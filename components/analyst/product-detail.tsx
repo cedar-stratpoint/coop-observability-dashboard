@@ -21,7 +21,9 @@ const STATUS: Record<ForecastStatus, {label: string; text: string}> = {
 };
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
 
-export function ProductDetailView({detail}: {detail: ProductDetail}) {
+export function ProductDetailView({detail, backHref = '/inventory', boxme, boxmeFirst = false}: {
+  detail: ProductDetail; backHref?: string; boxme?: React.ReactNode; boxmeFirst?: boolean;
+}) {
   const {product, forecast, series, chart, yoy, hasLastYear, lastCountedWeeksAgo, countsMatched, latestRealLabel, runsOutLabel, history} = detail;
   const status = (forecast?.status ?? (product.stock <= 0 ? 'out' : 'healthy')) as ForecastStatus;
   const s = STATUS[status];
@@ -30,13 +32,16 @@ export function ProductDetailView({detail}: {detail: ProductDetail}) {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8 md:px-10">
-      <Link href="/inventory" className="font-mono text-xs text-primary hover:underline">‹ Back to inventory</Link>
+      <Link href={backHref} className="font-mono text-xs text-primary hover:underline">‹ Back to inventory</Link>
       <h1 className="mt-3 text-3xl font-semibold tracking-tight">{product.name}</h1>
       <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-        {product.product_id} · Stratpoint (Offline) · {formatPeso(product.price)}{!product.active && ' · unlisted'}
+        {product.product_id} · {formatPeso(product.price)}{!product.active && ' · unlisted'}
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+      {boxmeFirst && boxme}
+
+      <h2 className="mt-6 text-sm font-semibold">Stratpoint (Offline) stock and sales</h2>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi big={String(product.stock)} lbl="Stock Qty now" tone={product.stock <= 0 ? 'crit' : undefined} />
         <Kpi big={s.label} lbl="status right now" small toneClass={s.text} />
         <Kpi big={String(lastMonthSold)} lbl="sold last month" />
@@ -122,6 +127,8 @@ export function ProductDetailView({detail}: {detail: ProductDetail}) {
           )}
         </div>
       </div>
+
+      {!boxmeFirst && boxme}
     </div>
   );
 }
