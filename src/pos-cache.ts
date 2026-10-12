@@ -8,6 +8,7 @@ export const POS_TAGS = {
   orders: 'pos-orders', // pos_orders / pos_order_items / sale movements
   catalog: 'pos-catalog', // pos_products / pos_prices / pos_inventory / pos_bundles
   events: 'pos-events', // pos_events
+  boxme: 'boxme-stock', // boxme_* (written daily by zoomy-observability's boxme-sync job)
 } as const;
 
 // Seconds a cached read may be stale before a background refresh. Short, so the
