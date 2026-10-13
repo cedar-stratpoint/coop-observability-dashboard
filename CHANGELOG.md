@@ -23,6 +23,11 @@ Dates are local working dates (GMT+8). Newest first.
 - The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
 - Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
 
+## 2026-10-13 — Events: Tiles / Table toggle
+- **A Tiles / Table switch sits beside the event count on `/offline-sales/events`.** Table shows Event (name + place), Status, Dates, Orders and Revenue per row. Live events keep a green left edge. Clicking a row opens the event page, and the name is also a real link.
+  - Search, When, Sort and pagination apply to both views, so switching keeps your place.
+  - *Decision:* the chosen view is remembered per browser (`localStorage`, guarded) and defaults to Tiles. It's a viewing preference, not shared state, so it doesn't belong in the URL or the database.
+
 ## 2026-10-13 — Events page is a tile grid; each event has its own page
 - **`/offline-sales/events` now lists events as a grid of tiles** (3 across on desktop, 2 on tablet, 1 on phone, 12 per page). Each tile shows the status pill, name, dates, place, revenue and order count, and the whole tile links to the event.
   - *Why:* every event was a full card with its cash box and analytics stacked inline (the live one expanded), so reaching older events meant scrolling past several screens of charts. Tiles keep the whole list scannable in one view.

@@ -2,7 +2,8 @@
 
 import {useEffect, useMemo, useState} from 'react';
 import Link from 'next/link';
-import {ArrowLeft, CalendarDays, ChevronRight, MapPin, Plus, Search, X} from 'lucide-react';
+import {useRouter} from 'next/navigation';
+import {ArrowLeft, CalendarDays, ChevronRight, LayoutGrid, List, MapPin, Plus, Search, X} from 'lucide-react';
 import type {EventRollup} from '@/src/pos-sales-types';
 import {formatPeso} from '@/src/pos-format';
 import {
@@ -24,6 +25,16 @@ import {EventStatusPill, eventDates} from './event-parts';
 
 const EVENTS_PER_PAGE = 12;
 
+type EventsView = 'tiles' | 'table';
+// Per-browser convenience only: which layout this viewer last picked. Storage can
+// be unavailable (private mode, blocked site data), so every access is guarded and
+// the page falls back to tiles.
+const VIEW_KEY = 'coop.events.view';
+
+function eventHref(eventId: string): string {
+  return `/offline-sales/events/${encodeURIComponent(eventId)}`;
+}
+
 export function OfflineEventsView({
   rollups,
   currentEventIds,
@@ -38,6 +49,22 @@ export function OfflineEventsView({
   fetchedAt: string;
 }) {
   const [creating, setCreating] = useState(false);
+  const [view, setView] = useState<EventsView>('tiles');
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_KEY) === 'table') setView('table');
+    } catch {
+      /* storage blocked; keep tiles */
+    }
+  }, []);
+  const changeView = (v: EventsView) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* storage blocked; the choice just won't persist */
+    }
+  };
 
   // Search + time bucket + sort + page, all client-side (see filterAndSortEvents):
   // the list is modest and each tile only needs its rollup. Any result-set change
@@ -128,9 +155,12 @@ export function OfflineEventsView({
           )}
 
           {total > 0 && (
-            <p className="mb-3 text-xs text-muted-foreground">
-              {filtering ? `${matches} of ${total} ${total === 1 ? 'event' : 'events'}` : `${total} ${total === 1 ? 'event' : 'events'}`}
-            </p>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {filtering ? `${matches} of ${total} ${total === 1 ? 'event' : 'events'}` : `${total} ${total === 1 ? 'event' : 'events'}`}
+              </p>
+              <ViewToggle value={view} onChange={changeView} />
+            </div>
           )}
 
           {matches === 0 ? (
@@ -146,6 +176,8 @@ export function OfflineEventsView({
                 </button>
               </CardContent>
             </Card>
+          ) : view === 'table' ? (
+            <EventsTable rollups={pageItems} todayKey={todayKey} liveIds={currentSet} />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {pageItems.map((r) => (
@@ -237,7 +269,7 @@ function EventTile({rollup, todayKey, spotlight}: {rollup: EventRollup; todayKey
 
   return (
     <Link
-      href={`/offline-sales/events/${encodeURIComponent(event.event_id)}`}
+      href={eventHref(event.event_id)}
       aria-label={`Open ${name}`}
       className={cn(
         'group flex h-full flex-col gap-3 rounded-xl border bg-card p-4 sm:gap-4 sm:p-5 transition-[background-color,border-color,transform] duration-150 ease-out',
@@ -273,5 +305,90 @@ function EventTile({rollup, todayKey, spotlight}: {rollup: EventRollup; todayKey
         </span>
       </div>
     </Link>
+  );
+}
+
+/** Tiles | Table layout switch, icon-only with accessible names. */
+function ViewToggle({value, onChange}: {value: EventsView; onChange: (v: EventsView) => void}) {
+  const options = [
+    {v: 'tiles' as const, label: 'Tile view', Icon: LayoutGrid},
+    {v: 'table' as const, label: 'Table view', Icon: List},
+  ];
+  return (
+    <div role="group" aria-label="Layout" className="inline-flex rounded-md border p-0.5">
+      {options.map(({v, label, Icon}) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          aria-pressed={value === v}
+          aria-label={label}
+          title={label}
+          className={cn(
+            'rounded-[5px] p-1.5 transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97]',
+            value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The same page of events as a dense table, for scanning many at once. Order
+ *  follows the toolbar's Sort (live events pinned first). The whole row opens the
+ *  event; the name is also a real link for keyboard and middle-click. */
+function EventsTable({rollups, todayKey, liveIds}: {rollups: EventRollup[]; todayKey: string; liveIds: Set<string>}) {
+  const router = useRouter();
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead>
+              <tr className="border-b text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-3 text-left">Event</th>
+                <th className="px-3 py-3 text-left">Status</th>
+                <th className="px-3 py-3 text-left">Dates</th>
+                <th className="px-3 py-3 text-right">Orders</th>
+                <th className="px-4 py-3 text-right">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rollups.map(({event, revenue, orders}) => {
+                const href = eventHref(event.event_id);
+                const place = [event.venue, event.city].filter(Boolean).join(', ');
+                const live = liveIds.has(event.event_id);
+                return (
+                  <tr
+                    key={event.event_id}
+                    onClick={() => router.push(href)}
+                    className="group cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/50"
+                  >
+                    <td className={cn('px-4 py-3', live && 'shadow-[inset_2px_0_0_var(--status-good)]')}>
+                      <Link
+                        href={href}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium transition-colors hover:text-primary"
+                      >
+                        {event.name || 'Untitled event'}
+                      </Link>
+                      {place && <div className="text-xs text-muted-foreground">{place}</div>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <EventStatusPill state={eventTimeState(event, todayKey)} className="whitespace-nowrap" />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">
+                      {eventDates(event.starts_on, event.ends_on) ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{orders}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{formatPeso(revenue)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+    </div>
   );
 }
