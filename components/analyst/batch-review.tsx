@@ -535,7 +535,7 @@ export function BatchReview({
       )}
 
       {lightbox && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 sm:p-8" role="dialog" aria-modal="true" aria-label="Scanned page" onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}>
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8" role="dialog" aria-modal="true" aria-label="Scanned page" onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}>
           <div className="mb-2 flex items-center justify-end gap-2">
             <a href={lightbox} target="_blank" rel="noopener noreferrer" className={buttonVariants({variant: 'secondary', size: 'sm'})}>
               <ExternalLink className="size-3.5" /> Open in new tab
