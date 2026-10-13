@@ -30,11 +30,12 @@ function monthGrid(year: number, month: number): {leading: number; days: number}
 
 /**
  * A single-month range calendar. Two picks define an inclusive [start, end]
- * range; a third pick starts over. Future days are disabled (a sale can't be
- * dated ahead), as are days outside the optional `min`/`max` (YYYY-MM-DD,
- * inclusive). Fully themed from the design tokens and keyboard-operable.
+ * range; a third pick starts over. Future days are disabled by default (a sale
+ * can't be dated ahead; `allowFuture` lifts that for scheduling), as are days
+ * outside the optional `min`/`max` (YYYY-MM-DD, inclusive). Fully themed from
+ * the design tokens and keyboard-operable.
  */
-export function Calendar({value, onChange, min, max}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string}) {
+export function Calendar({value, onChange, min, max, allowFuture = false}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string; allowFuture?: boolean}) {
   const today = todayYmd();
   const anchor = value.end ?? value.start ?? min ?? today;
   const [ay, am] = anchor.split('-').map(Number);
@@ -98,7 +99,7 @@ export function Calendar({value, onChange, min, max}: {value: DateRange; onChang
           const isEnd = day === value.end;
           const inRange = value.start && value.end && day > value.start && day < value.end;
           const isToday = day === today;
-          const disabled = day > today || (min != null && day < min) || (max != null && day > max);
+          const disabled = (!allowFuture && day > today) || (min != null && day < min) || (max != null && day > max);
           const endpoint = isStart || isEnd;
           return (
             <div
