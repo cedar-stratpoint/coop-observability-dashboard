@@ -7,16 +7,20 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import type {SpinLead} from './spin-leads-types';
 
 /**
- * Spin-the-wheel booth leads (spin_wheel_leads). The storefront admin
- * (zoomyforpets.com/admin/spin-wheel) writes these to the STOREFRONT Supabase
- * project, which Coop has no credentials for — finished events are imported
- * into the shared archive project with scripts/import-spin-leads.mjs from the
- * admin's CSV export. Table DDL: supabase/spin_wheel_leads.sql.
+ * Spin-the-wheel booth leads (spin_wheel_leads). The booth form on the
+ * storefront saves each lead into Shopify, in the shop's
+ * custom.newsletter_subscribers metafield (rows tagged source 'spin-win'), which
+ * zoomyforpets.com/admin/spin-wheel shows. Coop copies them into this table:
+ * the leads page's Update button pulls them through the CRM worker
+ * (src/spin-leads-actions.ts), and scripts/import-spin-leads.mjs still imports
+ * the admin's CSV export. Table DDL: supabase/spin_wheel_leads*.sql.
  *
  * Contact data, so this is read with the service-role key server-side only
  * (the table's RLS has no policies — the anon key sees nothing).
- * ponytail: import-on-demand; wire the storefront project if leads must be live.
  */
+/** Cleared by the leads page's Update button once new leads are written. */
+export const SPIN_LEADS_TAG = 'spin-wheel-leads';
+
 export const getSpinLeads = cache((): Promise<SpinLead[]> =>
   usingPosMock() ? Promise.resolve([]) : spinLeadsCached(),
 );
@@ -49,9 +53,11 @@ const spinLeadsCached = unstable_cache(async (): Promise<SpinLead[]> => {
     // Absent until spin_wheel_leads_instagram.sql has run on this environment.
     instagram: (l.instagram as string | null) ?? null,
     pet: (l.pet as string | null) ?? null,
+    // Absent until spin_wheel_leads_picky.sql has run on this environment.
+    picky: (l.picky as string | null) ?? null,
     mobile: (l.mobile as string | null) ?? null,
     prize: (l.prize as string | null) ?? 'Unknown',
     campaign: (l.campaign as string | null) ?? null,
     collectedAt: l.collected_at as string,
   }));
-}, ['spin-wheel-leads'], {revalidate: POS_CACHE_REVALIDATE});
+}, ['spin-wheel-leads'], {revalidate: POS_CACHE_REVALIDATE, tags: [SPIN_LEADS_TAG]});
