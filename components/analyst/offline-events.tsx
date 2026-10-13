@@ -98,7 +98,7 @@ export function OfflineEventsView({
   const filtering = query.trim() !== '' || when !== 'all';
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
       <Link href="/offline-sales" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" /> Offline Sales
       </Link>
@@ -179,7 +179,7 @@ export function OfflineEventsView({
           ) : view === 'table' ? (
             <EventsTable rollups={pageItems} todayKey={todayKey} liveIds={currentSet} />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {pageItems.map((r) => (
                 <EventTile
                   key={r.event.event_id}
@@ -215,8 +215,8 @@ function EventsToolbar({
   onSort: (v: EventSort) => void;
 }) {
   return (
-    <div className="mb-4 flex flex-col gap-3">
-      <div className="relative">
+    <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
+      <div className="relative xl:w-[420px] xl:shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"

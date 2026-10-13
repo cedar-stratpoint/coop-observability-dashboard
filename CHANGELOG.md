@@ -23,6 +23,11 @@ Dates are local working dates (GMT+8). Newest first.
 - The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
 - Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
 
+## 2026-10-13 — Events pages use the full width
+- **`/offline-sales/events` and each event page now span the whole content area** beside the sidebar (was a centered 896px column that left wide empty margins on desktop).
+  - Tiles go up to 4 across on wide screens (`xl`), so a 12-event page always fills whole rows.
+  - On wide screens the search box sits on the same row as the When/Sort filters instead of stretching across the page.
+
 ## 2026-10-13 — Events: Tiles / Table toggle
 - **A Tiles / Table switch sits beside the event count on `/offline-sales/events`.** Table shows Event (name + place), Status, Dates, Orders and Revenue per row. Live events keep a green left edge. Clicking a row opens the event page, and the name is also a real link.
   - Search, When, Sort and pagination apply to both views, so switching keeps your place.
