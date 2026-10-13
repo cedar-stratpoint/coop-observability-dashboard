@@ -3,6 +3,7 @@ import {getPosOrders} from '@/src/pos-sales';
 import {getOrdersWithPrizes} from '@/src/pos-prize-data';
 import {matchLeadsToOrders} from '@/src/lead-order-match';
 import {LeadsView} from '@/components/analyst/leads-view';
+import {LeadsUpdateButton} from '@/components/analyst/leads-update-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,12 +24,15 @@ export default async function Page() {
   const matches = matchLeadsToOrders(leads, orders, new Set(prizeOrders));
   return (
     <div className="space-y-6 p-6 md:p-10">
-      <header>
-        <h1 className="font-serif text-3xl font-normal tracking-tight">Event lead contacts</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Emails, Instagram handles and mobile numbers given in person at the booth, in exchange for a
-          spin. Market to them on that basis only, and honour an unsubscribe on either channel.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-serif text-3xl font-normal tracking-tight">Event lead contacts</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Emails, Instagram handles and mobile numbers given in person at the booth, in exchange for a
+            spin. Market to them on that basis only, and honour an unsubscribe on either channel.
+          </p>
+        </div>
+        <LeadsUpdateButton />
       </header>
       <LeadsView leads={leads} matches={matches} />
     </div>

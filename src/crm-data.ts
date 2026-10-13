@@ -3,6 +3,7 @@ import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {checkoutStage} from './crm-compute';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
+import type {RemoteSpinLead} from './spin-leads-sync';
 import type {
   CrmBirthdayVoucher,
   CrmCheckout,
@@ -48,6 +49,17 @@ async function crmGet<T>(path: string): Promise<T> {
   });
   if (!res.ok) throw new Error(`CRM ${res.status} for ${path}`);
   return res.json() as Promise<T>;
+}
+
+/**
+ * Every spin-the-wheel lead Shopify holds, via the Worker's /api/spin-leads.
+ * Uncached on purpose: it is only called by the leads page's Update button,
+ * whose whole job is to get the current list. Throws when the Worker or
+ * Shopify can't answer, so a failure is never reported as "no new leads".
+ */
+export async function fetchCrmSpinLeads(): Promise<RemoteSpinLead[]> {
+  const {leads} = await crmGet<{leads: RemoteSpinLead[]}>('/api/spin-leads');
+  return Array.isArray(leads) ? leads : [];
 }
 
 /** Shopify's payload arrives as a JSON string; junk is treated as absent. */

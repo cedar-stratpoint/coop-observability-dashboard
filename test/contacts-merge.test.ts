@@ -18,7 +18,7 @@ const crm = (over: Partial<EnrichedCustomer> = {}): EnrichedCustomer => ({
   orderCount: 2, spent: 1000, spendYtd: 1000, ...over,
 });
 const lead = (over: Partial<SpinLead> = {}): SpinLead => ({
-  email: 'buyer@x.com', instagram: null, pet: null, mobile: '09171234567', prize: '35% Off', campaign: 'modern-market-sept2026',
+  email: 'buyer@x.com', instagram: null, pet: null, picky: null, mobile: '09171234567', prize: '35% Off', campaign: 'modern-market-sept2026',
   collectedAt: '2026-09-20T05:00:00Z', ...over,
 });
 const laz = (over: Partial<LazadaCustomer> = {}): LazadaCustomer => ({

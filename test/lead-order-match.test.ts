@@ -4,7 +4,7 @@ import type {SpinLead} from '../src/spin-leads-types';
 import {addDays, followUpMessage, leadKey, matchLeadsToOrders, petName, treatPhrase} from '../src/lead-order-match';
 
 const lead = (over: Partial<SpinLead> = {}): SpinLead => ({
-  email: null, instagram: 'buddy.riley.bailey', pet: 'Bailey / Malshipoo', mobile: null,
+  email: null, instagram: 'buddy.riley.bailey', pet: 'Bailey / Malshipoo', picky: null, mobile: null,
   prize: 'Zoomy! Bandana', campaign: null, collectedAt: '2026-09-24T20:45:00+08:00', ...over,
 });
 const order = (over: Partial<PosOrder> = {}): PosOrder => ({
