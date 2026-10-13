@@ -52,7 +52,7 @@ function splitRow(line) {
  * Instagram handle. Matched by name, so a new or reordered column can't shift
  * data into the wrong field. */
 const HEADERS = {
-  email: 'contact', contact: 'contact', pet: 'pet', 'mobile number': 'mobile', mobile: 'mobile',
+  email: 'contact', contact: 'contact', pet: 'pet', 'picky eater': 'picky', 'mobile number': 'mobile', mobile: 'mobile',
   prize: 'prize', event: 'campaign', 'collected at (ph time)': 'collected', 'consent given at (ph time)': 'consent',
 };
 
@@ -80,6 +80,7 @@ export function parseSpinLeadsCsv(csv) {
       email,
       instagram,
       pet: r.pet || null,
+      picky: r.picky || null,
       mobile: r.mobile || null,
       prize: r.prize || 'Unknown',
       campaign: r.campaign || null,

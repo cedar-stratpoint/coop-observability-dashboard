@@ -46,6 +46,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
   const withMobile = leads.filter((l) => l.mobile).length;
   // Only Sep 27 onwards collects pets; older events keep the table as it was.
   const hasPets = leads.some((l) => l.pet);
+  const hasPicky = leads.some((l) => l.picky);
   const top = prizes[0]?.count ?? 1;
 
   // Every day these leads actually span, newest first — the filter only offers
@@ -158,6 +159,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Contact</th>
                 {hasPets && <th className="px-3 py-2 text-left font-semibold">Pet</th>}
+                {hasPicky && <th className="px-3 py-2 text-left font-semibold">Picky eater</th>}
                 <th className="px-3 py-2 text-left font-semibold">Mobile</th>
                 <th className="px-3 py-2 text-left font-semibold">Prize</th>
                 {matches && (
@@ -173,6 +175,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
                 <tr key={`${contactOf(l)}-${l.collectedAt}`} className={cn(i > 0 && 'border-t')}>
                   <td className="max-w-[220px] truncate px-3 py-2" title={contactOf(l)}>{contactOf(l)}</td>
                   {hasPets && <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground" title={l.pet ?? undefined}>{l.pet ?? '—'}</td>}
+                  {hasPicky && <td className="px-3 py-2 text-muted-foreground">{l.picky ?? '—'}</td>}
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{l.mobile ?? '—'}</td>
                   <td className="px-3 py-2 text-muted-foreground">{l.prize}</td>
                   {matches && <BoughtCell match={matches[leadKey(l)]} />}
