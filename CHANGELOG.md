@@ -23,6 +23,14 @@ Dates are local working dates (GMT+8). Newest first.
 - The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
 - Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
 
+## 2026-10-13 — Transactions page redesign
+- **`/offline-sales/orders` uses the full width and groups sales by day.** Each day gets a header ("Sat, Oct 10, 2026 · 2 sales", or "Today" / "Yesterday"), and each row shows just the time, so the date isn't repeated on every sale.
+  - Rows lead with what was bought, then the method, event, free-item, IG handle, edited/voided/oversold tags and a unit count. The total sits at the right.
+  - Edit and Void are compact icon buttons beside the total (dimmed until you hover the row on a mouse, always shown on touch). Unvoid stays a labelled button on voided sales.
+  - The running row number was dropped; it changed with every filter and page and didn't identify a sale.
+- **Filters sit in one toolbar box.** On a phone the Method choices scroll sideways inside it instead of running off screen.
+- **Count and pager:** "150 transactions" above the list and "Showing 1 to 10 of 150" with page numbers below (always visible). `PageInfo` now carries `total` (the filtered row count it already queried).
+
 ## 2026-10-13 — New/Edit event as a slide-over; persistent pager; colored statuses
 - **Creating or editing an event opens a right-side panel** instead of an inline card that stretched across the full-width page. The list (or the event page) stays visible behind it.
   - Fields are grouped: Event (name, organizer), Where (venue, city), When, Cash, and Close out when editing.
