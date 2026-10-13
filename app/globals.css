@@ -284,6 +284,26 @@ html.coop-splash-seen .coop-splash { display: none; }
   .coop-shine { animation: none; }
 }
 
+/* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
+   motion-reduce variant, so collapse every transition and animation here instead
+   (the slide-in drawers, dialogs, hover tweens). Final states still apply, so
+   layout never breaks. Loading spinners are functional, not decorative: they keep
+   turning so a pending action still reads as pending. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
 /* Native controls (date pickers' calendar icon, scrollbars, select popups) follow the
    app's theme, so they stay visible in dark mode. */
 :root { color-scheme: light; }
