@@ -3,15 +3,14 @@
 import {useCallback, useEffect, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
-import {ArrowLeft, Ban, Gift, Minus, PawPrint, Pencil, Plus, Receipt, RotateCcw, TriangleAlert, X} from 'lucide-react';
+import {ArrowLeft, Ban, Gift, Loader2, Minus, PawPrint, Pencil, Plus, Receipt, RotateCcw, TriangleAlert, X} from 'lucide-react';
 import type {PosOrder, PosOrdersFilter, PriceBounds, PosCatalogItem, PosBundleDef, EditEntry, PosEvent} from '@/src/pos-sales-types';
-import {isFilterActive, orderToEntries, type PageInfo} from '@/src/pos-sales-compute';
+import {isFilterActive, manilaDayKey, orderToEntries, type PageInfo} from '@/src/pos-sales-compute';
 import {formatPeso, paymentMethodLabel, paymentMethodBadgeClass} from '@/src/pos-format';
 import {voidOrderAction, unvoidOrderAction, editOrderAction} from '@/src/pos-sales-actions';
 import {addPrizeAction, voidPrizeAction, getOrderPrizeContextAction} from '@/src/pos-prize-actions';
 import type {OrderPrizeContext} from '@/src/pos-prize-data';
 import {cn} from '@/lib/utils';
-import {Card, CardContent} from '@/components/ui/card';
 import {Badge} from '@/components/ui/badge';
 import {Button} from '@/components/ui/button';
 import {Eyebrow, MockNote} from './sections';
@@ -119,8 +118,21 @@ export function OfflineOrdersView({
   // The order currently open in the edit modal (null = closed).
   const [editing, setEditing] = useState<PosOrder | null>(null);
 
+  // Group this page's sales by Manila calendar day (newest first, as fetched) so
+  // each row only needs its time; the day reads once in the group header.
+  const todayKey = manilaDayKey(new Date().toISOString());
+  const groups: {day: string; orders: PosOrder[]}[] = [];
+  for (const o of orders) {
+    const day = manilaDayKey(o.created_at);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.orders.push(o);
+    else groups.push({day, orders: [o]});
+  }
+  const shownFrom = pageInfo.total === 0 ? 0 : firstOnPage + 1;
+  const shownTo = firstOnPage + orders.length;
+
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
       <Link href="/offline-sales" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" /> Offline Sales
       </Link>
@@ -141,99 +153,47 @@ export function OfflineOrdersView({
 
       <TransactionFilters filter={filter} bounds={bounds} eventOptions={eventOptions} showEventFilter={showEventFilter} />
 
-      <Card>
-        <CardContent className="p-0">
-          {orders.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">
-              {filtered ? 'No transactions match these filters.' : 'No transactions yet.'}
-            </p>
-          ) : (
-            <ul className="flex flex-col divide-y">
-              {orders.map((o, i) => (
-                <li key={o.id} className={cn('flex items-start gap-4 px-5 py-3.5', o.status === 'voided' && 'opacity-60')}>
-                  <span className="mt-0.5 w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{firstOnPage + i + 1}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={cn('text-sm font-medium', o.status === 'voided' && 'line-through')}>{timeLabel(o.created_at)}</span>
-                      <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium', paymentMethodBadgeClass(o.payment_method))}>
-                        {paymentMethodLabel(o.payment_method)}
-                      </span>
-                      <OrderEventBadge order={o} events={events} />
-                      {prizeOrders.has(o.client_uuid) && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                          <Gift className="size-3" /> Free item
-                        </span>
-                      )}
-                      {o.customer_handle && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          <PawPrint className="size-3" /> {o.customer_handle}
-                        </span>
-                      )}
-                      {o.status === 'voided' && <Badge variant="destructive">voided</Badge>}
-                      {o.edited_at && o.status !== 'voided' && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                          <Pencil className="size-3" /> edited
-                        </span>
-                      )}
-                      {o.oversold && (
-                        <Badge variant="destructive">
-                          <TriangleAlert /> oversold
-                        </Badge>
-                      )}
-                    </div>
-                    <p className={cn('mt-0.5 text-xs leading-relaxed text-muted-foreground', o.status === 'voided' && 'line-through')}>
-                      {o.items.map((it) => `${it.name} ×${it.qty}`).join(', ') || 'No items'}
-                    </p>
-                    {o.remarks && (
-                      <p className="mt-1 text-xs italic text-muted-foreground/80">“{o.remarks}”</p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <span className={cn('text-sm font-semibold tabular-nums', o.status === 'voided' && 'text-muted-foreground line-through')}>{formatPeso(o.total)}</span>
-                    {o.status !== 'voided' ? (
-                      <div className="flex items-center gap-1.5">
-                        {/* Every non-voided order is editable now, bundles included:
-                            the editor rebuilds bundle groups from the order and the
-                            RPC re-derives the total + enforces each bundle's rules. */}
-                        <button
-                          type="button"
-                          onClick={() => setEditing(o)}
-                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-                        >
-                          <Pencil className="size-3" /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => voidOrder(o)}
-                          disabled={pending && actingId === o.client_uuid}
-                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-50"
-                        >
-                          <Ban className="size-3" />
-                          {pending && actingId === o.client_uuid ? 'Voiding…' : 'Void'}
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => unvoidOrder(o)}
-                        disabled={pending && actingId === o.client_uuid}
-                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-emerald-500 hover:text-emerald-500 disabled:opacity-50"
-                      >
-                        <RotateCcw className="size-3" />
-                        {pending && actingId === o.client_uuid ? 'Unvoiding…' : 'Unvoid'}
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <p className="mb-3 text-xs tabular-nums text-muted-foreground">
+        {pageInfo.total} {pageInfo.total === 1 ? 'transaction' : 'transactions'}
+        {filtered ? ' match these filters' : ''}
+      </p>
 
       {actionError && (
-        <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          Couldn’t update order: {actionError}
+        <div role="alert" className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Couldn&rsquo;t update order: {actionError}
+        </div>
+      )}
+
+      {orders.length === 0 ? (
+        <div className="rounded-xl border bg-card py-12 text-center text-sm text-muted-foreground">
+          {filtered ? 'No transactions match these filters.' : 'No transactions yet.'}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {groups.map((g) => (
+            <section key={g.day} aria-label={dayHeading(g.day, todayKey)}>
+              <h3 className="mb-2 flex items-baseline gap-2 px-1 text-xs font-semibold text-foreground">
+                {dayHeading(g.day, todayKey)}
+                <span className="font-normal text-muted-foreground">
+                  {g.orders.length} {g.orders.length === 1 ? 'sale' : 'sales'}
+                </span>
+              </h3>
+              <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+                {g.orders.map((o) => (
+                  <OrderRow
+                    key={o.id}
+                    order={o}
+                    events={events}
+                    prize={prizeOrders.has(o.client_uuid)}
+                    acting={pending && actingId === o.client_uuid}
+                    onEdit={() => setEditing(o)}
+                    onVoid={() => voidOrder(o)}
+                    onUnvoid={() => unvoidOrder(o)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
 
@@ -250,8 +210,123 @@ export function OfflineOrdersView({
         />
       )}
 
-      <Pagination page={page} pageCount={totalPages} hrefFor={pageHref} className="mt-4" label="Transactions pagination" />
+      {pageInfo.total > 0 && (
+        <div className="mt-6 flex flex-col items-center gap-3 border-t pt-4 sm:flex-row sm:justify-between">
+          <p className="text-xs tabular-nums text-muted-foreground">
+            Showing {shownFrom} to {shownTo} of {pageInfo.total}
+          </p>
+          <Pagination page={page} pageCount={totalPages} hrefFor={pageHref} label="Transactions pagination" alwaysShow />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** "Today · Oct 10", "Yesterday · Oct 9", or "Wed, Oct 7, 2026". */
+function dayHeading(day: string, todayKey: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const short = d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'UTC'});
+  if (day === todayKey) return `Today · ${short}`;
+  const y = new Date(`${todayKey}T00:00:00Z`);
+  y.setUTCDate(y.getUTCDate() - 1);
+  if (day === y.toISOString().slice(0, 10)) return `Yesterday · ${short}`;
+  return d.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'});
+}
+
+/** One sale: time, what was bought, its tags, the total, and row actions. */
+function OrderRow({
+  order: o,
+  events,
+  prize,
+  acting,
+  onEdit,
+  onVoid,
+  onUnvoid,
+}: {
+  order: PosOrder;
+  events: PosEvent[];
+  prize: boolean;
+  acting: boolean;
+  onEdit: () => void;
+  onVoid: () => void;
+  onUnvoid: () => void;
+}) {
+  const voided = o.status === 'voided';
+  const units = o.items.reduce((s, it) => s + it.qty, 0);
+  const itemsText = o.items.map((it) => `${it.name} ×${it.qty}`).join(', ') || 'No items';
+  const iconBtn =
+    'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted active:scale-[0.95] disabled:opacity-50';
+
+  return (
+    <li className={cn('group grid grid-cols-[4.5rem_1fr_auto] items-start gap-x-4 sm:items-center px-4 py-3.5 transition-colors hover:bg-muted/30 sm:px-5', voided && 'bg-muted/20')}>
+      <time dateTime={o.created_at} className="pt-px text-xs sm:self-start sm:pt-0.5 font-medium tabular-nums text-muted-foreground">
+        {new Date(o.created_at).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})}
+      </time>
+
+      <div className="min-w-0">
+        <p title={itemsText} className={cn('line-clamp-2 text-sm leading-snug', voided ? 'text-muted-foreground line-through' : 'text-foreground')}>
+          {itemsText}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium', paymentMethodBadgeClass(o.payment_method))}>
+            {paymentMethodLabel(o.payment_method)}
+          </span>
+          <OrderEventBadge order={o} events={events} />
+          {prize && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+              <Gift className="size-3" /> Free item
+            </span>
+          )}
+          {o.customer_handle && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              <PawPrint className="size-3" /> {o.customer_handle}
+            </span>
+          )}
+          {voided && <Badge variant="destructive">Voided</Badge>}
+          {o.edited_at && !voided && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              <Pencil className="size-3" /> Edited
+            </span>
+          )}
+          {o.oversold && (
+            <Badge variant="destructive">
+              <TriangleAlert /> Oversold
+            </Badge>
+          )}
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {units} {units === 1 ? 'unit' : 'units'}
+          </span>
+        </div>
+        {o.remarks && <p className="mt-1.5 text-xs italic text-muted-foreground/80">&ldquo;{o.remarks}&rdquo;</p>}
+      </div>
+
+      <div className="flex flex-col items-end gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <span className={cn('text-base font-semibold tabular-nums sm:min-w-[5.5rem] sm:text-right', voided && 'text-muted-foreground line-through')}>{formatPeso(o.total)}</span>
+        <div className="flex items-center gap-0.5 transition-opacity duration-150 [@media(hover:hover)]:opacity-60 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100">
+          {!voided ? (
+            <>
+              {/* Every non-voided order is editable, bundles included: the editor
+                  rebuilds bundle groups and the RPC re-derives the total. */}
+              <button type="button" onClick={onEdit} aria-label="Edit sale" title="Edit" className={cn(iconBtn, 'hover:text-primary')}>
+                <Pencil className="size-3.5" />
+              </button>
+              <button type="button" onClick={onVoid} disabled={acting} aria-label="Void sale" title="Void" className={cn(iconBtn, 'hover:text-destructive')}>
+                {acting ? <Loader2 className="size-3.5 animate-spin" /> : <Ban className="size-3.5" />}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onUnvoid}
+              disabled={acting}
+              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-emerald-600 active:scale-[0.97] disabled:opacity-50 dark:hover:text-emerald-400"
+            >
+              {acting ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />} Unvoid
+            </button>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }
 
