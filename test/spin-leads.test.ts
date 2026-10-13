@@ -17,6 +17,7 @@ function asLeads(): SpinLead[] {
     email: r.email,
     instagram: r.instagram,
     pet: r.pet,
+    picky: r.picky,
     mobile: r.mobile,
     prize: r.prize,
     campaign: r.campaign,

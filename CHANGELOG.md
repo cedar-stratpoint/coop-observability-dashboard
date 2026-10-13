@@ -10,6 +10,28 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-13 — Event lead contacts: an "Update leads" button replaces the CSV round trip
+- **New "Update leads" button on `/customers/leads`.** It pulls every spin-the-wheel lead from the storefront and adds the ones Coop doesn't have yet, then shows how many were added.
+  - *Why:* each event meant exporting a CSV from zoomyforpets.com/admin/spin-wheel and running `scripts/import-spin-leads.mjs` by hand.
+  - *Where leads really live:* the booth form saves them in **Shopify**, in the shop's `custom.newsletter_subscribers` metafield (rows tagged `source: 'spin-win'`), not in a storefront Supabase table as the old comments said. Coop has no Shopify access, so it reads them through the CRM worker's new read-only `GET /api/spin-leads` (zoomy-crm `feat/api-spin-leads`), using the existing `CRM_API_URL` / `CRM_API_READ_TOKEN`. No new secrets.
+  - **Insert-only.** Existing rows are never updated or removed, and pressing the button again is harmless.
+  - *Decision:* a lead counts as new when its **contact** (email or Instagram handle) isn't in the table yet. The storefront allows one spin per contact, so this is safe. The table's own key (contact + time) can't be used: CSV-imported rows hold minute-rounded times and Shopify holds seconds, so every existing lead would have looked new.
+  - *Decision:* a new lead's `collected_at` is its **consent time**, i.e. the spin itself. Shopify keeps a returning subscriber's original signup date, which is why a few CSV-imported leads show June/July dates. Existing rows are left as they are.
+  - Prize ids (`peso300`, `toy-collar`, …) are mapped to the labels the table already uses (`src/spin-leads-sync.ts`). A prize Coop hasn't seen keeps its raw id until it is added there.
+  - Fails loudly, never as "0 new": if the CRM worker or Shopify can't answer, the button says so and nothing is written.
+- **New "Picky eater" field** (Oct 2026 booth form). It is saved by the button and by the CSV import, and shown as a column once any lead has it. Needs `supabase/spin_wheel_leads_picky.sql` (additive: one new column), **run on prod before the button is used**.
+- The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
+- Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
+
+## 2026-10-13 — Events page is a tile grid; each event has its own page
+- **`/offline-sales/events` now lists events as a grid of tiles** (3 across on desktop, 2 on tablet, 1 on phone, 12 per page). Each tile shows the status pill, name, dates, place, revenue and order count, and the whole tile links to the event.
+  - *Why:* every event was a full card with its cash box and analytics stacked inline (the live one expanded), so reaching older events meant scrolling past several screens of charts. Tiles keep the whole list scannable in one view.
+  - Search, When/Sort filters, pagination, "New event", and pinning live events to the top (with the green ring) are unchanged.
+- **New per-event page `/offline-sales/events/[eventId]`** holds what the card used to: header (status, dates, venue, organizer, revenue), Edit (inline form), cash reconciliation, and the full analytics panel, always expanded.
+  - Orders use the same read-time event attribution as the list (`resolveOrderEvents`), so tile and page totals agree. Unknown ids 404.
+  - The event-scoped "View all products" rankings page now goes back to that event instead of the list.
+- Shared bits moved to `components/analyst/event-parts.tsx` (status pill, date range, cash reconciliation). Date ranges now read "Oct 10, 2026 to Oct 17, 2026" (no en dash, per the UI copy rule) and format in UTC so a date never shifts by a day.
+
 ## 2026-10-10 — One review view for a batch; unsaved edits are kept
 - **A page in an open batch always opens in the batch review, on that page's tab.**
   - *Why:* clicking a file in a bulk upload opened the single-scan review, while "Review & commit N pages" opened the batch review: two different screens for the same pages, each with its own store and period fields, and edits made in one were not in the other.
