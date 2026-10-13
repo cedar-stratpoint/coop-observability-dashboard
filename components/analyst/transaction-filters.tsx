@@ -50,7 +50,7 @@ export function TransactionFilters({
   const anyActive = isFilterActive(filter);
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+    <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border bg-card px-4 py-3">
       <Group label="Method">
         <Segmented
           items={ORDER_METHOD_FILTERS}
@@ -96,8 +96,8 @@ export function TransactionFilters({
 
 function Group({label, children}: {label: string; children: React.ReactNode}) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{label}</span>
+    <div className="flex min-w-0 max-w-full items-center gap-2">
+      <span className="shrink-0 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{label}</span>
       {children}
     </div>
   );
@@ -113,14 +113,14 @@ function Segmented<T extends string>({
   hrefFor: (value: T) => string;
 }) {
   return (
-    <div className="inline-flex rounded-md border p-0.5">
+    <div className="inline-flex min-w-0 max-w-full overflow-x-auto rounded-md border p-0.5 [scrollbar-width:none]">
       {items.map((it) => (
         <Link
           key={it.value}
           href={hrefFor(it.value)}
           scroll={false}
           className={cn(
-            'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+            'shrink-0 rounded px-2.5 py-1 text-xs font-medium transition-colors',
             it.value === active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
           )}
         >

@@ -430,9 +430,9 @@ describe('topBundles', () => {
 
 describe('paginate', () => {
   it('derives clamped page + range indices', () => {
-    expect(paginate(60, 1, 25)).toEqual({page: 1, pageSize: 25, totalPages: 3, from: 0, to: 24});
-    expect(paginate(60, 2, 25)).toEqual({page: 2, pageSize: 25, totalPages: 3, from: 25, to: 49});
-    expect(paginate(60, 3, 25)).toEqual({page: 3, pageSize: 25, totalPages: 3, from: 50, to: 74});
+    expect(paginate(60, 1, 25)).toEqual({page: 1, pageSize: 25, totalPages: 3, from: 0, to: 24, total: 60});
+    expect(paginate(60, 2, 25)).toEqual({page: 2, pageSize: 25, totalPages: 3, from: 25, to: 49, total: 60});
+    expect(paginate(60, 3, 25)).toEqual({page: 3, pageSize: 25, totalPages: 3, from: 50, to: 74, total: 60});
   });
   it('clamps out-of-range pages into [1, totalPages]', () => {
     expect(paginate(60, 99, 25).page).toBe(3);
@@ -440,7 +440,7 @@ describe('paginate', () => {
     expect(paginate(60, -5, 25).page).toBe(1);
   });
   it('always has at least one page, even with zero rows', () => {
-    expect(paginate(0, 1, 25)).toEqual({page: 1, pageSize: 25, totalPages: 1, from: 0, to: 24});
+    expect(paginate(0, 1, 25)).toEqual({page: 1, pageSize: 25, totalPages: 1, from: 0, to: 24, total: 0});
   });
 });
 
