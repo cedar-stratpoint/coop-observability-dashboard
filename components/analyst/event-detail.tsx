@@ -42,7 +42,7 @@ export function EventDetailView({
   const name = event.name || 'Untitled event';
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link href="/offline-sales/events" className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" /> Events
