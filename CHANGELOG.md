@@ -32,6 +32,33 @@ Dates are local working dates (GMT+8). Newest first.
   - **Measured:** each staged extraction records whether a profile was used (`rows.reader`). The Uploads page shows "Scan reader · X of Y handwritten numbers read right in the last N reviewed pages", and once there are pages from both groups, the rate with and without the reference.
   - The review gate is unchanged: nothing is saved to inventory until a person confirms it. No schema change.
 
+## 2026-10-08 — BoxMe (Online) inventory is live data, not a stub
+- **What:** the BoxMe channel of `/inventory?channel=online` now shows real BoxMe warehouse stock and replaces the D13 stub. Per SKU it shows Available, Awaiting pick, Reserved, Incoming, Damaged, next expiry, the Stratpoint Offline count (Office + Event) and a "Lasts" estimate. Above the table:
+  - a freshness pill
+  - a four-total strip
+  - status chips that also filter the table
+  - Line pills and search
+- **Below the table:**
+  - an Expiring soon list
+  - a Catalog match card listing POS products not at BoxMe and BoxMe SKUs unknown to POS
+  - the existing marketplace analytics, under their own heading (D13 kept)
+- **Product page:** `/inventory/[sku]` gets a BoxMe card with the per-warehouse split and a daily available-units trend. The KPI block is now labelled "Stratpoint (Offline)" instead of a hard-coded subtitle. Arriving from the BoxMe table shows the BoxMe card first, and Back returns to the BoxMe tab.
+- **Decisions:**
+  - **Separate `boxme_*` tables, not a `'boxme'` row in `pos_locations`.** BoxMe owns its numbers, so mirroring them into POS lots would collide with POS sales, FEFO and the stock RPCs.
+  - **Writer is zoomy-observability.** Its `boxme-sync` job (GitHub Actions, daily 07:30 Manila, ahead of the 08:00 stock digest) owns `supabase/boxme_inventory.sql`. This app only reads.
+  - **No fixed IP.** BoxMe's docs say an IP whitelist is mandatory, but our key works from unregistered IPs (VPN and local tests). A static-IP proxy (`BOXME_PROXY_URL`) is the fallback if BoxMe starts enforcing it.
+  - **Join on `seller_sku = product_id`.** All 20 BoxMe SKUs match `pos_products` on Staging.
+  - **Status:** Out at 0 available. Low at or under BoxMe `min_quantity` (or the POS threshold when that is unset), or under 14 days of cover.
+  - **"Lasts":** uses day-over-day drops in stock (restocks ignored) once 7 days of daily snapshots exist. Until then it reads "Building history".
+  - **Freshness:** stale after 26h, a banner on a failed or partial run, and a key-expiry warning inside 14 days.
+- **Files:**
+  - `src/boxme-inventory-{data,compute}.ts`, `src/boxme-format.ts`, `src/boxme-mock.ts` (demo data from a real BoxMe dry run)
+  - `components/analyst/boxme-{inventory-view,inventory-table,sku-card}.tsx`
+  - `src/inventory-status.ts`: the shared status pill styles, now importable by server components
+  - new `POS_TAGS.boxme` tag
+- **Database:** `boxme_*` applied to **Staging only**. Prod waits for sign-off.
+- **Tests:** `test/boxme-inventory-compute.test.ts` (15).
+
 ## 2026-10-07 — Event tiles get "View all products" (event-scoped rankings)
 - **Each event tile's Top sellers block now ends with "View all products →".** It opens Product rankings scoped to that event (`/offline-sales/rankings?event=<id>`), with the Products and Bundles tabs, sort, search and paging the overview's View all already has.
   - *Why:* the existing View all ranks every offline sale together; the team wanted the full list (including the "kulelat" bottom sellers) for one event.

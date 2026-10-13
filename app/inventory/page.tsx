@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import {getDigests} from '@/src/data';
 import {getBrief} from '@/src/salesSignals';
 import {pickIndex} from '@/src/week';
@@ -6,9 +5,10 @@ import {getPosBundles} from '@/src/pos-data';
 import {getInventoryPageData} from '@/src/pos-inventory-data';
 import {getLocationStock} from '@/src/pos-location-data';
 import {getFreeTasteSummary} from '@/src/pos-free-taste-data';
-import {cn} from '@/lib/utils';
+import {getBoxmeInventoryPageData} from '@/src/boxme-inventory-data';
 import {InventoryTab} from '@/components/analyst/tabs';
 import {InventoryView} from '@/components/analyst/inventory-view';
+import {BoxmeInventoryView} from '@/components/analyst/boxme-inventory-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,26 +39,21 @@ export default async function Page(
 }
 
 // D13: the Online scope KEEPS the existing marketplace analytics (digest-driven
-// InventoryTab) and adds a BoxMe stock stub above it — nothing is removed.
+// InventoryTab) and puts live BoxMe warehouse stock above it. BoxMe stock comes
+// from the boxme_* tables the zoomy-observability boxme-sync job writes daily.
 async function OnlineInventory({week}: {week?: string}) {
-  const digests = await getDigests();
+  const [boxme, digests] = await Promise.all([getBoxmeInventoryPageData(), getDigests()]);
   const row = digests[pickIndex(digests, week)];
   return (
-    <div>
-      <div className="mx-auto max-w-5xl px-6 pt-8 md:px-10">
-        <div className="mb-4 inline-flex rounded-md border p-0.5">
-          <Link href="/inventory" scroll={false} className="rounded px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">Stratpoint <span className="font-mono text-[9px] opacity-70">offline</span></Link>
-          <span className={cn('flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium', 'bg-primary text-primary-foreground')}>BoxMe <span className="font-mono text-[9px] opacity-70">online</span></span>
+    <div className="pb-8">
+      <BoxmeInventoryView data={boxme} />
+      <section aria-labelledby="marketplace-analytics" className="mt-10 border-t pt-2">
+        <div className="mx-auto max-w-6xl px-6 pt-6 md:px-10 max-md:px-4">
+          <h2 id="marketplace-analytics" className="text-lg font-semibold tracking-tight">Marketplace analytics</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Shopee and Lazada listings from the weekly digest. Separate from BoxMe warehouse stock above.</p>
         </div>
-        <div className="mb-2 flex items-start gap-2 rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          <span aria-hidden>🛰️</span>
-          <span>
-            <b className="font-medium text-foreground">BoxMe online stock isn&apos;t connected yet.</b> Until a feed lands, this shows the marketplace analytics below.
-            {/* TODO: real online (BoxMe) stock feed — replace this stub with live per-SKU online inventory. */}
-          </span>
-        </div>
-      </div>
-      {row ? <InventoryTab brief={getBrief()} row={row} /> : <div className="mx-auto max-w-5xl px-6 py-6 text-muted-foreground md:px-10">No marketplace digest archived yet.</div>}
+        {row ? <InventoryTab brief={getBrief()} row={row} /> : <div className="mx-auto max-w-5xl px-6 py-6 text-muted-foreground md:px-10">No marketplace digest archived yet.</div>}
+      </section>
     </div>
   );
 }

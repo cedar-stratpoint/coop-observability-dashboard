@@ -21,16 +21,12 @@ import {TransferModal} from './transfer-stock-button';
 import {Pagination} from './pagination';
 import type {InventoryRow} from '@/src/pos-inventory-data';
 import type {ForecastStatus} from '@/src/pos-forecast-compute';
+import {STATUS} from '@/src/inventory-status';
 
 type SortKey = 'category' | 'name' | 'status' | 'price' | 'thisMonth' | 'lastMonth' | 'threeMo' | 'stock' | 'office' | 'cover' | 'reorder';
 
 const PAGE_SIZE = 12; // rows per page on the merged product table
 
-const STATUS: Record<ForecastStatus, {label: string; dot: string; text: string; bg: string}> = {
-  healthy: {label: 'Healthy', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10'},
-  low: {label: 'Low', dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10'},
-  out: {label: 'Out', dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10'},
-};
 const STATUS_RANK: Record<ForecastStatus, number> = {out: 0, low: 1, healthy: 2};
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
 
@@ -636,18 +632,18 @@ function EditStockDialog({row, usingMock, onClose, onDone}: {
   );
 }
 
-function Th({children, className, onClick, active}: {children: React.ReactNode; className?: string; onClick?: () => void; active?: boolean}) {
+export function Th({children, className, onClick, active}: {children: React.ReactNode; className?: string; onClick?: () => void; active?: boolean}) {
   return (
     <th onClick={onClick} className={cn('cursor-pointer select-none whitespace-nowrap px-3 py-3 text-left transition-colors hover:text-foreground', active && 'text-primary', className)}>
       {children}
     </th>
   );
 }
-function Sc({children}: {children: React.ReactNode}) {
+export function Sc({children}: {children: React.ReactNode}) {
   return <span className="ml-0.5 text-[9px] opacity-60">{children}</span>;
 }
 
-function PillRow({label, items, active, onSelect}: {label: string; items: {v: string; l: string}[]; active: string; onSelect: (v: string) => void}) {
+export function PillRow({label, items, active, onSelect}: {label: string; items: {v: string; l: string}[]; active: string; onSelect: (v: string) => void}) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="w-16 shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
