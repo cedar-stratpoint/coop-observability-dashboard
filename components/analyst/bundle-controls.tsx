@@ -1,7 +1,6 @@
 'use client';
 
 import {useEffect, useState, useTransition} from 'react';
-import {createPortal} from 'react-dom';
 import {useRouter} from 'next/navigation';
 import {Boxes, Check, Pencil, Plus, Trash2, X} from 'lucide-react';
 import type {PosBundleRow} from '@/src/pos-types';
@@ -20,6 +19,7 @@ import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {Eyebrow} from './sections';
 import {EmojiPicker} from './emoji-picker';
+import {ModalShell, useModalExit} from './modal-shell';
 
 /**
  * Coop's view of the POS bundles (pos_bundles). Bundles are created on the POS
@@ -280,11 +280,12 @@ function BundleRow({
 // Create a new Buy-Any-N bundle, or edit an existing bundle's scope (the eligible
 // lines + pick count). Name / emoji / price are only in create mode; on an existing
 // bundle those stay inline-editable in the row.
-function BundleDialog({dialog, onClose, onDone}: {
+function BundleDialog({dialog, onClose: onClosed, onDone}: {
   dialog: {mode: 'create'} | {mode: 'scope'; bundle: PosBundleRow};
   onClose: () => void;
   onDone: () => void;
 }) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const creating = dialog.mode === 'create';
   const bundle = creating ? null : dialog.bundle;
   const [name, setName] = useState(bundle?.name ?? '');
@@ -314,68 +315,63 @@ function BundleDialog({dialog, onClose, onDone}: {
       else setError(res.error);
     });
   }
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Cancel" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-lg">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{creating ? 'New bundle' : `Edit scope · ${bundle?.name}`}</h2>
-          <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
-        </div>
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} backdropLabel="Cancel" panelClassName="w-full max-w-md rounded-xl border bg-popover p-5 shadow-lg">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">{creating ? 'New bundle' : `Edit scope · ${bundle?.name}`}</h2>
+        <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
+      </div>
 
-        <div className="flex flex-col gap-3">
-          {creating && (
-            <>
+      <div className="flex flex-col gap-3">
+        {creating && (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium">Name</span>
+              <input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="Buy Any 3" className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" />
+            </label>
+            <div className="flex gap-3">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium">Name</span>
-                <input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="Buy Any 3" className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" />
+                <span className="text-xs font-medium">Emoji</span>
+                <div className="pt-0.5"><EmojiPicker value={emoji} onCommit={(e) => setEmoji(e)} ariaLabel="Bundle emoji" /></div>
               </label>
-              <div className="flex gap-3">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-medium">Emoji</span>
-                  <div className="pt-0.5"><EmojiPicker value={emoji} onCommit={(e) => setEmoji(e)} ariaLabel="Bundle emoji" /></div>
-                </label>
-                <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-xs font-medium">Price</span>
-                  <div className="flex items-center gap-1"><span className="text-sm text-muted-foreground">₱</span>
-                    <input value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" /></div>
-                </label>
-              </div>
-            </>
-          )}
-
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium">Buy any (pick count)</span>
-            <input type="number" min={1} value={pickCount} onChange={(e) => setPickCount(Math.max(1, Math.round(Number(e.target.value) || 1)))}
-              className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
-          </label>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium">Eligible lines <span className="font-normal text-muted-foreground">a customer may pick from these</span></span>
-            <div className="flex flex-wrap gap-2">
-              {POS_CATEGORIES.map((c) => {
-                const on = lines.includes(c as string);
-                return (
-                  <button key={c} type="button" onClick={() => toggleLine(c as string)}
-                    className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', on ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                    {c}
-                  </button>
-                );
-              })}
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium">Price</span>
+                <div className="flex items-center gap-1"><span className="text-sm text-muted-foreground">₱</span>
+                  <input value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" /></div>
+              </label>
             </div>
+          </>
+        )}
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium">Buy any (pick count)</span>
+          <input type="number" min={1} value={pickCount} onChange={(e) => setPickCount(Math.max(1, Math.round(Number(e.target.value) || 1)))}
+            className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
+        </label>
+
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium">Eligible lines <span className="font-normal text-muted-foreground">a customer may pick from these</span></span>
+          <div className="flex flex-wrap gap-2">
+            {POS_CATEGORIES.map((c) => {
+              const on = lines.includes(c as string);
+              return (
+                <button key={c} type="button" onClick={() => toggleLine(c as string)}
+                  className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', on ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {c}
+                </button>
+              );
+            })}
           </div>
         </div>
-
-        {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={save} disabled={pending} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            {pending ? 'Saving…' : creating ? 'Create bundle' : 'Save scope'}
-          </button>
-        </div>
       </div>
-    </div>,
-    document.body,
+
+      {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
+        <button onClick={save} disabled={pending} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          {pending ? 'Saving…' : creating ? 'Create bundle' : 'Save scope'}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
