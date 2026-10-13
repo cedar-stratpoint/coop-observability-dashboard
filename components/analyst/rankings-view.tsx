@@ -167,10 +167,10 @@ export function RankingsView({
   return (
     <div className="mx-auto max-w-4xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
       <Link
-        href={scope ? '/offline-sales/events' : '/offline-sales'}
+        href={scope ? `/offline-sales/events/${encodeURIComponent(scope.eventId)}` : '/offline-sales'}
         className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="size-3.5" /> {scope ? 'Events' : 'Offline Sales'}
+        <ArrowLeft className="size-3.5" /> {scope ? scope.name : 'Offline Sales'}
       </Link>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
