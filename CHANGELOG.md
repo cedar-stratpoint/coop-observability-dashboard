@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-13 — Events page is a tile grid; each event has its own page
+- **`/offline-sales/events` now lists events as a grid of tiles** (3 across on desktop, 2 on tablet, 1 on phone, 12 per page). Each tile shows the status pill, name, dates, place, revenue and order count, and the whole tile links to the event.
+  - *Why:* every event was a full card with its cash box and analytics stacked inline (the live one expanded), so reaching older events meant scrolling past several screens of charts. Tiles keep the whole list scannable in one view.
+  - Search, When/Sort filters, pagination, "New event", and pinning live events to the top (with the green ring) are unchanged.
+- **New per-event page `/offline-sales/events/[eventId]`** holds what the card used to: header (status, dates, venue, organizer, revenue), Edit (inline form), cash reconciliation, and the full analytics panel, always expanded.
+  - Orders use the same read-time event attribution as the list (`resolveOrderEvents`), so tile and page totals agree. Unknown ids 404.
+  - The event-scoped "View all products" rankings page now goes back to that event instead of the list.
+- Shared bits moved to `components/analyst/event-parts.tsx` (status pill, date range, cash reconciliation). Date ranges now read "Oct 10, 2026 to Oct 17, 2026" (no en dash, per the UI copy rule) and format in UTC so a date never shifts by a day.
+
 ## 2026-10-10 — One review view for a batch; unsaved edits are kept
 - **A page in an open batch always opens in the batch review, on that page's tab.**
   - *Why:* clicking a file in a bulk upload opened the single-scan review, while "Review & commit N pages" opened the batch review: two different screens for the same pages, each with its own store and period fields, and edits made in one were not in the other.
