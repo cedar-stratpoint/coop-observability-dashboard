@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-13 — Motion polish: dialogs animate in and out, reduced motion app-wide
+Coop half of a POS + Coop motion audit (`design-motion-principles` skill, Emil primary / Jakub secondary). The user picked which findings to fix.
+- **Seven hand-rolled dialogs now share `ModalShell`** (`components/analyst/modal-shell.tsx`): Add stock, Move stock, New product, Bundle, Undo free taste, Edit (price/target) and Edit stock. They used to snap in and out in one frame. Now the backdrop fades over 150ms and the panel fades + scales from 0.96 over 180ms (ease-out-quint), and closing fades both over 120ms with no scale (exits are subtler than enters).
+  - *How:* the enter is pure CSS (`starting:` / @starting-style). The exit comes from `useModalExit(onClose)`. Each dialog shadows its `onClose` prop with the hook's animated `close`, so every existing close path (Escape, backdrop, X, Cancel) plays the exit without touching each call site. Parent `{open && …}` mounting is unchanged.
+- **The batch/upload review lightboxes fade in** over 150ms. An exit would need a restructure (they're inline, not components), so that was left out.
+- **Reduced motion is now app-wide:** one `prefers-reduced-motion: reduce` rule in `globals.css` collapses every transition and animation. Before, only 15 of ~80 animating components had their own guard. Loading spinners keep turning (functional, not decorative), and `useModalExit` closes immediately.
+- **Kept as is (user call):** the Ask Coop shine, the "Happening now" ping and the channel chip hint. The Chat and Playbook drawer exits weren't chosen this round.
+- Verified: typecheck, 2610 tests, and in the browser (Add stock open + Escape close, with and without reduced motion).
+
 ## 2026-10-13 — Transactions filters: fewer visible choices, removable filter pills
 - **The filter bar on `/offline-sales/orders` now shows five category triggers (Method, Date, Price, Status, Event) instead of every option at once.** Each opens its own dropdown; picking an option applies it straight away.
   - *Why (Hick's law):* the old bar laid out about 14 choices inline (two segmented controls plus three popovers) and felt cramped. Fewer visible choices means a faster decision, and the full list is still one click away.
