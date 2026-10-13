@@ -445,7 +445,7 @@ export function UploadReview({
       {/* Enlarged scan — full-screen lightbox. Escape / click backdrop / × to close. */}
       {scanUrl && lightboxOpen && (
         <div
-          className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 sm:p-8"
+          className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8"
           role="dialog"
           aria-modal="true"
           aria-label="Scanned file"
