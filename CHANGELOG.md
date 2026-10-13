@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-13 — Transactions filters: fewer visible choices, removable filter pills
+- **The filter bar on `/offline-sales/orders` now shows five category triggers (Method, Date, Price, Status, Event) instead of every option at once.** Each opens its own dropdown; picking an option applies it straight away.
+  - *Why (Hick's law):* the old bar laid out about 14 choices inline (two segmented controls plus three popovers) and felt cramped. Fewer visible choices means a faster decision, and the full list is still one click away.
+- **Applied filters read back as pills** ("Method Cash ×", "Price ₱100 to ₱500 ×") below the bar. Each pill removes just that filter, and **Clear all** resets everything. Triggers keep a fixed label with a dot when applied, so the bar never shifts width as filters change.
+- **Date quick ranges:** Today, Yesterday, Last 7 days, Last 30 days apply in one click; the calendar stays for custom ranges. A matching range shows its preset name in the pill.
+- Fixed en dashes in the date and price labels ("Sep 1 – Sep 9"): they now read "Sep 1 to Sep 9", per the no-dash UI copy rule.
+- Dropdowns animate from their trigger (origin-aware scale + fade, 150ms ease-out), matching the env switcher.
+
 ## 2026-10-13 — Event lead contacts: an "Update leads" button replaces the CSV round trip
 - **New "Update leads" button on `/customers/leads`.** It pulls every spin-the-wheel lead from the storefront and adds the ones Coop doesn't have yet, then shows how many were added.
   - *Why:* each event meant exporting a CSV from zoomyforpets.com/admin/spin-wheel and running `scripts/import-spin-leads.mjs` by hand.
