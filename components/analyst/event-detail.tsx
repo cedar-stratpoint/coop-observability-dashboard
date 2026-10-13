@@ -57,12 +57,8 @@ export function EventDetailView({
         </MockNote>
       )}
 
-      {editing ? (
-        <div className="mb-6">
-          <EventForm initial={event} events={allEvents} onDone={() => setEditing(false)} />
-        </div>
-      ) : (
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+      {editing && <EventForm initial={event} events={allEvents} onDone={() => setEditing(false)} />}
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
           <div className="min-w-0">
             <EventStatusPill state={eventTimeState(event, todayKey)} />
             <h1 className="mt-2 text-2xl font-semibold tracking-tight">{name}</h1>
@@ -101,7 +97,6 @@ export function EventDetailView({
             </button>
           </div>
         </header>
-      )}
 
       <CashReconciliation rollup={rollup} />
 

@@ -1,6 +1,7 @@
 // Pieces shared by the Events list (tiles) and the per-event detail page:
 // date formatting, the time-derived status pill, and the cash reconciliation box.
 
+import {Check, Clock} from 'lucide-react';
 import type {EventRollup} from '@/src/pos-sales-types';
 import {formatPeso} from '@/src/pos-format';
 import {cn} from '@/lib/utils';
@@ -24,21 +25,36 @@ export function eventDates(startsOn: string | null, endsOn: string | null): stri
 }
 
 /** Status badge, time-derived rather than the raw status field: a past bazaar
- *  reads "Done", never a misleading "Active". */
+ *  reads "Done", never a misleading "Active". Color-coded so state reads at a
+ *  glance: green = happening now (pulsing dot), blue = upcoming, neutral = done. */
 export function EventStatusPill({state, className}: {state: 'upcoming' | 'ongoing' | 'past'; className?: string}) {
-  const base = 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide';
+  const base = 'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide';
   if (state === 'ongoing') {
     return (
       <span
-        className={cn(base, 'gap-1.5 text-emerald-700 dark:text-emerald-300', className)}
-        style={{backgroundColor: 'color-mix(in oklab, var(--status-good) 14%, transparent)'}}
+        className={cn(base, 'text-emerald-700 dark:text-emerald-300', className)}
+        style={{backgroundColor: 'color-mix(in oklab, var(--status-good) 16%, transparent)'}}
       >
-        <span className="size-1.5 rounded-full bg-[var(--status-good)]" aria-hidden /> Happening now
+        <span className="relative flex size-1.5" aria-hidden>
+          <span className="absolute inline-flex size-full rounded-full bg-[var(--status-good)] opacity-60 motion-safe:animate-ping" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-[var(--status-good)]" />
+        </span>
+        Happening now
       </span>
     );
   }
-  if (state === 'upcoming') return <span className={cn(base, 'border text-muted-foreground', className)}>Upcoming</span>;
-  return <span className={cn(base, 'bg-muted text-muted-foreground', className)}>Done</span>;
+  if (state === 'upcoming') {
+    return (
+      <span className={cn(base, 'bg-sky-500/12 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300', className)}>
+        <Clock className="size-3" aria-hidden /> Upcoming
+      </span>
+    );
+  }
+  return (
+    <span className={cn(base, 'bg-stone-500/12 text-stone-600 dark:bg-stone-400/15 dark:text-stone-300', className)}>
+      <Check className="size-3" aria-hidden /> Done
+    </span>
+  );
 }
 
 /** Opening cash + cash sales = expected in till, plus the counted variance once

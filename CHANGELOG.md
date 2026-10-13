@@ -23,6 +23,17 @@ Dates are local working dates (GMT+8). Newest first.
 - The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
 - Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
 
+## 2026-10-13 — New/Edit event as a slide-over; persistent pager; colored statuses
+- **Creating or editing an event opens a right-side panel** instead of an inline card that stretched across the full-width page. The list (or the event page) stays visible behind it.
+  - Fields are grouped: Event (name, organizer), Where (venue, city), When, Cash, and Close out when editing.
+  - **One date-range picker** replaces the two native date inputs: pick the first and last day on a calendar (future days allowed), see "Sun, Oct 18 to Tue, Oct 20, 2026 · 3 days". One pick makes a single-day event. The "runs alongside" note is unchanged.
+  - Opening float has a ₱ prefix and quick picks (₱1,000 / ₱2,000 / ₱3,000 / ₱5,000). Errors show under the field they belong to.
+  - Close out: Active / Closed toggle; "Counted at close" appears once Closed is picked.
+  - Esc or the backdrop closes it; Cmd/Ctrl+Enter saves.
+  - `Calendar` gained an `allowFuture` prop (default off, so the sales date pickers still block future days).
+- **The Events pager is always visible**: "Showing 1 to 8 of 8 events", page numbers, and Per page 12 / 24 / 48 (multiples of 12 so tiles fill whole rows). `Pagination` gained `alwaysShow` (default off; other tables unchanged).
+- **Status pills are color-coded** everywhere they appear (tiles, table, event page): Happening now green with a pulsing dot, Upcoming blue with a clock, Done neutral with a check.
+
 ## 2026-10-13 — Events pages use the full width
 - **`/offline-sales/events` and each event page now span the whole content area** beside the sidebar (was a centered 896px column that left wide empty margins on desktop).
   - Tiles go up to 4 across on wide screens (`xl`), so a 12-event page always fills whole rows.

@@ -23,7 +23,9 @@ import {Pagination} from './pagination';
 import {EventForm} from './event-form';
 import {EventStatusPill, eventDates} from './event-parts';
 
-const EVENTS_PER_PAGE = 12;
+// Page sizes are multiples of 12 so tiles always fill whole rows at 2, 3 or 4 across.
+const PAGE_SIZES = [12, 24, 48] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
 
 type EventsView = 'tiles' | 'table';
 // Per-browser convenience only: which layout this viewer last picked. Storage can
@@ -73,7 +75,8 @@ export function OfflineEventsView({
   const [when, setWhen] = useState<EventWhen>('all');
   const [sort, setSort] = useState<EventSort>('recent');
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [query, when, sort]);
+  const [pageSize, setPageSize] = useState<PageSize>(12);
+  useEffect(() => { setPage(1); }, [query, when, sort, pageSize]);
 
   // Every event, for the form's live "runs alongside" note.
   const allEvents = useMemo(() => rollups.map((r) => r.event), [rollups]);
@@ -92,9 +95,9 @@ export function OfflineEventsView({
 
   const total = rollups.length;
   const matches = ordered.length;
-  const pageCount = Math.max(1, Math.ceil(matches / EVENTS_PER_PAGE));
+  const pageCount = Math.max(1, Math.ceil(matches / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageItems = ordered.slice((safePage - 1) * EVENTS_PER_PAGE, safePage * EVENTS_PER_PAGE);
+  const pageItems = ordered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const filtering = query.trim() !== '' || when !== 'all';
 
   return (
@@ -109,15 +112,13 @@ export function OfflineEventsView({
         </div>
         <div className="flex items-center gap-2">
           <RefreshControl fetchedAt={fetchedAt} />
-          {!creating && (
-            <button
+          <button
               type="button"
               onClick={() => setCreating(true)}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out active:scale-95"
             >
               <Plus className="size-3.5" /> New event
             </button>
-          )}
         </div>
       </div>
 
@@ -128,11 +129,7 @@ export function OfflineEventsView({
         </MockNote>
       )}
 
-      {creating && (
-        <div className="mb-3">
-          <EventForm events={allEvents} onDone={() => setCreating(false)} />
-        </div>
-      )}
+      {creating && <EventForm events={allEvents} onDone={() => setCreating(false)} />}
 
       {total === 0 && !creating ? (
         <Card>
@@ -191,7 +188,24 @@ export function OfflineEventsView({
             </div>
           )}
 
-          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} className="mt-6" />
+          {matches > 0 && (
+            <div className="mt-6 grid grid-cols-1 items-center gap-3 border-t pt-4 sm:grid-cols-[1fr_auto_1fr]">
+              <p className="text-xs tabular-nums text-muted-foreground max-sm:text-center">
+                Showing {(safePage - 1) * pageSize + 1} to {Math.min(safePage * pageSize, matches)} of {matches}{' '}
+                {matches === 1 ? 'event' : 'events'}
+              </p>
+              <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Events pagination" alwaysShow />
+              <div className="flex items-center gap-2 sm:justify-self-end max-sm:justify-center">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Per page</span>
+                <SegmentedControl
+                  ariaLabel="Events per page"
+                  options={PAGE_SIZES.map((n) => ({value: String(n), label: String(n)}))}
+                  value={String(pageSize)}
+                  onChange={(v) => setPageSize(Number(v) as PageSize)}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
