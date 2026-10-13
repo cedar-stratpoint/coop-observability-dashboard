@@ -2,9 +2,9 @@
 
 import {useEffect, useMemo, useState} from 'react';
 import Link from 'next/link';
-import {ArrowLeft, CalendarDays, ChevronDown, MapPin, Pencil, Plus, Search, Store, X} from 'lucide-react';
-import type {EventRollup, PosOrder} from '@/src/pos-sales-types';
-import type {SpinLead} from '@/src/spin-leads-types';
+import {useRouter} from 'next/navigation';
+import {ArrowLeft, CalendarDays, ChevronRight, LayoutGrid, List, MapPin, Plus, Search, X} from 'lucide-react';
+import type {EventRollup} from '@/src/pos-sales-types';
 import {formatPeso} from '@/src/pos-format';
 import {
   EVENT_SORT_OPTIONS,
@@ -21,90 +21,87 @@ import {RefreshControl} from './refresh-control';
 import {SegmentedControl} from './segmented-control';
 import {Pagination} from './pagination';
 import {EventForm} from './event-form';
-import {EventAnalytics} from './event-analytics';
+import {EventStatusPill, eventDates} from './event-parts';
 
-const EVENTS_PER_PAGE = 6;
+// Page sizes are multiples of 12 so tiles always fill whole rows at 2, 3 or 4 across.
+const PAGE_SIZES = [12, 24, 48] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
 
-/** "2026-09-14" → "Sep 14, 2026". */
-function dayLabel(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso + 'T00:00:00Z');
-  return Number.isNaN(d.getTime())
-    ? null
-    : d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
-}
+type EventsView = 'tiles' | 'table';
+// Per-browser convenience only: which layout this viewer last picked. Storage can
+// be unavailable (private mode, blocked site data), so every access is guarded and
+// the page falls back to tiles.
+const VIEW_KEY = 'coop.events.view';
 
-/** A single day, or "Sep 14 – 16, 2026" for a multi-day run. */
-function eventDates(startsOn: string | null, endsOn: string | null): string | null {
-  const start = dayLabel(startsOn);
-  if (!start) return dayLabel(endsOn);
-  if (!endsOn || endsOn === startsOn) return start;
-  const end = dayLabel(endsOn);
-  return end ? `${start} – ${end}` : start;
+function eventHref(eventId: string): string {
+  return `/offline-sales/events/${encodeURIComponent(eventId)}`;
 }
 
 export function OfflineEventsView({
   rollups,
-  orders,
-  leads,
-  currentEventId,
+  currentEventIds,
   todayKey,
   usingMock,
   fetchedAt,
 }: {
   rollups: EventRollup[];
-  orders: PosOrder[];
-  leads: SpinLead[];
-  currentEventId: string | null;
+  currentEventIds: string[];
   todayKey: string;
   usingMock: boolean;
   fetchedAt: string;
 }) {
   const [creating, setCreating] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [view, setView] = useState<EventsView>('tiles');
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_KEY) === 'table') setView('table');
+    } catch {
+      /* storage blocked; keep tiles */
+    }
+  }, []);
+  const changeView = (v: EventsView) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* storage blocked; the choice just won't persist */
+    }
+  };
 
   // Search + time bucket + sort + page, all client-side (see filterAndSortEvents):
-  // the list is modest and each card computes its own analytics, so a server-
-  // paginated slice would starve those. Any result-set change snaps back to page 1.
+  // the list is modest and each tile only needs its rollup. Any result-set change
+  // snaps back to page 1. Analytics live on the per-event detail page.
   const [query, setQuery] = useState('');
   const [when, setWhen] = useState<EventWhen>('all');
   const [sort, setSort] = useState<EventSort>('recent');
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [query, when, sort]);
-
-  // Orders bucketed by event, so each card computes its analytics from its own.
-  const ordersByEvent = useMemo(() => {
-    const m = new Map<string, PosOrder[]>();
-    for (const o of orders) {
-      if (!o.event_id) continue;
-      const arr = m.get(o.event_id) ?? [];
-      arr.push(o);
-      m.set(o.event_id, arr);
-    }
-    return m;
-  }, [orders]);
+  const [pageSize, setPageSize] = useState<PageSize>(12);
+  useEffect(() => { setPage(1); }, [query, when, sort, pageSize]);
 
   // Every event, for the form's live overlap check.
   const allEvents = useMemo(() => rollups.map((r) => r.event), [rollups]);
 
-  // Filter + sort, then pin the live event to the very top so it stays on page 1.
+  // The event live today, if any (pinned first with a highlight ring).
+  const currentSet = useMemo(() => new Set(currentEventIds), [currentEventIds]);
+
+  // Filter + sort, then pin every live event to the top so they stay on page 1.
   const ordered = useMemo(() => {
     const list = filterAndSortEvents(rollups, {query, when, sort}, todayKey);
-    if (!currentEventId) return list;
-    const idx = list.findIndex((r) => r.event.event_id === currentEventId);
-    if (idx <= 0) return list;
-    return [list[idx], ...list.slice(0, idx), ...list.slice(idx + 1)];
-  }, [rollups, query, when, sort, todayKey, currentEventId]);
+    if (currentSet.size === 0) return list;
+    const live = list.filter((r) => currentSet.has(r.event.event_id));
+    const rest = list.filter((r) => !currentSet.has(r.event.event_id));
+    return [...live, ...rest];
+  }, [rollups, query, when, sort, todayKey, currentSet]);
 
   const total = rollups.length;
   const matches = ordered.length;
-  const pageCount = Math.max(1, Math.ceil(matches / EVENTS_PER_PAGE));
+  const pageCount = Math.max(1, Math.ceil(matches / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageItems = ordered.slice((safePage - 1) * EVENTS_PER_PAGE, safePage * EVENTS_PER_PAGE);
+  const pageItems = ordered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const filtering = query.trim() !== '' || when !== 'all';
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
       <Link href="/offline-sales" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" /> Offline Sales
       </Link>
@@ -115,15 +112,13 @@ export function OfflineEventsView({
         </div>
         <div className="flex items-center gap-2">
           <RefreshControl fetchedAt={fetchedAt} />
-          {!creating && (
-            <button
+          <button
               type="button"
-              onClick={() => { setEditingId(null); setCreating(true); }}
+              onClick={() => setCreating(true)}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out active:scale-95"
             >
               <Plus className="size-3.5" /> New event
             </button>
-          )}
         </div>
       </div>
 
@@ -134,11 +129,7 @@ export function OfflineEventsView({
         </MockNote>
       )}
 
-      {creating && (
-        <div className="mb-3">
-          <EventForm events={allEvents} onDone={() => setCreating(false)} />
-        </div>
-      )}
+      {creating && <EventForm events={allEvents} onDone={() => setCreating(false)} />}
 
       {total === 0 && !creating ? (
         <Card>
@@ -161,9 +152,12 @@ export function OfflineEventsView({
           )}
 
           {total > 0 && (
-            <p className="mb-3 text-xs text-muted-foreground">
-              {filtering ? `${matches} of ${total} ${total === 1 ? 'event' : 'events'}` : `${total} ${total === 1 ? 'event' : 'events'}`}
-            </p>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {filtering ? `${matches} of ${total} ${total === 1 ? 'event' : 'events'}` : `${total} ${total === 1 ? 'event' : 'events'}`}
+              </p>
+              <ViewToggle value={view} onChange={changeView} />
+            </div>
           )}
 
           {matches === 0 ? (
@@ -179,27 +173,39 @@ export function OfflineEventsView({
                 </button>
               </CardContent>
             </Card>
+          ) : view === 'table' ? (
+            <EventsTable rollups={pageItems} todayKey={todayKey} liveIds={currentSet} />
           ) : (
-            <div className="flex flex-col gap-3">
-              {pageItems.map((r) =>
-                editingId === r.event.event_id ? (
-                  <EventForm key={r.event.event_id} initial={r.event} events={allEvents} onDone={() => setEditingId(null)} />
-                ) : (
-                  <EventCard
-                    key={r.event.event_id}
-                    rollup={r}
-                    orders={ordersByEvent.get(r.event.event_id) ?? []}
-                    leads={leads}
-                    todayKey={todayKey}
-                    spotlight={r.event.event_id === currentEventId}
-                    onEdit={() => { setCreating(false); setEditingId(r.event.event_id); }}
-                  />
-                ),
-              )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {pageItems.map((r) => (
+                <EventTile
+                  key={r.event.event_id}
+                  rollup={r}
+                  todayKey={todayKey}
+                  spotlight={currentSet.has(r.event.event_id)}
+                />
+              ))}
             </div>
           )}
 
-          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} className="mt-6" />
+          {matches > 0 && (
+            <div className="mt-6 grid grid-cols-1 items-center gap-3 border-t pt-4 sm:grid-cols-[1fr_auto_1fr]">
+              <p className="text-xs tabular-nums text-muted-foreground max-sm:text-center">
+                Showing {(safePage - 1) * pageSize + 1} to {Math.min(safePage * pageSize, matches)} of {matches}{' '}
+                {matches === 1 ? 'event' : 'events'}
+              </p>
+              <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Events pagination" alwaysShow />
+              <div className="flex items-center gap-2 sm:justify-self-end max-sm:justify-center">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Per page</span>
+                <SegmentedControl
+                  ariaLabel="Events per page"
+                  options={PAGE_SIZES.map((n) => ({value: String(n), label: String(n)}))}
+                  value={String(pageSize)}
+                  onChange={(v) => setPageSize(Number(v) as PageSize)}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -223,8 +229,8 @@ function EventsToolbar({
   onSort: (v: EventSort) => void;
 }) {
   return (
-    <div className="mb-4 flex flex-col gap-3">
-      <div className="relative">
+    <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
+      <div className="relative xl:w-[420px] xl:shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
@@ -266,132 +272,137 @@ function ToolbarGroup({label, children}: {label: string; children: React.ReactNo
   );
 }
 
-function EventCard({rollup, orders: eventOrders, leads, todayKey, spotlight, onEdit}: {rollup: EventRollup; orders: PosOrder[]; leads: SpinLead[]; todayKey: string; spotlight: boolean; onEdit: () => void}) {
-  const {event, revenue, orders, cashSales, expectedCash} = rollup;
-  const closed = event.status === 'closed';
-  // Status badge is time-derived, not the raw status field: a past bazaar should
-  // read "Done", never a misleading "Active". ongoing = happening now, past = done.
-  const timeState = eventTimeState(event, todayKey);
+/** One event as a compact tile: status, name, when/where, and the headline
+ *  revenue. The whole tile links to the event's detail page, which holds the
+ *  cash reconciliation, the analytics, and the edit form. */
+function EventTile({rollup, todayKey, spotlight}: {rollup: EventRollup; todayKey: string; spotlight: boolean}) {
+  const {event, revenue, orders} = rollup;
   const dates = eventDates(event.starts_on, event.ends_on);
   const place = [event.venue, event.city].filter(Boolean).join(', ');
-  // Over/short once the till is counted: counted closing_cash vs expected.
-  const variance = closed && event.closing_cash != null && expectedCash != null ? event.closing_cash - expectedCash : null;
-  // The live event opens expanded; the rest collapse to the summary + a toggle.
-  const [open, setOpen] = useState(spotlight);
+  const name = event.name || 'Untitled event';
 
   return (
-    <Card className={cn(spotlight && 'border-transparent ring-1 ring-[var(--status-good)]/40')}>
-      <CardContent className={cn('p-6', spotlight && 'md:p-7')}>
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold tracking-tight">{event.name || 'Untitled event'}</h3>
-              {timeState === 'ongoing' ? (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300"
-                  style={{backgroundColor: 'color-mix(in oklab, var(--status-good) 14%, transparent)'}}
-                >
-                  <span className="size-1.5 rounded-full bg-[var(--status-good)]" aria-hidden /> Happening now
-                </span>
-              ) : timeState === 'upcoming' ? (
-                <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Upcoming
-                </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Done
-                </span>
-              )}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {dates && (
-                <span className="inline-flex items-center gap-1">
-                  <CalendarDays className="size-3.5" /> {dates}
-                </span>
-              )}
-              {place && (
-                <span className="inline-flex items-center gap-1">
-                  <MapPin className="size-3.5" /> {place}
-                </span>
-              )}
-              {event.organizer && (
-                <span className="inline-flex items-center gap-1">
-                  <Store className="size-3.5" /> {event.organizer}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <div className="text-right">
-              <div className="font-serif text-2xl font-normal leading-tight tracking-tight tabular-nums">{formatPeso(revenue)}</div>
-              <div className="text-xs text-muted-foreground">
-                {orders} {orders === 1 ? 'order' : 'orders'}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onEdit}
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={`Edit ${event.name || 'event'}`}
-            >
-              <Pencil className="size-3" /> Edit
-            </button>
-          </div>
-        </div>
+    <Link
+      href={eventHref(event.event_id)}
+      aria-label={`Open ${name}`}
+      className={cn(
+        'group flex h-full flex-col gap-3 rounded-xl border bg-card p-4 sm:gap-4 sm:p-5 transition-[background-color,border-color,transform] duration-150 ease-out',
+        'hover:border-foreground/20 hover:bg-muted/40 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        spotlight && 'border-transparent ring-1 ring-[var(--status-good)]/40',
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <EventStatusPill state={eventTimeState(event, todayKey)} />
+        <ChevronRight className="size-4 text-muted-foreground transition-transform duration-150 ease-out group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </div>
 
-        {(event.opening_cash != null || cashSales > 0) && (
-          <div className="mt-5 rounded-lg border border-dashed bg-muted/30 px-4 py-4 text-xs">
-            <div className="mb-2 font-semibold uppercase tracking-wider text-muted-foreground">Cash reconciliation</div>
-            <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 tabular-nums text-foreground/80">
-              <span>Opening {formatPeso(event.opening_cash ?? 0)}</span>
-              <span className="text-muted-foreground">+</span>
-              <span>cash sales {formatPeso(cashSales)}</span>
-              <span className="text-muted-foreground">=</span>
-              <span className="font-medium text-foreground">{formatPeso(expectedCash ?? cashSales)} expected in till</span>
-            </div>
-            {revenue > cashSales && (
-              <p className="mt-2 leading-relaxed text-muted-foreground">
-                Card &amp; e-wallet sales ({formatPeso(revenue - cashSales)}) settle to their wallets, so they&rsquo;re not
-                in the till. Total revenue is {formatPeso(revenue)}.
-              </p>
-            )}
-            {closed && event.closing_cash != null && (
-              <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 tabular-nums text-foreground/80">
-                <span>Counted {formatPeso(event.closing_cash)}</span>
-                {variance != null && (
-                  <span
-                    className="font-medium"
-                    style={{color: Math.abs(variance) < 0.005 ? 'var(--status-good)' : 'var(--status-warn)'}}
-                  >
-                    ({variance === 0 ? 'balanced' : `${variance > 0 ? 'over' : 'short'} ${formatPeso(Math.abs(variance))}`})
-                  </span>
-                )}
-              </div>
-            )}
-            {event.cash_note && <p className="mt-1.5 text-muted-foreground">{event.cash_note}</p>}
-          </div>
-        )}
-
-        {/* Analytics: expanded for the live event, collapsed-with-toggle for the rest. */}
-        <div className="mt-6 border-t pt-6">
-          {open && (
-            <div className="mb-5">
-              <EventAnalytics event={event} orders={eventOrders} leads={leads} />
-            </div>
+      <div className="min-w-0 flex-1">
+        <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight">{name}</h3>
+        <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+          {dates && (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <CalendarDays className="size-3.5 shrink-0" /> <span className="truncate">{dates}</span>
+            </span>
           )}
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="group inline-flex items-center gap-2 rounded-full border bg-background/60 px-4 py-2 text-xs font-medium text-muted-foreground transition-colors duration-150 ease-out hover:border-foreground/25 hover:bg-muted hover:text-foreground active:scale-[0.98]"
-            >
-              {open ? 'Hide analytics' : 'Show analytics'}
-              <ChevronDown className={cn('size-3.5 transition-transform duration-200 ease-out', open && 'rotate-180')} />
-            </button>
-          </div>
+          {place && (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <MapPin className="size-3.5 shrink-0" /> <span className="truncate">{place}</span>
+            </span>
+          )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className="flex items-baseline justify-between gap-3 border-t pt-3 sm:pt-4">
+        <span className="font-serif text-2xl font-normal leading-none tracking-tight tabular-nums">{formatPeso(revenue)}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {orders} {orders === 1 ? 'order' : 'orders'}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+/** Tiles | Table layout switch, icon-only with accessible names. */
+function ViewToggle({value, onChange}: {value: EventsView; onChange: (v: EventsView) => void}) {
+  const options = [
+    {v: 'tiles' as const, label: 'Tile view', Icon: LayoutGrid},
+    {v: 'table' as const, label: 'Table view', Icon: List},
+  ];
+  return (
+    <div role="group" aria-label="Layout" className="inline-flex rounded-md border p-0.5">
+      {options.map(({v, label, Icon}) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          aria-pressed={value === v}
+          aria-label={label}
+          title={label}
+          className={cn(
+            'rounded-[5px] p-1.5 transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97]',
+            value === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The same page of events as a dense table, for scanning many at once. Order
+ *  follows the toolbar's Sort (live events pinned first). The whole row opens the
+ *  event; the name is also a real link for keyboard and middle-click. */
+function EventsTable({rollups, todayKey, liveIds}: {rollups: EventRollup[]; todayKey: string; liveIds: Set<string>}) {
+  const router = useRouter();
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead>
+              <tr className="border-b text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-3 text-left">Event</th>
+                <th className="px-3 py-3 text-left">Status</th>
+                <th className="px-3 py-3 text-left">Dates</th>
+                <th className="px-3 py-3 text-right">Orders</th>
+                <th className="px-4 py-3 text-right">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rollups.map(({event, revenue, orders}) => {
+                const href = eventHref(event.event_id);
+                const place = [event.venue, event.city].filter(Boolean).join(', ');
+                const live = liveIds.has(event.event_id);
+                return (
+                  <tr
+                    key={event.event_id}
+                    onClick={() => router.push(href)}
+                    className="group cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/50"
+                  >
+                    <td className={cn('px-4 py-3', live && 'shadow-[inset_2px_0_0_var(--status-good)]')}>
+                      <Link
+                        href={href}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium transition-colors hover:text-primary"
+                      >
+                        {event.name || 'Untitled event'}
+                      </Link>
+                      {place && <div className="text-xs text-muted-foreground">{place}</div>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <EventStatusPill state={eventTimeState(event, todayKey)} className="whitespace-nowrap" />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">
+                      {eventDates(event.starts_on, event.ends_on) ?? '—'}
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">{orders}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{formatPeso(revenue)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+    </div>
   );
 }

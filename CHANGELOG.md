@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-13 — Events redesign (prod release)
+Promotes this session's Events work from staging to prod by cherry-pick (develop commits 6cca2a6, 3da0413, 1313657, cb55d27). Multi-event (same-day events) is **not** part of this release, so two pieces were adapted to prod's one-event-per-date rule.
+- **Tile grid** on `/offline-sales/events` with a **Tiles / Table** toggle (remembered per browser), full page width, and an always-visible pager ("Showing X to Y of Z", Per page 12 / 24 / 48).
+- **Per-event page** `/offline-sales/events/[eventId]`: header, Edit, cash reconciliation and the full analytics (always expanded). Event-scoped rankings go back to it.
+- **New / Edit event as a slide-over** with grouped fields, one date-range calendar, ₱ float presets and per-field errors.
+- **Color-coded status pills**: Happening now green, Upcoming blue, Done neutral.
+- *Prod adaptations:* the live event pinned to the top comes from `featuredEvent` (one current event), not multi-event's `currentEventIds`. In the form, overlapping dates show a blocking warning and disable Create (prod's `upsert_pos_event` rejects overlaps), instead of staging's "runs alongside" note.
+
 ## 2026-10-13 — Event lead contacts: an "Update leads" button replaces the CSV round trip
 - **New "Update leads" button on `/customers/leads`.** It pulls every spin-the-wheel lead from the storefront and adds the ones Coop doesn't have yet, then shows how many were added.
   - *Why:* each event meant exporting a CSV from zoomyforpets.com/admin/spin-wheel and running `scripts/import-spin-leads.mjs` by hand.

@@ -37,6 +37,7 @@ export function Pagination({
   siblings = 1,
   className,
   label = 'Pagination',
+  alwaysShow = false,
 }: {
   page: number;
   pageCount: number;
@@ -45,8 +46,11 @@ export function Pagination({
   siblings?: number;
   className?: string;
   label?: string;
+  /** Render even for a single page (disabled arrows + "1"), for layouts that
+   *  keep a persistent pager bar. Default hides it. */
+  alwaysShow?: boolean;
 }) {
-  if (pageCount <= 1) return null;
+  if (pageCount <= 1 && !alwaysShow) return null;
   const items = pageItems(page, pageCount, siblings);
   return (
     <nav aria-label={label} className={cn('flex flex-wrap items-center justify-center gap-1', className)}>
