@@ -67,7 +67,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
 
   return (
     <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Eyebrow icon={Receipt}>Offline Sales</Eyebrow>
           <p className="text-sm text-muted-foreground">Bazaar sales synced from the POS.</p>
@@ -76,7 +76,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
       </div>
 
       {/* One toolbar for everything that scopes the numbers below. */}
-      <div className="mb-6 flex flex-wrap items-center gap-2">
+      <div className="mb-8 flex flex-wrap items-center gap-2">
         <RangeTabs active={range} />
         <PaymentMethodSelect value={method} options={methodOptions} onChange={setMethod} />
       </div>
@@ -93,7 +93,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
       {/* Hero: event + daily goal + KPIs. One row on wide screens (3 / 4 / 5 of
           12), event + goal side by side with KPIs under them on laptops, stacked
           on phones. */}
-      <div className="mb-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
+      <div className="mb-5 grid gap-5 lg:mb-6 lg:grid-cols-2 lg:gap-6 xl:grid-cols-12">
         <div className={cn(progress ? 'xl:col-span-3' : 'lg:col-span-2 xl:col-span-7')}>
           <EventStatusCard featured={featured} />
         </div>
@@ -108,7 +108,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
       </div>
 
       {/* Trend gets the width; pet mix sits beside it on wide screens. */}
-      <div className="mb-4 grid gap-4 xl:grid-cols-12">
+      <div className="mb-5 grid gap-5 lg:mb-6 lg:gap-6 xl:grid-cols-12">
         <Panel title="Sales over time" className="xl:col-span-8">
           {stackData.length === 0 ? (
             <Empty>No sales in this range.</Empty>
@@ -120,7 +120,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
       </div>
 
       {/* Lists: 3 across on wide screens, 2 on tablets, 1 on phones. */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-5 md:grid-cols-2 lg:gap-6 xl:grid-cols-3">
         <TopSellers byRevenue={productsByRevenue} byUnits={productsByUnits} bundles={bundles} topBundles={topBundles} />
 
         <Panel title="Recent orders" action={{label: 'View all', href: '/offline-sales/orders'}}>
@@ -132,7 +132,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
                 <li key={o.id}>
                   <Link
                     href="/offline-sales/orders"
-                    className="-mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-muted/50"
+                    className="-mx-2 flex items-start gap-3 rounded-md px-2 py-3 transition-colors hover:bg-muted/50"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -176,7 +176,7 @@ function KpiStrip({kpis}: {kpis: SalesKpis}) {
   return (
     <div className="grid h-full grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4 xl:grid-cols-2">
       {cells.map((c) => (
-        <div key={c.label} className="flex min-w-0 flex-col justify-center gap-1.5 bg-card px-5 py-4">
+        <div key={c.label} className="flex min-w-0 flex-col justify-center gap-1.5 bg-card px-6 py-5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{c.label}</span>
           <span className={cn(metricValueClass, 'truncate text-2xl xl:text-[1.75rem]', c.warn && 'text-destructive')}>{c.value}</span>
         </div>
@@ -201,7 +201,7 @@ function StockSnapshot({stock}: {stock: {urgent: ForecastRow[]; summary: Forecas
       ) : stock.urgent.length === 0 ? (
         <Empty>All good. Nothing low or out.</Empty>
       ) : (
-        <ul className="flex flex-col gap-2.5">
+        <ul className="flex flex-col gap-3">
           {stock.urgent.map((r) => {
             const s = SNAPSHOT_STATUS[r.status];
             return (
@@ -232,7 +232,7 @@ function StockAlertsCard({alerts, className}: {alerts: StockAlerts; className?: 
       {nothing ? (
         <Empty>All good. Nothing low, out, or near expiry.</Empty>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-3">
           <AlertColumn
             icon={<PackageX className="size-3.5" />}
             title="Out of stock"
@@ -331,7 +331,7 @@ function EventStatusCard({featured}: {featured: FeaturedEvent | null}) {
   return (
     <Link
       href="/offline-sales/events"
-      className="group flex h-full flex-col justify-between gap-5 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/40"
+      className="group flex h-full flex-col justify-between gap-6 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/40 lg:p-6"
     >
       {/* Top row: status icon (left) + the go-to-events affordance (right). */}
       <div className="flex items-start justify-between gap-3">
@@ -489,13 +489,13 @@ function TopSellers({
         {ranked.length === 0 && bundles.bundleRevenue <= 0 ? (
           <Empty>No sales in this range.</Empty>
         ) : (
-          <div className="flex flex-col gap-2.5">
-            <ul className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-3">
               {rows.map((t, i) => (
                 <li key={t.product_id} className="flex items-start gap-3">
                   <span className="w-4 pt-0.5 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{t.name}</span>
+                    <span className="line-clamp-2 block text-sm leading-snug">{t.name}</span>
                     {t.bundledUnits > 0 && (
                       <span className="text-[11px] text-muted-foreground">{t.bundledUnits} of these units were bundled</span>
                     )}
@@ -538,7 +538,7 @@ function TopSellers({
           title="Top bundles"
           info="Bundles sold as a set. Sales made offline, or before bundle tracking landed, are counted in the Bundle deals total on Top products but are not listed by name here."
         >
-          <ul className="flex flex-col gap-2.5">
+          <ul className="flex flex-col gap-3">
             {bundleRows.map((b, i) => (
               <li key={b.bundle_id} className="flex items-center gap-3">
                 <span className="w-4 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
@@ -590,8 +590,8 @@ function Panel({
 }) {
   return (
     <Card className={cn('h-full', className)}>
-      <CardContent className="flex h-full flex-col py-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+      <CardContent className="flex h-full flex-col py-5 lg:px-6 lg:py-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
           <h3 className="flex items-center gap-1 text-sm font-semibold">
             {title}
             {info && <InfoTip text={info} />}

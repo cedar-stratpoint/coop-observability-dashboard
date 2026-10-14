@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — Offline Sales overview: more breathing room
+- Wider spacing on `/offline-sales` after the full-width layout felt cramped: grid gaps 16 → 20px (24px from laptop up), a bigger gap under the range toolbar, roomier panel padding (24px on laptop+) and KPI cells, and a little more space between list rows.
+- Top products names wrap to two lines instead of truncating, since the three-across row made columns narrower.
+
 ## 2026-10-14 — Offline Sales overview: full width, responsive grid
 - **`/offline-sales` now uses the whole screen** (dropped the `max-w-5xl` cap, like Events and Transactions) and lays out on a 12-column grid that reflows by width:
   - **Wide (xl):** one hero row with event (3), daily goal (4) and KPIs (5); Sales over time (8) beside Pet mix (4); then Top products, Top bundles and Recent orders three across; Stock beside Stock alerts.
