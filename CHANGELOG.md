@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — v1.5.0: Transactions and Offline Sales redesign (prod release)
+Minor bump (SemVer): new, backward-compatible UI features; no schema, API or env changes. It also rolls up the feature releases that reached prod since v1.4.1 without a bump (#160 event-scoped "View all products", #169 "Update leads", #176 Events redesign). Ships to `main` as one cherry-picked release; staging has had each piece since 2026-10-13/14.
+
+- **Transactions (`/offline-sales/orders`):** full width, sales grouped by day (Today / Yesterday / date), cleaner rows with icon Edit/Void, "N transactions" count and "Showing X to Y of Z" pagination (`PageInfo.total`).
+- **Transactions filters:** Method, Date, Price and Status are compact dropdown triggers (Hick's law); applied filters show as removable pills with Clear all; Date has quick ranges (Today, Yesterday, Last 7 days, Last 30 days).
+- **Offline Sales (`/offline-sales`):** full-width responsive 12-column grid (hero row of event, daily goal and KPIs; chart beside pet mix; lists three across), roomier spacing, KPIs as one segmented card, range and payment option in one toolbar.
+- **Calmer list panels:** soft toggles and tinted status chips instead of solid fills (shared `SegmentedControl`, so other toggles soften too); Top products / Top bundles show "% of revenue / units / bundle orders"; Recent orders lead with what sold; Stock health bar; Stock alert lanes; Free items won as cards with "Show all".
+- **Free items won** names the event each prize was given at (order event tag, else the event covering its date) and links to it.
+- *Prod adaptation:* prod has no multi-event, so the Transactions **Event filter and per-sale event badge are not included** (staging-only, PR a99bb4c). Everything else matches staging.
+- Copy: no en/em dashes in the touched labels ("Oct 10 to Oct 17", "₱100 to ₱500").
+
 ## 2026-10-13 — Events redesign (prod release)
 Promotes this session's Events work from staging to prod by cherry-pick (develop commits 6cca2a6, 3da0413, 1313657, cb55d27). Multi-event (same-day events) is **not** part of this release, so two pieces were adapted to prod's one-event-per-date rule.
 - **Tile grid** on `/offline-sales/events` with a **Tiles / Table** toggle (remembered per browser), full page width, and an always-visible pager ("Showing X to Y of Z", Per page 12 / 24 / 48).

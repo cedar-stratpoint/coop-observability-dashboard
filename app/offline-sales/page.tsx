@@ -13,6 +13,7 @@ import {
   filterOrdersByRange,
   isSalesRange,
   manilaDayKey,
+  resolveOrderEvents,
   stockAlerts,
   topBundles,
   topProducts,
@@ -51,6 +52,17 @@ export default async function Page(props: {searchParams: Promise<{range?: string
   const stock = forecast ? {urgent: urgentForecastRows(forecast.rows), summary: forecast.summary} : null;
   // Spotlight the event running today, else the next upcoming one (Manila day).
   const featured = featuredEvent(events, manilaDayKey(new Date().toISOString()));
+  // Which event each prize was given at: the order's POS tag, else the event
+  // covering the order's date (same read-time fill as the Events page).
+  const eventById = new Map(events.map((e) => [e.event_id, e]));
+  const prizeEvents = resolveOrderEvents(
+    prizeData.prizes.map((p) => ({event_id: p.event_id, created_at: p.order_at ?? p.won_at})),
+    events,
+  );
+  const prizes = prizeData.prizes.map((p, i) => {
+    const ev = eventById.get(prizeEvents[i].event_id ?? '');
+    return {...p, event: ev ? {id: ev.event_id, name: ev.name || ev.venue || 'Untitled event'} : null};
+  });
 
   return (
     <>
@@ -69,8 +81,8 @@ export default async function Page(props: {searchParams: Promise<{range?: string
         usingMock={usingPosMock()}
         fetchedAt={new Date().toISOString()}
       />
-      <div className="mx-auto max-w-6xl px-6 pb-12 md:px-10 max-md:px-4">
-        <PrizePanel prizes={prizeData.prizes} recentOrders={prizeData.recentOrders} products={prizeData.products} />
+      <div className="w-full px-6 pt-2 pb-12 md:px-10 max-md:px-4">
+        <PrizePanel prizes={prizes} recentOrders={prizeData.recentOrders} products={prizeData.products} />
       </div>
     </>
   );

@@ -797,6 +797,7 @@ export interface PageInfo {
   totalPages: number;
   from: number; // 0-based inclusive start index (for a range query)
   to: number; // 0-based inclusive end index
+  total: number; // rows matching the filter, across all pages
 }
 
 /** Pure page math: clamp `page` into [1, totalPages] and derive range indices. */
@@ -806,7 +807,7 @@ export function paginate(total: number, page: number, pageSize = ORDERS_PAGE_SIZ
   const clamped = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
   const from = (clamped - 1) * size;
   const to = from + size - 1;
-  return {page: clamped, pageSize: size, totalPages, from, to};
+  return {page: clamped, pageSize: size, totalPages, from, to, total: Math.max(0, total)};
 }
 
 /** Parse a `?page=` param into a positive integer, defaulting to 1. */
