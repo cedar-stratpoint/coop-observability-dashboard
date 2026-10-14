@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
+- Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
+- Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".
+## 2026-10-14 — Free items won: show which event each prize was given at
+- Each prize card on `/offline-sales` now names its **event**, linking to that event's page; prizes with no event read "No event".
+  - *How:* the prize's order event tag (`pos_orders.event_id`), else the event covering the order's date, the same read-time fill the Events page uses (`resolveOrderEvents`). Read-only, no schema change.
+
 ## 2026-10-14 — Offline Sales lists: calmer, easier to scan
 - **Less glare.** Shared toggles (`SegmentedControl`, e.g. Revenue/Units, Top/Bottom; used across the analytics pages) and the range tabs now mark the active option with a soft muted fill instead of solid bright green. Status colors are soft tinted chips instead of colored text and uppercase headings.
 - **Top products / Top bundles:** each row leads with one number (the selected measure) and puts the other on a secondary line ("46 units · 11 in bundles"). A thin bar under each row shows its size relative to #1, so the gaps read at a glance. Bundle deals became a small summary box ("Items ₱35,242 + bundles ₱18,617 = ₱53,859 total revenue").
