@@ -14,14 +14,24 @@ const shortDay = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateStrin
 // Per-day revenue stacked by payment method. When a method is selected its
 // segments keep full color and the rest go grey (still visible). Hovering a bar
 // shows each payment option's amount for that day.
-export function MethodStackChart({data, methods, selected}: {data: DayMethodRevenue[]; methods: string[]; selected: string}) {
+export function MethodStackChart({
+  data,
+  methods,
+  selected,
+  className = 'h-[220px]',
+}: {
+  data: DayMethodRevenue[];
+  methods: string[];
+  selected: string;
+  className?: string; // chart height; the overview grows it on wide screens
+}) {
   const config = Object.fromEntries(methods.map((m) => [m, {label: paymentMethodLabel(m), color: paymentMethodColor(m)}])) as ChartConfig;
   const rows = data.map((d) => ({label: shortDay(d.day), ...Object.fromEntries(methods.map((m) => [m, d.byMethod[m] ?? 0]))}));
   const topMethod = methods[methods.length - 1];
 
   return (
     <div className="flex flex-col gap-2">
-      <ChartContainer config={config} className="h-[220px] w-full">
+      <ChartContainer config={config} className={cn(className, 'w-full')}>
         <BarChart data={rows} margin={{left: 4, right: 8, top: 8, bottom: 0}}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} />

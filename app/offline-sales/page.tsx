@@ -69,7 +69,7 @@ export default async function Page(props: {searchParams: Promise<{range?: string
         usingMock={usingPosMock()}
         fetchedAt={new Date().toISOString()}
       />
-      <div className="mx-auto max-w-6xl px-6 pb-12 md:px-10 max-md:px-4">
+      <div className="w-full px-6 pb-12 md:px-10 max-md:px-4">
         <PrizePanel prizes={prizeData.prizes} recentOrders={prizeData.recentOrders} products={prizeData.products} />
       </div>
     </>
