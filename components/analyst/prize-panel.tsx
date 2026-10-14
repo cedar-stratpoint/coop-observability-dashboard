@@ -8,19 +8,22 @@
 import {useEffect, useId, useState, useTransition} from 'react';
 import {createPortal} from 'react-dom';
 import {useRouter} from 'next/navigation';
-import {Gift, Undo2, X} from 'lucide-react';
+import {ChevronDown, Gift, Plus, Undo2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {addPrizeAction, voidPrizeAction} from '@/src/pos-prize-actions';
 import {SearchableSelect} from './searchable-select';
 import type {PrizeRow, RecentOrder, PrizeProduct} from '@/src/pos-prize-data';
 
 const DELTAS = [1, 2, 5];
+// Prizes shown before "Show all"; two full rows of the 3-across grid.
+const PREVIEW = 6;
 
 export function PrizePanel({prizes, recentOrders, products}: {prizes: PrizeRow[]; recentOrders: RecentOrder[]; products: PrizeProduct[]}) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [pendingVoid, startVoid] = useTransition();
   const [voidId, setVoidId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const active = prizes.filter((p) => !p.voided_at);
 
   function undo(clientUuid: string | null) {
@@ -33,58 +36,104 @@ export function PrizePanel({prizes, recentOrders, products}: {prizes: PrizeRow[]
     });
   }
 
+  const shown = showAll ? active : active.slice(0, PREVIEW);
+
   return (
-    <section className="rounded-2xl border bg-card p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <Gift className="size-3.5" /> Free items won
+    <section className="rounded-xl border bg-card p-5 lg:p-6" aria-labelledby="prizes-title">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground" aria-hidden>
+            <Gift className="size-4" />
+          </span>
+          <div>
+            <h3 id="prizes-title" className="text-sm font-semibold">
+              Free items won
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Spin-the-wheel prizes given with a sale · {active.length} logged
+            </p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Spin-a-wheel prizes given with a sale. {active.length} logged.
-          </p>
         </div>
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-background px-3 text-xs font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-muted active:scale-[0.97]"
         >
-          <Gift className="size-3.5" /> Add prize
+          <Plus className="size-3.5" /> Add prize
         </button>
       </div>
 
       {active.length === 0 ? (
         <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-          No free items logged yet. Use Add prize to record a spin-a-wheel win on a past order.
+          No free items logged yet. Use Add prize to record a spin-the-wheel win on a past order.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y">
-          {active.map((p) => (
-            <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-              <div className="min-w-0">
-                <div className="truncate text-sm">
-                  <span className="font-medium">{p.customer_handle?.trim() || 'Walk-in'}</span>
-                  <span className="text-muted-foreground"> won </span>
-                  <span className="font-medium">{p.qty}× {p.product_name}</span>
-                  {p.oversold && <span className="ml-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-amber-600 dark:text-amber-400">low stock</span>}
-                </div>
-                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                  {new Date(p.won_at).toLocaleDateString('en-PH', {month: 'short', day: 'numeric'})}
-                  {p.note ? ` · ${p.note}` : ''}
-                </div>
-              </div>
+        <>
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {shown.map((p) => {
+              const undoing = pendingVoid && voidId === p.client_uuid;
+              const who = p.customer_handle?.trim() || 'Walk-in';
+              const when = new Date(p.won_at).toLocaleDateString('en-PH', {month: 'short', day: 'numeric'});
+              return (
+                <li
+                  key={p.id}
+                  className={cn('flex items-center gap-3 rounded-lg border bg-muted/20 px-3.5 py-3 transition-opacity', undoing && 'opacity-50')}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium" title={p.product_name}>
+                        {p.product_name}
+                      </span>
+                      {p.qty > 1 && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">×{p.qty}</span>}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+                      <span className="truncate">{who}</span>
+                      <span aria-hidden>·</span>
+                      {when}
+                      {p.note && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="truncate">{p.note}</span>
+                        </>
+                      )}
+                      {p.oversold && (
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          style={{color: 'var(--status-warn)', backgroundColor: 'color-mix(in oklab, var(--status-warn) 14%, transparent)'}}
+                        >
+                          Low stock
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => undo(p.client_uuid)}
+                    disabled={!p.client_uuid || undoing}
+                    aria-label={`Undo prize: ${p.product_name} for ${who}`}
+                    title={p.client_uuid ? 'Undo this prize (restores stock)' : 'Cannot undo (no reference)'}
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-40"
+                  >
+                    <Undo2 className="size-4" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {active.length > PREVIEW && (
+            <div className="mt-4 text-center">
               <button
                 type="button"
-                onClick={() => undo(p.client_uuid)}
-                disabled={!p.client_uuid || (pendingVoid && voidId === p.client_uuid)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                title={p.client_uuid ? 'Undo this prize (restores stock)' : 'Cannot undo (no reference)'}
+                onClick={() => setShowAll((v) => !v)}
+                aria-expanded={showAll}
+                className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
-                <Undo2 className="size-3" /> {pendingVoid && voidId === p.client_uuid ? 'Undoing…' : 'Undo'}
+                {showAll ? 'Show fewer' : `Show all ${active.length}`}
+                <ChevronDown className={cn('size-3.5 transition-transform duration-200 ease-out', showAll && 'rotate-180')} />
               </button>
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        </>
       )}
 
       {adding && <AddPrizeModal recentOrders={recentOrders} products={products} onClose={() => setAdding(false)} />}
