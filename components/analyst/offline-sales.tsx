@@ -15,7 +15,7 @@ import {Card, CardContent} from '@/components/ui/card';
 import {Badge} from '@/components/ui/badge';
 import {cn} from '@/lib/utils';
 import {Eyebrow, MockNote} from './sections';
-import {Metric} from './metric';
+import {metricValueClass} from './metric';
 import {SegmentedControl} from './segmented-control';
 import {RefreshControl} from './refresh-control';
 import {DailyTargetBar} from './daily-target-bar';
@@ -63,20 +63,22 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
   const shownKpis = useMemo(() => (method === 'all' ? kpis : computeKpis(shownOrders)), [method, kpis, shownOrders]);
   const mix = useMemo(() => petMix(shownOrders), [shownOrders]);
 
+  const hasBundles = topBundles.length > 0;
+
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 md:px-10 max-md:px-4 max-md:py-6">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Eyebrow icon={Receipt}>Offline Sales</Eyebrow>
           <p className="text-sm text-muted-foreground">Bazaar sales synced from the POS.</p>
-          <div className="mt-2.5">
-            <PaymentMethodSelect value={method} options={methodOptions} onChange={setMethod} />
-          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <RefreshControl fetchedAt={fetchedAt} />
-          <RangeTabs active={range} />
-        </div>
+        <RefreshControl fetchedAt={fetchedAt} />
+      </div>
+
+      {/* One toolbar for everything that scopes the numbers below. */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <RangeTabs active={range} />
+        <PaymentMethodSelect value={method} options={methodOptions} onChange={setMethod} />
       </div>
 
       {usingMock && (
@@ -88,48 +90,45 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
         </div>
       )}
 
-      {/* Event (left) + daily goal (right); the event card stretches to match. */}
-      {progress ? (
-        <div className="mb-6 grid gap-4 md:grid-cols-2">
-          <EventStatusCard featured={featured} />
-          <DailyTargetBar progress={progress} variant="full" />
-        </div>
-      ) : (
-        <div className="mb-6">
+      {/* Hero: event + daily goal + KPIs. One row on wide screens (3 / 4 / 5 of
+          12), event + goal side by side with KPIs under them on laptops, stacked
+          on phones. */}
+      <div className="mb-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
+        <div className={cn(progress ? 'xl:col-span-3' : 'lg:col-span-2 xl:col-span-7')}>
           <EventStatusCard featured={featured} />
         </div>
-      )}
-
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi label="Revenue" value={formatPeso(shownKpis.revenue)} />
-        <Kpi label="Orders" value={String(shownKpis.orders)} />
-        <Kpi label="Units" value={String(shownKpis.units)} />
-        <Kpi label="Oversells" value={String(shownKpis.oversells)} warn={shownKpis.oversells > 0} />
+        {progress && (
+          <div className="xl:col-span-4">
+            <DailyTargetBar progress={progress} variant="full" />
+          </div>
+        )}
+        <div className="lg:col-span-2 xl:col-span-5">
+          <KpiStrip kpis={shownKpis} />
+        </div>
       </div>
 
-      <div className="mb-6">
-        <PetMixCard mix={mix} />
-      </div>
-
-      <div className="grid gap-5 md:grid-cols-2 md:items-start">
-        <Panel title="Sales over time">
+      {/* Trend gets the width; pet mix sits beside it on wide screens. */}
+      <div className="mb-4 grid gap-4 xl:grid-cols-12">
+        <Panel title="Sales over time" className="xl:col-span-8">
           {stackData.length === 0 ? (
             <Empty>No sales in this range.</Empty>
           ) : (
-            <MethodStackChart data={stackData} methods={methods} selected={method} />
+            <MethodStackChart data={stackData} methods={methods} selected={method} className="h-[220px] xl:h-[260px]" />
           )}
         </Panel>
-
-        <TopSellersColumn byRevenue={productsByRevenue} byUnits={productsByUnits} bundles={bundles} topBundles={topBundles} />
+        <PetMixCard mix={mix} className="xl:col-span-4" />
       </div>
 
-      <div className="mt-5 grid gap-5 md:grid-cols-2 md:items-start">
+      {/* Lists: 3 across on wide screens, 2 on tablets, 1 on phones. */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <TopSellers byRevenue={productsByRevenue} byUnits={productsByUnits} bundles={bundles} topBundles={topBundles} />
+
         <Panel title="Recent orders" action={{label: 'View all', href: '/offline-sales/orders'}}>
           {orders.length === 0 ? (
             <Empty>No orders yet.</Empty>
           ) : (
             <ul className="flex flex-col divide-y">
-              {orders.slice(0, 5).map((o) => (
+              {orders.slice(0, 6).map((o) => (
                 <li key={o.id}>
                   <Link
                     href="/offline-sales/orders"
@@ -158,11 +157,30 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
         </Panel>
 
         <StockSnapshot stock={stock} />
+        <StockAlertsCard alerts={alerts} className={cn('md:col-span-2', !hasBundles && 'xl:col-span-3')} />
       </div>
+    </div>
+  );
+}
 
-      <div className="mt-5">
-        <StockAlertsCard alerts={alerts} />
-      </div>
+/** The four headline numbers as one segmented card (hairline dividers) rather
+ *  than four separate boxes: less chrome, reads as a single summary. 2x2 on
+ *  phones and in the wide hero slot, 4 across on laptops. */
+function KpiStrip({kpis}: {kpis: SalesKpis}) {
+  const cells: {label: string; value: string; warn?: boolean}[] = [
+    {label: 'Revenue', value: formatPeso(kpis.revenue)},
+    {label: 'Orders', value: String(kpis.orders)},
+    {label: 'Units', value: String(kpis.units)},
+    {label: 'Oversells', value: String(kpis.oversells), warn: kpis.oversells > 0},
+  ];
+  return (
+    <div className="grid h-full grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4 xl:grid-cols-2">
+      {cells.map((c) => (
+        <div key={c.label} className="flex min-w-0 flex-col justify-center gap-1.5 bg-card px-5 py-4">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{c.label}</span>
+          <span className={cn(metricValueClass, 'truncate text-2xl xl:text-[1.75rem]', c.warn && 'text-destructive')}>{c.value}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -181,7 +199,7 @@ function StockSnapshot({stock}: {stock: {urgent: ForecastRow[]; summary: Forecas
       {!stock || stock.summary.total === 0 ? (
         <Empty>No stock data yet.</Empty>
       ) : stock.urgent.length === 0 ? (
-        <Empty>All good — nothing low or out.</Empty>
+        <Empty>All good. Nothing low or out.</Empty>
       ) : (
         <ul className="flex flex-col gap-2.5">
           {stock.urgent.map((r) => {
@@ -207,14 +225,14 @@ function StockSnapshot({stock}: {stock: {urgent: ForecastRow[]; summary: Forecas
   );
 }
 
-function StockAlertsCard({alerts}: {alerts: StockAlerts}) {
+function StockAlertsCard({alerts, className}: {alerts: StockAlerts; className?: string}) {
   const nothing = alerts.out.length === 0 && alerts.low.length === 0 && alerts.nearExpiry.length === 0;
   return (
-    <Panel title="Stock alerts">
+    <Panel title="Stock alerts" className={className}>
       {nothing ? (
         <Empty>All good. Nothing low, out, or near expiry.</Empty>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3">
           <AlertColumn
             icon={<PackageX className="size-3.5" />}
             title="Out of stock"
@@ -293,16 +311,12 @@ function RangeTabs({active}: {active: SalesRange}) {
   );
 }
 
-function Kpi({label, value, warn}: {label: string; value: string; warn?: boolean}) {
-  return <Metric label={label} value={value} valueClassName={warn ? 'text-destructive' : undefined} />;
-}
-
-/** A compact event date range: "Sep 16", "Sep 16 – 18", "Sep 30 – Oct 1". */
+/** A compact event date range: "Sep 16", "Sep 16 to Sep 18", "Sep 30 to Oct 1". */
 function eventDatesShort(startsOn: string | null, endsOn: string | null): string {
   if (!startsOn && !endsOn) return 'No dates set';
   if (!startsOn) return shortDay(endsOn as string);
   if (!endsOn || endsOn === startsOn) return shortDay(startsOn);
-  return `${shortDay(startsOn)} – ${shortDay(endsOn)}`;
+  return `${shortDay(startsOn)} to ${shortDay(endsOn)}`;
 }
 
 /** The event spotlight banner: the bazaar running today ("Happening now"), else
@@ -366,13 +380,14 @@ const PET_SEGMENTS: {key: keyof PetMix; label: string; color: string}[] = [
 /** Revenue + order split by tagged pet: a 4-segment bar over a per-segment
  *  legend. Widths are revenue-proportional; the legend always lists all four so
  *  a zero segment still reads. Empty (no orders) shows a friendly note. */
-function PetMixCard({mix}: {mix: PetMix}) {
+function PetMixCard({mix, className}: {mix: PetMix; className?: string}) {
   const totalRevenue = PET_SEGMENTS.reduce((s, seg) => s + mix[seg.key].revenue, 0);
   const totalOrders = PET_SEGMENTS.reduce((s, seg) => s + mix[seg.key].orders, 0);
 
   return (
     <Panel
       title="Pet mix"
+      className={className}
       info="Sales split by the pet each order was tagged for at the POS. Untagged sales were recorded without a pet type. Honors the range and payment-option filters above."
     >
       {totalOrders === 0 ? (
@@ -386,20 +401,24 @@ function PetMixCard({mix}: {mix: PetMix}) {
               return <div key={seg.key} style={{width: `${pct}%`, backgroundColor: seg.color}} />;
             })}
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+          {/* A 2/4-up legend grid; on wide screens (beside the chart) it becomes a
+              row-per-pet list so the card fills the chart's height. */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4 xl:mt-1 xl:grid-cols-1 xl:gap-y-0 xl:divide-y">
             {PET_SEGMENTS.map((seg) => {
               const s = mix[seg.key];
               const pct = totalRevenue > 0 ? Math.round((s.revenue / totalRevenue) * 100) : 0;
               return (
-                <div key={seg.key} className="flex flex-col gap-0.5">
+                <div key={seg.key} className="flex flex-col gap-0.5 xl:flex-row xl:items-center xl:justify-between xl:gap-3 xl:py-3">
                   <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     <span className="size-2 rounded-[3px]" style={{backgroundColor: seg.color}} aria-hidden />
                     {seg.label}
                     {totalRevenue > 0 && <span className="tabular-nums text-muted-foreground/60">{pct}%</span>}
                   </span>
-                  <span className="text-sm font-medium tabular-nums">{formatPeso(s.revenue)}</span>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {s.orders} {s.orders === 1 ? 'order' : 'orders'}
+                  <span className="flex flex-col gap-0.5 xl:items-end">
+                    <span className="text-sm font-medium tabular-nums">{formatPeso(s.revenue)}</span>
+                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                      {s.orders} {s.orders === 1 ? 'order' : 'orders'}
+                    </span>
                   </span>
                 </div>
               );
@@ -421,11 +440,11 @@ const DIRECTION_OPTIONS = [
 ] as const;
 const SELLERS_LIMIT = 5;
 
-/** Right column of the overview: the product list stacked over Top bundles.
+/** Top products + Top bundles, rendered as two sibling grid cells.
  *  A Revenue/Units toggle picks the metric; a Top/Bottom toggle flips between the
  *  best sellers and the lowest ("kulelat"). In Units mode bundles rank by orders
  *  (their unit analog: one order == one bundle sold). */
-function TopSellersColumn({
+function TopSellers({
   byRevenue,
   byUnits,
   bundles,
@@ -461,7 +480,7 @@ function TopSellersColumn({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <>
       <Panel
         title={isTop ? 'Top products' : 'Lowest products'}
         info="Money shown is itemized sales only. Bundle deals are priced as a set, so their value is listed once under Bundle deals, not split per item."
@@ -536,7 +555,7 @@ function TopSellersColumn({
           <ViewAllFooter href="/offline-sales/rankings?tab=bundles" label="View all bundles" />
         </Panel>
       )}
-    </div>
+    </>
   );
 }
 
@@ -544,18 +563,34 @@ function TopSellersColumn({
  *  bundles lists to reach the full paginated rankings page. */
 function ViewAllFooter({href, label}: {href: string; label: string}) {
   return (
-    <div className="mt-3 border-t pt-3 text-right">
-      <Link href={href} className="text-xs font-medium text-primary hover:underline">
-        {label} →
-      </Link>
+    <div className="mt-auto pt-3">
+      <div className="border-t pt-3 text-right">
+        <Link href={href} className="text-xs font-medium text-primary hover:underline">
+          {label} →
+        </Link>
+      </div>
     </div>
   );
 }
 
-function Panel({title, info, action, control, children}: {title: string; info?: string; action?: {label: string; href: string}; control?: React.ReactNode; children: React.ReactNode}) {
+function Panel({
+  title,
+  info,
+  action,
+  control,
+  className,
+  children,
+}: {
+  title: string;
+  info?: string;
+  action?: {label: string; href: string};
+  control?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Card>
-      <CardContent className="py-4">
+    <Card className={cn('h-full', className)}>
+      <CardContent className="flex h-full flex-col py-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
           <h3 className="flex items-center gap-1 text-sm font-semibold">
             {title}
