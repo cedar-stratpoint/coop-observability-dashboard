@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — Offline Sales overview: full width, responsive grid
+- **`/offline-sales` now uses the whole screen** (dropped the `max-w-5xl` cap, like Events and Transactions) and lays out on a 12-column grid that reflows by width:
+  - **Wide (xl):** one hero row with event (3), daily goal (4) and KPIs (5); Sales over time (8) beside Pet mix (4); then Top products, Top bundles and Recent orders three across; Stock beside Stock alerts.
+  - **Laptop (lg):** event + goal side by side, KPIs 4 across under them; chart and pet mix full width.
+  - **Tablet (md):** lists two across. **Phone:** single column.
+- **KPIs are one segmented card** (hairline dividers) instead of four boxes: less chrome, reads as one summary.
+- **Range and payment option share one toolbar** under the title, since both scope every number below; Refresh sits top right.
+- Panels in a row stretch to equal height with their "View all" footers pinned to the bottom. On wide screens the Pet mix legend turns into a row-per-pet list so it fills the space beside the chart, and the chart grows to 260px.
+- The spin-the-wheel prizes panel follows the same full width.
+- Copy: event dates read "Oct 10 to Oct 17" (was an en dash) and the Stock empty state drops its em dash.
+
 ## 2026-10-13 — Motion polish: dialogs animate in and out, reduced motion app-wide
 Coop half of a POS + Coop motion audit (`design-motion-principles` skill, Emil primary / Jakub secondary). The user picked which findings to fix.
 - **Seven hand-rolled dialogs now share `ModalShell`** (`components/analyst/modal-shell.tsx`): Add stock, Move stock, New product, Bundle, Undo free taste, Edit (price/target) and Edit stock. They used to snap in and out in one frame. Now the backdrop fades over 150ms and the panel fades + scales from 0.96 over 180ms (ease-out-quint), and closing fades both over 120ms with no scale (exits are subtler than enters).
