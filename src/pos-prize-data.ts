@@ -22,6 +22,7 @@ export interface PrizeRow {
   order_client_uuid: string | null;
   customer_handle: string | null;
   order_at: string | null;
+  event_id: string | null; // the order's POS event tag (null = untagged; the page resolves by date)
 }
 
 export interface RecentOrder {
@@ -124,7 +125,7 @@ export const getPrizeData = cache(async (): Promise<PrizeData> => {
   const [prizeRes, ordersRes, products, locations] = await Promise.all([
     supabase
       .from('pos_order_prizes')
-      .select('id,client_uuid,product_id,qty,oversold,note,won_at,voided_at,pos_orders(client_uuid,customer_handle,created_at)')
+      .select('id,client_uuid,product_id,qty,oversold,note,won_at,voided_at,pos_orders(client_uuid,customer_handle,created_at,event_id)')
       .order('won_at', {ascending: false})
       .limit(200),
     supabase
@@ -144,7 +145,7 @@ export const getPrizeData = cache(async (): Promise<PrizeData> => {
   const eventById = new Map(locations.map((l) => [l.product_id, l.event]));
 
   const prizes: PrizeRow[] = (prizeRes.data ?? []).map((r) => {
-    const ord = pickOne(r.pos_orders) as {client_uuid: string | null; customer_handle: string | null; created_at: string | null} | null;
+    const ord = pickOne(r.pos_orders) as {client_uuid: string | null; customer_handle: string | null; created_at: string | null; event_id: string | null} | null;
     return {
       id: r.id as string,
       client_uuid: (r.client_uuid as string | null) ?? null,
@@ -158,6 +159,7 @@ export const getPrizeData = cache(async (): Promise<PrizeData> => {
       order_client_uuid: ord?.client_uuid ?? null,
       customer_handle: ord?.customer_handle ?? null,
       order_at: ord?.created_at ?? null,
+      event_id: ord?.event_id ?? null,
     };
   });
 
