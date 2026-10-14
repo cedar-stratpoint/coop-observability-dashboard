@@ -141,7 +141,7 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
           <RecentOrdersPanel orders={orders} />
         </div>
         <div className="contents xl:flex xl:flex-col xl:gap-6">
-          {hasBundles && <TopBundlesPanel topBundles={topBundles} metric={metric} className="xl:h-auto" />}
+          {hasBundles && <TopBundlesPanel topBundles={topBundles} metric={metric} totalRevenue={bundles.totalRevenue} className="xl:h-auto" />}
           <StockSnapshot stock={stock} className="xl:h-auto xl:flex-1" />
         </div>
         <StockAlertsCard alerts={alerts} className="md:col-span-2 xl:col-span-3" />
@@ -543,24 +543,29 @@ const DIRECTION_OPTIONS = [
 ] as const;
 const SELLERS_LIMIT = 5;
 
-/** One ranked row: rank, name, a secondary line, the headline value, and a thin
- *  bar showing the value relative to the #1 seller, so the gap between items is
- *  visible without reading every number. */
-function RankRow({rank, name, sub, value, share}: {rank: number; name: string; sub?: string; value: string; share: number}) {
+/** "17%", or "<1%" for a sliver that would otherwise round to zero. */
+function pctLabel(part: number, whole: number): string {
+  if (whole <= 0 || part <= 0) return '0%';
+  const pct = (part / whole) * 100;
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`;
+}
+
+/** One ranked row: rank and name on the left, the headline value on the right,
+ *  and under it a plain-language share ("17% of revenue") so each row explains
+ *  itself without a legend. */
+function RankRow({rank, name, sub, value, share}: {rank: number; name: string; sub?: string; value: string; share: string}) {
   return (
-    <li className="flex gap-3">
+    <li className="flex items-start gap-3">
       <span className="w-4 shrink-0 pt-px text-right text-xs tabular-nums text-muted-foreground">{rank}</span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="min-w-0 truncate text-sm font-medium" title={name}>
-            {name}
-          </span>
-          <span className="shrink-0 text-sm font-semibold tabular-nums">{value}</span>
+        <div className="truncate text-sm font-medium" title={name}>
+          {name}
         </div>
         {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
-        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-primary/45" style={{width: `${Math.max(2, Math.min(100, share))}%`}} />
-        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{value}</div>
+        <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">{share}</div>
       </div>
     </li>
   );
@@ -593,7 +598,10 @@ function TopProductsPanel({
   const ranked = metric === 'revenue' ? byRevenue : byUnits;
   const rows = isTop ? ranked.slice(0, SELLERS_LIMIT) : ranked.slice(-SELLERS_LIMIT).reverse();
   const measure = (t: TopProduct) => (metric === 'revenue' ? t.revenue : t.units);
-  const best = ranked.length > 0 ? measure(ranked[0]) : 0;
+  // Shares are of the whole: total revenue (the Revenue KPI, bundles included)
+  // or every unit sold, so they match the numbers at the top of the page.
+  const whole = metric === 'revenue' ? bundles.totalRevenue : byUnits.reduce((n, t) => n + t.units, 0);
+  const of = metric === 'revenue' ? 'of revenue' : 'of units';
   // The bundle reconciliation is a whole-of-total statement, so it only belongs
   // with the best-sellers view, not the lowest.
   const showBundleReconcile = isTop && bundles.bundleRevenue > 0;
@@ -613,7 +621,7 @@ function TopProductsPanel({
         <Empty>No sales in this range.</Empty>
       ) : (
         <div className="flex flex-col gap-4">
-          <ul className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-3.5">
             {rows.map((t, i) => {
               const other = metric === 'revenue' ? plural(t.units, 'unit', 'units') : formatPeso(t.revenue);
               return (
@@ -623,7 +631,7 @@ function TopProductsPanel({
                   name={t.name}
                   value={metric === 'revenue' ? formatPeso(t.revenue) : plural(t.units, 'unit', 'units')}
                   sub={t.bundledUnits > 0 ? `${other} · ${t.bundledUnits} in bundles` : other}
-                  share={best > 0 ? (measure(t) / best) * 100 : 0}
+                  share={`${pctLabel(measure(t), whole)} ${of}`}
                 />
               );
             })}
@@ -653,17 +661,28 @@ function TopProductsPanel({
 
 /** Bundles sold as a set, ranked by revenue (or by orders in Units mode: one
  *  order is one bundle sold). */
-function TopBundlesPanel({topBundles, metric, className}: {topBundles: TopBundle[]; metric: 'revenue' | 'units'; className?: string}) {
+function TopBundlesPanel({
+  topBundles,
+  metric,
+  totalRevenue,
+  className,
+}: {
+  topBundles: TopBundle[];
+  metric: 'revenue' | 'units';
+  totalRevenue: number; // the Revenue KPI, so shares match the top of the page
+  className?: string;
+}) {
   const rows = metric === 'revenue' ? topBundles : [...topBundles].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
   const measure = (b: TopBundle) => (metric === 'revenue' ? b.revenue : b.orders);
-  const best = rows.length > 0 ? measure(rows[0]) : 0;
+  const whole = metric === 'revenue' ? totalRevenue : topBundles.reduce((n, b) => n + b.orders, 0);
+  const of = metric === 'revenue' ? 'of revenue' : 'of bundle orders';
   return (
     <Panel
       title="Top bundles"
       info="Bundles sold as a set. Sales made offline, or before bundle tracking landed, are counted in the Bundle deals total on Top products but are not listed by name here."
       className={className}
     >
-      <ul className="flex flex-col gap-4">
+      <ul className="flex flex-col gap-3.5">
         {rows.map((b, i) => (
           <RankRow
             key={b.bundle_id}
@@ -671,7 +690,7 @@ function TopBundlesPanel({topBundles, metric, className}: {topBundles: TopBundle
             name={b.name}
             value={metric === 'revenue' ? formatPeso(b.revenue) : plural(b.orders, 'order', 'orders')}
             sub={metric === 'revenue' ? plural(b.orders, 'order', 'orders') : formatPeso(b.revenue)}
-            share={best > 0 ? (measure(b) / best) * 100 : 0}
+            share={`${pctLabel(measure(b), whole)} ${of}`}
           />
         ))}
       </ul>
