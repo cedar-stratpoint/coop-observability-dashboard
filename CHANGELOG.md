@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — Offline Sales lists: calmer, easier to scan
+- **Less glare.** Shared toggles (`SegmentedControl`, e.g. Revenue/Units, Top/Bottom; used across the analytics pages) and the range tabs now mark the active option with a soft muted fill instead of solid bright green. Status colors are soft tinted chips instead of colored text and uppercase headings.
+- **Top products / Top bundles:** each row leads with one number (the selected measure) and puts the other on a secondary line ("46 units · 11 in bundles"). A thin bar under each row shows its size relative to #1, so the gaps read at a glance. Bundle deals became a small summary box ("Items ₱35,242 + bundles ₱18,617 = ₱53,859 total revenue").
+- **Recent orders:** rows lead with what sold ("Meaty Treats Chicken ×4 +2 more"), then time and payment method, with a dot in the method's chart color. Voided and oversold show as chips.
+- **Stock:** status chips ("Out", "3 left"), and the old monospace "10 healthy · 18 low · 2 out" line is now a small health bar with a color legend.
+- **Stock alerts:** three soft lanes (Out of stock, Running low, Near expiry) with sentence-case titles and count chips; an empty lane says "All clear" with a check instead of "None".
+- **Layout:** on wide screens the lists sit in three content-sized columns (products | recent orders | bundles over stock) so short lists no longer leave big holes; stock alerts span the full width below.
+- **Free items won:** a compact 3-across card grid (product first, then who and when) with an icon-only Undo, showing 6 with a "Show all" toggle. Add prize became a quieter outline button.
+
 ## 2026-10-14 — Offline Sales overview: more breathing room
 - Wider spacing on `/offline-sales` after the full-width layout felt cramped: grid gaps 16 → 20px (24px from laptop up), a bigger gap under the range toolbar, roomier panel padding (24px on laptop+) and KPI cells, and a little more space between list rows.
 - Top products names wrap to two lines instead of truncating, since the three-across row made columns narrower.

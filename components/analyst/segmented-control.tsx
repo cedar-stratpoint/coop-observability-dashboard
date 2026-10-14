@@ -28,7 +28,7 @@ export function SegmentedControl<T extends string>({
           aria-pressed={value === opt.value}
           className={cn(
             'rounded-[5px] px-2.5 py-1 font-medium transition-colors duration-150 ease-out active:scale-[0.97]',
-            value === opt.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            value === opt.value ? 'bg-muted text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {opt.label}
