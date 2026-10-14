@@ -8,7 +8,8 @@
 import {useEffect, useId, useState, useTransition} from 'react';
 import {createPortal} from 'react-dom';
 import {useRouter} from 'next/navigation';
-import {ChevronDown, Gift, Plus, Undo2, X} from 'lucide-react';
+import Link from 'next/link';
+import {CalendarDays, ChevronDown, Gift, Plus, Undo2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {addPrizeAction, voidPrizeAction} from '@/src/pos-prize-actions';
 import {SearchableSelect} from './searchable-select';
@@ -18,7 +19,10 @@ const DELTAS = [1, 2, 5];
 // Prizes shown before "Show all"; two full rows of the 3-across grid.
 const PREVIEW = 6;
 
-export function PrizePanel({prizes, recentOrders, products}: {prizes: PrizeRow[]; recentOrders: RecentOrder[]; products: PrizeProduct[]}) {
+/** A prize plus the event it was given at (resolved server-side; null = none). */
+export type PrizeWithEvent = PrizeRow & {event: {id: string; name: string} | null};
+
+export function PrizePanel({prizes, recentOrders, products}: {prizes: PrizeWithEvent[]; recentOrders: RecentOrder[]; products: PrizeProduct[]}) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [pendingVoid, startVoid] = useTransition();
@@ -86,6 +90,21 @@ export function PrizePanel({prizes, recentOrders, products}: {prizes: PrizeRow[]
                       </span>
                       {p.qty > 1 && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">×{p.qty}</span>}
                     </span>
+                    {p.event ? (
+                      <Link
+                        href={`/offline-sales/events/${p.event.id}`}
+                        className="mt-1 flex w-fit max-w-full items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        title={`Given at ${p.event.name}`}
+                      >
+                        <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+                        <span className="truncate">{p.event.name}</span>
+                      </Link>
+                    ) : (
+                      <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70">
+                        <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+                        No event
+                      </span>
+                    )}
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
                       <span className="truncate">{who}</span>
                       <span aria-hidden>·</span>
