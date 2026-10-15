@@ -25,7 +25,7 @@ export interface ChatUsage {
 export interface ToolDefinition {
   name: string;
   description: string;
-  strict: true;
+  strict: boolean;
   input_schema: {
     type: 'object';
     properties: Record<string, unknown>;
