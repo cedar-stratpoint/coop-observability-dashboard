@@ -8,11 +8,11 @@
 // Inventory forecast and the Products page.
 
 import {useEffect, useId, useState, useTransition} from 'react';
-import {createPortal} from 'react-dom';
 import {Package, Plus, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {SearchableSelect} from './searchable-select';
 import {addStockAction, type StockLocation} from '@/src/pos-stock-intake-actions';
+import {ModalShell, useModalExit} from './modal-shell';
 
 export interface IntakeProduct {
   product_id: string;
@@ -45,7 +45,8 @@ export function AddStockButton({products, className}: {products: IntakeProduct[]
   );
 }
 
-function AddStockModal({products, onClose}: {products: IntakeProduct[]; onClose: () => void}) {
+function AddStockModal({products, onClose: onClosed}: {products: IntakeProduct[]; onClose: () => void}) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const titleId = useId();
   const [lines, setLines] = useState<Line[]>([{key: 1, sku: '', qty: 1}]);
   const [seq, setSeq] = useState(2);
@@ -95,94 +96,89 @@ function AddStockModal({products, onClose}: {products: IntakeProduct[]; onClose:
     });
   }
 
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-lg">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
-            <Package className="size-4" /> Add stock
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground">
-            <X className="size-4" />
-          </button>
-        </div>
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} labelledBy={titleId} panelClassName="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-lg">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
+          <Package className="size-4" /> Add stock
+        </h2>
+        <button type="button" onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground">
+          <X className="size-4" />
+        </button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <p className="mb-3 text-xs text-muted-foreground">
-            Each line picks a product and a quantity. On Update, every line is recorded as a receipt in the stock ledger.
-          </p>
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        <p className="mb-3 text-xs text-muted-foreground">
+          Each line picks a product and a quantity. On Update, every line is recorded as a receipt in the stock ledger.
+        </p>
 
-          <div className="mb-4">
-            <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Receive into</span>
-            <div className="inline-flex rounded-lg border bg-muted/40 p-1">
-              {(['office', 'event'] as const).map((loc) => (
-                <button
-                  key={loc}
-                  type="button"
-                  onClick={() => setLocation(loc)}
-                  className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                    location === loc ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {loc === 'office' ? 'Office' : 'Event'}
-                  <span className="ml-1.5 font-mono text-[9px] opacity-70">{loc === 'office' ? 'back-stock' : 'sellable'}</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              {location === 'office'
-                ? 'Lands in Office back-stock. Use Move stock to send units to Event for the POS to sell.'
-                : 'Lands directly in Event — immediately sellable at the POS.'}
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {lines.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No lines yet — click Add product to start.</p>}
-            {lines.map((line) => (
-              <LineCard
-                key={line.key}
-                line={line}
-                products={products}
-                unavailable={usedSkus(line.key)}
-                meta={line.sku ? byId.get(line.sku) : undefined}
-                onSku={(sku) => update(line.key, {sku})}
-                onQty={(qty) => update(line.key, {qty})}
-                onRemove={() => remove(line.key)}
-              />
+        <div className="mb-4">
+          <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Receive into</span>
+          <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+            {(['office', 'event'] as const).map((loc) => (
+              <button
+                key={loc}
+                type="button"
+                onClick={() => setLocation(loc)}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                  location === loc ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {loc === 'office' ? 'Office' : 'Event'}
+                <span className="ml-1.5 font-mono text-[9px] opacity-70">{loc === 'office' ? 'back-stock' : 'sellable'}</span>
+              </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={addLine}
-            className="mt-3 w-full rounded-lg border border-dashed border-primary/60 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/5"
-          >
-            + Add product
-          </button>
-          {msg && <p className={cn('mt-3 text-xs', msg.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>{msg.text}</p>}
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            {location === 'office'
+              ? 'Lands in Office back-stock. Use Move stock to send units to Event for the POS to sell.'
+              : 'Lands directly in Event — immediately sellable at the POS.'}
+          </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-5 py-3">
-          <span className="font-mono text-[11px] text-muted-foreground">🔒 recorded with your account · now</span>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={pending || validCount === 0}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {pending ? 'Updating…' : validCount > 0 ? `Update · ${validCount} item${validCount > 1 ? 's' : ''}` : 'Update'}
-            </button>
-          </div>
+        <div className="flex flex-col gap-3">
+          {lines.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No lines yet — click Add product to start.</p>}
+          {lines.map((line) => (
+            <LineCard
+              key={line.key}
+              line={line}
+              products={products}
+              unavailable={usedSkus(line.key)}
+              meta={line.sku ? byId.get(line.sku) : undefined}
+              onSku={(sku) => update(line.key, {sku})}
+              onQty={(qty) => update(line.key, {qty})}
+              onRemove={() => remove(line.key)}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={addLine}
+          className="mt-3 w-full rounded-lg border border-dashed border-primary/60 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/5"
+        >
+          + Add product
+        </button>
+        {msg && <p className={cn('mt-3 text-xs', msg.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>{msg.text}</p>}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-5 py-3">
+        <span className="font-mono text-[11px] text-muted-foreground">🔒 recorded with your account · now</span>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending || validCount === 0}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {pending ? 'Updating…' : validCount > 0 ? `Update · ${validCount} item${validCount > 1 ? 's' : ''}` : 'Update'}
+          </button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalShell>
   );
 }
 

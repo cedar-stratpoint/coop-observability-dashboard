@@ -21,6 +21,7 @@ import {TransferModal} from './transfer-stock-button';
 import {Pagination} from './pagination';
 import type {InventoryRow} from '@/src/pos-inventory-data';
 import type {ForecastStatus} from '@/src/pos-forecast-compute';
+import {ModalShell, useModalExit} from './modal-shell';
 
 type SortKey = 'category' | 'name' | 'status' | 'price' | 'thisMonth' | 'lastMonth' | 'threeMo' | 'stock' | 'office' | 'cover' | 'reorder';
 
@@ -500,9 +501,10 @@ function MenuItem({children, onClick, href, disabled, icon: Icon}: {children: Re
   return <button type="button" onClick={onClick} disabled={disabled} className={cls}>{inner}</button>;
 }
 
-function EditDialog({row, field, usingMock, onClose, onSaved}: {
+function EditDialog({row, field, usingMock, onClose: onClosed, onSaved}: {
   row: InventoryRow; field: 'name' | 'price'; usingMock: boolean; onClose: () => void; onSaved: (patch: Partial<InventoryRow>) => void;
 }) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const [value, setValue] = useState(field === 'name' ? row.name : String(row.price ?? ''));
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -523,39 +525,34 @@ function EditDialog({row, field, usingMock, onClose, onSaved}: {
       } else setError(res.error);
     });
   }
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Cancel" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative w-full max-w-sm rounded-xl border bg-popover p-5 shadow-lg">
-        <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{field === 'name' ? 'Rename product' : 'Change price'}</h2>
-          <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
-        </div>
-        <p className="mb-3 font-mono text-[11px] text-muted-foreground">{row.product_id}</p>
-        {field === 'price' ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">₱</span>
-            <input type="text" inputMode="decimal" value={value} autoFocus
-              onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ''))}
-              className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
-          </div>
-        ) : (
-          <input type="text" value={value} autoFocus onChange={(e) => setValue(e.target.value)}
-            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" />
-        )}
-        {field === 'price' && (
-          <p className="mt-2 text-[11px] text-muted-foreground">Logged to the price history. Past sales keep the price they were rung up at.</p>
-        )}
-        {usingMock && <p className="mt-2 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to save.</p>}
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={save} disabled={pending || usingMock} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Saving…' : 'Save'}</button>
-        </div>
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} backdropLabel="Cancel" panelClassName="w-full max-w-sm rounded-xl border bg-popover p-5 shadow-lg">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">{field === 'name' ? 'Rename product' : 'Change price'}</h2>
+        <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
       </div>
-    </div>,
-    document.body,
+      <p className="mb-3 font-mono text-[11px] text-muted-foreground">{row.product_id}</p>
+      {field === 'price' ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">₱</span>
+          <input type="text" inputMode="decimal" value={value} autoFocus
+            onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ''))}
+            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
+        </div>
+      ) : (
+        <input type="text" value={value} autoFocus onChange={(e) => setValue(e.target.value)}
+          className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" />
+      )}
+      {field === 'price' && (
+        <p className="mt-2 text-[11px] text-muted-foreground">Logged to the price history. Past sales keep the price they were rung up at.</p>
+      )}
+      {usingMock && <p className="mt-2 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to save.</p>}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
+        <button onClick={save} disabled={pending || usingMock} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Saving…' : 'Save'}</button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -563,9 +560,10 @@ function EditDialog({row, field, usingMock, onClose, onSaved}: {
 // (set_product_stock -> a 'recount' movement carrying the signed delta). Distinct
 // from Add stock: this overwrites that location's total. Prefilled with the current
 // count; the ledger records previous -> new.
-function EditStockDialog({row, usingMock, onClose, onDone}: {
+function EditStockDialog({row, usingMock, onClose: onClosed, onDone}: {
   row: InventoryRow; usingMock: boolean; onClose: () => void; onDone: (newQty: number, loc: 'office' | 'event') => void;
 }) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const [loc, setLoc] = useState<'office' | 'event'>('event');
   const current = loc === 'office' ? row.office : row.event;
   const [value, setValue] = useState(String(row.event));
@@ -593,46 +591,41 @@ function EditStockDialog({row, usingMock, onClose, onDone}: {
       } else setError(res.error);
     });
   }
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Cancel" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative w-full max-w-sm rounded-xl border bg-popover p-5 shadow-lg">
-        <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Edit stock</h2>
-          <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
-        </div>
-        <p className="mb-3 font-mono text-[11px] text-muted-foreground">{row.name} · {row.product_id} · {current} in {loc === 'office' ? 'Office' : 'Event'} now</p>
-        <div className="mb-3 inline-flex rounded-lg border bg-muted/40 p-1" role="group" aria-label="Location">
-          {(['event', 'office'] as const).map((l) => (
-            <button key={l} type="button" onClick={() => {setLoc(l); setValue(String(l === 'office' ? row.office : row.event));}}
-              className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', loc === l ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
-              {l === 'office' ? 'Office' : 'Event'}<span className="ml-1.5 font-mono text-[9px] opacity-70">{l === 'office' ? row.office : row.event}</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Set to</span>
-          <input type="text" inputMode="numeric" value={value} autoFocus
-            onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))}
-            onKeyDown={(e) => {if (e.key === 'Enter') save();}}
-            className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
-          <span className="text-xs text-muted-foreground">units</span>
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          {valid && diff !== 0
-            ? `Changes ${current} → ${parsed} (${diff > 0 ? '+' : ''}${diff}). Logged to the stock history with the previous and new amounts.`
-            : `Overwrites the ${loc === 'office' ? 'Office' : 'Event'} count. Logged to the stock history with the previous and new amounts.`}
-        </p>
-        {usingMock && <p className="mt-2 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to edit stock.</p>}
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={save} disabled={pending || usingMock || !valid || diff === 0} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Saving…' : 'Save stock'}</button>
-        </div>
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} backdropLabel="Cancel" panelClassName="w-full max-w-sm rounded-xl border bg-popover p-5 shadow-lg">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Edit stock</h2>
+        <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
       </div>
-    </div>,
-    document.body,
+      <p className="mb-3 font-mono text-[11px] text-muted-foreground">{row.name} · {row.product_id} · {current} in {loc === 'office' ? 'Office' : 'Event'} now</p>
+      <div className="mb-3 inline-flex rounded-lg border bg-muted/40 p-1" role="group" aria-label="Location">
+        {(['event', 'office'] as const).map((l) => (
+          <button key={l} type="button" onClick={() => {setLoc(l); setValue(String(l === 'office' ? row.office : row.event));}}
+            className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors', loc === l ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+            {l === 'office' ? 'Office' : 'Event'}<span className="ml-1.5 font-mono text-[9px] opacity-70">{l === 'office' ? row.office : row.event}</span>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Set to</span>
+        <input type="text" inputMode="numeric" value={value} autoFocus
+          onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={(e) => {if (e.key === 'Enter') save();}}
+          className="w-32 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" />
+        <span className="text-xs text-muted-foreground">units</span>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        {valid && diff !== 0
+          ? `Changes ${current} → ${parsed} (${diff > 0 ? '+' : ''}${diff}). Logged to the stock history with the previous and new amounts.`
+          : `Overwrites the ${loc === 'office' ? 'Office' : 'Event'} count. Logged to the stock history with the previous and new amounts.`}
+      </p>
+      {usingMock && <p className="mt-2 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to edit stock.</p>}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
+        <button onClick={save} disabled={pending || usingMock || !valid || diff === 0} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Saving…' : 'Save stock'}</button>
+      </div>
+    </ModalShell>
   );
 }
 

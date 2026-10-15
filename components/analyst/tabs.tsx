@@ -325,7 +325,7 @@ export function TrafficTab({brief, row}: TabProps) {
 }
 
 // ── Settings — account (mock) + digest preferences (mock persistence) ────────────
-export function SettingsTab() {
+export function SettingsTab({before}: {before?: React.ReactNode} = {}) {
   return (
     <TabContainer>
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Settings</h1>
@@ -333,6 +333,7 @@ export function SettingsTab() {
         Account and digest preferences. <span className="font-medium">Mock flow</span> — preferences save to your
         browser; real per-store persistence + sign-in land next.
       </p>
+      {before && <div className="mb-8">{before}</div>}
       <PreferencesForm />
     </TabContainer>
   );

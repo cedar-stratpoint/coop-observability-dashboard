@@ -29,14 +29,26 @@ export async function fetchAllRows(
   label: string,
   makePage: MakePage,
   pageSize: number = POS_PAGE_SIZE,
+  opts: {concurrency?: number} = {},
 ): Promise<Record<string, unknown>[]> {
+  // Parallel mode: request `concurrency` pages at once (speculatively) and stop at the
+  // first short page. Same result as the sequential loop (pages are kept in order and
+  // anything past the first short page is discarded) but ~N× fewer round-trip waits on
+  // big reads, at the cost of up to N−1 empty requests at the end.
+  const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 1));
   const rows: Record<string, unknown>[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const {data, error} = await makePage(from, from + pageSize - 1);
-    if (error) throw new Error(`${label} read failed: ${error.message}`);
-    const page = (data ?? []) as Record<string, unknown>[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
+  for (let from = 0; ; from += pageSize * concurrency) {
+    const batch = await Promise.all(
+      Array.from({length: concurrency}, (_, k) => {
+        const start = from + k * pageSize;
+        return makePage(start, start + pageSize - 1);
+      }),
+    );
+    for (const {data, error} of batch) {
+      if (error) throw new Error(`${label} read failed: ${error.message}`);
+      const page = (data ?? []) as Record<string, unknown>[];
+      rows.push(...page);
+      if (page.length < pageSize) return rows;
+    }
   }
-  return rows;
 }

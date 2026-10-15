@@ -4,6 +4,7 @@ import {Suspense} from 'react';
 import {Inter, Newsreader} from 'next/font/google';
 import {cn} from '@/lib/utils';
 import {getDigests, usingMock} from '@/src/data';
+import {getNavContext} from '@/src/active-context';
 import {DashboardShell} from '@/components/analyst/dashboard-shell';
 import {IntroSplash} from '@/components/analyst/intro-splash';
 import {auth} from '@/auth';
@@ -43,7 +44,16 @@ export default async function RootLayout({children}: {children: ReactNode}) {
   // The shell (header + week sidebar + tab nav) is shared across all tab routes,
   // so it fetches the week list once here; getDigests() is React-cached so the
   // page doesn't re-fetch. useSearchParams inside the shell needs a Suspense boundary.
-  const digests = authed ? await getDigests() : [];
+  const nav = authed ? await getNavContext() : null;
+  // Zoomy's digests must load ONLY for a Zoomy viewer — otherwise the RSC payload
+  // would ship Zoomy data to a Goldline user / data-blind Coop Admin on every route
+  // (even /uploads), above the per-section guards. Local dev-auth bypass (null nav)
+  // and legacy authed staff with no membership stay on Zoomy; a resolved non-Zoomy
+  // company gets none.
+  // (Dev bypass with no DEV_AUTH_AS has no nav → Zoomy, as before; with DEV_AUTH_AS it
+  // follows the stand-in membership like a real session.)
+  const isZoomyViewer = authed && (!nav || nav.companyId === 'zoomy');
+  const digests = isZoomyViewer ? await getDigests() : [];
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -61,7 +71,7 @@ export default async function RootLayout({children}: {children: ReactNode}) {
           <>
             <IntroSplash />
             <Suspense>
-              <DashboardShell digests={digests} usingMock={usingMock()} user={{name: session!.user?.name, email: session!.user?.email, image: session!.user?.image}}>
+              <DashboardShell digests={digests} usingMock={usingMock()} nav={nav ?? undefined} user={{name: session!.user?.name, email: session!.user?.email, image: session!.user?.image}}>
                 {children}
               </DashboardShell>
             </Suspense>

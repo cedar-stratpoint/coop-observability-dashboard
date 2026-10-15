@@ -28,3 +28,7 @@ scripts/local-supabase/.proxy.log
 
 # Golden-set expected figures (regenerated from the local fixture by scripts/explore-golden-expected.mjs)
 test/support/.explore-golden-expected.json
+
+# Local generated artifacts (not committed)
+.impeccable/
+graphify-out/

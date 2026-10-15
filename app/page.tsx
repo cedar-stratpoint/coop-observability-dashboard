@@ -1,4 +1,5 @@
 import {getDigests} from '@/src/data';
+import {requireZoomyData} from '@/src/active-context';
 import {getBrief} from '@/src/salesSignals';
 import {pickIndex} from '@/src/week';
 import {ChannelOverview, type Channel} from '@/components/analyst/channel-compare';
@@ -59,6 +60,7 @@ async function offlineDailyProgress(): Promise<DailyProgress | null> {
 }
 
 export default async function Page(props: {searchParams: Promise<{week?: string; channel?: string; from?: string; to?: string}>}) {
+  await requireZoomyData(); // Zoomy-only overview — bounce a non-Zoomy viewer to /uploads
   const searchParams = await props.searchParams;
   // Customer PII is masked inside getDigests() (server-only) rather than here, so
   // every route is fail-closed — see src/data.ts + src/pii.ts.

@@ -37,6 +37,11 @@ vi.mock('@/auth', () => ({
     return h.session;
   },
 }));
+// The route resolves the active company to fence Ask Coop to Zoomy. Mock it to
+// null (no company context) so these legacy tests exercise the Zoomy path (no 403).
+vi.mock('@/src/active-context', () => ({
+  getActiveContext: async () => null,
+}));
 vi.mock('@/src/data', () => ({
   getDigests: async () => {
     h.getDigestsCalls += 1;

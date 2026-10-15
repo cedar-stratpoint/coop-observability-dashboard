@@ -57,21 +57,31 @@ export function StockSalesChart({data, vsLastYear, lastCountedWeeksAgo}: {
 
   // Sold connecting line: solid across real, dashed across forecast (sharing the
   // last real point as the junction).
-  const soldY = (d: ChartMonth) => sy(d.isForecast ? d.soldForecast ?? 0 : d.sold ?? 0);
-  const realPts = data.slice(0, firstForecast).map((d, i) => `${cx(i)},${soldY(d)}`).join(' ');
-  const fcPts = data.slice(firstForecast - 1).map((d, k) => `${cx(firstForecast - 1 + k)},${soldY(d)}`).join(' ');
+  // A null value is "no data" (e.g. a month nobody counted): no bar, no point.
+  const soldVal = (d: ChartMonth) => (d.isForecast ? d.soldForecast : d.sold);
+  const pts = (from: number, to: number) =>
+    data
+      .slice(from, to)
+      .map((d, k) => [from + k, soldVal(d)] as const)
+      .filter(([, v]) => v != null)
+      .map(([i, v]) => `${cx(i)},${sy(v as number)}`)
+      .join(' ');
+  const realPts = pts(0, firstForecast);
+  const fcPts = pts(firstForecast - 1, n);
 
   // Stock lines.
   const realStock = data.filter((d) => !d.isForecast && d.stockEnd != null);
   const realStockPts = realStock.map((d) => `${cx(data.indexOf(d))},${ky(d.stockEnd as number)}`).join(' ');
-  const fcStock = data.slice(firstForecast - 1); // include last real as the junction
+  const fcStock = data.slice(firstForecast - 1).filter((d) => (d.stockForecast ?? d.stockEnd) != null); // last real = junction
   const fcStockPts = fcStock
     .map((d) => `${cx(data.indexOf(d))},${ky((d.stockForecast ?? d.stockEnd) as number)}`)
     .join(' ');
+  const firstStockX = realStock.length ? cx(data.indexOf(realStock[0])) : 0;
+  const lastStockX = realStock.length ? cx(data.indexOf(realStock[realStock.length - 1])) : 0;
   const areaPath = realStock.length
-    ? `M ${cx(0)},${ky(realStock[0].stockEnd as number)} ` +
+    ? `M ${firstStockX},${ky(realStock[0].stockEnd as number)} ` +
       realStock.map((d) => `L ${cx(data.indexOf(d))},${ky(d.stockEnd as number)}`).join(' ') +
-      ` L ${cx(realStock.length - 1)},${STOCK_BOTTOM} L ${cx(0)},${STOCK_BOTTOM} Z`
+      ` L ${lastStockX},${STOCK_BOTTOM} L ${firstStockX},${STOCK_BOTTOM} Z`
     : '';
 
   return (
@@ -115,7 +125,8 @@ export function StockSalesChart({data, vsLastYear, lastCountedWeeksAgo}: {
         {/* Sold bars */}
         <g className="text-emerald-600 dark:text-emerald-400">
           {data.map((d, i) => {
-            const v = d.isForecast ? d.soldForecast ?? 0 : d.sold ?? 0;
+            const v = soldVal(d);
+            if (v == null) return null;
             const y = sy(v);
             const h = SOLD_BOTTOM - y;
             const title = d.isForecast ? `${d.label} forecast` : d.label;
@@ -137,7 +148,8 @@ export function StockSalesChart({data, vsLastYear, lastCountedWeeksAgo}: {
         </g>
         <g className="fill-foreground text-[11px] font-semibold" style={{fontVariantNumeric: 'tabular-nums'}}>
           {data.map((d, i) => {
-            const v = d.isForecast ? d.soldForecast ?? 0 : d.sold ?? 0;
+            const v = soldVal(d);
+            if (v == null) return null;
             return <text key={d.key} x={cx(i)} y={sy(v) - 8} textAnchor="middle" className={d.isForecast ? 'fill-muted-foreground' : ''}>{d.isForecast ? `~${v}` : v}</text>;
           })}
         </g>
@@ -163,7 +175,7 @@ export function StockSalesChart({data, vsLastYear, lastCountedWeeksAgo}: {
             );
           })}
           {/* forecast points (hollow) */}
-          {data.filter((d) => d.isForecast).map((d) => {
+          {data.filter((d) => d.isForecast && d.stockForecast != null).map((d) => {
             const i = data.indexOf(d);
             const y = ky(d.stockForecast ?? 0);
             return (
@@ -196,7 +208,7 @@ export function StockSalesChart({data, vsLastYear, lastCountedWeeksAgo}: {
         {/* last counted note */}
         {lastCountedWeeksAgo != null && (
           <text x={cx(0)} y={STOCK_BOTTOM + 14} textAnchor="middle" className="fill-muted-foreground text-[10px]">
-            last counted ~{lastCountedWeeksAgo} wks ago
+            {lastCountedWeeksAgo === 0 ? 'last counted this week' : `last counted ~${lastCountedWeeksAgo} ${lastCountedWeeksAgo === 1 ? 'wk' : 'wks'} ago`}
           </text>
         )}
         {/* runs out marker */}

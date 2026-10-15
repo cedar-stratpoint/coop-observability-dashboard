@@ -8,10 +8,10 @@
 
 import {useEffect, useId, useRef, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {createPortal} from 'react-dom';
 import {Dog, Undo2, X} from 'lucide-react';
 import {voidFreeTasteAction} from '@/src/pos-free-taste-actions';
 import type {FreeTasteSummary} from '@/src/pos-free-taste-data';
+import {ModalShell, useModalExit} from './modal-shell';
 
 type PendingUndo = {productName: string; clientUuid: string; qty: number};
 
@@ -71,7 +71,8 @@ export function SamplingPanel({sampling}: {sampling: FreeTasteSummary}) {
 
 // Confirm before voiding a product's most recent free taste. Portalled modal in the
 // incumbent style; the firedRef guard keeps a double-click from voiding twice.
-function UndoConfirmModal({undo, onClose}: {undo: PendingUndo; onClose: () => void}) {
+function UndoConfirmModal({undo, onClose: onClosed}: {undo: PendingUndo; onClose: () => void}) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const titleId = useId();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -95,45 +96,40 @@ function UndoConfirmModal({undo, onClose}: {undo: PendingUndo; onClose: () => vo
     });
   }
 
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <button type="button" aria-label="Cancel" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-lg">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
-            <Undo2 className="size-4" /> Undo free taste
-          </h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground">
-            <X className="size-4" />
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} backdropLabel="Cancel" labelledBy={titleId} panelClassName="flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-popover shadow-lg">
+      <div className="flex items-center justify-between border-b px-5 py-4">
+        <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
+          <Undo2 className="size-4" /> Undo free taste
+        </h2>
+        <button type="button" onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground">
+          <X className="size-4" />
+        </button>
+      </div>
+
+      <div className="px-5 py-4">
+        <p className="text-sm text-muted-foreground">
+          Undo the most recent free taste of this product? This restores {undo.qty} to Event stock.
+        </p>
+        <p className="mt-2 text-sm font-medium">{undo.qty}× {undo.productName}</p>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-5 py-3">
+        <span className="font-mono text-[11px] text-muted-foreground">🔒 recorded with your account · now</span>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={pending}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {pending ? 'Undoing…' : 'Undo'}
           </button>
         </div>
-
-        <div className="px-5 py-4">
-          <p className="text-sm text-muted-foreground">
-            Undo the most recent free taste of this product? This restores {undo.qty} to Event stock.
-          </p>
-          <p className="mt-2 text-sm font-medium">{undo.qty}× {undo.productName}</p>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-5 py-3">
-          <span className="font-mono text-[11px] text-muted-foreground">🔒 recorded with your account · now</span>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={confirm}
-              disabled={pending}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {pending ? 'Undoing…' : 'Undo'}
-            </button>
-          </div>
-        </div>
       </div>
-    </div>,
-    document.body,
+    </ModalShell>
   );
 }
