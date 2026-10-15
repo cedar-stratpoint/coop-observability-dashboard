@@ -6,7 +6,7 @@
 // the row-skips and column-drift a free read produces. This module is PURE (no
 // network, no SDK) so it unit-tests; the live call that sends `buildSystemPrompt()`
 // + `buildManifestPrompt(page)` + the schema with the PDF lives in the server
-// route and is smoke-tested on Staging with ANTHROPIC_API_KEY in the env.
+// route and is smoke-tested on Staging with GOLDLINE_ANTHROPIC_API_KEY in the env.
 
 // Matches the model the Coop chat uses (src/chat/config.ts), so one tier serves
 // both. Sonnet is the plan's default for extraction (accuracy on messy handwriting
