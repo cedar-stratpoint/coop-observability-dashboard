@@ -1,7 +1,7 @@
 {
   "name": "zoomy-digest-dashboard",
   "private": true,
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Reader dashboard for Zoomy weekly store-ops digests. Renders archived DigestDocuments from Supabase (anon key + RLS). Separate app from zoomy-observability (the batch job that writes them).",
   "scripts": {
     "dev": "next dev --webpack",
