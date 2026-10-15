@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-15 — Ask Coop answers again on prod: the three CRM list tools are not strict
+- **What broke:** on prod every Ask Coop question failed ("Coop hit a problem answering that"). The API answered 400 "the compiled grammar is too large" before any token: Explore and the four website CRM tools together put 18 strict tools in one request (the staging config sent 14 and worked). Found by logging the 400 message (#195).
+- **Fix:** `list_crm_orders`, `list_crm_customers` and `list_crm_checkouts` are sent with `strict: false`; `get_crm_metrics` and every other tool stay strict. A key the model leaves out takes its default (limit 25, offset 0, filters "all", group_by "none"); the dates have no default; an unknown key (a url, a method) is still refused before any read; the CRM client is still GET-only.
+- **Measured:** probes against the live API at `max_tokens: 1`: base 11 and Explore 14 pass, base plus the four CRM tools (15) and all 18 fail; with the three list tools non-strict all 18 pass. `test/chat-tools-grammar.integration.test.ts` repeats this (skipped without an API key): run it before a deploy that touches `metrics-registry.ts`, `tool-defs.ts` or `crm/tools.ts`, because a new metric or dimension grows `query_metric`'s enums and uses up the headroom.
+- Also logged: `chat_error` carries the first 300 characters of a 400's message (#195).
+
 ## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
 - Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
 - Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".

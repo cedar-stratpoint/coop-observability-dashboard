@@ -56,8 +56,18 @@ describe('list_crm_orders', () => {
     expect(readOrdersInput({...ORD, from: ''})).toEqual({error: expect.stringMatching(/Ask the owner/)});
     expect(readOrdersInput({...ORD, from: '2026-01-01', to: '2026-06-30', group_by: 'day'})).toEqual({error: expect.stringMatching(/at most 92 days/)});
     expect(readOrdersInput({...ORD, limit: 7})).toEqual({error: expect.stringMatching(/limit must be one of: 10, 25, 50, 100/)});
-    expect(readOrdersInput({...ORD, url: 'https://evil.example'})).toEqual({error: expect.stringMatching(/Use exactly these parameters/)});
+    expect(readOrdersInput({...ORD, url: 'https://evil.example'})).toEqual({error: expect.stringMatching(/Use only these parameters/)});
     expect(readOrdersInput({...ORD, offset: -1})).toEqual({error: expect.stringMatching(/offset/)});
+  });
+});
+
+describe('the list tools are not strict, so a missing key takes its default', () => {
+  it('fills the defaults, still requires the dates and still refuses an unknown key', () => {
+    expect(readOrdersInput({from: '2026-09-01', to: '2026-09-30'})).toMatchObject({financial_status: 'all', group_by: 'none', limit: 25, offset: 0});
+    expect(readOrdersInput({from: '2026-09-01'})).toEqual({error: expect.stringMatching(/Dates have no default/)});
+    expect(readOrdersInput({from: '2026-09-01', to: '2026-09-30', url: 'https://evil.example'})).toEqual({error: expect.stringMatching(/Use only these parameters/)});
+    expect(readCustomersInput({})).toMatchObject({joined: null, tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', limit: 25, offset: 0});
+    expect(readCheckoutsInput({from: '2026-09-01', to: '2026-09-30'})).toMatchObject({stage: 'all', status: 'all', group_by: 'none', limit: 25, offset: 0});
   });
 });
 
@@ -153,7 +163,7 @@ describe('createCrmExecutors', () => {
     const s = sink();
     const f = fakeCrmClient();
     const ex = createCrmExecutors({client: f.client, now: NOW, user: null, sink: s, keep: (r) => r, maxCalls: 1});
-    expect(await ex.list_crm_orders({...ORD, method: 'POST'})).toEqual({error: expect.stringMatching(/Use exactly these parameters/)});
+    expect(await ex.list_crm_orders({...ORD, method: 'POST'})).toEqual({error: expect.stringMatching(/Use only these parameters/)});
     await ex.get_crm_metrics({});
     expect(await ex.get_crm_metrics({})).toEqual({error: CRM_ERROR_TEXT.call_cap});
     expect(f.gets).toEqual(['metrics']);
@@ -165,7 +175,7 @@ describe('createCrmExecutors', () => {
     const f = fakeCrmClient();
     const ex = createCrmExecutors({client: f.client, now: NOW, user: null, sink: s, keep: (r) => r, maxCalls: 2, maxRefused: 3});
     const bad = {...ORD, method: 'POST'};
-    for (let i = 0; i < 3; i++) expect(await ex.list_crm_orders(bad)).toEqual({error: expect.stringMatching(/Use exactly these parameters/)});
+    for (let i = 0; i < 3; i++) expect(await ex.list_crm_orders(bad)).toEqual({error: expect.stringMatching(/Use only these parameters/)});
     expect(await ex.list_crm_orders(bad)).toEqual({error: CRM_ERROR_TEXT.refused_cap});
     expect(CRM_ERROR_TEXT.refused_cap).toBe('Too many invalid requests this turn.');
     expect(await ex.get_crm_metrics({})).not.toHaveProperty('error');
