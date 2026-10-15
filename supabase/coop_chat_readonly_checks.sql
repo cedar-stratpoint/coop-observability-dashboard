@@ -14,8 +14,9 @@ where n.nspname = 'public'
 order by p.prosecdef desc, 1::text;
 
 -- (b) Every table/view privilege held by coop_chat_ro on any non-system relation.
--- EXPECTED: exactly seven rows, all SELECT: coop_chat_orders, coop_chat_order_items, coop_chat_products, coop_chat_bundles,
--- coop_chat_prices, coop_chat_price_changes, coop_chat_events.
+-- EXPECTED: exactly ten rows, all SELECT: coop_chat_orders, coop_chat_order_items, coop_chat_products, coop_chat_bundles,
+-- coop_chat_prices, coop_chat_price_changes, coop_chat_events, coop_chat_stock_by_location, coop_chat_sale_movements,
+-- coop_chat_stock_config (the last three from supabase/coop_chat_stock.sql; apply it first).
 -- BAD: any other relation, or any privilege other than SELECT.
 select table_schema, table_name, privilege_type
 from information_schema.role_table_grants
@@ -48,7 +49,10 @@ with contract(view_name, cols) as (values
   ('coop_chat_bundles',     'bundle_id,name'),
   ('coop_chat_prices',        'product_id,price'),
   ('coop_chat_price_changes', 'id,product_id,old_price,new_price,changed_at'),
-  ('coop_chat_events',        'event_id,name,venue,city,starts_on,ends_on,status,created_at')
+  ('coop_chat_events',        'event_id,name,venue,city,starts_on,ends_on,status,created_at'),
+  ('coop_chat_stock_by_location', 'product_id,location,stock'),
+  ('coop_chat_sale_movements',    'id,product_id,delta,reason,created_at'),
+  ('coop_chat_stock_config',      'key,value')
 ), actual as (
   select c.relname as view_name,
          string_agg(a.attname, ',' order by a.attnum) as cols,

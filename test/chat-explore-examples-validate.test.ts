@@ -11,4 +11,15 @@ describe('EXP-02 the worked examples pass the real validator', () => {
     const v = await validateExploreSql(sql);
     expect(v.ok, v.ok ? '' : `${v.code}`).toBe(true);
   });
+  it('EXP-02 the one-label-per-event SQL (collate "C" plus a window over an aggregate) passes the parser and validator', async () => {
+    const sql = "select min(min(btrim(e.name) collate \"C\")) over (partition by lower(btrim(e.name))) as event, count(*) as orders_count from coop_explore_orders o join coop_explore_events e on e.event_id = o.event_id where o.status = 'completed' group by lower(btrim(e.name))";
+    const v = await validateExploreSql(sql);
+    expect(v.ok, v.ok ? '' : `${v.code}`).toBe(true);
+  });
+  it('EXP-02 only the "C" collation is allowed; any other collation is refused', async () => {
+    for (const c of ['"en_US"', '"POSIX"', 'pg_catalog."default"']) {
+      const v = await validateExploreSql(`select min(btrim(e.name) collate ${c}) as event from coop_explore_events e group by lower(btrim(e.name))`);
+      expect(v.ok, c).toBe(false);
+    }
+  });
 });

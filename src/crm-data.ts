@@ -1,17 +1,10 @@
 import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
-import {checkoutStage} from './crm-compute';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
+import {envelope, MEMBERSHIP_FALLBACK, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder} from './crm-project';
 import type {RemoteSpinLead} from './spin-leads-sync';
-import type {
-  CrmBirthdayVoucher,
-  CrmCheckout,
-  CrmCustomer,
-  CrmMembershipConfig,
-  CrmMetrics,
-  CrmOrder,
-} from './crm-types';
+import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
 
 /**
  * Reader for the Zoomy CRM engine — a Cloudflare Worker over its own D1
@@ -30,9 +23,6 @@ import type {
 
 const base = process.env.CRM_API_URL?.replace(/\/$/, '');
 const token = process.env.CRM_API_READ_TOKEN;
-
-/** Fallbacks matching the storefront's own constants (app/lib/membership-tier.js). */
-const MEMBERSHIP_FALLBACK: CrmMembershipConfig = {platinumThreshold: 2000, programStart: '2026-07-01'};
 
 /** True when the CRM env is absent — pages render the empty state, not an error. */
 export function crmConfigured(): boolean {
@@ -62,21 +52,6 @@ export async function fetchCrmSpinLeads(): Promise<RemoteSpinLead[]> {
   return Array.isArray(leads) ? leads : [];
 }
 
-/** Shopify's payload arrives as a JSON string; junk is treated as absent. */
-function parseRaw(raw: string | undefined): unknown {
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-const num = (v: unknown): number => {
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) ? n : 0;
-};
-
 /* ---------- readers ---------- */
 
 export const getCrmMetrics = cache((): Promise<CrmMetrics | null> =>
@@ -85,19 +60,7 @@ export const getCrmMetrics = cache((): Promise<CrmMetrics | null> =>
 
 const metricsCached = unstable_cache(async (): Promise<CrmMetrics | null> => {
   try {
-    const m = await crmGet<Record<string, unknown>>('/api/metrics');
-    return {
-      customers: num(m.customers),
-      orders: num(m.orders),
-      totalRevenue: num(m.totalRevenue),
-      ordersLast7Days: num(m.ordersLast7Days),
-      revenueLast7Days: num(m.revenueLast7Days),
-      abandonedActive: num(m.abandonedActive),
-      recovered: num(m.recovered),
-      reminded: num(m.reminded),
-      revenueRecovered: num(m.revenueRecovered),
-      recoveryRate: num(m.recoveryRate),
-    };
+    return projectMetrics(await crmGet<unknown>('/api/metrics'));
   } catch (err) {
     // Fail soft, like the spin-leads reader: the CRM is one page of a
     // multi-channel dashboard, and the Worker being briefly unreachable must
@@ -113,22 +76,7 @@ export const getCrmCustomers = cache((): Promise<CrmCustomer[]> =>
 
 const customersCached = unstable_cache(async (): Promise<CrmCustomer[]> => {
   try {
-    const {customers} = await crmGet<{customers: CrmCustomer[]}>('/api/customers');
-    return (customers ?? []).map((c) => ({
-      shopifyCustomerId: String(c.shopifyCustomerId),
-      email: c.email ?? null,
-      firstName: c.firstName ?? null,
-      lastName: c.lastName ?? null,
-      phone: c.phone ?? null,
-      ordersCount: c.ordersCount ?? null,
-      totalSpent: c.totalSpent ?? null,
-      membershipTier: c.membershipTier ?? null,
-      petName: c.petName ?? null,
-      petBirthday: c.petBirthday ?? null,
-      emailMarketingState: c.emailMarketingState ?? null,
-      createdAt: c.createdAt ?? null,
-      updatedAt: c.updatedAt ?? null,
-    }));
+    return (envelope(await crmGet<unknown>('/api/customers'), 'customers') ?? []).map(projectCustomer);
   } catch (err) {
     console.warn(`CRM customers read failed: ${(err as Error).message}`);
     return [];
@@ -141,24 +89,7 @@ export const getCrmOrders = cache((): Promise<CrmOrder[]> =>
 
 const ordersCached = unstable_cache(async (): Promise<CrmOrder[]> => {
   try {
-    const {orders} = await crmGet<{orders: CrmOrder[]}>('/api/orders');
-    return (orders ?? []).map((o) => ({
-      shopifyOrderId: String(o.shopifyOrderId),
-      shopifyCustomerId: o.shopifyCustomerId ?? null,
-      orderNumber: o.orderNumber ?? null,
-      email: o.email ?? null,
-      totalPrice: o.totalPrice ?? null,
-      currency: o.currency ?? null,
-      financialStatus: o.financialStatus ?? null,
-      fulfillmentStatus: o.fulfillmentStatus ?? null,
-      createdAt: o.createdAt ?? null,
-      fulfilledAt: o.fulfilledAt ?? null,
-      reviewRequestSentAt: o.reviewRequestSentAt ?? null,
-      reviewSubmittedAt: o.reviewSubmittedAt ?? null,
-      // ponytail: raw Shopify JSON (~2.3KB/order); past ~850 orders this cache entry
-      // nears Next's 2MB limit — slim it to title/quantity/price/discounts then.
-      lineItems: o.lineItems ?? null,
-    }));
+    return (envelope(await crmGet<unknown>('/api/orders'), 'orders') ?? []).map(projectOrder);
   } catch (err) {
     console.warn(`CRM orders read failed: ${(err as Error).message}`);
     return [];
@@ -173,25 +104,11 @@ const checkoutsCached = unstable_cache(async (): Promise<CrmCheckout[]> => {
   try {
     // `raw` is the original Shopify payload. The progress stage is derived from
     // it HERE, on the server, and the blob itself is then dropped — the browser
-    // needs the label, not the shopper's address.
-    const {checkouts} = await crmGet<{checkouts: Array<CrmCheckout & {raw?: string}>}>(
-      '/api/checkouts',
+    // needs the label, not the shopper's address. The stage is derived in src/crm-project.ts and the blob is dropped.
+    // (The pages keep the recovery link: the Website CRM page shows it to staff.)
+    return (envelope(await crmGet<unknown>('/api/checkouts'), 'checkouts') ?? []).map(
+      (c): CrmCheckout => ({...projectCheckoutSafe(c), abandonedCheckoutUrl: typeof c.abandonedCheckoutUrl === 'string' ? c.abandonedCheckoutUrl : null}),
     );
-    return (checkouts ?? []).map((c) => ({
-      shopifyCheckoutId: String(c.shopifyCheckoutId),
-      email: c.email ?? null,
-      abandonedCheckoutUrl: c.abandonedCheckoutUrl ?? null,
-      totalPrice: c.totalPrice ?? null,
-      currency: c.currency ?? null,
-      createdAt: c.createdAt ?? null,
-      updatedAt: c.updatedAt ?? null,
-      convertedAt: c.convertedAt ?? null,
-      remindersSent: num(c.remindersSent),
-      lastReminderAt: c.lastReminderAt ?? null,
-      reachedPaymentAt: c.reachedPaymentAt ?? null,
-      winbackSentAt: c.winbackSentAt ?? null,
-      stage: checkoutStage(c, parseRaw(c.raw)),
-    }));
   } catch (err) {
     console.warn(`CRM checkouts read failed: ${(err as Error).message}`);
     return [];
@@ -226,13 +143,7 @@ export const getCrmMembershipConfig = cache((): Promise<CrmMembershipConfig> =>
 
 const membershipConfigCached = unstable_cache(async (): Promise<CrmMembershipConfig> => {
   try {
-    const c = await crmGet<{platinumThreshold: number | null; programStart: string | null}>(
-      '/api/membership-config',
-    );
-    return {
-      platinumThreshold: c.platinumThreshold ?? MEMBERSHIP_FALLBACK.platinumThreshold,
-      programStart: c.programStart ?? MEMBERSHIP_FALLBACK.programStart,
-    };
+    return projectMembership(await crmGet<unknown>('/api/membership-config'));
   } catch (err) {
     console.warn(`CRM membership config read failed: ${(err as Error).message}`);
     return MEMBERSHIP_FALLBACK;

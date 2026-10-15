@@ -1,5 +1,5 @@
 // The ONLY file that imports the Postgres driver (spec 10.5). One read-only transaction per query as the login role coop_explore_ro:
-//   BEGIN READ ONLY; SET LOCAL timeouts / timezone / search_path; DECLARE ... CURSOR FOR <validated sql>; FETCH max+1; ROLLBACK.
+//   BEGIN READ ONLY; SET LOCAL timeouts / timezone / search_path (public, pg_temp); DECLARE ... CURSOR FOR <validated sql>; FETCH max+1; ROLLBACK.
 // - The model text is ONLY ever the validated string wrapped in DECLARE (parser step 3 judged exactly that string); it is never concatenated
 //   into anything else, and it runs on the EXTENDED protocol (`simple: false`), so a second statement is refused by the protocol itself.
 //   (postgres.js `unsafe(sql)` with no options uses the simple protocol, which accepts several statements.)
@@ -10,6 +10,7 @@ import postgres from 'postgres';
 import {ExploreDbError, mapDbError} from './errors';
 import type {RawColumnType, RawQueryResult} from './result';
 import {CURSOR_NAME} from './parse';
+import {scrubRows} from './scrub';
 import type {ExploreAccess, ExploreLimits} from './types';
 
 export const EXPLORE_TIMEZONE = 'Asia/Manila';
@@ -57,12 +58,13 @@ export async function runInEnvelope(sql: ExploreSql, sent: string, opts: {timeou
       await tx.unsafe('SET LOCAL lock_timeout = 2000', [], {simple: false});
       await tx.unsafe('SET LOCAL idle_in_transaction_session_timeout = 10000', [], {simple: false});
       await tx.unsafe(`SET LOCAL timezone = '${EXPLORE_TIMEZONE}'`, [], {simple: false});
-      await tx.unsafe('SET LOCAL search_path = public', [], {simple: false});
+      await tx.unsafe('SET LOCAL search_path = public, pg_temp', [], {simple: false}); // pg_temp LAST: no temporary object can shadow a name
       await tx.unsafe(sent, [], {simple: false});
       const fetched = await tx.unsafe(`FETCH FORWARD ${integer(opts.maxRows) + 1} FROM ${CURSOR_NAME}`, [], {simple: false}).values();
       const cols = (fetched.columns ?? []).map((c) => ({name: c.name, type: typeOf(c.type)}));
-      const rows = (fetched as unknown[][]).map((r) => r.map((cell, i) => convert(cell, cols[i]?.type)));
-      throw new Rollback({columns: cols, rows, fetched: rows.length, ms: Date.now() - t0}); // always ROLLBACK, never COMMIT
+      const converted = (fetched as unknown[][]).map((r) => r.map((cell, i) => convert(cell, cols[i]?.type)));
+      const {rows, hidden} = scrubRows(converted); // layer 4: before anything leaves this file
+      throw new Rollback({columns: cols, rows, fetched: rows.length, ms: Date.now() - t0, hidden}); // always ROLLBACK, never COMMIT
     });
   } catch (e) {
     if (e instanceof Rollback) return e.value;

@@ -15,6 +15,7 @@ vi.mock('../src/chat/metrics-registry', async (importOriginal) => {
 
 import {runMetric} from '../src/chat/query-metric';
 import {METRICS, METRIC_IDS, sharesOf} from '../src/chat/metrics-registry';
+import {isStockMetric} from '../src/chat/stock-metrics';
 import {resolveRange} from '../src/chat/range';
 import {ROUND_ROW_PAGE, SMALL_SAMPLE_N, UNTAGGED_WARN_SHARE, runChecks} from '../src/chat/checks';
 import {createExecutors} from '../src/chat/tool-executors';
@@ -217,7 +218,7 @@ describe('skill rules enforced by code', () => {
   });
 
   it('BI-30: every result carries source, range, data coverage dates and coverage in meta', () => {
-    for (const id of METRIC_IDS) {
+    for (const id of METRIC_IDS.filter((x) => !isStockMetric(x))) { // stock is "as of now" and has no data dates (test/chat-stock-metrics.test.ts)
       const def = METRICS[id];
       const r = run({metric: id, dimension: def.defaultDimension, measure: 'default'}, bundleData());
       expect(['live', 'mock', 'digest'], id).toContain(r.meta.source);

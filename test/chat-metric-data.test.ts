@@ -29,6 +29,10 @@ function fakeClient(tables: Record<string, Row[]>) {
               call.ranges.push([f, t]);
               return builder;
             },
+            // the stock loader's filters (Task 8): the fake ignores them, the loader test pins their use
+            eq: () => builder,
+            gte: () => builder,
+            limit: () => builder,
             then: <R1, R2>(ok?: (v: {data: Row[]; error: null}) => R1, no?: (e: unknown) => R2) =>
               Promise.resolve({data: rows.slice(from, Math.min(to + 1, from + 1000)), error: null}).then(ok, no),
           };
@@ -57,6 +61,9 @@ function tablesFor(mode: (typeof CHAT_READ_MODES)[number], sizes: {orders: numbe
     ],
     [t.prices]: Array.from({length: sizes.prices}, (_, i) => ({product_id: `P${i}`, price: String(100 + i)})),
     [t.priceChanges]: Array.from({length: sizes.changes}, (_, i) => ({id: i + 1, product_id: 'P1', old_price: i === 0 ? null : '100', new_price: '120', changed_at: '2026-09-15T02:00:00Z'})),
+    [t.stock]: [{product_id: 'P1', location: 'event', stock: 5}],
+    [t.saleMovements]: [],
+    [t.stockConfig]: [],
   };
 }
 
@@ -64,7 +71,7 @@ describe('relations (extended)', () => {
   it('both modes declare events, prices and priceChanges with explicit columns', () => {
     for (const mode of CHAT_READ_MODES) {
       const r = relationsForMode(mode);
-      expect(r.allowed).toHaveLength(7);
+      expect(r.allowed).toHaveLength(10); // seven order relations + the three stock relations (Task 8)
       for (const k of ['events', 'prices', 'priceChanges'] as const) {
         expect(r.tables[k]).toBeTruthy();
         expect(r.columns[k]).not.toContain('*');
@@ -98,10 +105,12 @@ describe('loadMetricData', () => {
         const {client, calls} = fakeClient(tablesFor(mode, {orders: 3, items: 4, prices: 2, changes: 1}));
         await loadMetricData(client, mode);
         const rel = relationsForMode(mode);
-        expect(calls.map((c) => c.relation).sort()).toEqual(Object.values(rel.tables).sort());
+        // products is read once for the orders and once for the stock names
+        expect([...new Set(calls.map((c) => c.relation))].sort()).toEqual(Object.values(rel.tables).sort());
         for (const c of calls) {
           expect(c.columns).not.toContain('*');
           for (const col of FORBIDDEN_COLUMNS) expect(c.columns.split(','), `${c.relation}.${col}`).not.toContain(col);
+          if (c.relation === rel.tables.stockConfig) continue; // one row by key (limit 1), not paged
           expect(c.orders.length, c.relation).toBeGreaterThan(0);
           expect(c.ranges.length, c.relation).toBeGreaterThan(0);
         }

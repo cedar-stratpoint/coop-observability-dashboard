@@ -1,7 +1,7 @@
 // Static checks on the worked examples (spec 6.6). The Integrator's chat-explore-examples-validate.test.ts runs them through
 // validateExploreSql and the local database; this file never imports the parser.
 import {describe, expect, it} from 'vitest';
-import {EXPLORE_VIEWS, EXPLORE_VIEW_NAMES} from '../src/chat/explore/views';
+import {EXPLORE_VIEWS, EXPLORE_VIEW_NAMES, baseRelation} from '../src/chat/explore/views';
 import {EXPLORE_EXAMPLES, buildExamplesText} from '../src/chat/explore/examples';
 import {estimateTokens} from '../src/chat/skills/load';
 
@@ -9,7 +9,12 @@ const FORBIDDEN_FIGURES = ['106,950', '147,300', '40,350', '71,050', '18,050', '
 const REAL_NAMES = ['SM Aura', 'Circuit Makati', 'Modern Market', 'Salmon Bites', 'Chicken Jerky'];
 const SUFFIX = /_(php|pct|count|units|ratio)$/;
 const views = new Set<string>(EXPLORE_VIEW_NAMES);
-const colsOf = (v: string): string[] => [...EXPLORE_VIEWS[v as keyof typeof EXPLORE_VIEWS].columns, ...EXPLORE_VIEWS[v as keyof typeof EXPLORE_VIEWS].optionalColumns];
+const colsOfView = (v: string): string[] => [...EXPLORE_VIEWS[v as keyof typeof EXPLORE_VIEWS].columns, ...EXPLORE_VIEWS[v as keyof typeof EXPLORE_VIEWS].optionalColumns];
+// Train 3: examples use the base table names. A base table's columns are the union over the Explore views whose source it is (views.ts baseRelation).
+// pos_orders_completed is pos_orders filtered to completed (Task 8): same columns.
+const viewsOf = (rel: string): string[] => (rel === 'pos_orders_completed' ? viewsOf('pos_orders') : views.has(rel) ? [rel] : EXPLORE_VIEW_NAMES.filter((v) => baseRelation(v) === rel));
+const isKnown = (rel: string): boolean => viewsOf(rel).length > 0;
+const colsOf = (rel: string): string[] => viewsOf(rel).flatMap(colsOfView);
 const ctes = (sql: string) => [...sql.matchAll(/(?:\bwith|,)\s+([a-z_]\w*)\s+as\s*\(/gi)].map((m) => m[1].toLowerCase());
 const KEYWORDS = new Set(['join', 'left', 'right', 'inner', 'on', 'where', 'group', 'order', 'limit', 'as']);
 
@@ -49,20 +54,21 @@ describe('the examples', () => {
       expect(e.teaches.length, e.id).toBeGreaterThan(0);
     }
   });
-  it.each(EXPLORE_EXAMPLES.map((e) => [e.id, e] as const))('%s: relations are Explore views or CTEs and columns exist', (_id, e) => {
+  it.each(EXPLORE_EXAMPLES.map((e) => [e.id, e] as const))('%s: relations are catalog tables, Explore views or CTEs and columns exist', (_id, e) => {
     const local = new Set(ctes(e.sql));
     const rels = relations(e.sql);
     expect(rels.length).toBeGreaterThan(0);
-    for (const r of rels) expect(views.has(r.name) || local.has(r.name), `${e.id} relation ${r.name}`).toBe(true);
-    const aliasToView = new Map(rels.filter((r) => views.has(r.name)).map((r) => [r.alias, r.name]));
+    for (const r of rels) expect(isKnown(r.name) || local.has(r.name), `${e.id} relation ${r.name}`).toBe(true);
+    const aliasToView = new Map(rels.filter((r) => isKnown(r.name)).map((r) => [r.alias, r.name]));
     for (const m of e.sql.matchAll(/\b([a-z_]\w*)\.([a-z_]\w*)\b/gi)) {
       const v = aliasToView.get(m[1].toLowerCase());
       if (v) expect(colsOf(v), `${e.id} ${m[0]}`).toContain(m[2].toLowerCase());
     }
   });
   it('the gate can fail: an unknown relation and an unknown column are caught', () => {
-    expect(relations('select 1 from pos_orders o').every((r) => views.has(r.name))).toBe(false);
-    expect(colsOf('coop_explore_orders')).not.toContain('revenue');
+    expect(relations('select 1 from nope_table o').every((r) => isKnown(r.name))).toBe(false);
+    expect(colsOf('pos_orders')).not.toContain('revenue');
+    expect(colsOf('coop_explore_orders')).toEqual(colsOf('pos_orders'));
   });
   it('names every column: no select * and no alias.*', () => {
     for (const e of EXPLORE_EXAMPLES) {
@@ -102,11 +108,13 @@ describe('the examples', () => {
   });
 });
 
-describe('E02 labels each event by its group key (live test 5)', () => {
-  it('selects lower(btrim(e.name)) as event and never min()/max() of the raw name', async () => {
+describe('E02 labels each event by one spelling per event (live test 5, A7)', () => {
+  it('groups by lower(btrim(e.name)) and labels with min(min(btrim(e.name) collate "C")) over the same partition', async () => {
     const {EXPLORE_EXAMPLES: ex} = await import('../src/chat/explore/examples');
     const e02 = ex.find((e) => e.id === 'E02')!;
-    expect(e02.sql).toMatch(/select lower\(btrim\(e\.name\)\) as event/);
-    expect(ex.map((e) => e.sql).join('\n')).not.toMatch(/\b(min|max)\(\s*btrim\(e\.name\)/);
+    expect(e02.sql).toMatch(/select min\(min\(btrim\(e\.name\) collate "C"\)\) over \(partition by lower\(btrim\(e\.name\)\)\) as event/);
+    expect(e02.sql).toMatch(/group by lower\(btrim\(e\.name\)\)/);
+    expect(e02.sql).not.toMatch(/lower\(btrim\(e\.name\)\) as event/);
+    expect(e02.teaches.join(' ')).not.toMatch(/never min\(\)/);
   });
 });

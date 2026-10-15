@@ -1,12 +1,13 @@
 import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {MOCK_DIGESTS} from '../mock';
+import {dedupeReruns, sameWindow, windowOf, type DigestWindow} from '../digest-windows';
 import {maskRows} from '../pii';
 import {MOCK_POS_EVENTS, MOCK_POS_ORDERS} from '../pos-sales-mock';
 import {logGuardTrip} from './audit';
 import type {DigestSource} from './digest-lookup';
 import {chatDigestClient, chatReadClient} from './read/client';
-import {readDigestRows, DIGEST_ROW_LIMIT, type DigestRow} from './read/digest';
+import {readDigestIndex, readDigestRowAt, readDigestRows, DIGEST_ROW_LIMIT, type DigestRow} from './read/digest';
 import {loadMetricData} from './read/metric-data';
 import {assertChatReadable} from './read/mode';
 import type {ChatReadMode} from './read/relations';
@@ -106,8 +107,8 @@ export async function getChatMetricDataOrDegrade(): Promise<ChatDataResult> {
   }
 }
 
-// F10: the stored weekly digests for get_digest. Its own guarded client (one relation, `bundle` refused), cached for five
-// minutes like the dashboard's digest read, under the same tag so revalidateTag('digest-archive') refreshes both.
+// F10 + F.5: the stored digests for get_digest. Their own guarded client (one relation, `bundle` refused). Each read is cached for five
+// minutes like the dashboard's digest read, under the same tag, so revalidateTag('digest-archive') refreshes all three.
 const loadDigestCached = unstable_cache(
   async (mode: ChatReadMode, _project: string): Promise<DigestRow[]> => {
     const {client} = chatDigestClient({mode, onTrip: (b) => logGuardTrip({layer: 'http_guard', detail: b})});
@@ -116,13 +117,44 @@ const loadDigestCached = unstable_cache(
   ['chat-digest'],
   {revalidate: 300, tags: ['digest-archive']},
 );
+// The window index: window_from, window_to and created_at of every row (no JSON), small enough for one cache entry.
+const loadDigestIndexCached = unstable_cache(
+  async (mode: ChatReadMode, _project: string): Promise<DigestWindow[]> => {
+    const {client} = chatDigestClient({mode, onTrip: (b) => logGuardTrip({layer: 'http_guard', detail: b})});
+    return readDigestIndex(client, mode);
+  },
+  ['chat-digest-index'],
+  {revalidate: 300, tags: ['digest-archive']},
+);
+// One older document at a time (outside the DIGEST_ROW_LIMIT newest): one cache entry per window, never every JSON in one key.
+const loadDigestRowCached = unstable_cache(
+  async (mode: ChatReadMode, _project: string, from: string, to: string, createdAt: string): Promise<DigestRow | null> => {
+    const {client} = chatDigestClient({mode, onTrip: (b) => logGuardTrip({layer: 'http_guard', detail: b})});
+    return readDigestRowAt(client, mode, {from, to, createdAt});
+  },
+  ['chat-digest-row'],
+  {revalidate: 300, tags: ['digest-archive']},
+);
+
+const mockRows = (): DigestRow[] => maskRows([...MOCK_DIGESTS].sort((a, b) => b.window_to.localeCompare(a.window_to)));
+const byWindow = (ws: DigestWindow[]): DigestWindow[] => dedupeReruns(ws, (w) => w);
+
+/** Every stored window (a narrow read, re-runs removed), newest first: the per-turn [digests] line. */
+export async function getChatDigestIndex(): Promise<DigestWindow[]> {
+  if (!process.env.SUPABASE_URL_ARCHIVE) return byWindow(mockRows().map(windowOf));
+  const readable = assertChatReadable(process.env);
+  if (!readable.ok) throw new ChatUnavailableError(readable.message);
+  return byWindow(await loadDigestIndexCached(readable.mode, projectOf()));
+}
 
 export async function getChatDigest(): Promise<DigestSource> {
   if (!process.env.SUPABASE_URL_ARCHIVE) {
-    const rows = maskRows([...MOCK_DIGESTS].sort((a, b) => b.window_to.localeCompare(a.window_to)).slice(0, DIGEST_ROW_LIMIT));
-    return {source: 'mock', rows};
+    const all = mockRows();
+    return {source: 'mock', rows: all.slice(0, DIGEST_ROW_LIMIT), index: byWindow(all.map(windowOf)), rowAt: async (w) => all.find((r) => sameWindow(windowOf(r), w)) ?? null};
   }
   const readable = assertChatReadable(process.env);
   if (!readable.ok) throw new ChatUnavailableError(readable.message);
-  return {source: 'live', rows: await loadDigestCached(readable.mode, projectOf())};
+  const project = projectOf();
+  const [rows, index] = await Promise.all([loadDigestCached(readable.mode, project), loadDigestIndexCached(readable.mode, project)]);
+  return {source: 'live', rows, index: byWindow(index), rowAt: (w) => loadDigestRowCached(readable.mode, project, w.from, w.to, w.createdAt)};
 }

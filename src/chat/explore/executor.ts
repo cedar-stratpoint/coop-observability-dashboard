@@ -6,6 +6,7 @@ import {GuardTripError} from '../tools';
 import {ExploreDbError, mapDbError} from './errors';
 import type {LeadFacts} from './basis';
 import {shapeResult, type RawQueryResult} from './result';
+import {baseRelation} from './views';
 import {EXPLORE_ERROR_CLASS, EXPLORE_ERROR_MESSAGES, type ExploreErrorCode, type ExploreLimits, type ValidateErr, type ValidateOk} from './types';
 
 export type {RawQueryResult} from './result';
@@ -78,7 +79,7 @@ export function createExploreExecutor(deps: ExploreDeps): ExploreExecutor {
     }
 
     const id = step === 'final' ? `x${finals + 1}` : null;
-    const leadFacts = id && v.relations.includes('coop_explore_event_leads') && deps.leadFacts ? await deps.leadFacts().catch(() => null) : null;
+    const leadFacts = id && v.relations.some((r) => baseRelation(r) === 'spin_wheel_leads') && deps.leadFacts ? await deps.leadFacts().catch(() => null) : null;
     const shaped = shapeResult({raw, validated: v, limits, id, leadFacts});
     if (!shaped.ok) {
       logExploreQuery({step, ok: false, code: shaped.code, fingerprint: v.fingerprint, literalsHash: v.literalsHash, views: v.relations, user: deps.user}, sink);

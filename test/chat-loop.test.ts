@@ -1,9 +1,13 @@
 import {describe, expect, it, vi} from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import {readFileSync} from 'node:fs';
-import {runChatLoop, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
+import {runChatLoop, UNTRUSTED_TEXT_TOOLS, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
+import {COST_CAP_TEXT} from '../src/chat/cost';
 import {assertRequestShape} from '../src/chat/request-shape';
-import {CHAT_TOOLS, exploreTools} from '../src/chat/tool-defs';
+import {CHAT_TOOLS, chatTools, exploreTools} from '../src/chat/tool-defs';
+import {createExecutors} from '../src/chat/tool-executors';
+import {createCrmClient} from '../src/chat/crm/client';
+import {CRM_BODIES} from './support/crm-fixtures';
 import type {ChatStreamEvent} from '../src/chat/stream-types';
 import type {ToolExecutors} from '../src/chat/tools';
 
@@ -72,6 +76,60 @@ const turnLines = (s: ReturnType<typeof sink>) => s.info.mock.calls.map((c) => J
 const guardTrips = (s: ReturnType<typeof sink>) => s.error.mock.calls.map((c) => JSON.parse(c[0] as string)).filter((l) => l.event === 'chat_guard_trip');
 
 describe('runChatLoop', () => {
+  it('Train 4: a tool with customer-entered text emits one untrusted event before the answer text; errors and other tools do not', async () => {
+    expect([...UNTRUSTED_TEXT_TOOLS].sort()).toEqual(['list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'run_query']);
+    const probe = {purpose: 'p', sql: 'select 1 as n', step: 'probe'};
+    const client = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'run_query', probe), toolUse('t2', 'run_query', probe)) : {text: ['Done.']}));
+    const {events, opts} = setup(client, {tools: exploreTools(), executors: {run_query: async () => ({rows: [{note: 'visit https://evil.example'}]})}});
+    await runChatLoop(opts);
+    const kinds = events.map((e) => e.t);
+    expect(kinds.filter((k) => k === 'untrusted')).toHaveLength(1);
+    expect(kinds.indexOf('untrusted')).toBeLessThan(kinds.lastIndexOf('text'));
+
+    const failing = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'run_query', probe)) : {text: ['Done.']}));
+    const f = setup(failing, {tools: exploreTools(), executors: {run_query: async () => { throw new Error('db down'); }}});
+    await runChatLoop(f.opts);
+    expect(f.events.some((e) => e.t === 'untrusted')).toBe(false);
+
+    const metric = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'query_metric', QUERY)) : {text: ['Done.']}));
+    const m = setup(metric);
+    await runChatLoop(m.opts);
+    expect(m.events.some((e) => e.t === 'untrusted')).toBe(false);
+  });
+
+  const CRM_ORDERS = {from: '2026-09-01', to: '2026-09-30', financial_status: 'all', group_by: 'none', limit: 10, offset: 0};
+  it('Train 4: a CRM list tool emits the untrusted event too', async () => {
+    const client = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'list_crm_orders', CRM_ORDERS)) : {text: ['Done.']}));
+    const {events, opts} = setup(client, {executors: {list_crm_orders: async () => ({id: 'r1', rows: []})}});
+    await runChatLoop(opts);
+    expect(events.filter((e) => e.t === 'untrusted')).toHaveLength(1);
+  });
+
+  it('Train 4: the REAL CRM executors over a fake fetch run in the loop, fire untrusted once, and the metrics tool (no customer text) does not', async () => {
+    const fetch = (async (input: RequestInfo | URL) => {
+      const id = ({'/api/orders': 'orders', '/api/metrics': 'metrics'} as Record<string, string>)[new URL(String(input)).pathname];
+      return new Response(JSON.stringify((CRM_BODIES as Record<string, unknown>)[id]), {status: 200});
+    }) as typeof globalThis.fetch;
+    const real = () => createExecutors({data: async () => ({source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []}), now: new Date('2026-10-07T04:00:00Z'), user: null, crm: createCrmClient({baseUrl: 'https://crm.example', token: 'tok', fetch})} as Parameters<typeof createExecutors>[0]);
+    const tools = chatTools({explore: false, crm: true});
+
+    const c1 = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'list_crm_orders', CRM_ORDERS)) : {text: ['Done.']}));
+    const a = setup(c1, {tools, executors: real()});
+    await runChatLoop(a.opts);
+    expect(a.events.filter((e) => e.t === 'untrusted')).toHaveLength(1);
+    expect(c1.requests[1]).toContain('#1001'); // the tool really ran and its result went back to the model
+
+    const c2 = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'get_crm_metrics', {})) : {text: ['Done.']}));
+    const b = setup(c2, {tools, executors: real()});
+    await runChatLoop(b.opts);
+    expect(b.events.some((e) => e.t === 'untrusted')).toBe(false);
+
+    const bad = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'list_crm_orders', {...CRM_ORDERS, url: 'https://evil.example'})) : {text: ['Done.']}));
+    const c = setup(bad, {tools, executors: real()});
+    await runChatLoop(c.opts);
+    expect(c.events.some((e) => e.t === 'untrusted')).toBe(false); // a refused call carries no customer text
+  });
+
   it('degenerate loop: a repeated unit stops the stream, trims the tail, says so honestly and ends with done', async () => {
     const client = new FakeClient(() => ({text: ['Last week you sold 12 bags.', ...Array.from({length: 1000}, () => '<br> ')], stop_reason: 'max_tokens'}));
     const {events, opts} = setup(client);
@@ -238,6 +296,37 @@ describe('runChatLoop', () => {
       const summary = await runChatLoop(opts);
       expect(client.requests).toHaveLength(2);
       expect(summary.stopReason).toBe('deadline');
+    });
+  });
+
+  describe('2.8 cost cap per turn', () => {
+    const big = (...uses: Block[]): Scripted => ({content: [THINKING, ...uses], stop_reason: 'tool_use', usage: {input_tokens: 400_000, output_tokens: 0}});
+
+    it('a budget already spent before any tool result stops with COST_CAP_TEXT, stopReason cost_cap and no model call', async () => {
+      const client = new FakeClient(() => ({text: ['never sent']}));
+      const {events, opts} = setup(client, {turnBudget: 0});
+      const summary = await runChatLoop(opts);
+      expect(summary.stopReason).toBe('cost_cap');
+      expect(client.requests).toHaveLength(0);
+      expect(events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('')).toContain(COST_CAP_TEXT);
+      expect(events.at(-1)).toMatchObject({t: 'done'});
+    });
+
+    it('over the budget after a tool step: exactly one more model call, made without tools being callable (the wrap-up), then done', async () => {
+      const client: FakeClient = new FakeClient((n): Scripted => (n === 1 ? big(toolUse('t1', 'query_metric', QUERY)) : {text: ['Revenue was ₱100.']}));
+      const {opts, events} = setup(client, {turnBudget: 1000});
+      const summary = await runChatLoop(opts);
+      expect(client.requests).toHaveLength(2);
+      expect(client.req(1).tool_choice).toEqual({type: 'none'});
+      expect(summary.stopReason).toBe('wrapped_up');
+      expect(events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('')).toBe('Revenue was ₱100.');
+    });
+
+    it('no budget option: no cap', async () => {
+      const client: FakeClient = new FakeClient((n): Scripted => (n === 1 ? big(toolUse('t1', 'query_metric', QUERY)) : {text: ['ok']}));
+      const summary = await runChatLoop(setup(client).opts);
+      expect(client.req(1).tool_choice).toEqual({type: 'auto'});
+      expect(summary.stopReason).toBe('end_turn');
     });
   });
 

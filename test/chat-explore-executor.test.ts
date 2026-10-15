@@ -154,7 +154,7 @@ describe('EXP-03 limits and errors', () => {
     const {exec} = make(run);
     const r = (await exec(call('select * from coop_explore_orders'))) as {error: string};
     expect(Object.keys(r)).toEqual(['error']);
-    expect(r.error).toBe('E_SELECT_STAR: Name the columns you need; * is not allowed (count(*) is fine).');
+    expect(r.error).toBe('E_SELECT_STAR: Name the columns you need; * and a whole-row reference (t, t::text) are not allowed (count(*) is fine).');
     expect(run).not.toHaveBeenCalled();
     const syn = (await exec(call('selec 1'))) as {error: string};
     expect(syn.error).toMatch(/^E_SYNTAX: SQL syntax error near character \d+\.$/);

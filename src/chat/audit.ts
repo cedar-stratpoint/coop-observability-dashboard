@@ -129,6 +129,19 @@ export function logExploreQuery(
   );
 }
 
+/** Train 4: one line per website CRM tool call. Endpoint ids, a params fingerprint and counts only: never a URL, a body, a row, a value or the token. */
+export function logCrmCall(
+  e: {tool: string; endpoints: readonly string[]; paramsFp: string; ok: boolean; code: string | null; rows: number | null; bytes: number | null; ms: number; user?: string | null},
+  sink: AuditSink = console,
+): void {
+  sink.info(JSON.stringify({event: 'chat_crm_call', tool: e.tool, endpoints: e.endpoints, params_fp: e.paramsFp, ok: e.ok, code: e.code, rows: e.rows, bytes: e.bytes, ms: e.ms, user: e.user ?? null}));
+}
+
+/** Spec 8 (Task 7 review finding 8): one line per list_tables / describe_table call. Names only: never a column list or a row. */
+export function logExploreSchema(e: {tool: 'list_tables' | 'describe_table'; ok: boolean; code: string | null; table?: string | null; domain?: string | null; user?: string | null}, sink: AuditSink = console): void {
+  sink.info(JSON.stringify({event: 'chat_explore_schema', tool: e.tool, ok: e.ok, code: e.code, table: e.table ?? null, domain: e.domain ?? null, user: e.user ?? null}));
+}
+
 /** Spec 8: once per question when at least one final succeeded. The log the "promote repeated shapes to metrics" decision reads. */
 export function logRegistryGap(e: {fingerprints: readonly string[]; views: readonly string[]; metricsTried: readonly string[]; user?: string | null}, sink: AuditSink = console): void {
   sink.info(JSON.stringify({event: 'chat_registry_gap', fingerprints: e.fingerprints, views: e.views, metrics_tried: e.metricsTried, user: e.user ?? null}));

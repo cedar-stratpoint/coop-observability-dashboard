@@ -51,7 +51,7 @@ describe('EXP-04/06 no mental arithmetic: merge and total in the SQL, quote cell
     expect(topic).toMatch(/every figure you write must be a cell/i);
   });
   it('merges spellings of one event in the SQL with lower(btrim()) and sum(), and returns totals as cells', () => {
-    expect(topic).toMatch(/group by lower\(btrim\(name\)\)[^.]*sum\(/i);
+    expect(topic).toMatch(/`group by` with `sum\(\.\.\.\)`/i);
     expect(topic).toMatch(/per-group and grand totals as columns or rows/i);
     expect(topic).toMatch(/if the owner asks for a total, query the total/i);
   });
@@ -60,12 +60,23 @@ describe('EXP-04/06 no mental arithmetic: merge and total in the SQL, quote cell
   });
 });
 
-// Live test 5 (G01): the SQL grouped by lower(btrim(name)) but labelled each group with min(btrim(name)), which differs per pet sub-group, so one event
-// showed as two categories. The label must be the group key (or the same for every row of the group).
-describe('EXP-04/06 the display label is the group key', () => {
-  it('says to select the group key itself and never min()/max() of the raw name per sub-group', () => {
-    expect(topic).toMatch(/selecting the group key itself/i);
-    expect(topic).toMatch(/lower\(btrim\(e\.name\)\) as event/i);
-    expect(topic).toMatch(/never (a )?`?min\(\)`?\/`?max\(\)`? of the raw name/i);
+// Live test 5 (G01) and final review (A7): one event label per event, never split across pets, proper-case. ONE rule in EXP-06 (EXP-04 points to it).
+const LABEL = /min\(min\(btrim\(e\.name\) collate "C"\)\) over \(partition by lower\(btrim\(e\.name\)\)\) as event/;
+describe('EXP-04/06 one label rule for event names', () => {
+  it('EXP-06 says group by lower(btrim(e.name)) and label with min(min(... collate "C")) over the same partition', () => {
+    expect(topic).toMatch(/group by lower\(btrim\(e\.name\)\)/);
+    expect(topic).toMatch(LABEL);
+  });
+  it('EXP-04 points to the EXP-06 rule instead of stating its own', () => {
+    const exp04 = topic.split('\n').find((l) => l.startsWith('[EXP-04'))!;
+    expect(exp04).toMatch(/EXP-06/);
+    expect(exp04).not.toMatch(/min\(btrim|never the lower-cased key/);
+  });
+  it('no line teaches lower() as the label or the old min(btrim(name)) label', () => {
+    expect(topic).not.toMatch(/lower\(btrim\(e\.name\)\) as event/);
+    expect(topic).not.toMatch(/never `min\(\)`/);
+  });
+  it('EXP-06 tells the model to select the venue column when the question names venues or malls', () => {
+    expect(topic).toMatch(/names venues or malls, select the venue column too \(venue, event, pet, measure\)/);
   });
 });

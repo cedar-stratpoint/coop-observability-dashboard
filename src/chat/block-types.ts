@@ -4,7 +4,7 @@
 // names, it never types a value (the model-never-types-numbers rule).
 import type {ColumnUnit, MetricRow, ResultColumn} from './result-types';
 
-export type ChartForm = 'bar' | 'grouped_bar' | 'stacked_bar' | 'stacked_bar_100' | 'line' | 'area' | 'pie' | 'diverging_bar';
+export type ChartForm = 'bar' | 'grouped_bar' | 'stacked_bar' | 'stacked_bar_100' | 'small_multiples' | 'line' | 'area' | 'pie' | 'diverging_bar';
 export type Orientation = 'vertical' | 'horizontal';
 export type BlockFormat = 'peso' | 'count' | 'percent';
 
@@ -23,6 +23,8 @@ export interface ChosenView {
   adjustments: string[];
   /** 'user' when the form came from an explicit request, 'auto' when code chose it. */
   mode: 'auto' | 'user';
+  /** Code-written coverage notes about the data (a group over 10% untagged): added to the block's Notes and returned to the model. */
+  notes?: string[];
 }
 
 /** A color is a design TOKEN name, never a hex: the UI resolves it per theme. */

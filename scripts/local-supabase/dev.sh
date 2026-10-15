@@ -19,7 +19,7 @@ for f in "$ROOT/.env" "$ROOT/.env.local"; do
     export "$name="
   done
 done
-# The CRM proxy is a hosted service too: keep a local run off it (the chat does not use it; the CRM pages render empty).
+# The CRM proxy is a hosted service too: keep a local run off it (the chat's Website totals then say 'not connected'; the CRM pages render empty).
 export CRM_API_URL= CRM_API_READ_TOKEN=
 
 set -a; . "$ENVF"; set +a   # the local values win over the blanks above

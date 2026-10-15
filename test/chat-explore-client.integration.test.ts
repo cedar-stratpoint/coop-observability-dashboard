@@ -7,7 +7,7 @@
 import {execSync} from 'node:child_process';
 import {afterAll, describe, expect, it, vi} from 'vitest';
 vi.mock('server-only', () => ({}));
-import {createRunQuery} from '../src/chat/explore/client';
+import {createRunQuery, runInEnvelope, type ExploreSql} from '../src/chat/explore/client';
 import {ExploreDbError} from '../src/chat/explore/errors';
 import {createExploreExecutor} from '../src/chat/explore/executor';
 import {DEFAULT_EXPLORE_LIMITS} from '../src/chat/explore/limits';
@@ -49,7 +49,22 @@ describe.skipIf(!local)('EXP-05 the real driver and the real role (local Postgre
       "select current_setting('transaction_read_only') as ro, current_setting('statement_timeout') as st, current_setting('lock_timeout') as lt, current_setting('timezone') as tz, current_setting('search_path') as sp, current_setting('idle_in_transaction_session_timeout') as idle, current_user as who",
       {timeoutMs: 1234, maxRows: 5},
     );
-    expect(r).toEqual({ro: 'on', st: '1234ms', lt: '2s', tz: 'Asia/Manila', sp: 'public', idle: '10s', who: 'coop_explore_ro'});
+    expect(r).toEqual({ro: 'on', st: '1234ms', lt: '2s', tz: 'Asia/Manila', sp: 'public, pg_temp', idle: '10s', who: 'coop_explore_ro'});
+  });
+
+  it('Task 7: a temporary object made earlier on the same session can never shadow a real view (search_path public, pg_temp)', async () => {
+    const postgres = (await import('postgres')).default;
+    const sql = postgres(URL_!, {max: 1, prepare: false, onnotice: () => {}});
+    try {
+      // The app never sends this (the parser allows one SELECT, the envelope is READ ONLY): it simulates a session that somehow holds one.
+      await sql.unsafe('begin read write; create temporary view coop_explore_orders as select -1::bigint as id; commit');
+      const shadow = await sql.unsafe('select o.id from coop_explore_orders o limit 1'); // default path: pg_temp is searched first
+      expect(Number(shadow[0].id)).toBe(-1);
+      const r = await runInEnvelope(sql as unknown as ExploreSql, wrapCursor('select min(o.id) as id from coop_explore_orders o'), OPTS);
+      expect(Number(r.rows[0][0])).toBeGreaterThan(0); // the envelope reads the real view
+    } finally {
+      await sql.end({timeout: 1});
+    }
   });
 
   it('EXP-05 a Manila-day boundary: 16:30 UTC lands on the next Manila day', async () => {
@@ -117,8 +132,11 @@ describe.skipIf(!local)('EXP-05 the real driver and the real role (local Postgre
     expect(admin('select count(*) from pos_orders')).toBe(before);
   });
 
-  it('EXP-05 a base table (not a view) is denied by the role (42501 -> E_DB_DENIED)', async () => {
-    expect(await codeOf(run(wrapCursor('select id from pos_orders'), OPTS))).toBe('E_DB_DENIED');
+  // Train 3 (direct reads): base tables are readable on purpose now; a CLOSED table (secret name, scripts/coop-direct-fixture.sql) is
+  // what the role denies.
+  it('EXP-05 a base table is readable, a closed (secret-named) table is denied by the role (42501 -> E_DB_DENIED)', async () => {
+    expect((await run(wrapCursor('select o.id from pos_orders o'), OPTS)).rows.length).toBeGreaterThan(0);
+    expect(await codeOf(run(wrapCursor('select m.marketplace from marketplace_tokens m'), OPTS))).toBe('E_DB_DENIED');
   });
 
   it('EXP-05 a statement timeout surfaces as E_TIMEOUT within about the limit', async () => {

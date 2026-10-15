@@ -237,6 +237,8 @@ function decideChart(f: Facts, mixed: boolean): BlockDecision[] {
     } else if (k === 'diverging_bar') {
       if (job === 'delta' || hasNeg) form = 'diverging_bar';
       else substitute('a diverging bar needs values above and below a baseline');
+    } else if (k === 'small_multiples') {
+      substitute('small multiples need a second category to split each chart by', parts.length >= 2 ? 'grouped_bar' : 'bar');
     } else if (k === 'pie') {
       if (parts.length !== 1) substitute('a pie shows one measure');
       else if (isTime) substitute('a pie of dates is not a whole');
@@ -357,26 +359,97 @@ function pickMeasure(measures: ResultColumn[], title: string): ResultColumn {
   return named ?? measures.find((m) => m.unit === 'PHP') ?? measures[0];
 }
 
-const TWO_DIM_KINDS = new Set<ViewRequest['kind']>(['auto', 'grouped_bar', 'stacked_bar', 'stacked_bar_100']);
+// Two category columns and one measure (spec 2c). UNTUNED estimates like the constants above.
+export const GROUPED_MAX_SERIES = 6; // side-by-side bars up to this many series values; stacked past it
+export const UNTAGGED_NOTE_SHARE = 0.1; // a group whose untagged share of the measure is OVER this gets a Notes line
+
+const TWO_DIM_KINDS = new Set<ViewRequest['kind']>(['auto', 'grouped_bar', 'stacked_bar', 'stacked_bar_100', 'small_multiples']);
 const NO_VALUE = 'No tag';
 
+/** A cell as a category name: trimmed, and "No tag" for an empty one. */
+const rawName = (r: MetricRow, c: ResultColumn): string => {
+  const v = r[c.key];
+  const s = v === null || v === undefined ? '' : String(v).trim();
+  return s === '' ? NO_VALUE : s;
+};
+
 /**
- * Two category columns and one measure (an Explore result such as event by pet): the first dimension is the axis, the second is the
- * series (grouped or stacked bars), ONE measure is drawn. Returns null when the shape does not fit (non-additive duplicates, ...), and
- * the caller falls back to the one-dimension path. Only the x tail past TABLE_MIN_CLASSES and the series tail past SERIES_FOLD_AT fold
- * into "Other", and only for additive measures; the table twin always has every row.
+ * Case-insensitive groups of a column's names (spec 2c.4): the label is the most frequent original spelling; a tie prefers one with a
+ * capital letter, then sort order. `variants` lists every spelling seen, most frequent first.
  */
-function decideTwoDim(result: MetricResult, request: ViewRequest, pick: {y?: string[]; title?: string}): BlockDecision | null {
+export function displaySpellings(names: readonly string[]): Map<string, {label: string; variants: string[]}> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const n of names) {
+    const k = n.toLowerCase();
+    const m = counts.get(k) ?? new Map<string, number>();
+    m.set(n, (m.get(n) ?? 0) + 1);
+    counts.set(k, m);
+  }
+  const capital = (s: string): number => (/[A-Z]/.test(s) ? 1 : 0);
+  const out = new Map<string, {label: string; variants: string[]}>();
+  for (const [k, m] of counts) {
+    const ranked = [...m].sort((a, b) => b[1] - a[1] || capital(b[0]) - capital(a[0]) || a[0].localeCompare(b[0])).map(([s]) => s);
+    out.set(k, {label: ranked[0], variants: ranked});
+  }
+  return out;
+}
+
+/** With three category columns, one whose value another fixes (venue, fixed by event) adds no split: it is set aside for the notes. */
+function splitParent(cats: ResultColumn[], rows: MetricRow[]): {pair: ResultColumn[]; parent: ResultColumn | null} {
+  if (cats.length !== 3) return {pair: cats, parent: null};
+  const key = (r: MetricRow, c: ResultColumn): string => rawName(r, c).toLowerCase();
+  for (const a of cats) {
+    for (const b of cats) {
+      if (a === b) continue;
+      const parentOf = new Map<string, string>();
+      const fixed = rows.every((r) => {
+        const prev = parentOf.get(key(r, b));
+        parentOf.set(key(r, b), key(r, a));
+        return prev === undefined || prev === key(r, a);
+      });
+      if (fixed && new Set(parentOf.values()).size < parentOf.size) return {pair: cats.filter((c) => c !== a), parent: a};
+    }
+  }
+  return {pair: cats, parent: null};
+}
+
+const isUntagged = (name: string): boolean => isNeutral(name) && name.trim().toLowerCase() !== 'other';
+
+/** One Notes line per group whose untagged share of the measure is over UNTAGGED_NOTE_SHARE (spec 2c.2). Written by code, never by the model. */
+function untaggedNotes(totals: Map<string, {all: number; untagged: number}>, measure: string, dim: string): string[] {
+  const out: string[] = [];
+  for (const [group, t] of totals) {
+    if (!(t.all > 0) || t.untagged / t.all <= UNTAGGED_NOTE_SHARE) continue;
+    out.push(`${group}: ${Math.round((t.untagged / t.all) * 100)}% of ${measure} has no ${dim} tag.`);
+  }
+  return out;
+}
+
+/**
+ * Two category columns and one measure (an Explore result such as event by pet), plus at most one parent column (venue): the first
+ * dimension is the groups, the second the series (one color per value), ONE measure is drawn. Grouped bars up to GROUPED_MAX_SERIES
+ * series, stacked past it; "stacked_bar_100" for shares and "small_multiples" (one panel per group) when asked. Names that differ only
+ * in case are drawn as one group with the most frequent spelling. Returns null when the shape does not fit, and the caller falls back
+ * to the one-dimension path. Only the x tail past TABLE_MIN_CLASSES and the series tail past SERIES_FOLD_AT fold into "Other"; the
+ * table twin always has every row.
+ */
+function decideTwoDim(result: MetricResult, request: ViewRequest, pick: {x?: string; y?: string[]; title?: string}): BlockDecision | null {
   const cats = result.columns.filter((c) => c.role === 'category');
-  if (cats.length !== 2 || result.columns.some((c) => c.role === 'time') || !TWO_DIM_KINDS.has(request.kind)) return null;
+  if (cats.length < 2 || cats.length > 3 || result.columns.some((c) => c.role === 'time') || !TWO_DIM_KINDS.has(request.kind)) return null;
+  const {pair, parent} = splitParent(cats, result.rows);
+  if (pair.length !== 2) return null;
   const numeric = result.columns.filter(isNumericColumn);
   const wanted = pick.y?.length ? pick.y.map((k) => numeric.find((c) => c.key === k)).filter((c): c is ResultColumn => c !== undefined) : [];
   if (pick.y?.length && wanted.length !== 1) return null;
   const measures = numeric.filter((c) => c.role === 'measure');
   const m = wanted[0] ?? (measures.length ? pickMeasure(measures, pick.title ?? '') : undefined);
   if (!m || m.role !== 'measure' || !ADDITIVE.has(m.unit) || result.meta.measures.some((d) => d.key === m.key && d.kind === 'derived')) return null;
-  const [xc, sc] = cats;
-  const name = (r: MetricRow, c: ResultColumn): string => (r[c.key] === null || r[c.key] === undefined || r[c.key] === '' ? NO_VALUE : String(r[c.key]));
+  const [xc, sc] = pick.x !== undefined && pair[1].key === pick.x ? [pair[1], pair[0]] : pair; // an explicit x picks the groups
+  const spell = new Map(cats.map((c) => [c.key, displaySpellings(result.rows.map((r) => rawName(r, c)))] as const));
+  const name = (r: MetricRow, c: ResultColumn): string => {
+    const raw = rawName(r, c);
+    return spell.get(c.key)?.get(raw.toLowerCase())?.label ?? raw;
+  };
 
   const cells = new Map<string, Map<string, number[]>>();
   for (const r of result.rows) {
@@ -394,6 +467,12 @@ function decideTwoDim(result: MetricResult, request: ViewRequest, pick: {y?: str
   if (seriesNames.length < 2) return null;
 
   const adj: string[] = [];
+  if (parent) adj.push(`Each ${xc.label.toLowerCase()} has one ${parent.label.toLowerCase()}, so the chart groups by ${xc.label.toLowerCase()}; the table keeps the ${parent.label.toLowerCase()} column.`);
+  for (const c of pair) {
+    for (const {label, variants} of spell.get(c.key)?.values() ?? []) {
+      if (variants.length > 1) adj.push(`${variants.map((v) => `"${v}"`).join(' and ')} differ only in capitalisation, so the chart draws them as one ${c.label.toLowerCase()}, "${label}"; the table keeps each row.`);
+    }
+  }
   const keep = seriesNames.length > SERIES_FOLD_AT ? seriesNames.slice(0, SERIES_FOLD_AT - 1) : seriesNames;
   const foldedSeries = keep.length < seriesNames.length;
   const shown = foldedSeries ? [...keep, 'Other'] : keep;
@@ -418,13 +497,32 @@ function decideTwoDim(result: MetricResult, request: ViewRequest, pick: {y?: str
   if (foldedSeries) adj.push(`Showing the top ${SERIES_FOLD_AT - 1} of ${seriesNames.length} ${sc.label.toLowerCase()} values and the rest as "Other". The table has every row.`);
   const colors = colorMap(shown);
   const series: Series[] = shown.map((s) => ({key: keyOf(s), label: s, unit: m.unit, entity: s, color: colors[s]}));
-  const form: ChartForm = request.kind === 'auto' ? autoForm('grouped', series.length) : (request.kind as ChartForm);
-  const orientation = orientationFor(request, wide.map((r) => cell(r, xc.key)), adj);
-  const reason = `${xc.label} by ${sc.label.toLowerCase()}: ${m.label.toLowerCase()} as ${form === 'grouped_bar' ? 'side-by-side' : 'stacked'} bars, one series per ${sc.label.toLowerCase()} value.`;
+  const form: ChartForm = request.kind === 'auto' ? (series.length <= GROUPED_MAX_SERIES ? 'grouped_bar' : 'stacked_bar') : (request.kind as ChartForm);
+  const orientation: Orientation = form === 'small_multiples' ? 'horizontal' : orientationFor(request, wide.map((r) => cell(r, xc.key)), adj);
+  const dim = sc.label.toLowerCase();
+  const measureWord = m.label.toLowerCase();
+  const how = form === 'small_multiples'
+    ? `one small chart per ${xc.label.toLowerCase()} on one shared scale`
+    : `${measureWord} as ${form === 'grouped_bar' ? 'side-by-side' : form === 'stacked_bar_100' ? '100% stacked' : 'stacked'} bars`;
+  const reason = `${xc.label} by ${dim}: ${how}, one series per ${dim} value.`;
+
+  const totalsBy = (c: ResultColumn): Map<string, {all: number; untagged: number}> => {
+    const out = new Map<string, {all: number; untagged: number}>();
+    for (const r of result.rows) {
+      const v = num(r[m.key]);
+      if (v === null) continue;
+      const t = out.get(name(r, c)) ?? {all: 0, untagged: 0};
+      t.all += v;
+      if (isUntagged(name(r, sc))) t.untagged += v;
+      out.set(name(r, c), t);
+    }
+    return out;
+  };
+  const notes = [...(parent ? untaggedNotes(totalsBy(parent), measureWord, dim) : []), ...untaggedNotes(totalsBy(xc), measureWord, dim)];
   return {
     block: 'chart',
     chart: {form, orientation, x: {key: xc.key, label: xc.label, unit: xc.unit}, series, rows: wide, folded},
-    chosen: chosen(form, orientation, reason, adj, request),
+    chosen: {...chosen(form, orientation, reason, adj, request), ...(notes.length ? {notes} : {})},
     twin: twinOf(result),
     emphasis: null,
   };
@@ -489,7 +587,8 @@ export function recommendView(result: MetricResult, request: ViewRequest, pick: 
     };
   }
 
-  if (!pick.x) {
+  // An explicit x on kind auto is a one-dimension ask; with a grouped/stacked/small-multiples kind, an x naming a category column still pivots (live A7).
+  if (!pick.x || (request.kind !== 'auto' && columns.some((c) => c.key === pick.x && c.role === 'category'))) {
     const two = decideTwoDim(result, request, pick);
     if (two) return {decisions: [two]};
   }

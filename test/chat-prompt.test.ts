@@ -120,7 +120,13 @@ describe('live context block: the owner defines the dates (no digest anchoring)'
 describe('explore variants of the period rule and the guardrails (spec 6.4)', () => {
   it('the non-explore period text is unchanged and still says to ask which dates', () => {
     expect(buildLiveContextBlock({})).toBe(buildLiveContextBlock());
-    expect(buildLiveContextBlock()).toMatch(/If a question has no period, ask which dates before using any tool\./);
+    expect(buildLiveContextBlock()).toMatch(/If a question has no period, ask which dates before using any tool, except where THINK-01 says otherwise \(stock\)\./);
+  });
+  it('the website flag says where Website figures come from (live orders through get_channel_report), never only "stored digests"', () => {
+    const on = buildLiveContextBlock({website: true});
+    expect(on).toMatch(/Website totals for any dates come from live website orders through get_channel_report/);
+    expect(on).not.toMatch(/Shopee, Lazada and Website figures come from the stored digests/);
+    expect(buildLiveContextBlock()).toMatch(/Shopee, Lazada and Website figures come from the stored digests/);
   });
   it('the explore period text makes a ranking or profile question with no period mean all available data', () => {
     const t = buildLiveContextBlock({explore: true});
@@ -146,7 +152,8 @@ describe('explore variants of the period rule and the guardrails (spec 6.4)', ()
     const on = buildStaticSystem({tools: true, explore: true});
     expect(off).toMatch(/customer-level data are not available/);
     expect(off).not.toMatch(/run_query|coop_explore_/);
-    expect(on).toMatch(/coop_explore_orders/);
+    expect(on).toMatch(/pos_orders/);
+    expect(on).toMatch(/list_tables/);
     expect(on).toMatch(/Exploratory, not a registered metric/);
     expect(on).not.toMatch(/already masked/);
     expect(buildStaticSystem({tools: true, explore: true})).toBe(on); // cache-stable

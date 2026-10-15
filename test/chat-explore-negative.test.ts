@@ -16,7 +16,6 @@ import {
   EXPLORE_ERROR_CLASS,
   EXPLORE_ERROR_MESSAGES,
   EXPLORE_FUNCTION_NAMES,
-  EXPLORE_VIEW_NAMES,
   type ExploreErrorCode,
 } from '../src/chat/explore/types';
 
@@ -132,8 +131,8 @@ describe('EXP-02 priority: hard trips are always reported as trips', () => {
     expect(r).toMatchObject({ok: false, code: 'E_CATALOG', trip: 'hard'});
     const s = await validateExploreSql('select o.api_key from pos_orders o');
     expect(s).toMatchObject({ok: false, code: 'E_BLOCKED_COLUMN', trip: 'soft'});
-    const t = await validateExploreSql('select * from pos_orders');
-    expect(t).toMatchObject({ok: false, code: 'E_RELATION'});
+    const t = await validateExploreSql('select * from pos_orders'); // Train 3: the base table is readable, the star is not
+    expect(t).toMatchObject({ok: false, code: 'E_SELECT_STAR'});
   });
   it('the error table is complete: every code has a class and a constant message', () => {
     for (const code of Object.keys(EXPLORE_ERROR_MESSAGES) as ExploreErrorCode[]) {
@@ -141,7 +140,7 @@ describe('EXP-02 priority: hard trips are always reported as trips', () => {
       expect(EXPLORE_ERROR_MESSAGES[code].length).toBeGreaterThan(5);
       expect(EXPLORE_ERROR_MESSAGES[code]).not.toMatch(/drop |insert /i);
     }
-    expect(EXPLORE_ERROR_MESSAGES.E_RELATION).toContain(EXPLORE_VIEW_NAMES.join(', '));
+    expect(EXPLORE_ERROR_MESSAGES.E_RELATION).toMatch(/Secret tables/);
   });
   it('the exported allowlists match the contract', () => {
     expect(EXPLORE_FUNCTIONS).toEqual(EXPLORE_FUNCTION_NAMES);
@@ -171,9 +170,11 @@ describe('EXP-02 mutation: a gate must be able to fail (spec 4.8)', () => {
       expect(await closed(byId(id).sql)).toMatchObject({ok: false, code: 'E_NODE'});
     }
   });
-  it('(2b) with the relation allowlist widened to a base table, N23 passes', async () => {
-    const wide = createExploreValidator({viewNames: [...EXPLORE_VIEW_NAMES, 'pos_orders']});
-    expect((await wide(byId('N23').sql)).ok).toBe(true);
+  it('(2b) with the relation rule opened to every name, a secret table passes: the name rule is load-bearing', async () => {
+    const wide = createExploreValidator({relationAllowed: () => true});
+    const sql = 'select m.marketplace from marketplace_tokens m';
+    expect(await validateExploreSql(sql)).toMatchObject({ok: false, code: 'E_RELATION'});
+    expect((await wide(sql)).ok).toBe(true);
   });
   it('(3) the wrapper check catches a parser that disagrees about the string it will send; skipping it lets that through', async () => {
     // A stub parse that, for the wrapped string only, returns a DECLARE whose query differs from the standalone SELECT.
@@ -214,7 +215,7 @@ describe('EXP-02 mutation: a gate must be able to fail (spec 4.8)', () => {
     expect(EXPLORE_COLUMN_PATTERN_EXCEPTIONS).toEqual([]);
   });
   it('(5) with the blocked-column check removed, N54 passes', async () => {
-    const lax = createExploreValidator({blockedColumnRe: /(?!)/});
+    const lax = createExploreValidator({secretName: () => false});
     expect((await lax(byId('N54').sql)).ok).toBe(true);
   });
 });

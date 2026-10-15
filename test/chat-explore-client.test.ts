@@ -49,7 +49,7 @@ describe('EXP-05 the envelope', () => {
       'SET LOCAL lock_timeout = 2000',
       'SET LOCAL idle_in_transaction_session_timeout = 10000',
       "SET LOCAL timezone = 'Asia/Manila'",
-      'SET LOCAL search_path = public',
+      'SET LOCAL search_path = public, pg_temp', // pg_temp LAST: a temporary object can never shadow a real table or type
       SQL,
       'FETCH FORWARD 201 FROM coop_explore_c',
       'ROLLBACK',
@@ -57,6 +57,25 @@ describe('EXP-05 the envelope', () => {
     expect(r.columns).toEqual([{name: 'day', type: 'date'}, {name: 'revenue_php', type: 'number'}]);
     expect(r.rows).toEqual([['2026-09-01', 12.5]]); // numeric text -> number, date stays text
     expect(r.fetched).toBe(1);
+  });
+
+  it('Task 7: secret-shaped values are replaced with [hidden] inside the envelope, before anything leaves client.ts, with a count', async () => {
+    const jwt = 'eyJ' + 'a'.repeat(12) + '.' + 'b'.repeat(12) + '.' + 'c'.repeat(12);
+    const d = fakeDriver({rows: [[1, jwt], [2, 'plain']], columns: [{name: 'id', type: 23}, {name: 'note', type: 25}]});
+    const r = await runInEnvelope(d.sql, SQL, {timeoutMs: 5000, maxRows: 200});
+    expect(r.rows).toEqual([[1, '[hidden]'], [2, 'plain']]);
+    expect(r.hidden).toBe(1);
+  });
+
+  it('Task 7 round 2 N5: if the scanner throws (a stack overflow on a hostile value), no row leaves: ExploreDbError, rolled back', async () => {
+    const hostile = {get token(): string {
+      throw new RangeError('Maximum call stack size exceeded');
+    }};
+    const d = fakeDriver({rows: [[1, 'plain'], [2, hostile]], columns: [{name: 'id', type: 23}, {name: 'payload', type: 3802}]});
+    const p = runInEnvelope(d.sql, SQL, {timeoutMs: 5000, maxRows: 200});
+    await expect(p).rejects.toBeInstanceOf(ExploreDbError);
+    await expect(p).rejects.not.toHaveProperty('value');
+    expect(d.events.at(-1)).toBe('ROLLBACK');
   });
 
   it('EXP-05 never uses the simple protocol for any statement (a second statement would otherwise run) and never COMMITs', async () => {

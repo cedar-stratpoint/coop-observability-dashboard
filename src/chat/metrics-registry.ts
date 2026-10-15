@@ -626,6 +626,11 @@ const REVENUE: MeasureDecl = {key: 'revenue', label: 'Revenue', kind: 'measured'
 const ORDERS: MeasureDecl = {key: 'orders', label: 'Orders', kind: 'measured', unit: 'count', method: 'Number of completed (not voided) orders'};
 const AOV: MeasureDecl = {key: 'aov', label: 'Average order value', kind: 'derived', unit: 'PHP', method: 'Revenue divided by number of orders, derived; empty when there are no orders'};
 
+/** Stock metrics run through stock-metrics.ts (runMetric branches before any orders work); reaching this means a wiring bug. */
+const notAnOrdersMetric = (): ComputeOutput => {
+  throw new Error('stock metrics are computed by runStockMetric, never by an orders compute');
+};
+
 const DEFS: MetricDef[] = [
   {
     id: 'offline_revenue',
@@ -753,6 +758,35 @@ const DEFS: MetricDef[] = [
     supportsPet: true, supportsEvent: true, supportsCompare: true,
     profile: {job: 'detail', headlineColumns: ['value', 'share'], shareBasis: 'allocated bundle revenue'},
     compute: computeBundlePicks,
+  },
+  {
+    id: 'stock_on_hand',
+    label: 'Stock on hand',
+    description: 'Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all locations, or per location.',
+    dimensions: [
+      {key: 'sellable', label: 'Per product, Event (sellable) stock', shape: 'category'},
+      {key: 'office', label: 'Per product, Office (back) stock', shape: 'category'},
+      {key: 'all_locations', label: 'Per product, all locations', shape: 'category'},
+      {key: 'by_location', label: 'Per product and location', shape: 'matrix'},
+    ],
+    measures: [{key: 'units', label: 'Stock', kind: 'measured', unit: 'units', method: 'Units on hand in the stock lots, per location, as of now'}],
+    defaultMeasure: 'units',
+    defaultDimension: 'sellable',
+    supportsPet: false, supportsEvent: false, supportsCompare: false,
+    profile: {job: 'compare', headlineColumns: ['stock_units'], shareBasis: null},
+    compute: notAnOrdersMetric,
+  },
+  {
+    id: 'stock_cover',
+    label: 'Stock cover',
+    description: 'How many selling days the Event (sellable) stock lasts per product, with status (out, low, healthy): the Inventory page forecast, as of now.',
+    dimensions: [{key: 'sku', label: 'Per product', shape: 'category'}],
+    measures: [{key: 'cover', label: 'Cover (selling days)', kind: 'derived', unit: 'ratio', method: 'Event stock divided by units sold per selling day over the last 60 days (the Inventory forecast), as of now'}],
+    defaultMeasure: 'cover',
+    defaultDimension: 'sku',
+    supportsPet: false, supportsEvent: false, supportsCompare: false,
+    profile: {job: 'detail', headlineColumns: ['cover_days', 'stock_units'], shareBasis: null},
+    compute: notAnOrdersMetric,
   },
 ];
 

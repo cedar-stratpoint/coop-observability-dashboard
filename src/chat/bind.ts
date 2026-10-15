@@ -10,7 +10,7 @@ export type ResultStore = Map<string, MetricResult>;
 export type BindOutcome = {error: string} | {blocks: ChatBlock[]; chosen: ChosenView[]};
 
 export const MAX_TITLE = 120;
-export const KINDS: readonly string[] = ['auto', 'line', 'area', 'bar', 'grouped_bar', 'stacked_bar', 'stacked_bar_100', 'pie', 'diverging_bar'];
+export const KINDS: readonly string[] = ['auto', 'line', 'area', 'bar', 'grouped_bar', 'stacked_bar', 'stacked_bar_100', 'small_multiples', 'pie', 'diverging_bar'];
 export const ORIENTATIONS: readonly string[] = ['auto', 'vertical', 'horizontal'];
 export const FORMATS: readonly string[] = ['peso', 'count', 'percent'];
 
@@ -112,7 +112,9 @@ function fromDecision(result: MetricResult, d: BlockDecision, title: string, nex
   if (d.block === 'table') return [tableBlock(result, nextId(), title, d.columns)];
   const cols = [d.chart.x, ...d.chart.series];
   const parts = d.chart.form === 'stacked_bar' || d.chart.form === 'stacked_bar_100' || d.chart.form === 'pie'; // a split of a whole names its basis
-  return [{...baseOf(result, nextId(), title, parts || isShareLike(result.columns.filter((c) => cols.some((k) => k.key === c.key)))), kind: 'chart', chart: d.chart, chosen: d.chosen, twin: d.twin}];
+  const block: ChartBlock = {...baseOf(result, nextId(), title, parts || isShareLike(result.columns.filter((c) => cols.some((k) => k.key === c.key)))), kind: 'chart', chart: d.chart, chosen: d.chosen, twin: d.twin};
+  block.caveats.push(...(d.chosen.notes ?? []));
+  return [block];
 }
 
 /**

@@ -17,6 +17,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const file = (p) => readFileSync(join(root, p), 'utf8')
 const FIXTURE = file('scripts/coop-chat-ro-fixture.sql')
 const MAIN = file('supabase/coop_chat_readonly.sql')
+const STOCK_FIXTURE = file('scripts/coop-stock-fixture.sql')
+const STOCK = file('supabase/coop_chat_stock.sql')
 const CHECKS = file('supabase/coop_chat_readonly_checks.sql')
 const PROOF = file('supabase/coop_chat_readonly_proof.sql')
 const SWEEP = file('supabase/coop_chat_readonly_function_sweep.sql')
@@ -29,6 +31,9 @@ const CONTRACT = {
   coop_chat_prices: 'product_id,price',
   coop_chat_price_changes: 'id,product_id,old_price,new_price,changed_at',
   coop_chat_events: 'event_id,name,venue,city,starts_on,ends_on,status,created_at',
+  coop_chat_stock_by_location: 'product_id,location,stock',
+  coop_chat_sale_movements: 'id,product_id,delta,reason,created_at',
+  coop_chat_stock_config: 'key,value',
 }
 const CUSTOMER = ['customer_handle', 'remarks', 'phone', 'email', 'instagram', 'customer_name', 'client_uuid', 'device_id', 'created_by', 'updated_by', 'changed_by', 'opening_cash', 'closing_cash', 'cash_note', 'organizer']
 
@@ -63,10 +68,13 @@ const count = () => Number(q('select count(*) from public.pos_orders'))
 sh(`do $$ begin if exists (select 1 from pg_roles where rolname='coop_chat_ro') then alter role coop_chat_ro reset all; end if; end $$;
     alter role authenticator reset pgrst.db_pre_request;`)
 sh(FIXTURE)
+sh(STOCK_FIXTURE) // the stock tables the three stock views read (local fixture only)
 const out1 = sh(MAIN)
 rec('apply coop_chat_readonly.sql (first run)', !/ERROR/.test(out1), out1.match(/ERROR.*/)?.[0])
 const out2 = sh(MAIN)
 rec('apply coop_chat_readonly.sql again (idempotent)', !/ERROR/.test(out2), out2.match(/ERROR.*/)?.[0])
+const outStock = sh(STOCK)
+rec('apply coop_chat_stock.sql (and again: idempotent)', !/ERROR/.test(outStock) && !/ERROR/.test(sh(STOCK)), outStock.match(/ERROR.*/)?.[0])
 rec('hook installed notice', /pgrst\.db_pre_request set to public\.coop_chat_pre_request/.test(out2))
 await reload()
 
@@ -80,7 +88,7 @@ for (const [view, cols] of Object.entries(CONTRACT)) {
 }
 { const r = await api('GET', 'coop_chat_order_items?select=order_id,qty&order=id.asc&limit=3', { token: RO })
   rec('order=id works on coop_chat_order_items', r.status === 200 && r.body.length === 3, `${r.status}`) }
-for (const t of ['pos_orders', 'pos_order_items', 'pos_products', 'pos_bundles', 'pos_prices', 'pos_price_changes', 'pos_events']) {
+for (const t of ['pos_orders', 'pos_order_items', 'pos_products', 'pos_bundles', 'pos_prices', 'pos_price_changes', 'pos_events', 'pos_inventory_by_location', 'pos_stock_movements', 'pos_settings']) {
   const r = await api('GET', `${t}?select=*&limit=1`, { token: RO })
   rec(`base table ${t} denied`, r.status >= 400 && !Array.isArray(r.body), `${r.status} ${r.text}`)
 }
@@ -134,10 +142,10 @@ const [qa, qb, qc, qd, qe] = stmts.map((s) => q(s + ';'))
 const rowsA = qa.split('\n').filter(Boolean)
 rec('(a) lists the definer fixture function and the hook', rowsA.some((l) => /fake_write_rpc\(\)\|t\|/.test(l)) && rowsA.some((l) => /coop_chat_pre_request\(\)\|f\|/.test(l)), qa)
 rec('(a) release check: definer functions callable only with hook installed', rowsA.every((l) => !/\|t\|/.test(l)) || /public\.coop_chat_pre_request/.test(qc))
-rec('(b) exactly SELECT on the seven views', qb.split('\n').sort().join() === Object.keys(CONTRACT).sort().map((v) => `public|${v}|SELECT`).join(), qb)
+rec('(b) exactly SELECT on the ten views', qb.split('\n').sort().join() === Object.keys(CONTRACT).sort().map((v) => `public|${v}|SELECT`).join(), qb)
 rec('(c) hook set to coop_chat_pre_request', /pgrst\.db_pre_request=public\.coop_chat_pre_request/.test(qc), qc)
 rec('(d) role cannot login/inherit/bypass', qd === 'coop_chat_ro|f|f|f|f|f|f', qd)
-rec('(e) seven views match the contract', qe.split('\n').length === 7 && qe.split('\n').every((l) => l.endsWith('|t')), qe)
+rec('(e) ten views match the contract', qe.split('\n').length === 10 && qe.split('\n').every((l) => l.endsWith('|t')), qe)
 
 // ---- proof.sql through psql
 const proofBefore = count()

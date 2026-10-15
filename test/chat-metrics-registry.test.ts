@@ -2,10 +2,10 @@ import {describe, it, expect} from 'vitest';
 import {METRICS, METRIC_IDS, sharesOf} from '../src/chat/metrics-registry';
 import type {MetricId} from '../src/chat/result-types';
 
-const ALL: MetricId[] = ['offline_revenue', 'offline_orders', 'offline_aov', 'top_products', 'payment_mix', 'event_rollup', 'pet_mix', 'bundle_sales', 'bundle_picks'];
+const ALL: MetricId[] = ['offline_revenue', 'offline_orders', 'offline_aov', 'top_products', 'payment_mix', 'event_rollup', 'pet_mix', 'bundle_sales', 'bundle_picks', 'stock_on_hand', 'stock_cover'];
 
 describe('METRICS registry', () => {
-  it('declares exactly the nine slice-1 metrics, keyed by their id', () => {
+  it('declares exactly the nine order metrics and the two stock metrics, keyed by their id', () => {
     expect([...METRIC_IDS].sort()).toEqual([...ALL].sort());
     expect(Object.keys(METRICS).sort()).toEqual([...ALL].sort());
     for (const id of ALL) expect(METRICS[id].id).toBe(id);
@@ -46,7 +46,7 @@ describe('METRICS registry', () => {
           expect(m.method.trim().length, `${m.key} method`).toBeGreaterThan(0);
           expect(m.method, m.key).not.toContain('\n');
           expect(['measured', 'allocated', 'derived']).toContain(m.kind);
-          expect(['PHP', 'count', 'units']).toContain(m.unit);
+          expect(['PHP', 'count', 'units', 'ratio']).toContain(m.unit);
         }
       });
 
@@ -96,8 +96,10 @@ describe('METRICS registry', () => {
   });
 
   it('supports the pet filter everywhere except pet_mix', () => {
-    for (const id of ALL) expect(METRICS[id].supportsPet, id).toBe(id !== 'pet_mix');
-    for (const id of ALL) expect(METRICS[id].supportsEvent, id).toBe(true);
+    const orders = ALL.filter((id) => !id.startsWith('stock_')); // stock is "as of now": no pet or event filter
+    for (const id of orders) expect(METRICS[id].supportsPet, id).toBe(id !== 'pet_mix');
+    for (const id of orders) expect(METRICS[id].supportsEvent, id).toBe(true);
+    for (const id of ['stock_on_hand', 'stock_cover'] as const) expect([METRICS[id].supportsPet, METRICS[id].supportsEvent, METRICS[id].supportsCompare]).toEqual([false, false, false]);
   });
 });
 

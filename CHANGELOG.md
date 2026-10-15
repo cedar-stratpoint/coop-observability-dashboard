@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-15 — v1.6.0: Ask Coop trains 1-4 (prod release)
+Minor bump (SemVer): new, backward-compatible Ask Coop features. Unlike v1.5.0 this release **needs a database and env step before it works on prod** (see below); the dashboard still builds and runs without it, with Explore and the CRM tools off.
+
+- **Train 1, fast path:** the chat gets the open page and describes pasted dashboard links from a page map; Explore reads stock; the prompt is honest about what it can and cannot see.
+- **Train 2, digest periods and charts:** period comparisons from the digest, with charts first.
+- **Train 3, direct reads:** Explore reads every `public` table and view except secrets, tenant (`gl_*`, `company_*`) and token tables.
+- **Train 4, website CRM tools:** `get_crm_metrics`, `list_crm_orders`, `list_crm_customers`, `list_crm_checkouts` (GET only).
+- *Before enabling on prod (not part of this PR):* apply `supabase/coop_chat_explore.sql`, `coop_chat_stock.sql`, `coop_chat_explore_direct.sql`, `coop_chat_default_views.sql` by hand (the co-worker owns the prod project), run the checks files, then set `EXPLORE_DATABASE_URL`, `EXPLORE_MODE`, `EXPLORE_ALLOWED_EMAILS`, `CRM_API_URL`, `CRM_API_READ_TOKEN` on Vercel and redeploy. Train 3 on prod also waits for zoomy-pos to revoke PUBLIC execute on its write RPCs.
+- Per-train detail is in the entries below.
+
 ## 2026-10-14 — v1.5.0: Transactions and Offline Sales redesign (prod release)
 Minor bump (SemVer): new, backward-compatible UI features; no schema, API or env changes. It also rolls up the feature releases that reached prod since v1.4.1 without a bump (#160 event-scoped "View all products", #169 "Update leads", #176 Events redesign). Ships to `main` as one cherry-picked release; staging has had each piece since 2026-10-13/14.
 
@@ -41,6 +51,55 @@ Promotes this session's Events work from staging to prod by cherry-pick (develop
 - **New "Picky eater" field** (Oct 2026 booth form). It is saved by the button and by the CSV import, and shown as a column once any lead has it. Needs `supabase/spin_wheel_leads_picky.sql` (additive: one new column), **run on prod before the button is used**.
 - The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
 - Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
+
+## 2026-10-08 — Ask Coop reads the whole database except secrets (Train 3)
+- **Access.** `run_query` reads every `public` table and view by its own name. The view-per-table model hid every new table and column until someone re-ran SQL, and it narrowed the owner's "everything except passwords and credentials" without saying so.
+- **The lock stays in the database.** The read-only login gets `SELECT` plus `BYPASSRLS`. One whole-word secret-name rule (password, token, secret, key, pin, hash, credential, with a reviewed `pos_settings.key` exception) and the Zoomy-only tenant fence (`gl_*`, `company_*`, `companies`) close tables and columns. The allowlist is 29 views.
+- **Future objects.** An event trigger re-applies the rule on every DDL, and a 5-minute pg_cron job backs it, because Supabase skips user event triggers for superusers and reserved roles. A daily drift job shows up in `/api/chat/health`.
+- **App layers.** A value scanner hides secret-shaped values that sit under innocent names, and fails closed past every bound. `list_tables` and `describe_table` read the live schema. A 66-case attack suite covers the parser and scanner. Two limits are accepted: string-function splitting of a secret, and X58 text in Postgres logs.
+- **Owner decision.** `digest_archive.bundle` stays queryable (the UI still never selects it).
+- **Catalog.** A runtime catalog generated from `knowledge/data-catalog/` drives the prompt, the page map and the go-links. The `tables.md` edits live outside git. `crm-tools.md` is deferred to Train 4.
+- **Answers.** A new default view, `pos_orders_completed`, sits next to `pos_orders`; the status lint now fires only on raw `pos_orders` with no status filter. Event stock keeps its Train 1 view (`coop_explore_stock_event`). "Completed" means what the dashboard counts: every order that is not voided (`status is distinct from 'voided'`, a null status included), the same in `query_metric`, the view, the coverage line and the Offline Sales page; in practice status is only `completed` or `voided`. The `stock_on_hand` and `stock_cover` registry metrics arrived, and a code-written basis note is added.
+- **Cost cap.** Each question has a cost cap in input-token equivalents: `CHAT_TURN_BUDGET` (default 300000); past it the turn stops with a "try a narrower question" line.
+- **Go-links.** The chat can open 18 dashboard destinations (was 8), from the catalog's page map (`components/analyst/coop-chat.tsx` `APP_PATHS`).
+- **Health.** `/api/chat/health` adds `drift` (the daily drift job's newest time and count) and `uncatalogued` (open tables missing from the catalog).
+- **Website.** When the CRM is configured, the prompt says Website totals come from live orders through `get_channel_report`, and the gap line names what is still not readable (customers, carts, order lists).
+- **Aliases.** The `coop_explore_*` views stay as aliases until a later PR.
+- **Train 2 merged in.** Its final fix wave (one event-label rule, `min(min(btrim(e.name) collate "C")) over (partition by lower(btrim(e.name)))`, and a parser that accepts only `collate "C"`) now governs the base-table examples too: one label rule across the skill, E01-E18 and the tool descriptions.
+- **Apply order.** By hand on staging: `coop_chat_explore_direct.sql`, then `coop_chat_default_views.sql`, then `coop_chat_stock.sql` (it needs the `coop_chat_ro` role from `coop_chat_readonly.sql`; the readonly checks (b) now expect ten grants). Check with `coop_chat_explore_direct_checks.sql`; `coop_chat_explore_checks.sql` is for the Train 1 state only. PROD waits for zoomy-pos to revoke public execute on its write RPCs.
+- **Rollback.** Unset `EXPLORE_MODE` first (or deploy a pre-Train 3 app): the prompt names base tables the rolled-back login cannot read. Then `coop_chat_explore_direct_rollback.sql`, `coop_chat_explore.sql` and the Train 1 checks.
+
+## 2026-10-07 — Ask Coop reads the website CRM (Train 4)
+- **Four GET-only tools.** Website customers, orders and abandoned checkouts live only in the CRM Worker, so Ask Coop gets `get_crm_metrics`, `list_crm_orders`, `list_crm_customers` and `list_crm_checkouts`. Totals, groups and paging are computed in code; results chart and pass the number check.
+- **Decision: the model never sees a URL, the token, a checkout link, a voucher code, the raw Shopify blob or free-text line-item properties.** The chat has its own guarded client (GET only, one base URL, endpoint and parameter allowlists, read-scoped token, 5 s / 4 MB / 8 GETs / 6 calls per turn). Both it and the pages share one field allowlist (`src/crm-project.ts`). This replaces the spec's "value scanner reused" for CRM data (owner sign-off in the PR).
+- **`get_channel_report` (any period) reads through the same client.** Its Website row uses the new client; the temporary Train 2 exception for the old reader (`src/crm-data.ts`) is gone.
+- **Decision (owner): customer contacts reach the model unmasked.** Email, phone and names from the CRM tools go to the model, the Anthropic API and the browser's localStorage chat history without masking. This departs from `knowledge/best-practices/pii-and-secrets.md` ("mask at the read seam"), by owner decision and on the same precedent as Explore. Still never returned: checkout links, voucher codes, the raw blob.
+- **Decision: a field allowlist replaces the spec's "value scanner reused".** `src/crm-project.ts` copies only listed fields, so a field the Worker adds later is dropped until added on purpose; no scan of values is run.
+- **Decision: customer text is untrusted.** It is cleaned, capped and marked in every result. An answer that used CRM or Explore text shows links as plain text. There is no send or write tool, so injected text has nowhere to go.
+- **Three prompt states.** The prompt text depends on: no CRM env; CRM env set with `CHAT_CRM_TOOLS=off`; tools on. `get_digest` and `NOT_STORED` are true in all three, so the model never claims tools it does not have.
+- **Env.** `CRM_API_URL`, `CRM_API_READ_TOKEN`; optional kill switch `CHAT_CRM_TOOLS=off` hides the tools without touching the Website CRM page.
+- **Known limits.** Only the Worker enforces that the read token cannot open `/admin` (the dashboard never calls it, and a test pins that). Customer text can only be labelled untrusted, not stopped.
+- Best practice: `knowledge/best-practices/chat-readonly-api-tools.md`.
+- **Merged onto Train 3.** The CRM tools sit after `get_channel_report` next to Explore's `list_tables` / `describe_table` (15 tools with the CRM, 18 with Explore too; the strict limit is 20). The per-turn "Not available" line keeps the three CRM states and appends the catalog-built "Not in the database" line from the same flags (`DataFlags {website, crm}`).
+
+## 2026-10-07 — Ask Coop digest periods and charts (Train 2)
+- **Digests by date.** Ask Coop reads digests by date in Philippine days. `window_from` is a PH-midnight `timestamptz` and was read with `slice(0,10)`, which showed 27 Sep for a window starting 28 Sep. PROD holds mixed windows (weekly, about a month, rolling 30 days, re-runs), so every stored window is listed per turn (newest re-run only), and `get_digest` can pick the one covering a date.
+- **Any period per channel.** New `get_channel_report`: Shopee and Lazada from the digests' per-day `daily` data (merged per channel and day, newest digest wins), Website from live CRM orders, Offline from POS. AOV is recomputed, never averaged. Old windows without `daily` are summed only when they tile exactly, and overlapping ones are refused as "not combinable". Website units are "unknown" when the CRM has no line items. The chat route now passes `getCrmOrders` to this one tool: a deliberate, temporary architecture exception (aggregates only, fence test updated) that Train 4's GET-only CRM tools replace.
+- **`recent_weeks` removed.** It matched weeks by Monday and showed a month as a "week"; `get_channel_report` replaces it.
+- **Two-dimension charts.** Event-by-pet results draw as grouped bars, 100% stacked or small multiples (one colour per series), with a code-written note for every group over 10% untagged and display spelling merged to the most frequent variant. No SQL to apply.
+- **Framing rule (EXP-08).** Explore skill rule that a claim about a group must hold for every row (no "both venues" overclaims); golden A07 and a fixture trap pin it. Explore skill budget raised to 6,600 tokens (final measure about 6,494 after the fix wave below).
+- **Not saved into reports.** `get_channel_report` charts, like `get_digest` charts, are not saved into reports.
+- **Final review fixes.**
+  - **One event-label rule.** EXP-04 and EXP-06 contradicted each other (and the few-shot taught `lower()`), so live A7 showed lower-case event names. Now one rule: group by `lower(btrim(e.name))`, label with `min(min(btrim(e.name) collate "C")) over (partition by lower(btrim(e.name))) as event` (one capitalised spelling per event, never split across pets). EXP-04 points to EXP-06. The Explore validator now allows `CollateClause` for collation `"C"` only (negative corpus row X17 uses `en_US`).
+  - **Venue rule.** When the question names venues or malls the SQL selects the venue column too (venue, event, pet, measure), which feeds the venue-level untagged note.
+  - **Channel reports draw themselves.** In live A8 the model typed a table and no chart appeared; the loop's backstop now auto-draws a `get_channel_report` result (chart first, table twin) when no render tool ran.
+  - **Coverage notes name their sources.** Every Shopee or Lazada row now says which digests supplied the days ("per-day sales from digests Sep 1 to Sep 27, 2026; ... (every day covered)") so the model no longer says it did not check.
+  - **CRM exception narrowed.** The architecture test pins the chat's `@/src/crm-data` imports to exactly `crmConfigured` and `getCrmOrders` (Train 4 replaces them with GET-only tools).
+  - **Explicit x still pivots.** Live A7: the model called `render_chart` with kind `grouped_bar`, x `event`, y `revenue_php`; an explicit x skipped the two-dimension pivot and drew one plain bar chart. With a non-auto kind, an x naming a category column now picks the groups.
+  - **`get_digest` covering** rejects impossible dates (2026-02-30), sharing `isRealDay` with `get_channel_report`.
+
+## 2026-10-07 — Ask Coop fast path (Train 1)
+- **Ask Coop fast path (Train 1).** The per-turn context no longer calls contacts, free-form questions or stock unavailable when Explore is on (it did on every turn in PROD). The chat now sends the open page, and dashboard links pasted in a question are described from a page map, so "this" means the page's data. Explore can read stock (5 views over 4 zoomy-pos sources; `coop_explore_stock_event` is the default) with sellable Event stock as the default basis, because two kinds of "stock" exist and the dashboard forecast uses Event. `pos_locations` was left out (it may not exist on staging or PROD), and `coop_chat_explore.sql` now stops in step 0 with a clear message if a stock source or `pos_inventory_by_location.location` is missing. Needs `supabase/coop_chat_explore.sql` re-applied on staging and PROD.
 
 ## 2026-10-07 — Event tiles get "View all products" (event-scoped rankings)
 - **Each event tile's Top sellers block now ends with "View all products →".** It opens Product rankings scoped to that event (`/offline-sales/rankings?event=<id>`), with the Products and Bundles tabs, sort, search and paging the overview's View all already has.
@@ -1251,6 +1310,7 @@ scope for Business Health (`#coop-scroll`) unchanged — `<main>` still owns scr
 all breakpoints. **Deferred to phase 2:** per-view content density (table→card
 transforms, chart label density, typography) and the PWA layer (manifest, icons,
 service worker).
+
 ## 2026-09-24 — All contacts: the three lists merged — `feat(customers)`
 
 `/customers/all` is the hub's new landing view: one row per PERSON across the

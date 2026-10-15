@@ -6,7 +6,7 @@ vi.mock('server-only', () => ({}));
 import {shapeDigest} from '../src/chat/digest-lookup';
 import {chatDigestClient} from '../src/chat/read/client';
 import {mintChatReadJwt} from '../src/chat/read/mint-jwt';
-import {readDigestRows} from '../src/chat/read/digest';
+import {readDigestIndex, readDigestRowAt, readDigestRows} from '../src/chat/read/digest';
 import type {ChatReadMode} from '../src/chat/read/relations';
 import {assertLocalSupabase} from './support/local-only';
 
@@ -29,22 +29,41 @@ function serviceJwt(secret: string): string {
 const env = () => ({SUPABASE_URL_ARCHIVE: URL_, SUPABASE_SERVICE_ROLE_KEY_ARCHIVE: SECRET ? serviceJwt(SECRET) : undefined, CHAT_RO_JWT_SECRET: SECRET});
 
 describe.skipIf(!local)('get_digest read path on the local stack', () => {
-  it.each<ChatReadMode>(['guarded_service', 'ro_role'])('%s: reads the two seeded digests newest first, without the bundle', async (mode) => {
+  it.each<ChatReadMode>(['guarded_service', 'ro_role'])('%s: reads the six seeded digests newest first, without the bundle', async (mode) => {
     const {client, stats} = chatDigestClient({mode, env: env()});
     const rows = await readDigestRows(client, mode);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(6);
     expect(rows[0].digest.headline).toMatch(/Lazada and Shopee both grew/);
-    expect(rows[1].digest.headline).toMatch(/quieter week/);
+    expect(rows.some((r) => /quieter week/.test(r.digest.headline))).toBe(true);
     expect(JSON.stringify(rows)).not.toContain(MARKER);
     expect(Object.keys(rows[0]).sort()).toEqual(['created_at', 'digest', 'window_from', 'window_to']);
     expect(rows[0].digest.customers?.outreach[0].name).toBe('Maria S.'); // masked at the seam
-    expect(stats).toMatchObject({attemptedNonRead: 0, allowed: 1});
 
     const out = shapeDigest({window: 'latest', section: 'comparison'}, {source: 'live', rows}, new Date('2026-09-30T04:00:00Z'));
     if ('error' in out) throw new Error(out.error);
     expect(out.result.meta.source).toBe('digest');
-    expect(out.result.rows.find((r) => r.channel === 'Lazada')).toMatchObject({revenue: 26250, orders: 52});
+    expect(out.result.rows.find((r) => r.channel === 'Lazada')).toMatchObject({revenue: 6300, orders: 14});
     expect(JSON.stringify(out)).not.toMatch(/Maria|Santos|FICTIONAL/);
+
+    const index = await readDigestIndex(client, mode);
+    expect(index).toHaveLength(6);
+    expect(JSON.stringify(index)).not.toContain(MARKER);
+    expect(stats).toMatchObject({attemptedNonRead: 0, allowed: 2});
+  });
+
+  // rowAt (Task 1) matches an older digest by eq on the created_at TEXT the index returned. Proves the round trip against real PostgREST
+  // (timestamptz text such as "+00:00", with the "+" surviving the query string), for EVERY stored window, in both modes.
+  it.each<ChatReadMode>(['guarded_service', 'ro_role'])('%s: readDigestRowAt finds every window by the text the index returned', async (mode) => {
+    const {client} = chatDigestClient({mode, env: env()});
+    const index = await readDigestIndex(client, mode);
+    expect(index).toHaveLength(6);
+    for (const w of index) {
+      const row = await readDigestRowAt(client as never, mode, w);
+      expect(row, `${w.from} ${w.to} ${w.createdAt}`).not.toBeNull();
+      expect([row?.window_from, row?.window_to, row?.created_at]).toEqual([w.from, w.to, w.createdAt]);
+    }
+    const oldest = index[index.length - 1];
+    expect(await readDigestRowAt(client as never, mode, {...oldest, createdAt: '2020-01-01T00:00:00+00:00'})).toBeNull();
   });
 
   it('the guard refuses a select of bundle before it reaches the database, in both modes', async () => {
