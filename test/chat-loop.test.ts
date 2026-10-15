@@ -578,6 +578,21 @@ describe('provider account errors', () => {
   });
 });
 
+describe('chat_error log', () => {
+  it('a 400 logs its message (cut to 300 characters) so a rejected request shape can be diagnosed; other statuses log none', async () => {
+    const bad = setup(new FakeClient(() => Object.assign(new Error(`400 tools.3.input_schema: ${'x'.repeat(400)}`), {status: 400})));
+    await runChatLoop(bad.opts);
+    const line = bad.s.error.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === 'chat_error');
+    expect(line.status).toBe(400);
+    expect(line.detail).toMatch(/^400 tools\.3\.input_schema/);
+    expect(line.detail.length).toBe(300);
+    const other = setup(new FakeClient(() => Object.assign(new Error('boom'), {status: 500})));
+    await runChatLoop(other.opts);
+    const l2 = other.s.error.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === 'chat_error');
+    expect(l2.detail).toBeUndefined();
+  });
+});
+
 describe('automatic prompt caching (ai-expert audit, 2026-10-02)', () => {
   it('every request carries the top-level ephemeral breakpoint, and the total stays within the 4-breakpoint limit', async () => {
     const client = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('a', 'query_metric', QUERY)) : {text: ['Done.']}));
