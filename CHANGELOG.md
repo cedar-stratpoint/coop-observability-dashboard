@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-15 — v1.6.0: Ask Coop trains 1-4 (prod release)
+Minor bump (SemVer): new, backward-compatible Ask Coop features. Unlike v1.5.0 this release **needs a database and env step before it works on prod** (see below); the dashboard still builds and runs without it, with Explore and the CRM tools off.
+
+- **Train 1, fast path:** the chat gets the open page and describes pasted dashboard links from a page map; Explore reads stock; the prompt is honest about what it can and cannot see.
+- **Train 2, digest periods and charts:** period comparisons from the digest, with charts first.
+- **Train 3, direct reads:** Explore reads every `public` table and view except secrets, tenant (`gl_*`, `company_*`) and token tables.
+- **Train 4, website CRM tools:** `get_crm_metrics`, `list_crm_orders`, `list_crm_customers`, `list_crm_checkouts` (GET only).
+- *Before enabling on prod (not part of this PR):* apply `supabase/coop_chat_explore.sql`, `coop_chat_stock.sql`, `coop_chat_explore_direct.sql`, `coop_chat_default_views.sql` by hand (the co-worker owns the prod project), run the checks files, then set `EXPLORE_DATABASE_URL`, `EXPLORE_MODE`, `EXPLORE_ALLOWED_EMAILS`, `CRM_API_URL`, `CRM_API_READ_TOKEN` on Vercel and redeploy. Train 3 on prod also waits for zoomy-pos to revoke PUBLIC execute on its write RPCs.
+- Per-train detail is in the entries below.
+
 ## 2026-10-14 — v1.5.0: Transactions and Offline Sales redesign (prod release)
 Minor bump (SemVer): new, backward-compatible UI features; no schema, API or env changes. It also rolls up the feature releases that reached prod since v1.4.1 without a bump (#160 event-scoped "View all products", #169 "Update leads", #176 Events redesign). Ships to `main` as one cherry-picked release; staging has had each piece since 2026-10-13/14.
 
