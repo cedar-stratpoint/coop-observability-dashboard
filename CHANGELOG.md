@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-15 — Goldline reads its own Anthropic key (`GOLDLINE_ANTHROPIC_API_KEY`)
+- Goldline PDF extraction now reads **`GOLDLINE_ANTHROPIC_API_KEY`**, not `ANTHROPIC_API_KEY` (Ask Coop's). **No fallback.** Without it, a PDF is stored for manual review instead of being read.
+- *Why:* Ask Coop and Goldline are billed on separate Anthropic keys; reading the shared variable put Goldline usage on Ask Coop's key.
+- *Action:* set `GOLDLINE_ANTHROPIC_API_KEY` on the **Staging** Vercel project (and prod, with the v1.7.0 release), or Staging PDF uploads stop being read once this lands.
+- Same change shipped to prod in the v1.7.0 release (#200). Test: `src/goldline-extract-run.test.ts`.
+
 ## 2026-10-15 — Ask Coop answers again on prod: the three CRM list tools are not strict
 - **What broke:** on prod every Ask Coop question failed ("Coop hit a problem answering that"). The API answered 400 "the compiled grammar is too large" before any token: Explore and the four website CRM tools together put 18 strict tools in one request (the staging config sent 14 and worked). Found by logging the 400 message (#195).
 - **Fix:** `list_crm_orders`, `list_crm_customers` and `list_crm_checkouts` are sent with `strict: false`; `get_crm_metrics` and every other tool stay strict. A key the model leaves out takes its default (limit 25, offset 0, filters "all", group_by "none"); the dates have no default; an unknown key (a url, a method) is still refused before any read; the CRM client is still GET-only.
