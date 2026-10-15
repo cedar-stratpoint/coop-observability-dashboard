@@ -11,7 +11,9 @@ import {
 import type {WriterProfile} from './goldline-writer-data';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
-// ANTHROPIC_API_KEY from the env (never the browser). The hard, reusable parts —
+// GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
+// key, separate from Ask Coop's ANTHROPIC_API_KEY, and deliberately does NOT fall
+// back to it, so Goldline usage is never billed to Ask Coop's key. The hard, reusable parts —
 // the prompt, manifest, and schema — are in goldline-extract.ts and unit-tested;
 // this thin wrapper is exercised end-to-end by the upload route and smoke-tested
 // on Staging once the key is set.
@@ -50,7 +52,12 @@ export type ExtractedPage = {
 
 /** True when extraction is configured; lets callers disable the PDF path cleanly. */
 export function extractionConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.GOLDLINE_ANTHROPIC_API_KEY);
+}
+
+/** Goldline's own Anthropic client (its key, not Ask Coop's). */
+function goldlineClient(): Anthropic {
+  return new Anthropic({apiKey: process.env.GOLDLINE_ANTHROPIC_API_KEY});
 }
 
 /** A document content block for a base64 PDF — shared by the detect + extract calls. */
@@ -75,8 +82,8 @@ function parseJsonContent(res: {content?: Array<{type: string; text?: string}>})
  * pick the right manifest without asking the user which page they uploaded.
  */
 export async function detectPage(pdfBase64: string): Promise<number> {
-  if (!extractionConfigured()) throw new Error('ANTHROPIC_API_KEY is not set');
-  const client = new Anthropic();
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
     max_tokens: 300,
@@ -104,11 +111,11 @@ export async function detectPage(pdfBase64: string): Promise<number> {
  * surfaces the reason to the reviewer.
  */
 export async function extractInventoryPage(pdfBase64: string, page: number, profile?: WriterProfile): Promise<ExtractedPage> {
-  if (!extractionConfigured()) throw new Error('ANTHROPIC_API_KEY is not set');
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const system = buildSystemPrompt();
   const manifest = buildManifestPrompt(page); // throws if this page has no manifest yet
 
-  const client = new Anthropic();
+  const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
     // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON. 16000 covers the
