@@ -49,8 +49,8 @@ const digestDoc = (over: Partial<DigestDocument> = {}): DigestDocument => ({
 export const GOLDEN_DIGEST: DigestSource = {
   source: 'live',
   rows: [
-    {window_from: '2026-09-21T00:00:00+00:00', window_to: '2026-09-27T23:59:59+00:00', created_at: '2026-09-28T01:00:00+00:00', digest: digestDoc()},
-    {window_from: '2026-09-14T00:00:00+00:00', window_to: '2026-09-20T23:59:59+00:00', created_at: '2026-09-21T01:00:00+00:00', digest: digestDoc({headline: 'Quieter.', window: {label: 'week of Sep 14 to 20', from: '2026-09-14T00:00:00.000Z', to: '2026-09-20T23:59:59.000Z'}})},
+    {window_from: '2026-09-20T16:00:00+00:00', window_to: '2026-09-27T16:00:00+00:00', created_at: '2026-09-28T01:00:00+00:00', digest: digestDoc()},
+    {window_from: '2026-09-13T16:00:00+00:00', window_to: '2026-09-20T16:00:00+00:00', created_at: '2026-09-21T01:00:00+00:00', digest: digestDoc({headline: 'Quieter.', window: {label: 'week of Sep 14 to 20', from: '2026-09-13T16:00:00.000Z', to: '2026-09-20T16:00:00.000Z'}})},
   ],
 };
 
@@ -162,10 +162,10 @@ export interface GoldenCase {
   noTools?: boolean;
   /**
    * OWNER RULE (THINK-01): the prompt names no period, so the model must ask which dates BEFORE any data tool, draw nothing, state no
-   * figure and anchor on no digest week or "this week". `undatedDigestOk` lets it probe `get_digest` (recent_weeks) WITHOUT dates:
+   * figure and anchor on no digest week or "this week". `undatedReportOk` lets it probe `get_channel_report` WITHOUT dates:
    * that call only returns the tool's own ask-for-dates error.
    */
-  askFirst?: {undatedDigestOk?: boolean};
+  askFirst?: {undatedReportOk?: boolean};
   /** OFFLINE ONLY: tools whose scripted call the real executor is expected to refuse (an is_error result). Default none. */
   refusedTools?: string[];
   /** Exact number of blocks EMITTED this turn per kind (a kind left out is 0). Omit to leave the count unchecked. */
@@ -300,18 +300,19 @@ export const GOLDEN_CASES: GoldenCase[] = [
     script: [{calls: [call('get_digest', {window: 'latest', section: 'comparison'})]}, {text: 'This is the weekly digest for the week of Sep 21 to 27, the week you asked for. Lazada has the higher revenue and the higher ROAS of the two.'}],
   },
   {
-    // OD5 / TTD08-c / GAP-10: the owner NAMES the dates, so the model goes straight to get_digest(recent_weeks) with them, draws the line the owner
-    // asked for and says which weeks have no stored digest BEFORE any figure. The seeded digests cover only the weeks of Sep 14 and Sep 21.
+    // OD5 / TTD08-c / GAP-10, on get_channel_report since Train 2 (recent_weeks is gone): the owner NAMES the dates, so the model goes straight
+    // to the weekly channel report, draws the line and says which weeks have no Shopee or Lazada figures BEFORE any figure. GOLDEN_DIGEST holds
+    // two PH-aligned weekly windows without per-day data that tile the weeks of Sep 14 and Sep 21; Aug 31 and Sep 7 have none; no CRM here.
     id: 'weekly_online_offline', smoke: true, category: 'lookup', prompt: 'Show Shopee, Lazada, Website and Offline revenue week by week from Aug 31 to Sep 27, 2026 as a line.',
     expectTools: [
-      {tool: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '2026-08-31', to: '2026-09-27'}},
+      {tool: 'get_channel_report', input: {from: '2026-08-31', to: '2026-09-27', granularity: 'week'}},
       {tool: 'render_chart', input: {kind: 'line'}},
     ],
-    forbidTools: ['query_metric'], blocks: {chart: 1}, chartForm: 'line', kind: 'line', captionFirst: true, textMatches: [/no (?:online )?(?:figures|digest)|only for the weeks|missing/i],
-    rubric: ['The text lists the weeks with no stored digest (Aug 31 and Sep 7) as missing for the online channels BEFORE any figure.', 'It says Offline POS is shown for every week and does not guess the missing online figures.'],
+    forbidTools: ['query_metric', 'get_digest'], blocks: {chart: 1}, chartForm: 'line', kind: 'line', captionFirst: true, textMatches: [/no stored digest|not connected|missing/i],
+    rubric: ['The text says the weeks of Aug 31 and Sep 7 have no Shopee or Lazada figures and that Website is not connected, BEFORE any figure.', 'It does not guess the missing figures.'],
     steps: ['THINK-07', 'VIZ-09', 'DASH-01'],
     script: [
-      {text: 'Online figures exist only for the weeks of Sep 14 and Sep 21, so the weeks of Aug 31 and Sep 7 have no Shopee, Lazada or Website data; Offline POS is shown for every week.', calls: [call('get_digest', {window: 'recent_weeks', section: 'weekly_revenue', from: '2026-08-31', to: '2026-09-27'})]},
+      {text: 'Shopee and Lazada figures exist only for the weeks of Sep 14 and Sep 21 (no stored digest covers Aug 31 to Sep 13), and the website CRM is not connected here; Offline is shown for every week.', calls: [call('get_channel_report', {from: '2026-08-31', to: '2026-09-27', channels: ['all'], granularity: 'week'})]},
       {calls: [chartCall('new', 'r1', 'line', 'Revenue by week and channel')]},
       {text: 'Want the same weeks for offline only, split by pet?'},
     ],
@@ -444,12 +445,12 @@ export const GOLDEN_CASES: GoldenCase[] = [
   },
   {
     id: 'ask_weekly_online_offline', smoke: true, category: 'ask_first', prompt: 'week by week online vs offline as a line',
-    expectTools: [], askFirst: {undatedDigestOk: true}, blocks: {}, forbidTools: ['query_metric', 'render_chart', 'render_kpi', 'render_table'],
-    refusedTools: ['get_digest'],
+    expectTools: [], askFirst: {undatedReportOk: true}, blocks: {}, forbidTools: ['query_metric', 'render_chart', 'render_kpi', 'render_table'],
+    refusedTools: ['get_channel_report'],
     rubric: ['Asks for the start and end dates (offers a range such as the last 8 weeks) before drawing anything.', 'Does not choose weeks itself and shows no figure.'],
     steps: ['THINK-01', 'THINK-07'],
     script: [
-      {calls: [call('get_digest', {window: 'recent_weeks', section: 'weekly_revenue', from: '', to: ''})]},
+      {calls: [call('get_channel_report', {from: '', to: '', channels: ['all'], granularity: 'week'})]},
       {text: 'Which dates do you want, for example the last 8 weeks or a start and end date? Then I can draw online and offline week by week.'},
     ],
   },
@@ -553,8 +554,8 @@ export function askFirstFailures(rule: NonNullable<GoldenCase['askFirst']>, o: P
   const out: string[] = [];
   for (const call of o.calls) {
     const i = isRecord(call.input) ? call.input : {};
-    const undatedDigest = call.name === 'get_digest' && i.window === 'recent_weeks' && !i.from && !i.to;
-    if (!(rule.undatedDigestOk && undatedDigest)) out.push(`${call.name} was called before the owner gave dates`);
+    const undatedReport = call.name === 'get_channel_report' && !i.from && !i.to;
+    if (!(rule.undatedReportOk && undatedReport)) out.push(`${call.name} was called before the owner gave dates`);
   }
   if (o.blocks.length > 0) out.push(`${o.blocks.length} block(s) drawn before the owner gave dates`);
   const text = bodyText(o.text);

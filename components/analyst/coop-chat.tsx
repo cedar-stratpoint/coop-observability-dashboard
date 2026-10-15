@@ -17,7 +17,7 @@ import type {SavedReportRef} from '@/src/reports-suggest';
 
 // `blocks` (F7): stat tiles, charts and tables the server bound; `at` = length of the accumulated raw text when the block
 // arrived, so the answer reads caveat, headline, block, then whatever streamed after it. `content` stays plain text.
-type Msg = {role: 'user' | 'assistant'; content: string; error?: boolean; blocks?: PlacedBlock[]};
+type Msg = {role: 'user' | 'assistant'; content: string; error?: boolean; blocks?: PlacedBlock[]; untrusted?: true};
 type NavAction = {label: string; path: string};
 
 type Side = 'left' | 'right';
@@ -48,6 +48,11 @@ const HOME_SUGGESTIONS = [
 const ASSISTANT_BUBBLE =
   'max-w-[90%] overflow-hidden rounded-2xl border border-border bg-card px-3.5 py-2 text-[13.5px] leading-relaxed text-foreground [&_a]:text-primary [&_a]:underline [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_p]:my-1 [&_strong]:font-semibold [&_table]:my-1.5 [&_table]:block [&_table]:w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-4';
 
+/** True when message `i` or any earlier message used customer or Explore text: a link repeated in a later answer stays plain. */
+function untrustedThrough(msgs: readonly {untrusted?: true}[], i: number): boolean {
+  return msgs.slice(0, i + 1).some((x) => x.untrusted === true);
+}
+
 /** Read the stored conversation tolerantly: old entries have no blocks, malformed blocks are dropped, nothing throws. */
 function loadMessages(raw: string): Msg[] {
   const parsed: unknown = JSON.parse(raw);
@@ -56,12 +61,12 @@ function loadMessages(raw: string): Msg[] {
   for (const m of parsed as Record<string, unknown>[]) {
     if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') continue;
     const blocks = sanitizeBlocks(m.blocks);
-    out.push({role: m.role, content: m.content, ...(m.error === true ? {error: true} : {}), ...(blocks.length ? {blocks} : {})});
+    out.push({role: m.role, content: m.content, ...(m.error === true ? {error: true} : {}), ...(m.untrusted === true ? {untrusted: true as const} : {}), ...(blocks.length ? {blocks} : {})});
   }
   return out;
 }
 
-const APP_PATHS = new Set(['/', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website', '/customers', '/inventory', '/traffic']);
+const APP_PATHS = new Set(['/', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
 
 /** Split a raw assistant message into visible text + follow-up suggestions + nav
  *  actions, tolerating partially-streamed hidden tags. */
@@ -179,7 +184,7 @@ export function CoopChatProvider({children, scopeLabel}: {children: React.ReactN
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: {'content-type': 'application/json'},
-          body: JSON.stringify({messages: history.map(({blocks: _blocks, ...rest}) => rest), week, home, report: reportBody(reportAtSend)}),
+          body: JSON.stringify({messages: history.map(({blocks: _blocks, untrusted: _untrusted, ...rest}) => rest), week, home, report: reportBody(reportAtSend), page: {path: window.location.pathname, query: window.location.search.slice(1)}}),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) {
@@ -635,7 +640,7 @@ function CoopChatDrawer({
                           </div>
                         ) : p.text.trim() ? (
                           <div key={pi} className={ASSISTANT_BUBBLE}>
-                            <ChatMarkdown text={p.text} knownHostsOnly={(m.blocks ?? []).some((b) => b.block.exploratory === true)} />
+                            <ChatMarkdown text={p.text} knownHostsOnly={untrustedThrough(messages, i) || (m.blocks ?? []).some((b) => b.block.exploratory === true)} />
                           </div>
                         ) : null,
                       )

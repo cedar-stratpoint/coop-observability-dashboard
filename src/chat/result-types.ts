@@ -11,10 +11,12 @@ export type MetricId =
   | 'event_rollup'
   | 'pet_mix'
   | 'bundle_sales'
-  | 'bundle_picks';
+  | 'bundle_picks'
+  | 'stock_on_hand'
+  | 'stock_cover';
 
 /** What a stored result may be: a registry metric, or one of the lookup tools' results (F10). Only registry metrics can be re-run or saved. */
-export type ResultMetricId = MetricId | 'digest' | 'product_lookup' | 'explore';
+export type ResultMetricId = MetricId | 'digest' | 'product_lookup' | 'explore' | 'channel_report' | 'crm_metrics' | 'crm_customers' | 'crm_orders' | 'crm_checkouts';
 
 export type PetKey = 'dog' | 'cat' | 'both' | 'untagged';
 
@@ -65,7 +67,8 @@ export type CheckCode =
   | 'untagged_share'
   | 'partial_coverage'
   | 'sudden_change'
-  | 'mock_source';
+  | 'mock_source'
+  | 'values_hidden';
 
 export interface Check {
   code: CheckCode;
@@ -168,4 +171,16 @@ export interface MetricData {
   priceChanges: {product_id: string; old_price: number | null; new_price: number; changed_at: string}[];
   /** Row counts of the bulk reads, for the round-row-count check. */
   bulkReads: {relation: string; rows: number}[];
+  stock?: StockData | null;
 }
+
+/** Stock for the registry stock metrics (Train 3). "As of now": stock has no date range. null = the stock read failed. */
+export interface StockData {
+  byLocation: {product_id: string; location: string; stock: number}[];
+  names: Record<string, string>;
+  /** Sale movements of the last FORECAST_WINDOW_DAYS days, as units and Manila day (the Inventory forecast's input). */
+  sales: import('../pos-forecast-compute').SaleMovement[];
+  config: import('../pos-forecast-compute').ForecastConfig;
+  asOf: string;
+}
+

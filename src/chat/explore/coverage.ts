@@ -6,21 +6,21 @@ import type {RunQuery} from './executor';
 import type {ExploreLimits, ValidateErr, ValidateOk} from './types';
 
 export const EXPLORE_COVERAGE_SQL = `with oc as (
-  select min((o.created_at at time zone 'Asia/Manila')::date) filter (where o.status = 'completed') as orders_from,
-         max((o.created_at at time zone 'Asia/Manila')::date) filter (where o.status = 'completed') as orders_to,
-         count(*) filter (where o.status = 'completed') as completed_count,
+  select min((o.created_at at time zone 'Asia/Manila')::date) filter (where o.status is distinct from 'voided') as orders_from,
+         max((o.created_at at time zone 'Asia/Manila')::date) filter (where o.status is distinct from 'voided') as orders_to,
+         count(*) filter (where o.status is distinct from 'voided') as completed_count,
          count(*) filter (where o.status = 'voided') as voided_count
   from coop_explore_orders o
 ), pf as (
   select min(o.created_at) as first_tagged,
          min((o.created_at at time zone 'Asia/Manila')::date) as first_tagged_day
   from coop_explore_orders o
-  where o.status = 'completed' and o.pet_type is not null
+  where o.status is distinct from 'voided' and o.pet_type is not null
 ), pt as (
   select count(*) as since_count, count(o.pet_type) as since_tagged
   from coop_explore_orders o
   join pf on o.created_at >= pf.first_tagged
-  where o.status = 'completed'
+  where o.status is distinct from 'voided'
 ), lc as (
   select min((l.collected_at at time zone 'Asia/Manila')::date) as leads_from,
          max((l.collected_at at time zone 'Asia/Manila')::date) as leads_to,

@@ -1,7 +1,8 @@
 import {describe, it, expect} from 'vitest';
 import {runMetric} from '../src/chat/query-metric';
 import {METRICS, METRIC_IDS} from '../src/chat/metrics-registry';
-import type {MetricData, MetricError, MetricRequest, MetricResult} from '../src/chat/result-types';
+import {isStockMetric} from '../src/chat/stock-metrics';
+import type {MetricData, MetricError, MetricRequest, MetricResult, StockData} from '../src/chat/result-types';
 import type {PetType, PosEvent, PosOrder, PosOrderLine} from '../src/pos-sales-types';
 import {bundlePickRows} from '../src/pos-bundle-compute';
 import {buildPriceHistory} from '../src/pos-price-history';
@@ -393,7 +394,7 @@ describe('source and empty data', () => {
   });
 
   it('every metric and dimension survives empty data with no NaN or Infinity', () => {
-    for (const id of METRIC_IDS) {
+    for (const id of METRIC_IDS.filter((x) => !isStockMetric(x))) { // stock has no orders or range: test/chat-stock-metrics.test.ts
       for (const d of METRICS[id].dimensions) {
         for (const m of METRICS[id].measures) {
           const r = res(req({metric: id, dimension: d.key, measure: m.key, from: '2026-09-01', to: '2026-09-30'}), data({orders: [], events: []}));
@@ -418,13 +419,20 @@ describe('source and empty data', () => {
   it('every metric default query returns its headline columns', () => {
     for (const id of METRIC_IDS) {
       const d = METRICS[id];
-      const r = res(req({metric: id, dimension: d.defaultDimension, measure: 'default'}), bundleData());
+      const r = res(req({metric: id, dimension: d.defaultDimension, measure: 'default'}), bundleData({stock: STOCK}));
       for (const c of d.profile.headlineColumns) expect(r.columns.map((x) => x.key), `${id}.${c}`).toContain(c);
       expect(r.meta.measure).toBe(d.defaultMeasure);
       expect(r.meta.measures).toEqual(d.measures);
     }
   });
 });
+
+const STOCK: StockData = {
+  byLocation: [{product_id: 'P1', location: 'event', stock: 12}],
+  names: {P1: 'Chicken Jerky'}, sales: [{product_id: 'P1', qty: 28, day: '2026-09-20'}],
+  config: {threshold: 5, thresholdOverrides: {}, targetCoverEventDays: 6, leadTimeDays: 3, earlyWarningEvents: 3, eventWeekdays: [5, 6, 0]},
+  asOf: NOW.toISOString(),
+};
 
 // ---- bundles on A's synthetic fixture -------------------------------------------------------------------------------
 

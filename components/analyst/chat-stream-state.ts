@@ -12,6 +12,8 @@ export const CUT_OFF_NOTE = 'The answer was cut off.';
 export interface StreamMsg {
   content: string;
   blocks?: PlacedBlock[];
+  /** Train 4: the answer used customer-entered text; its links render as plain text. */
+  untrusted?: true;
 }
 
 export interface StreamState<M extends StreamMsg> {
@@ -61,6 +63,8 @@ export function applyStreamEvents<M extends StreamMsg>(state: StreamState<M>, la
       acc += `${acc ? '\n\n' : ''}⚠️ ${ev.message}`;
       errored = true;
       effects.status = '';
+    } else if (ev.t === 'untrusted') {
+      messages = messages.map((m, i) => (i === last ? {...m, untrusted: true as const} : m));
     } else if (ev.t === 'done') {
       finished = true;
       effects.status = '';

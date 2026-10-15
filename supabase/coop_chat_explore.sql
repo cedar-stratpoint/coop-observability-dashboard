@@ -7,14 +7,21 @@
 --
 -- PREREQUISITES (the file fails loudly if one is missing):
 --   supabase/spin_wheel_leads.sql and supabase/spin_wheel_leads_instagram.sql applied (the leads view reads instagram and pet).
+--   The zoomy-pos stock sources: pos_inventory, pos_inventory_by_location (WITH a `location` column), pos_inventory_lots and
+--   pos_stock_movements. None is confirmed on staging or PROD yet. Before applying, run these read-only checks and read the result:
+--     select table_name, column_name, data_type, ordinal_position from information_schema.columns
+--       where table_schema = 'public' and table_name in ('pos_inventory','pos_inventory_by_location','pos_inventory_lots','pos_stock_movements')
+--       order by table_name, ordinal_position;                       -- all 4 tables present; by_location has `location`
+--     select distinct location from pos_inventory_by_location;      -- expect 'event' (sellable) and 'office'
+--   If one is missing the file stops in step 0 below, naming it, before changing anything.
 --
 -- WHAT THIS DOES
 --   1. a LOGIN role `coop_explore_ro` (no password here), the first Postgres credential the dashboard holds;
---   2. ten DEFINER views `coop_explore_*` (no security_invoker), one per business table, built by a generator that reads the base
+--   2. fifteen DEFINER views `coop_explore_*` (no security_invoker), one per business table, built by a generator that reads the base
 --      table's columns AT APPLY TIME. Open by default: every column is exposed EXCEPT those whose NAME matches
 --      password|token|secret|key|pin|hash|credential (case-insensitive substring, fails closed). A column added to a base table later
 --      stays hidden until a person re-applies this file. The resulting column list per view is printed with RAISE NOTICE;
---   3. grants: SELECT on the ten views to the role and nothing else; REVOKE ALL from PUBLIC, anon, authenticated (these views carry
+--   3. grants: SELECT on the fifteen views to the role and nothing else; REVOKE ALL from PUBLIC, anon, authenticated (these views carry
 --      contact data and PostgREST would otherwise expose them: Supabase default privileges grant new public objects to those roles).
 --
 -- AFTER APPLYING, ONCE, in the SQL editor and NEVER in this file (a login role with no password cannot connect by password):
@@ -26,12 +33,21 @@
 
 -- 0. Prerequisites ----------------------------------------------------------------------------------------------
 do $$
+declare t text;
 begin
   if to_regclass('public.spin_wheel_leads') is null then
     raise exception 'apply supabase/spin_wheel_leads.sql first';
   end if;
   if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'spin_wheel_leads' and column_name = 'instagram') then
     raise exception 'apply supabase/spin_wheel_leads_instagram.sql first';
+  end if;
+  foreach t in array array['pos_inventory', 'pos_inventory_by_location', 'pos_inventory_lots', 'pos_stock_movements'] loop
+    if to_regclass('public.' || t) is null then
+      raise exception 'missing stock source public.% (owned by zoomy-pos): run the read-only checks in this file''s header, then apply nothing until it exists', t;
+    end if;
+  end loop;
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'pos_inventory_by_location' and column_name = 'location') then
+    raise exception 'public.pos_inventory_by_location has no location column: coop_explore_stock_event cannot be built';
   end if;
 end $$;
 
@@ -69,7 +85,11 @@ declare
     'coop_explore_prices',         'pos_prices',
     'coop_explore_price_changes',  'pos_price_changes',
     'coop_explore_event_leads',    'spin_wheel_leads',
-    'coop_explore_digest',         'digest_archive'
+    'coop_explore_digest',         'digest_archive',
+    'coop_explore_inventory',             'pos_inventory',
+    'coop_explore_inventory_by_location', 'pos_inventory_by_location',
+    'coop_explore_inventory_lots',        'pos_inventory_lots',
+    'coop_explore_stock_movements',       'pos_stock_movements'
   ];
   i int;
   vname text;
@@ -98,6 +118,12 @@ begin
     raise notice '% <- %: % | dropped by name pattern: %', vname, src, cols, coalesce(dropped, '(none)');
   end loop;
 end $$;
+
+-- Default view (spec 2.4/F.3): sellable stock = the event location. Raw stock stays readable in the views above.
+drop view if exists public.coop_explore_stock_event;
+create view public.coop_explore_stock_event as select product_id, stock from public.pos_inventory_by_location where location = 'event';
+revoke all on public.coop_explore_stock_event from public, anon, authenticated;
+grant select on public.coop_explore_stock_event to coop_explore_ro;
 
 revoke all on schema public from coop_explore_ro;
 grant usage on schema public to coop_explore_ro;

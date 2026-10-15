@@ -16,6 +16,12 @@ const run = (state: ReturnType<typeof startStream<M>>, last: number, events: Cha
 describe('applyStreamEvents', () => {
   const history = (): M[] => [{role: 'user', content: 'q'}, {role: 'assistant', content: ''}];
 
+  it('Train 4: an untrusted event marks only the streamed message, and the mark survives later text', () => {
+    const out = run(startStream(history(), null), 1, [{t: 'untrusted'}, {t: 'text', d: 'See https://evil.example'}, done]);
+    expect(out.state.messages[1]).toMatchObject({content: 'See https://evil.example', untrusted: true});
+    expect(out.state.messages[0]).not.toHaveProperty('untrusted');
+  });
+
   it('accumulates text into the streamed message and clears the status', () => {
     const out = run(startStream(history(), null), 1, [{t: 'status', text: 'Looking'}, {t: 'text', d: 'Hel'}, {t: 'text', d: 'lo'}]);
     expect(out.state.messages[1].content).toBe('Hello');

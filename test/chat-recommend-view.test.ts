@@ -1,9 +1,13 @@
 import {describe, expect, it} from 'vitest';
 import {
-  KPI_MAX, PIE_MAX_SEGMENTS, SERIES_FOLD_AT, STANDOUT_RATIO, STANDOUT_SHARE, TABLE_MIN_CLASSES, TIME_SINGLE_FORM, recommendView,
+  GROUPED_MAX_SERIES, KPI_MAX, PIE_MAX_SEGMENTS, SERIES_FOLD_AT, STANDOUT_RATIO, STANDOUT_SHARE, TABLE_MIN_CLASSES, TIME_SINGLE_FORM, UNTAGGED_NOTE_SHARE, recommendView,
   type BlockDecision,
 } from '../src/chat/recommend-view';
-import type {ViewRequest} from '../src/chat/block-types';
+import {bindBlock} from '../src/chat/bind';
+import {createRenderExecutors} from '../src/chat/render-executors';
+import {renderSkill} from '../src/chat/skills/load';
+import {createReportSession} from '../src/chat/report-session';
+import type {ChatBlock, ViewRequest} from '../src/chat/block-types';
 import type {ColumnRole, ColumnUnit, MetricResult, MetricRow, ResultColumn} from '../src/chat/result-types';
 
 // Synthetic results only (fictional names and figures).
@@ -387,5 +391,104 @@ describe('two dimensions and two measures (Explore event by pet)', () => {
   it('an explicit x or a pie keeps the old single-dimension behaviour', () => {
     const d = chartOf(first(live, AUTO, {x: 'event', y: ['revenue_php']}));
     expect(d.chart.series).toHaveLength(1);
+  });
+});
+
+// PROD evidence (2c, owner screenshot 2026-10-07): (venue, event, pet, orders, revenue, share), 9 rows, refused as grouped bars. Same shape, on
+// the fictional fixture's figures (scripts/coop-explore-fixture.sql after Task 6): a case-variant event name and a fully untagged event.
+describe('EXP-07: two categories and one measure (PROD shape: venue, event, pet)', () => {
+  const prod = mk(
+    [col('venue', 'text', 'category', 'Venue'), col('event', 'text', 'category', 'Event'), col('pet', 'text', 'category', 'Pet'), col('orders_count', 'count', 'measure', 'Orders'), col('revenue_php', 'PHP', 'measure', 'Revenue'), col('share_pct', 'percent', 'share', 'Share')],
+    [
+      {venue: 'SM Aura', event: 'SM Aura Pet Fair', pet: 'dog', orders_count: 2, revenue_php: 960, share_pct: 33.1},
+      {venue: 'SM Aura', event: 'SM Aura Pet Fair', pet: 'cat', orders_count: 2, revenue_php: 1124, share_pct: 38.7},
+      {venue: 'SM Aura', event: 'SM Aura Pet Fair', pet: 'both', orders_count: 1, revenue_php: 450, share_pct: 15.5},
+      {venue: 'SM Aura', event: 'SM Aura Pet Fair', pet: 'untagged', orders_count: 2, revenue_php: 370, share_pct: 12.7},
+      {venue: 'Circuit Mall', event: 'Circuit Makati Weekend', pet: 'dog', orders_count: 2, revenue_php: 1000, share_pct: 39.6},
+      {venue: 'Circuit Mall', event: 'Circuit Makati Weekend', pet: 'cat', orders_count: 1, revenue_php: 400, share_pct: 15.8},
+      {venue: 'Circuit Mall', event: 'Circuit Makati Weekend', pet: 'both', orders_count: 1, revenue_php: 499, share_pct: 19.8},
+      {venue: 'Circuit Mall', event: 'Circuit Makati Weekend', pet: 'untagged', orders_count: 1, revenue_php: 150, share_pct: 5.9},
+      {venue: 'Circuit Mall', event: 'circuit makati weekend', pet: 'dog', orders_count: 1, revenue_php: 275, share_pct: 57.9},
+      {venue: 'Circuit Mall', event: 'circuit makati weekend', pet: 'cat', orders_count: 1, revenue_php: 200, share_pct: 42.1},
+      {venue: 'Circuit Mall', event: 'locallymade ph', pet: 'untagged', orders_count: 3, revenue_php: 3000, share_pct: 100},
+    ],
+    {measure: 'sql'},
+  );
+  const NOTES = [
+    'SM Aura: 13% of revenue has no pet tag.',
+    'Circuit Mall: 57% of revenue has no pet tag.',
+    'SM Aura Pet Fair: 13% of revenue has no pet tag.',
+    'locallymade ph: 100% of revenue has no pet tag.',
+  ];
+
+  // Final review (live A7): the model called render_chart with x "event" and y ["revenue_php"]; an explicit x skipped the pivot and drew one bar chart.
+  it('EXP-07: an explicit x naming a category column still pivots (the other category is the series); the other way round swaps them', () => {
+    const d = chartOf(first(prod, {kind: 'grouped_bar', orientation: 'auto'}, {x: 'event', y: ['revenue_php'], title: 'Revenue'}));
+    expect(d.chart.form).toBe('grouped_bar');
+    expect(d.chart.x.key).toBe('event');
+    expect(d.chart.series.map((s) => s.label)).toEqual(['untagged', 'dog', 'cat', 'both']);
+    const swapped = chartOf(first(prod, {kind: 'grouped_bar', orientation: 'auto'}, {x: 'pet', y: ['revenue_php'], title: 'Revenue'}));
+    expect(swapped.chart.x.key).toBe('pet');
+  });
+
+  it('EXP-07: auto is grouped bars, one group per event, one color per pet, the venue set aside', () => {
+    const d = chartOf(first(prod, AUTO, {title: 'Revenue by event and pet'}));
+    expect(d.chart.form).toBe('grouped_bar');
+    expect(d.chart.x.key).toBe('event');
+    expect(d.chart.series.map((s) => s.label)).toEqual(['untagged', 'dog', 'cat', 'both']);
+    expect(new Set(d.chart.series.map((s) => s.color)).size).toBe(4);
+    expect(d.chart.rows.map((r) => r.event)).toEqual(['locallymade ph', 'SM Aura Pet Fair', 'Circuit Makati Weekend']);
+    expect(d.chosen.adjustments).toContain('Each event has one venue, so the chart groups by event; the table keeps the venue column.');
+    expect(d.twin.rows).toHaveLength(11);
+  });
+  it('EXP-07: names that differ only in case are one group with the most frequent spelling; the table keeps both', () => {
+    const d = chartOf(first(prod, AUTO, {title: 'Revenue by event and pet'}));
+    expect(d.chart.rows.find((r) => r.event === 'Circuit Makati Weekend')).toMatchObject({dog: 1275, cat: 600, both: 499, untagged: 150});
+    expect(JSON.stringify(d.chart.rows)).not.toContain('circuit makati weekend');
+    expect(d.chosen.adjustments).toContain('"Circuit Makati Weekend" and "circuit makati weekend" differ only in capitalisation, so the chart draws them as one event, "Circuit Makati Weekend"; the table keeps each row.');
+  });
+  it('EXP-07: a group over 10% untagged gets a code-written note, for the venue and for the event', () => {
+    expect(chartOf(first(prod, AUTO, {title: 'Revenue by event and pet'})).chosen.notes).toEqual(NOTES);
+    expect(UNTAGGED_NOTE_SHARE).toBe(0.1);
+    const atTen = mk([col('event', 'text', 'category', 'Event'), col('pet', 'text', 'category', 'Pet'), col('revenue_php', 'PHP', 'measure', 'Revenue')],
+      [{event: 'E1', pet: 'dog', revenue_php: 90}, {event: 'E1', pet: null, revenue_php: 10}, {event: 'E2', pet: 'cat', revenue_php: 50}], {measure: 'sql'});
+    expect(chartOf(first(atTen)).chosen.notes).toBeUndefined(); // exactly 10% is not over 10%
+  });
+  it('EXP-07: "as percentages" is 100% stacked; small multiples are one panel per event; more than GROUPED_MAX_SERIES series stack', () => {
+    expect(chartOf(first(prod, ask('stacked_bar_100'))).chart.form).toBe('stacked_bar_100');
+    const sm = chartOf(first(prod, ask('small_multiples')));
+    expect([sm.chart.form, sm.chart.orientation, sm.chart.rows.length]).toEqual(['small_multiples', 'horizontal', 3]);
+    const pets = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    const wide = mk([col('event', 'text', 'category', 'Event'), col('pet', 'text', 'category', 'Pet'), col('revenue_php', 'PHP', 'measure', 'Revenue')],
+      ['E1', 'E2'].flatMap((event) => pets.map((pet, i) => ({event, pet, revenue_php: 100 + i}))), {measure: 'sql'});
+    expect(GROUPED_MAX_SERIES).toBe(6);
+    expect(chartOf(first(wide)).chart.form).toBe('stacked_bar');
+  });
+  it('EXP-07: small multiples on a one-dimension result are replaced by a bar, with the reason', () => {
+    const d = chartOf(first(cat(4), ask('small_multiples')));
+    expect(d.chart.form).toBe('bar');
+    expect(d.chosen.adjustments.join(' ')).toMatch(/small multiples need a second category/);
+  });
+  it('EXP-07: the notes reach the block\'s Notes and the render tool\'s summary to the model', async () => {
+    const out = bindBlock('render_chart', {source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: 'Revenue by event and pet'}, new Map([['r1', prod]]), () => 'b1');
+    if ('error' in out) throw new Error(out.error);
+    expect(out.blocks[0].caveats).toEqual(expect.arrayContaining(NOTES));
+    const session = createReportSession();
+    session.store.set('r1', prod);
+    const blocks: ChatBlock[] = [];
+    const ex = createRenderExecutors({data: async () => { throw new Error('unused'); }, now: new Date('2026-10-07T04:00:00Z'), user: null, emitBlock: (b) => blocks.push(b)}, session);
+    const res = (await ex.render_chart?.({block: 'new', source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: 'Revenue by event and pet'})) as {chosen: {notes?: string[]}};
+    expect(res.chosen.notes).toEqual(NOTES);
+    expect(blocks[0].caveats).toEqual(expect.arrayContaining(NOTES));
+  });
+});
+
+describe('EXP-07: the skill text quotes the code\'s numbers', () => {
+  it('EXP-07: the explore skill states GROUPED_MAX_SERIES series and the UNTAGGED_NOTE_SHARE note threshold; the base skill does not', () => {
+    const text = renderSkill({explore: true});
+    expect(text).toContain(`grouped bars up to ${GROUPED_MAX_SERIES} series`);
+    expect(text).toContain(`over ${Math.round(UNTAGGED_NOTE_SHARE * 100)}% untagged`);
+    expect(text).toMatch(/\[EXP-08\] A claim about a group/);
+    expect(renderSkill()).not.toContain('EXP-07');
   });
 });

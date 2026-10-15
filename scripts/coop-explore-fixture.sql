@@ -6,8 +6,9 @@
 -- Re-runnable. The default `up.sh` and the registry integration tests never see these rows (order ids >= 1000, event ids 'X-...').
 --
 -- TRAPS, one per line, so the golden set (test/support/explore-golden.ts, Integrator) and the corpus can lean on them:
---   events   'SM Aura Pet Fair', 'Circuit Makati Weekend' and a differently-cased duplicate name; one event with ends_on NULL; one with no sales
---   orders   3 weeks (7 to 27 Sep 2026); voided; null pet_type; ids >= 1000; event ids 'X-...'; repeated and null customer_handle; discounts;
+--   events   'SM Aura Pet Fair', 'Circuit Makati Weekend' and a differently-cased duplicate name; one event with ends_on NULL; one with no sales;
+--            'locallymade ph' at Circuit Mall where every sale is untagged (A7: the biggest Circuit Mall event has no pet tag)
+--   orders   7 to 28 Sep 2026; voided; null pet_type; ids >= 1000; event ids 'X-...'; repeated and null customer_handle; discounts;
 --            a remarks value that reads like an instruction; one oversold order; two orders at 2026-09-27T15:30Z (Manila 23:30, the 27th)
 --            and 2026-09-27T16:30Z (Manila 00:30, the 28th)
 --   bundles  a header line (bundle_id set, product_id null, price in line_total) and its pick lines (same bundle_group, unit_price = line_total = 0);
@@ -60,7 +61,8 @@ insert into public.pos_events (event_id, name, venue, city, organizer, starts_on
   ('X-EV2', 'Circuit Makati Weekend',  'Circuit Mall',  'Makati', 'Circuit Events', '2026-09-19', '2026-09-21', 1500, null,              6800, 'closed', 'staff-2'),
   ('X-EV3', 'circuit makati weekend',  'Circuit Mall',  'Makati', 'Circuit Events', '2026-09-26', '2026-09-26', 1000, 'second run, same name in lowercase', 2400, 'closed', 'staff-2'),
   ('X-EV4', 'Modern Market Day',       'Modern Market', 'Pasig',  null,             '2026-09-27', null,         500,  'no end date set', null, 'active', 'staff-3'),
-  ('X-EV5', 'Quiet Pop-up',            'Corner Cafe',   'Quezon City', null,         '2026-09-05', '2026-09-05', 300,  'nothing sold',   300,  'closed', 'staff-1');
+  ('X-EV5', 'Quiet Pop-up',            'Corner Cafe',   'Quezon City', null,         '2026-09-05', '2026-09-05', 300,  'nothing sold',   300,  'closed', 'staff-1'),
+  ('X-EV6', 'locallymade ph',          'Circuit Mall',  'Makati', 'Locally Made PH', '2026-09-28', '2026-09-28', 800, 'pop-up market, nobody tagged a pet', 3800, 'closed', 'staff-2');
 
 -- 4. Orders (explicit ids >= 1000; subtotal = total + discount) ----------------------------------------------------
 insert into public.pos_orders (id, subtotal, discount, total, oversold, device_id, payment_method, customer_handle, status, remarks, created_at, event_id, pet_type)
@@ -102,7 +104,11 @@ from (values
   (1047, '2026-09-17 11:30:00+08', null, 'dog',  'completed', null,          0,   250, 'cash',  'sold at the new P1 price', false),
   (1048, '2026-09-22 12:30:00+08', null, null,    'completed', '@mimi_pup',   0,   180, 'gcash', null, false),
   (1049, '2026-09-23 13:30:00+08', null, 'cat',  'completed', null,          0,   90,  'cash',  null, false),
-  (1050, '2026-09-25 14:30:00+08', null, 'both', 'completed', '@luna_cat',   0,   330, 'cash',  null, false)
+  (1050, '2026-09-25 14:30:00+08', null, 'both', 'completed', '@luna_cat',   0,   330, 'cash',  null, false),
+  -- locallymade ph, 28 Sep (Circuit Mall): every sale untagged (A7 trap)
+  (1061, '2026-09-28 11:00:00+08', 'X-EV6', null, 'completed', null, 0, 1250, 'gcash', null, false),
+  (1062, '2026-09-28 13:00:00+08', 'X-EV6', null, 'completed', null, 0, 1000, 'cash',  null, false),
+  (1063, '2026-09-28 16:00:00+08', 'X-EV6', null, 'completed', null, 0, 750,  'card',  null, false)
 ) as v(id, at, ev, pet, status, handle, discount, total, pay, remarks, oversold);
 
 -- 260 synthetic orders so a result can exceed 200 rows (ids 3001..3260, no event, no pet tag, no handle)
@@ -155,7 +161,10 @@ insert into public.pos_order_items (order_id, product_id, bundle_id, bundle_grou
   (1048, 'P3', null, null, 1, 75, 75),
   (1049, 'P3', null, null, 1, 90, 90),
   (1050, 'P1', null, null, 1, 250, 250),
-  (1050, 'P3', null, null, 1, 80, 80);
+  (1050, 'P3', null, null, 1, 80, 80),
+  (1061, 'P1', null, null, 5, 250, 1250),
+  (1062, 'P2', null, null, 4, 250, 1000),
+  (1063, 'P1', null, null, 3, 250, 750);
 
 -- 6. Booth leads (spin-the-wheel). email is nullable since v2; a lead needs an email or an instagram handle. ------------------
 insert into public.spin_wheel_leads (email, instagram, mobile, prize, campaign, collected_at, consent_at, pet) values

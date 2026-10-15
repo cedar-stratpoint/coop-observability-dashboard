@@ -85,7 +85,7 @@ describe('mechanicalFailures can fail', () => {
 
 describe('owner rule: the owner defines the dates (golden set)', () => {
   const PERIOD = /\b(?:last (?:week|month)|week of|from [A-Z][a-z]{2} \d|(?:Aug|Sep)\w* \d|September|August|\d{4}-\d{2}-\d{2})/i;
-  const usesData = (c: GoldenCase) => c.expectTools.some((t) => t.tool === 'query_metric' || t.tool === 'get_digest');
+  const usesData = (c: GoldenCase) => c.expectTools.some((t) => t.tool === 'query_metric' || t.tool === 'get_digest' || t.tool === 'get_channel_report');
 
   it('a data, lookup or negative case that reads data names its period in the prompt (no case relies on a default period)', () => {
     const readers = GOLDEN_CASES.filter((c) => ['data', 'lookup', 'negative'].includes(c.category) && usesData(c));
@@ -95,12 +95,11 @@ describe('owner rule: the owner defines the dates (golden set)', () => {
 
   it('no case expects a digest week as the answer to a period-less prompt: every get_digest case names the week or the dates it uses', () => {
     const digestCases = GOLDEN_CASES.filter((x) => x.expectTools.some((t) => t.tool === 'get_digest'));
-    expect(digestCases.map((c) => c.id).sort()).toEqual(['neg_roas_scope', 'shopee_vs_lazada', 'weekly_online_offline']);
-    for (const c of digestCases) {
-      const call = c.expectTools.find((t) => t.tool === 'get_digest');
-      if (call?.input?.window === 'recent_weeks') expect(c.prompt, c.id).toContain('from Aug 31 to Sep 27, 2026'); // the owner's own dates are passed on
-      else expect(c.prompt, c.id).toMatch(/week of Sep 21 to 27/);
-    }
+    expect(digestCases.map((c) => c.id).sort()).toEqual(['neg_roas_scope', 'shopee_vs_lazada']);
+    for (const c of digestCases) expect(c.prompt, c.id).toMatch(/week of Sep 21 to 27/);
+    const reportCases = GOLDEN_CASES.filter((x) => x.expectTools.some((t) => t.tool === 'get_channel_report'));
+    expect(reportCases.map((c) => c.id)).toEqual(['weekly_online_offline']);
+    expect(reportCases[0].prompt).toContain('from Aug 31 to Sep 27, 2026');
   });
 
   it('the five formerly period-less cases now pin the owner\'s dates in the tool call they expect', () => {
@@ -134,11 +133,11 @@ describe('owner rule: the owner defines the dates (golden set)', () => {
     expect(r.summary.steps).toBe(1);
   });
 
-  it('week by week with no dates: get_digest itself returns the ask-for-dates error, no week is picked, nothing is drawn', async () => {
+  it('week by week with no dates: get_channel_report itself returns the ask-for-dates error, no week is picked, nothing is drawn', async () => {
     const c = GOLDEN_CASES.find((x) => x.id === 'ask_weekly_online_offline') as GoldenCase;
     const r = await run(c);
-    expect(r.modelCalls).toEqual([{step: 1, name: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '', to: ''}}]);
-    expect(r.executed).toEqual(['get_digest']);
+    expect(r.modelCalls).toEqual([{step: 1, name: 'get_channel_report', input: {from: '', to: '', channels: ['all'], granularity: 'week'}}]);
+    expect(r.executed).toEqual(['get_channel_report']);
     expect(r.results).toHaveLength(1);
     expect(r.results[0].is_error).toBe(true);
     const err = (r.results[0].content as {error?: string}).error ?? String(r.results[0].content);
@@ -154,7 +153,7 @@ describe('owner rule: the owner defines the dates (golden set)', () => {
     const first = await run(c);
     const r = await runScripted({
       script: [
-        {calls: [{name: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '2026-08-31', to: '2026-09-27'}}]},
+        {calls: [{name: 'get_channel_report', input: {from: '2026-08-31', to: '2026-09-27', channels: ['all'], granularity: 'week'}}]},
         {text: 'Online figures exist only for the weeks of Sep 14 and Sep 21; Offline POS covers every week. Here is the line.', calls: [{name: 'render_chart', input: {block: 'new', source: 'r1', kind: 'line', orientation: 'auto', x: 'auto', y: ['auto'], title: 'Online vs offline by week'}}]},
         {text: 'Want it split by pet?'},
       ],
@@ -164,7 +163,7 @@ describe('owner rule: the owner defines the dates (golden set)', () => {
     expect(r.results[0].is_error).toBe(false);
     const meta = (r.results[0].content as {meta: {coverage: string; checks: {code: string; text: string}[]}}).meta;
     expect(meta.coverage).toBe('partial');
-    expect(meta.checks.map((k) => k.text).join(' ')).toMatch(/No online figures for the weeks? starting 2026-08-31/);
+    expect(meta.checks.map((k) => k.text).join(' ')).toMatch(/Aug 31 to Sep 6, 2026: Shopee: no stored digest covers Aug 31 to Sep 6, 2026\./);
     expect(r.blocks.map((b) => b.kind)).toEqual(['chart']);
     expect(r.results.every((x) => !x.is_error)).toBe(true);
   });
@@ -173,10 +172,11 @@ describe('owner rule: the owner defines the dates (golden set)', () => {
     const good = {calls: [] as {name: string; input: unknown}[], text: 'Which dates: last week, last month or a range?', blocks: []};
     expect(askFirstFailures({}, good)).toEqual([]);
     expect(askFirstFailures({}, {...good, calls: [{name: 'query_metric', input: {metric: 'top_products'}}]}).join()).toMatch(/query_metric was called before the owner gave dates/);
-    expect(askFirstFailures({}, {...good, calls: [{name: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '', to: ''}}]}).join()).toMatch(/get_digest was called/);
-    expect(askFirstFailures({undatedDigestOk: true}, {...good, calls: [{name: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '', to: ''}}]})).toEqual([]);
-    expect(askFirstFailures({undatedDigestOk: true}, {...good, calls: [{name: 'get_digest', input: {window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-01', to: '2026-09-27'}}]}).join()).toMatch(/get_digest was called/);
-    expect(askFirstFailures({undatedDigestOk: true}, {...good, calls: [{name: 'get_digest', input: {window: 'latest', section: 'comparison', from: '', to: ''}}]}).join()).toMatch(/get_digest was called/);
+    const undated = {from: '', to: '', channels: ['all'], granularity: 'week'};
+    expect(askFirstFailures({}, {...good, calls: [{name: 'get_channel_report', input: undated}]}).join()).toMatch(/get_channel_report was called/);
+    expect(askFirstFailures({undatedReportOk: true}, {...good, calls: [{name: 'get_channel_report', input: undated}]})).toEqual([]);
+    expect(askFirstFailures({undatedReportOk: true}, {...good, calls: [{name: 'get_channel_report', input: {...undated, from: '2026-09-01', to: '2026-09-27'}}]}).join()).toMatch(/get_channel_report was called/);
+    expect(askFirstFailures({undatedReportOk: true}, {...good, calls: [{name: 'get_digest', input: {window: 'latest', section: 'comparison', from: '', to: ''}}]}).join()).toMatch(/get_digest was called/);
     expect(askFirstFailures({}, {...good, blocks: [{kind: 'kpi'}] as never}).join()).toMatch(/1 block\(s\) drawn/);
     expect(askFirstFailures({}, {...good, text: 'Here are your sales for last week.'}).join()).toMatch(/does not ask a question/);
     expect(askFirstFailures({}, {...good, text: 'What would you like to see?'}).join()).toMatch(/does not ask about dates/);

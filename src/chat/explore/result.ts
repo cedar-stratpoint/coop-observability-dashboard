@@ -1,8 +1,9 @@
 // Shape one Explore query result into a MetricResult (spec 3.3). Pure: the driver rows come in, the stored result and the
 // model-visible payload come out. The model declares no column types: code derives them from the driver types and the alias suffix.
-import {leadsCoverageNote, ordersBasisNotes, type LeadFacts} from './basis';
-import type {ColumnUnit, MetricResult, MetricRow, ResultColumn} from '../result-types';
+import {leadsCoverageNote, ordersBasisNotes, tableBasisNotes, type LeadFacts} from './basis';
+import type {Check, ColumnUnit, MetricResult, MetricRow, ResultColumn} from '../result-types';
 import type {ExploreErrorCode, ExploreLimits, ExploreLint, ValidateOk} from './types';
+import {baseRelation} from './views';
 
 export type RawColumnType = 'text' | 'number' | 'bool' | 'date' | 'timestamp' | 'json' | 'other';
 export interface RawQueryResult {
@@ -10,6 +11,8 @@ export interface RawQueryResult {
   rows: unknown[][]; // already converted by the driver wrapper: numeric/bigint -> number, dates -> text, json -> object
   fetched: number; // rows actually fetched, up to maxRows + 1
   ms: number;
+  /** Values the scanner (scrub.ts) replaced with [hidden] before the rows left client.ts. */
+  hidden?: number;
 }
 
 export const EXPLORATORY_LABEL = 'Exploratory, not a registered metric';
@@ -121,6 +124,12 @@ export function shapeResult({raw, validated, limits, id, leadFacts}: ShapeInput)
   if (typed.some((t) => t.guessed)) warnings.push('W_UNIT_GUESS');
 
   const caveats = ['Exploratory, not a registered metric.', ...validated.lints.map((l) => l.message)];
+  const checks: Check[] = [];
+  if (raw.hidden) {
+    const text = `${raw.hidden} value${raw.hidden === 1 ? '' : 's'} looked like a secret (key, token or hash) and ${raw.hidden === 1 ? 'was' : 'were'} hidden.`;
+    caveats.push(text);
+    checks.push({code: 'values_hidden', status: 'warn', text, values: {hidden: raw.hidden}});
+  }
   let rows: MetricRow[] = raw.rows.map((r) => Object.fromEntries(keys.map((k, i) => [k, cellOf(r[i])])));
   const returned = rows.length;
   if (raw.fetched > limits.maxRows || rows.length > limits.maxRows) {
@@ -162,7 +171,7 @@ export function shapeResult({raw, validated, limits, id, leadFacts}: ShapeInput)
       if (nulls > 0) notes.push(`${Math.round((nulls / rows.length) * 100)}% of ${c.label.toLowerCase()} values are empty.`);
     }
   }
-  if (validated.relations.includes('coop_explore_event_leads')) {
+  if (validated.relations.some((r) => baseRelation(r) === 'spin_wheel_leads')) {
     notes.push(LEADS_NOTE);
     caveats.push(LEADS_NOTE);
     if (leadFacts) {
@@ -172,6 +181,10 @@ export function shapeResult({raw, validated, limits, id, leadFacts}: ShapeInput)
     }
   }
   for (const n of ordersBasisNotes({relations: validated.relations, columnRefs: validated.columnRefs ?? []})) {
+    notes.push(n);
+    caveats.push(n);
+  }
+  for (const n of tableBasisNotes(validated.relations)) {
     notes.push(n);
     caveats.push(n);
   }
@@ -197,7 +210,7 @@ export function shapeResult({raw, validated, limits, id, leadFacts}: ShapeInput)
       measure: 'sql',
       measures: [],
       insights: [],
-      checks: [],
+      checks,
       reliable: true,
       exploratory: {label: EXPLORATORY_LABEL, sql: validated.sql, coverage_note, warnings},
     },

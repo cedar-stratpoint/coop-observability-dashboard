@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import type {ColorToken} from '../src/chat/block-types';
 import {
   pieSlices,
+  resolveForm,
   ariaSummary,
   axisTicks,
   formatAxis,
@@ -15,7 +16,7 @@ import {
   tokenToCssVar,
   upsertBlock,
 } from '../components/analyst/chat-blocks-format';
-import {donut4, groupedVertical, kpiRow, plainBar, tableTotal} from '../components/analyst/chat-blocks.fixtures';
+import {donut4, groupedVertical, kpiRow, plainBar, smallMultiples, tableTotal} from '../components/analyst/chat-blocks.fixtures';
 
 describe('formatValue', () => {
   it('formats peso with up to 2 decimals and no trailing zeros', () => {
@@ -188,5 +189,21 @@ describe('pieSlices reads the shape the server really emits', () => {
     const slices = pieSlices(d.chart);
     expect(slices.map((s) => s.name).sort()).toEqual(['both', 'cat', 'dog', 'untagged']);
     expect(slices.reduce((a, s) => a + s.value, 0)).toBe(147300);
+  });
+});
+
+describe('small multiples (2c.1)', () => {
+  it('2c.1: small multiples are announced as one small bar chart per group', () => {
+    expect(ariaSummary(smallMultiples)).toMatch(/^Revenue by event and pet: small multiples \(one small bar chart per group\) of 3 categories across 4 series/);
+  });
+  it('an unknown chart form is announced as a grouped bar chart, never "undefined"', () => {
+    const odd = {...smallMultiples, chart: {...smallMultiples.chart, form: 'radar' as never}};
+    expect(ariaSummary(odd)).toMatch(/: grouped bar chart of 3 categories/);
+  });
+  it('resolveForm keeps known forms and falls back to grouped_bar for any form the renderer cannot draw', () => {
+    expect(resolveForm('small_multiples')).toBe('small_multiples');
+    expect(resolveForm('pie')).toBe('pie');
+    expect(resolveForm('radar')).toBe('grouped_bar');
+    expect(resolveForm(undefined)).toBe('grouped_bar');
   });
 });

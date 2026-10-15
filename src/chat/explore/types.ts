@@ -1,6 +1,5 @@
 // Shared contract for Ask Coop Explore mode (spec sections 3.4, 3.6, 2.1). Pure data and types, no runtime deps, importable from
 // anywhere (vitest, scripts, the catalog). Error messages are fixed constants: they never echo the SQL or raw database text.
-import {EXPLORE_VIEW_NAMES} from './views';
 
 export {EXPLORE_VIEWS, EXPLORE_VIEW_NAMES} from './views';
 export type {ExploreViewName} from './views';
@@ -63,20 +62,20 @@ export const EXPLORE_ERROR_MESSAGES: Record<ExploreErrorCode, string> = {
   E_VALUES: 'VALUES lists are not allowed; read the data from the views.',
   E_PARAM: 'Query parameters ($1) are not allowed; write the value in the SQL.',
   E_NODE: 'That SQL feature is not allowed (for example sampling, arrays, grouping sets, collations).',
-  E_SELECT_STAR: 'Name the columns you need; * is not allowed (count(*) is fine).',
+  E_SELECT_STAR: 'Name the columns you need; * and a whole-row reference (t, t::text) are not allowed (count(*) is fine).',
   E_CONSTANT_COLUMN: 'Every output column must come from a column or an aggregate; do not type values into the SELECT list.',
   E_TOO_MANY_COLUMNS: 'At most 12 output columns.',
   E_CROSS_JOIN: 'Use an explicit JOIN ... ON with a real condition (no comma joins, CROSS, NATURAL, or ON true).',
   E_LATERAL: 'LATERAL is not allowed.',
-  E_TOO_MANY_RELATIONS: 'At most 8 view references in one query; use CTEs to reduce.',
+  E_TOO_MANY_RELATIONS: 'At most 8 table references in one query; use CTEs to reduce.',
   E_TOO_DEEP: 'The query is nested too deeply (limit 20).',
-  E_RELATION: `Only these views can be read: ${EXPLORE_VIEW_NAMES.join(', ')}. Use the name exactly, no schema.`,
+  E_RELATION: "Only tables and views in public can be read, by their plain lower-case name (no other schema). Secret tables and other companies' tables are never readable. Call list_tables to see what is.",
   E_CATALOG: 'System catalogs are not readable.',
   E_FUNCTION: `That function is not allowed. Allowed: ${EXPLORE_FUNCTION_NAMES.join(', ')}.`,
   E_FUNCTION_DENIED: 'That function is blocked.',
   E_OPERATOR: 'That operator is not allowed. Allowed: + - * / % = <> < > <= >= || -> ->> LIKE ILIKE ~ ~*.',
   E_CAST: 'That type is not allowed. Allowed: text, integer, bigint, numeric, double precision, date, timestamp, timestamptz, interval.',
-  E_BLOCKED_COLUMN: 'That column name is blocked (password, token, secret, key, pin, hash, credential).',
+  E_BLOCKED_COLUMN: 'That column or JSON key is secret (a word part password, token, secret, key, pin, hash or credential) and is never readable. Write a JSON key as a plain string literal.',
   E_TIMEOUT: 'The query took longer than 5 seconds. Narrow the dates or aggregate more.',
   E_COLUMN: 'A column does not exist in that view. Check the catalog.',
   E_GROUPING: 'Every selected column must be in GROUP BY or inside an aggregate.',
@@ -127,9 +126,9 @@ export type ValidateOk = {
   ok: true;
   sql: string; // the exact input, unchanged
   sent: string; // wrapCursor(sql): what the driver will send
-  relations: import('./views').ExploreViewName[];
-  /** Every column reference in the statement, resolved to its view when it is qualified by a view alias (null: unqualified or a CTE). */
-  columnRefs: {relation: import('./views').ExploreViewName | null; column: string}[];
+  relations: string[];
+  /** Every column reference in the statement, resolved to its relation when it is qualified by an alias (null: unqualified or a CTE). */
+  columnRefs: {relation: string | null; column: string}[];
   ctes: string[];
   functions: string[];
   outputColumns: string[]; // output names of the outermost SELECT
