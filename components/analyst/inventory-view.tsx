@@ -9,7 +9,6 @@
 import {useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {createPortal} from 'react-dom';
 import {Package, Plus, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {POS_CATEGORIES} from '@/src/pos-format';
@@ -25,6 +24,7 @@ import type {InventoryPageData} from '@/src/pos-inventory-data';
 import type {LocationStockRow} from '@/src/pos-location-data';
 import type {FreeTasteSummary} from '@/src/pos-free-taste-data';
 import type {PosBundleRow} from '@/src/pos-types';
+import {ModalShell, useModalExit} from './modal-shell';
 
 type Tab = 'all' | 'bundles' | 'summary';
 
@@ -128,7 +128,8 @@ function ChannelLink({href, active, children}: {href: string; active: boolean; c
   return <Link href={href} scroll={false} className={cn('flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors', active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>{children}</Link>;
 }
 
-function NewProductDialog({usingMock, onClose, onCreated}: {usingMock: boolean; onClose: () => void; onCreated: () => void}) {
+function NewProductDialog({usingMock, onClose: onClosed, onCreated}: {usingMock: boolean; onClose: () => void; onCreated: () => void}) {
+  const {closing, close: onClose} = useModalExit(onClosed);
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
@@ -144,32 +145,27 @@ function NewProductDialog({usingMock, onClose, onCreated}: {usingMock: boolean; 
       else setError(res.error);
     });
   }
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Cancel" onClick={onClose} className="absolute inset-0 cursor-default bg-foreground/40 backdrop-blur-[1px]" />
-      <div className="relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-lg">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">New product</h2>
-          <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
-        </div>
-        <div className="flex flex-col gap-3">
-          <Field label="SKU Code"><input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="ZMY…" className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" /></Field>
-          <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" /></Field>
-          <div className="flex gap-3">
-            <Field label="Price"><div className="flex items-center gap-1"><span className="text-sm text-muted-foreground">₱</span><input value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ''))} className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" /></div></Field>
-            <Field label="Line"><select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring"><option value="">—</option>{POS_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-          </div>
-        </div>
-        {usingMock && <p className="mt-3 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to create.</p>}
-        {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={save} disabled={pending || usingMock || !sku.trim() || !name.trim()} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Creating…' : 'Create'}</button>
+  return (
+    <ModalShell closing={closing} onBackdropClick={onClose} backdropLabel="Cancel" panelClassName="w-full max-w-md rounded-xl border bg-popover p-5 shadow-lg">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">New product</h2>
+        <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
+      </div>
+      <div className="flex flex-col gap-3">
+        <Field label="SKU Code"><input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="ZMY…" className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" /></Field>
+        <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring" /></Field>
+        <div className="flex gap-3">
+          <Field label="Price"><div className="flex items-center gap-1"><span className="text-sm text-muted-foreground">₱</span><input value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ''))} className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus-visible:border-ring" /></div></Field>
+          <Field label="Line"><select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:border-ring"><option value="">—</option>{POS_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
         </div>
       </div>
-    </div>,
-    document.body,
+      {usingMock && <p className="mt-3 text-xs text-muted-foreground">Demo mode — set the Supabase pos_* env to create.</p>}
+      {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">Cancel</button>
+        <button onClick={save} disabled={pending || usingMock || !sku.trim() || !name.trim()} className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{pending ? 'Creating…' : 'Create'}</button>
+      </div>
+    </ModalShell>
   );
 }
 function Field({label, children}: {label: string; children: React.ReactNode}) {

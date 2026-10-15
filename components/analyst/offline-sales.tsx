@@ -2,7 +2,7 @@
 
 import {useMemo, useState} from 'react';
 import Link from 'next/link';
-import {CalendarClock, CalendarDays, ChevronDown, ChevronRight, PackageX, Receipt, TriangleAlert} from 'lucide-react';
+import {CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, PackageX, Receipt, TriangleAlert} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import type {BundleSalesSummary, DayMethodRevenue, FeaturedEvent, PetMix, PosOrder, SalesKpis, SalesRange, TopBundle, TopProduct} from '@/src/pos-sales-types';
 import type {DailyProgress} from '@/src/pos-target-types';
@@ -12,10 +12,9 @@ import type {PosProductRow} from '@/src/pos-types';
 import type {ForecastRow, ForecastSummary, ForecastStatus} from '@/src/pos-forecast-compute';
 import {formatPeso, paymentMethodColor, paymentMethodLabel} from '@/src/pos-format';
 import {Card, CardContent} from '@/components/ui/card';
-import {Badge} from '@/components/ui/badge';
 import {cn} from '@/lib/utils';
 import {Eyebrow, MockNote} from './sections';
-import {Metric} from './metric';
+import {metricValueClass} from './metric';
 import {SegmentedControl} from './segmented-control';
 import {RefreshControl} from './refresh-control';
 import {DailyTargetBar} from './daily-target-bar';
@@ -63,20 +62,25 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
   const shownKpis = useMemo(() => (method === 'all' ? kpis : computeKpis(shownOrders)), [method, kpis, shownOrders]);
   const mix = useMemo(() => petMix(shownOrders), [shownOrders]);
 
+  const hasBundles = topBundles.length > 0;
+  // Shared by Top products and Top bundles so both rank by the same measure.
+  const [metric, setMetric] = useState<'revenue' | 'units'>('revenue');
+  const [direction, setDirection] = useState<'top' | 'bottom'>('top');
+
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 md:px-10 max-md:px-4 max-md:py-6">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="w-full px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Eyebrow icon={Receipt}>Offline Sales</Eyebrow>
           <p className="text-sm text-muted-foreground">Bazaar sales synced from the POS.</p>
-          <div className="mt-2.5">
-            <PaymentMethodSelect value={method} options={methodOptions} onChange={setMethod} />
-          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <RefreshControl fetchedAt={fetchedAt} />
-          <RangeTabs active={range} />
-        </div>
+        <RefreshControl fetchedAt={fetchedAt} />
+      </div>
+
+      {/* One toolbar for everything that scopes the numbers below. */}
+      <div className="mb-8 flex flex-wrap items-center gap-2">
+        <RangeTabs active={range} />
+        <PaymentMethodSelect value={method} options={methodOptions} onChange={setMethod} />
       </div>
 
       {usingMock && (
@@ -88,188 +92,305 @@ export function OfflineSalesView({range, progress, featured, kpis, productsByRev
         </div>
       )}
 
-      {/* Event (left) + daily goal (right); the event card stretches to match. */}
-      {progress ? (
-        <div className="mb-6 grid gap-4 md:grid-cols-2">
-          <EventStatusCard featured={featured} />
-          <DailyTargetBar progress={progress} variant="full" />
-        </div>
-      ) : (
-        <div className="mb-6">
+      {/* Hero: event + daily goal + KPIs. One row on wide screens (3 / 4 / 5 of
+          12), event + goal side by side with KPIs under them on laptops, stacked
+          on phones. */}
+      <div className="mb-5 grid gap-5 lg:mb-6 lg:grid-cols-2 lg:gap-6 xl:grid-cols-12">
+        <div className={cn(progress ? 'xl:col-span-3' : 'lg:col-span-2 xl:col-span-7')}>
           <EventStatusCard featured={featured} />
         </div>
-      )}
-
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi label="Revenue" value={formatPeso(shownKpis.revenue)} />
-        <Kpi label="Orders" value={String(shownKpis.orders)} />
-        <Kpi label="Units" value={String(shownKpis.units)} />
-        <Kpi label="Oversells" value={String(shownKpis.oversells)} warn={shownKpis.oversells > 0} />
+        {progress && (
+          <div className="xl:col-span-4">
+            <DailyTargetBar progress={progress} variant="full" />
+          </div>
+        )}
+        <div className="lg:col-span-2 xl:col-span-5">
+          <KpiStrip kpis={shownKpis} />
+        </div>
       </div>
 
-      <div className="mb-6">
-        <PetMixCard mix={mix} />
-      </div>
-
-      <div className="grid gap-5 md:grid-cols-2 md:items-start">
-        <Panel title="Sales over time">
+      {/* Trend gets the width; pet mix sits beside it on wide screens. */}
+      <div className="mb-5 grid gap-5 lg:mb-6 lg:gap-6 xl:grid-cols-12">
+        <Panel title="Sales over time" className="xl:col-span-8">
           {stackData.length === 0 ? (
             <Empty>No sales in this range.</Empty>
           ) : (
-            <MethodStackChart data={stackData} methods={methods} selected={method} />
+            <MethodStackChart data={stackData} methods={methods} selected={method} className="h-[220px] xl:h-[260px]" />
           )}
         </Panel>
-
-        <TopSellersColumn byRevenue={productsByRevenue} byUnits={productsByUnits} bundles={bundles} topBundles={topBundles} />
+        <PetMixCard mix={mix} className="xl:col-span-4" />
       </div>
 
-      <div className="mt-5 grid gap-5 md:grid-cols-2 md:items-start">
-        <Panel title="Recent orders" action={{label: 'View all', href: '/offline-sales/orders'}}>
-          {orders.length === 0 ? (
-            <Empty>No orders yet.</Empty>
-          ) : (
-            <ul className="flex flex-col divide-y">
-              {orders.slice(0, 5).map((o) => (
-                <li key={o.id}>
-                  <Link
-                    href="/offline-sales/orders"
-                    className="-mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={cn('text-sm', o.status === 'voided' && 'line-through')}>{timeLabel(o.created_at)}</span>
-                        {o.status === 'voided' && <Badge variant="destructive">voided</Badge>}
-                        {o.oversold && (
-                          <Badge variant="destructive">
-                            <TriangleAlert /> oversold
-                          </Badge>
-                        )}
-                      </div>
-                      <p className={cn('truncate text-xs text-muted-foreground', o.status === 'voided' && 'line-through')}>
-                        {o.items.map((it) => `${it.name} ×${it.qty}`).join(', ') || 'No items'}
-                      </p>
-                    </div>
-                    <span className={cn('text-sm font-medium tabular-nums', o.status === 'voided' && 'text-muted-foreground line-through')}>{formatPeso(o.total)}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-
-        <StockSnapshot stock={stock} />
-      </div>
-
-      <div className="mt-5">
-        <StockAlertsCard alerts={alerts} />
+      {/* Lists. Wide screens: three columns sized to their content (products |
+          recent orders | bundles over stock) so short lists don't leave holes, with
+          stock alerts full width below. Narrower: the wrappers dissolve
+          (`contents`) and the cards flow two across, then one. */}
+      <div className="grid gap-5 md:grid-cols-2 lg:gap-6 xl:grid-cols-3">
+        <div className="contents xl:flex xl:flex-col xl:gap-6">
+          <TopProductsPanel
+            byRevenue={productsByRevenue}
+            byUnits={productsByUnits}
+            bundles={bundles}
+            metric={metric}
+            direction={direction}
+            onMetric={setMetric}
+            onDirection={setDirection}
+          />
+        </div>
+        <div className="contents xl:flex xl:flex-col xl:gap-6">
+          <RecentOrdersPanel orders={orders} />
+        </div>
+        <div className="contents xl:flex xl:flex-col xl:gap-6">
+          {hasBundles && <TopBundlesPanel topBundles={topBundles} metric={metric} totalRevenue={bundles.totalRevenue} className="xl:h-auto" />}
+          <StockSnapshot stock={stock} className="xl:h-auto xl:flex-1" />
+        </div>
+        <StockAlertsCard alerts={alerts} className="md:col-span-2 xl:col-span-3" />
       </div>
     </div>
   );
 }
 
-const SNAPSHOT_STATUS: Record<ForecastStatus, {label: string; dot: string; text: string}> = {
-  healthy: {label: 'Healthy', dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400'},
-  low: {label: 'Low', dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400'},
-  out: {label: 'Out', dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400'},
+/** The four headline numbers as one segmented card (hairline dividers) rather
+ *  than four separate boxes: less chrome, reads as a single summary. 2x2 on
+ *  phones and in the wide hero slot, 4 across on laptops. */
+function KpiStrip({kpis}: {kpis: SalesKpis}) {
+  const cells: {label: string; value: string; warn?: boolean}[] = [
+    {label: 'Revenue', value: formatPeso(kpis.revenue)},
+    {label: 'Orders', value: String(kpis.orders)},
+    {label: 'Units', value: String(kpis.units)},
+    {label: 'Oversells', value: String(kpis.oversells), warn: kpis.oversells > 0},
+  ];
+  return (
+    <div className="grid h-full grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4 xl:grid-cols-2">
+      {cells.map((c) => (
+        <div key={c.label} className="flex min-w-0 flex-col justify-center gap-1.5 bg-card px-6 py-5">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{c.label}</span>
+          <span className={cn(metricValueClass, 'truncate text-2xl xl:text-[1.75rem]', c.warn && 'text-destructive')}>{c.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type Tone = 'good' | 'warn' | 'crit' | 'neutral';
+
+const TONE_VAR: Record<Exclude<Tone, 'neutral'>, string> = {
+  good: 'var(--status-good)',
+  warn: 'var(--status-warn)',
+  crit: 'var(--status-crit)',
 };
 
-// Replaces "Recently synced" — a live pulse on what needs restocking, deep-linking
-// into the Inventory forecast with Offline preselected.
-function StockSnapshot({stock}: {stock: {urgent: ForecastRow[]; summary: ForecastSummary} | null}) {
+/** A soft tinted chip: colored text on a 14% wash of the same color. Reads as a
+ *  status at a glance without the glare of a solid fill. */
+function StatusChip({tone, children}: {tone: Tone; children: React.ReactNode}) {
+  const color = tone === 'neutral' ? undefined : TONE_VAR[tone];
   return (
-    <Panel title="Stock" action={{label: 'View all →', href: '/inventory?channel=offline'}}>
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums whitespace-nowrap',
+        tone === 'neutral' && 'bg-muted text-muted-foreground',
+      )}
+      style={color ? {color, backgroundColor: `color-mix(in oklab, ${color} 14%, transparent)`} : undefined}
+    >
+      {children}
+    </span>
+  );
+}
+
+const SNAPSHOT_TONE: Record<ForecastStatus, Tone> = {healthy: 'good', low: 'warn', out: 'crit'};
+
+// A live pulse on what needs restocking, deep-linking into the Inventory
+// forecast with Offline preselected. The footer bar shows the whole catalog's
+// health split so the list reads in context.
+function StockSnapshot({stock, className}: {stock: {urgent: ForecastRow[]; summary: ForecastSummary} | null; className?: string}) {
+  const sum = stock?.summary;
+  const parts: {key: string; label: string; n: number; tone: Exclude<Tone, 'neutral'>}[] = sum
+    ? [
+        {key: 'healthy', label: 'healthy', n: sum.healthy, tone: 'good'},
+        {key: 'low', label: 'low', n: sum.low, tone: 'warn'},
+        {key: 'out', label: 'out', n: sum.out, tone: 'crit'},
+      ]
+    : [];
+  const total = parts.reduce((t, x) => t + x.n, 0);
+
+  return (
+    <Panel title="Stock" action={{label: 'View all', href: '/inventory?channel=offline'}} className={className}>
       {!stock || stock.summary.total === 0 ? (
         <Empty>No stock data yet.</Empty>
       ) : stock.urgent.length === 0 ? (
-        <Empty>All good — nothing low or out.</Empty>
+        <AllClear>Nothing low or out.</AllClear>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {stock.urgent.map((r) => (
+            <li key={r.product_id} className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-sm" title={r.name}>
+                {r.name}
+              </span>
+              <StatusChip tone={SNAPSHOT_TONE[r.status]}>{r.status === 'out' ? 'Out' : `${r.stock} left`}</StatusChip>
+            </li>
+          ))}
+        </ul>
+      )}
+      {total > 0 && (
+        <div className="mt-auto pt-4">
+          <div className="flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full" role="img" aria-label={parts.map((x) => `${x.n} ${x.label}`).join(', ')}>
+            {parts.map((x) =>
+              x.n > 0 ? <div key={x.key} style={{width: `${(x.n / total) * 100}%`, backgroundColor: TONE_VAR[x.tone]}} className="h-full opacity-80" /> : null,
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {parts.map((x) => (
+              <span key={x.key} className="inline-flex items-center gap-1.5 tabular-nums">
+                <span className="size-1.5 rounded-full" style={{backgroundColor: TONE_VAR[x.tone]}} aria-hidden />
+                {x.n} {x.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function StockAlertsCard({alerts, className}: {alerts: StockAlerts; className?: string}) {
+  const nothing = alerts.out.length === 0 && alerts.low.length === 0 && alerts.nearExpiry.length === 0;
+  return (
+    <Panel title="Stock alerts" className={className}>
+      {nothing ? (
+        <AllClear>Nothing low, out, or near expiry.</AllClear>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <AlertLane
+            icon={PackageX}
+            title="Out of stock"
+            tone="crit"
+            rows={alerts.out.map((p) => ({key: p.product_id, name: p.name, chip: 'Out'}))}
+          />
+          <AlertLane
+            icon={TriangleAlert}
+            title="Running low"
+            tone="warn"
+            rows={alerts.low.map((p) => ({key: p.product_id, name: p.name, chip: `${p.stock} left`}))}
+          />
+          <AlertLane
+            icon={CalendarClock}
+            title="Near expiry"
+            tone="warn"
+            rows={alerts.nearExpiry.map((p) => ({key: p.product_id, name: p.name, chip: expiryLabel(p.next_expiry)}))}
+          />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** One alert category as a soft lane: icon + sentence-case title + count, then
+ *  rows with a tinted chip. An empty lane says so calmly instead of "None". */
+function AlertLane({
+  icon: Icon,
+  title,
+  tone,
+  rows,
+}: {
+  icon: React.ComponentType<{className?: string; style?: React.CSSProperties}>;
+  title: string;
+  tone: Exclude<Tone, 'neutral' | 'good'>;
+  rows: {key: string; name: string; chip: string}[];
+}) {
+  const empty = rows.length === 0;
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-4" aria-label={title}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Icon className="size-4" style={{color: empty ? undefined : TONE_VAR[tone]}} />
+          {title}
+        </span>
+        <StatusChip tone={empty ? 'neutral' : tone}>{rows.length}</StatusChip>
+      </div>
+      {empty ? (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Check className="size-3.5" style={{color: 'var(--status-good)'}} aria-hidden /> All clear
+        </p>
       ) : (
         <ul className="flex flex-col gap-2.5">
-          {stock.urgent.map((r) => {
-            const s = SNAPSHOT_STATUS[r.status];
+          {rows.map((r) => (
+            <li key={r.key} className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-sm" title={r.name}>
+                {r.name}
+              </span>
+              <StatusChip tone={tone}>{r.chip}</StatusChip>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Calm "nothing to do" state with a green check, for empty alert lists. */
+function AllClear({children}: {children: React.ReactNode}) {
+  return (
+    <p className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+      <Check className="size-4" style={{color: 'var(--status-good)'}} aria-hidden />
+      {children}
+    </p>
+  );
+}
+
+/** "Freeze-Dried Salmon Cubes ×1 +2 more": one line item, then a count of the rest. */
+function orderSummary(o: PosOrder): string {
+  if (o.items.length === 0) return 'No items';
+  // Lead with a named product when the first line is an unmatched "Unknown".
+  const first = o.items.find((it) => it.name && it.name !== 'Unknown') ?? o.items[0];
+  const rest = o.items.length - 1;
+  return `${first.name} ×${first.qty}${rest > 0 ? ` +${rest} more` : ''}`;
+}
+
+/** Latest sales, led by what sold (the part people scan for), then when and how
+ *  it was paid. A method-colored dot ties each row to the chart legend. */
+function RecentOrdersPanel({orders}: {orders: PosOrder[]}) {
+  return (
+    <Panel title="Recent orders" action={{label: 'View all', href: '/offline-sales/orders'}}>
+      {orders.length === 0 ? (
+        <Empty>No orders yet.</Empty>
+      ) : (
+        <ul className="-mx-2 flex flex-col">
+          {orders.slice(0, 6).map((o) => {
+            const voided = o.status === 'voided';
+            const method = orderMethod(o);
             return (
-              <li key={r.product_id} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate font-medium">{r.name}</span>
-                <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-xs font-medium', s.text)}>
-                  <span className={cn('size-1.5 rounded-full', s.dot)} />
-                  {r.status === 'out' ? 'Out' : `${r.stock} · ${s.label}`}
-                </span>
+              <li key={o.id}>
+                <Link
+                  href="/offline-sales/orders"
+                  className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted/50"
+                >
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{backgroundColor: voided ? 'var(--muted-foreground)' : paymentMethodColor(method)}}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className={cn('block truncate text-sm', voided && 'text-muted-foreground line-through')} title={o.items.map((it) => `${it.name} ×${it.qty}`).join(', ')}>
+                      {orderSummary(o)}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+                      {timeLabel(o.created_at)}
+                      <span aria-hidden>·</span>
+                      {paymentMethodLabel(method)}
+                      {voided && <StatusChip tone="crit">Voided</StatusChip>}
+                      {o.oversold && <StatusChip tone="warn">Oversold</StatusChip>}
+                    </span>
+                  </span>
+                  <span className={cn('shrink-0 text-sm font-semibold tabular-nums', voided && 'font-normal text-muted-foreground line-through')}>
+                    {formatPeso(o.total)}
+                  </span>
+                </Link>
               </li>
             );
           })}
         </ul>
       )}
-      {stock && stock.summary.total > 0 && (
-        <div className="mt-3 border-t pt-3 font-mono text-[11px] text-muted-foreground">
-          {stock.summary.healthy} healthy · {stock.summary.low} low · {stock.summary.out} out
-        </div>
-      )}
     </Panel>
-  );
-}
-
-function StockAlertsCard({alerts}: {alerts: StockAlerts}) {
-  const nothing = alerts.out.length === 0 && alerts.low.length === 0 && alerts.nearExpiry.length === 0;
-  return (
-    <Panel title="Stock alerts">
-      {nothing ? (
-        <Empty>All good. Nothing low, out, or near expiry.</Empty>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-3">
-          <AlertColumn
-            icon={<PackageX className="size-3.5" />}
-            title="Out of stock"
-            rows={alerts.out.map((p) => ({key: p.product_id, name: p.name, note: `${p.stock}`}))}
-            tone="destructive"
-          />
-          <AlertColumn
-            icon={<TriangleAlert className="size-3.5" />}
-            title="Low stock"
-            rows={alerts.low.map((p) => ({key: p.product_id, name: p.name, note: `${p.stock} left`}))}
-            tone="warn"
-          />
-          <AlertColumn
-            icon={<CalendarClock className="size-3.5" />}
-            title="Near expiry"
-            rows={alerts.nearExpiry.map((p) => ({key: p.product_id, name: p.name, note: expiryLabel(p.next_expiry)}))}
-            tone="warn"
-          />
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-function AlertColumn({
-  icon,
-  title,
-  rows,
-  tone,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  rows: {key: string; name: string; note: string}[];
-  tone: 'destructive' | 'warn';
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className={cn('flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider', tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground')}>
-        {icon}
-        {title}
-        <span className="text-muted-foreground">({rows.length})</span>
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">None</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {rows.map((r) => (
-            <li key={r.key} className="flex items-center justify-between gap-2 text-sm">
-              <span className="min-w-0 truncate">{r.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{r.note}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -283,7 +404,7 @@ function RangeTabs({active}: {active: SalesRange}) {
           scroll={false}
           className={cn(
             'rounded px-2.5 py-1 text-xs font-medium transition-colors',
-            r.value === active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            r.value === active ? 'bg-muted text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {r.label}
@@ -293,16 +414,12 @@ function RangeTabs({active}: {active: SalesRange}) {
   );
 }
 
-function Kpi({label, value, warn}: {label: string; value: string; warn?: boolean}) {
-  return <Metric label={label} value={value} valueClassName={warn ? 'text-destructive' : undefined} />;
-}
-
-/** A compact event date range: "Sep 16", "Sep 16 – 18", "Sep 30 – Oct 1". */
+/** A compact event date range: "Sep 16", "Sep 16 to Sep 18", "Sep 30 to Oct 1". */
 function eventDatesShort(startsOn: string | null, endsOn: string | null): string {
   if (!startsOn && !endsOn) return 'No dates set';
   if (!startsOn) return shortDay(endsOn as string);
   if (!endsOn || endsOn === startsOn) return shortDay(startsOn);
-  return `${shortDay(startsOn)} – ${shortDay(endsOn)}`;
+  return `${shortDay(startsOn)} to ${shortDay(endsOn)}`;
 }
 
 /** The event spotlight banner: the bazaar running today ("Happening now"), else
@@ -317,7 +434,7 @@ function EventStatusCard({featured}: {featured: FeaturedEvent | null}) {
   return (
     <Link
       href="/offline-sales/events"
-      className="group flex h-full flex-col justify-between gap-5 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/40"
+      className="group flex h-full flex-col justify-between gap-6 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/40 lg:p-6"
     >
       {/* Top row: status icon (left) + the go-to-events affordance (right). */}
       <div className="flex items-start justify-between gap-3">
@@ -366,13 +483,14 @@ const PET_SEGMENTS: {key: keyof PetMix; label: string; color: string}[] = [
 /** Revenue + order split by tagged pet: a 4-segment bar over a per-segment
  *  legend. Widths are revenue-proportional; the legend always lists all four so
  *  a zero segment still reads. Empty (no orders) shows a friendly note. */
-function PetMixCard({mix}: {mix: PetMix}) {
+function PetMixCard({mix, className}: {mix: PetMix; className?: string}) {
   const totalRevenue = PET_SEGMENTS.reduce((s, seg) => s + mix[seg.key].revenue, 0);
   const totalOrders = PET_SEGMENTS.reduce((s, seg) => s + mix[seg.key].orders, 0);
 
   return (
     <Panel
       title="Pet mix"
+      className={className}
       info="Sales split by the pet each order was tagged for at the POS. Untagged sales were recorded without a pet type. Honors the range and payment-option filters above."
     >
       {totalOrders === 0 ? (
@@ -386,20 +504,24 @@ function PetMixCard({mix}: {mix: PetMix}) {
               return <div key={seg.key} style={{width: `${pct}%`, backgroundColor: seg.color}} />;
             })}
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+          {/* A 2/4-up legend grid; on wide screens (beside the chart) it becomes a
+              row-per-pet list so the card fills the chart's height. */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4 xl:mt-1 xl:grid-cols-1 xl:gap-y-0 xl:divide-y">
             {PET_SEGMENTS.map((seg) => {
               const s = mix[seg.key];
               const pct = totalRevenue > 0 ? Math.round((s.revenue / totalRevenue) * 100) : 0;
               return (
-                <div key={seg.key} className="flex flex-col gap-0.5">
+                <div key={seg.key} className="flex flex-col gap-0.5 xl:flex-row xl:items-center xl:justify-between xl:gap-3 xl:py-3">
                   <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     <span className="size-2 rounded-[3px]" style={{backgroundColor: seg.color}} aria-hidden />
                     {seg.label}
                     {totalRevenue > 0 && <span className="tabular-nums text-muted-foreground/60">{pct}%</span>}
                   </span>
-                  <span className="text-sm font-medium tabular-nums">{formatPeso(s.revenue)}</span>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {s.orders} {s.orders === 1 ? 'order' : 'orders'}
+                  <span className="flex flex-col gap-0.5 xl:items-end">
+                    <span className="text-sm font-medium tabular-nums">{formatPeso(s.revenue)}</span>
+                    <span className="text-[11px] tabular-nums text-muted-foreground">
+                      {s.orders} {s.orders === 1 ? 'order' : 'orders'}
+                    </span>
                   </span>
                 </div>
               );
@@ -421,142 +543,193 @@ const DIRECTION_OPTIONS = [
 ] as const;
 const SELLERS_LIMIT = 5;
 
-/** Right column of the overview: the product list stacked over Top bundles.
- *  A Revenue/Units toggle picks the metric; a Top/Bottom toggle flips between the
- *  best sellers and the lowest ("kulelat"). In Units mode bundles rank by orders
- *  (their unit analog: one order == one bundle sold). */
-function TopSellersColumn({
+/** "17%", or "<1%" for a sliver that would otherwise round to zero. */
+function pctLabel(part: number, whole: number): string {
+  if (whole <= 0 || part <= 0) return '0%';
+  const pct = (part / whole) * 100;
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`;
+}
+
+/** One ranked row: rank and name on the left, the headline value on the right,
+ *  and under it a plain-language share ("17% of revenue") so each row explains
+ *  itself without a legend. */
+function RankRow({rank, name, sub, value, share}: {rank: number; name: string; sub?: string; value: string; share: string}) {
+  return (
+    <li className="flex items-start gap-3">
+      <span className="w-4 shrink-0 pt-px text-right text-xs tabular-nums text-muted-foreground">{rank}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium" title={name}>
+          {name}
+        </div>
+        {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-sm font-semibold tabular-nums">{value}</div>
+        <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">{share}</div>
+      </div>
+    </li>
+  );
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Best (or lowest) sellers by revenue or units. The non-selected measure moves
+ *  to the secondary line so each row leads with one number. */
+function TopProductsPanel({
   byRevenue,
   byUnits,
   bundles,
-  topBundles,
+  metric,
+  direction,
+  onMetric,
+  onDirection,
 }: {
   byRevenue: TopProduct[];
   byUnits: TopProduct[];
   bundles: BundleSalesSummary;
-  topBundles: TopBundle[];
+  metric: 'revenue' | 'units';
+  direction: 'top' | 'bottom';
+  onMetric: (m: 'revenue' | 'units') => void;
+  onDirection: (d: 'top' | 'bottom') => void;
 }) {
-  const [metric, setMetric] = useState<'revenue' | 'units'>('revenue');
-  const [direction, setDirection] = useState<'top' | 'bottom'>('top');
   const isTop = direction === 'top';
-
   // Full ranked list (high→low). Top shows the first N; Bottom shows the last N
   // flipped so #1 is the single lowest seller.
   const ranked = metric === 'revenue' ? byRevenue : byUnits;
   const rows = isTop ? ranked.slice(0, SELLERS_LIMIT) : ranked.slice(-SELLERS_LIMIT).reverse();
-  const bundleRows =
-    metric === 'revenue'
-      ? topBundles
-      : [...topBundles].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
-
-  // The bundle reconciliation is a whole-of-total statement ("matching Revenue
-  // above"), so it only belongs with the best-sellers view, not the lowest.
+  const measure = (t: TopProduct) => (metric === 'revenue' ? t.revenue : t.units);
+  // Shares are of the whole: total revenue (the Revenue KPI, bundles included)
+  // or every unit sold, so they match the numbers at the top of the page.
+  const whole = metric === 'revenue' ? bundles.totalRevenue : byUnits.reduce((n, t) => n + t.units, 0);
+  const of = metric === 'revenue' ? 'of revenue' : 'of units';
+  // The bundle reconciliation is a whole-of-total statement, so it only belongs
+  // with the best-sellers view, not the lowest.
   const showBundleReconcile = isTop && bundles.bundleRevenue > 0;
 
-  const controls = (
-    <div className="flex items-center gap-1.5">
-      <SegmentedControl ariaLabel="Rank by" options={METRIC_OPTIONS} value={metric} onChange={setMetric} />
-      <SegmentedControl ariaLabel="Show best or lowest" options={DIRECTION_OPTIONS} value={direction} onChange={setDirection} />
-    </div>
-  );
-
   return (
-    <div className="flex flex-col gap-4">
-      <Panel
-        title={isTop ? 'Top products' : 'Lowest products'}
-        info="Money shown is itemized sales only. Bundle deals are priced as a set, so their value is listed once under Bundle deals, not split per item."
-        control={controls}
-      >
-        {ranked.length === 0 && bundles.bundleRevenue <= 0 ? (
-          <Empty>No sales in this range.</Empty>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            <ul className="flex flex-col gap-2.5">
-              {rows.map((t, i) => (
-                <li key={t.product_id} className="flex items-start gap-3">
-                  <span className="w-4 pt-0.5 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{t.name}</span>
-                    {t.bundledUnits > 0 && (
-                      <span className="text-[11px] text-muted-foreground">{t.bundledUnits} of these units were bundled</span>
-                    )}
-                  </span>
-                  <span className={cn('pt-0.5 text-xs tabular-nums', metric === 'units' ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-                    {t.units} units
-                  </span>
-                  <span className={cn('w-20 pt-0.5 text-right text-sm tabular-nums', metric === 'revenue' ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-                    {formatPeso(t.revenue)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            {showBundleReconcile && (
-              <>
-                <div className="h-px w-full bg-border" />
-                <div className="flex items-center gap-3">
-                  <span className="w-4" />
-                  <span className="min-w-0 flex-1 text-sm">
-                    Bundle deals
-                    <span className="ml-1.5 text-[11px] text-muted-foreground">priced as a set</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">{bundles.bundleOrders} orders</span>
-                  <span className="w-20 text-right text-sm font-medium tabular-nums">{formatPeso(bundles.bundleRevenue)}</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Itemized {formatPeso(bundles.itemizedRevenue)} plus bundles {formatPeso(bundles.bundleRevenue)} is{' '}
-                  {formatPeso(bundles.totalRevenue)}, matching Revenue above.
-                </p>
-              </>
-            )}
-          </div>
-        )}
-        {ranked.length > 0 && <ViewAllFooter href="/offline-sales/rankings?tab=products" label="View all products" />}
-      </Panel>
-
-      {topBundles.length > 0 && (
-        <Panel
-          title="Top bundles"
-          info="Bundles sold as a set. Sales made offline, or before bundle tracking landed, are counted in the Bundle deals total on Top products but are not listed by name here."
-        >
-          <ul className="flex flex-col gap-2.5">
-            {bundleRows.map((b, i) => (
-              <li key={b.bundle_id} className="flex items-center gap-3">
-                <span className="w-4 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-sm">{b.name}</span>
-                <span className={cn('text-xs tabular-nums', metric === 'units' ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-                  {b.orders} {b.orders === 1 ? 'order' : 'orders'}
-                </span>
-                <span className={cn('w-20 text-right text-sm tabular-nums', metric === 'revenue' ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-                  {formatPeso(b.revenue)}
-                </span>
-              </li>
-            ))}
+    <Panel
+      title={isTop ? 'Top products' : 'Lowest products'}
+      info="Money shown is itemized sales only. Bundle deals are priced as a set, so their value is listed once under Bundle deals, not split per item."
+      control={
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SegmentedControl ariaLabel="Rank by" options={METRIC_OPTIONS} value={metric} onChange={onMetric} />
+          <SegmentedControl ariaLabel="Show best or lowest" options={DIRECTION_OPTIONS} value={direction} onChange={onDirection} />
+        </div>
+      }
+    >
+      {ranked.length === 0 && bundles.bundleRevenue <= 0 ? (
+        <Empty>No sales in this range.</Empty>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-3.5">
+            {rows.map((t, i) => {
+              const other = metric === 'revenue' ? plural(t.units, 'unit', 'units') : formatPeso(t.revenue);
+              return (
+                <RankRow
+                  key={t.product_id}
+                  rank={i + 1}
+                  name={t.name}
+                  value={metric === 'revenue' ? formatPeso(t.revenue) : plural(t.units, 'unit', 'units')}
+                  sub={t.bundledUnits > 0 ? `${other} · ${t.bundledUnits} in bundles` : other}
+                  share={`${pctLabel(measure(t), whole)} ${of}`}
+                />
+              );
+            })}
           </ul>
-          <ViewAllFooter href="/offline-sales/rankings?tab=bundles" label="View all bundles" />
-        </Panel>
+
+          {showBundleReconcile && (
+            <div className="rounded-lg bg-muted/40 px-3.5 py-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-sm font-medium">
+                  Bundle deals
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">{plural(bundles.bundleOrders, 'order', 'orders')}</span>
+                </span>
+                <span className="text-sm font-semibold tabular-nums">{formatPeso(bundles.bundleRevenue)}</span>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Priced as a set. Items {formatPeso(bundles.itemizedRevenue)} + bundles {formatPeso(bundles.bundleRevenue)} ={' '}
+                {formatPeso(bundles.totalRevenue)} total revenue.
+              </p>
+            </div>
+          )}
+        </div>
       )}
-    </div>
+      {ranked.length > 0 && <ViewAllFooter href="/offline-sales/rankings?tab=products" label="View all products" />}
+    </Panel>
   );
 }
 
-/** Right-aligned "View all → " footer link, used under the Top products / Top
- *  bundles lists to reach the full paginated rankings page. */
+/** Bundles sold as a set, ranked by revenue (or by orders in Units mode: one
+ *  order is one bundle sold). */
+function TopBundlesPanel({
+  topBundles,
+  metric,
+  totalRevenue,
+  className,
+}: {
+  topBundles: TopBundle[];
+  metric: 'revenue' | 'units';
+  totalRevenue: number; // the Revenue KPI, so shares match the top of the page
+  className?: string;
+}) {
+  const rows = metric === 'revenue' ? topBundles : [...topBundles].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
+  const measure = (b: TopBundle) => (metric === 'revenue' ? b.revenue : b.orders);
+  const whole = metric === 'revenue' ? totalRevenue : topBundles.reduce((n, b) => n + b.orders, 0);
+  const of = metric === 'revenue' ? 'of revenue' : 'of bundle orders';
+  return (
+    <Panel
+      title="Top bundles"
+      info="Bundles sold as a set. Sales made offline, or before bundle tracking landed, are counted in the Bundle deals total on Top products but are not listed by name here."
+      className={className}
+    >
+      <ul className="flex flex-col gap-3.5">
+        {rows.map((b, i) => (
+          <RankRow
+            key={b.bundle_id}
+            rank={i + 1}
+            name={b.name}
+            value={metric === 'revenue' ? formatPeso(b.revenue) : plural(b.orders, 'order', 'orders')}
+            sub={metric === 'revenue' ? plural(b.orders, 'order', 'orders') : formatPeso(b.revenue)}
+            share={`${pctLabel(measure(b), whole)} ${of}`}
+          />
+        ))}
+      </ul>
+      <ViewAllFooter href="/offline-sales/rankings?tab=bundles" label="View all bundles" />
+    </Panel>
+  );
+}
+
 function ViewAllFooter({href, label}: {href: string; label: string}) {
   return (
-    <div className="mt-3 border-t pt-3 text-right">
-      <Link href={href} className="text-xs font-medium text-primary hover:underline">
-        {label} →
-      </Link>
+    <div className="mt-auto pt-3">
+      <div className="border-t pt-3 text-right">
+        <Link href={href} className="text-xs font-medium text-primary hover:underline">
+          {label}
+        </Link>
+      </div>
     </div>
   );
 }
 
-function Panel({title, info, action, control, children}: {title: string; info?: string; action?: {label: string; href: string}; control?: React.ReactNode; children: React.ReactNode}) {
+function Panel({
+  title,
+  info,
+  action,
+  control,
+  className,
+  children,
+}: {
+  title: string;
+  info?: string;
+  action?: {label: string; href: string};
+  control?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+    <Card className={cn('h-full', className)}>
+      <CardContent className="flex h-full flex-col py-5 lg:px-6 lg:py-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
           <h3 className="flex items-center gap-1 text-sm font-semibold">
             {title}
             {info && <InfoTip text={info} />}

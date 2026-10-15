@@ -10,6 +10,105 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
+- Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
+- Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".
+## 2026-10-14 — Free items won: show which event each prize was given at
+- Each prize card on `/offline-sales` now names its **event**, linking to that event's page; prizes with no event read "No event".
+  - *How:* the prize's order event tag (`pos_orders.event_id`), else the event covering the order's date, the same read-time fill the Events page uses (`resolveOrderEvents`). Read-only, no schema change.
+
+## 2026-10-14 — Offline Sales lists: calmer, easier to scan
+- **Less glare.** Shared toggles (`SegmentedControl`, e.g. Revenue/Units, Top/Bottom; used across the analytics pages) and the range tabs now mark the active option with a soft muted fill instead of solid bright green. Status colors are soft tinted chips instead of colored text and uppercase headings.
+- **Top products / Top bundles:** each row leads with one number (the selected measure) and puts the other on a secondary line ("46 units · 11 in bundles"). A thin bar under each row shows its size relative to #1, so the gaps read at a glance. Bundle deals became a small summary box ("Items ₱35,242 + bundles ₱18,617 = ₱53,859 total revenue").
+- **Recent orders:** rows lead with what sold ("Meaty Treats Chicken ×4 +2 more"), then time and payment method, with a dot in the method's chart color. Voided and oversold show as chips.
+- **Stock:** status chips ("Out", "3 left"), and the old monospace "10 healthy · 18 low · 2 out" line is now a small health bar with a color legend.
+- **Stock alerts:** three soft lanes (Out of stock, Running low, Near expiry) with sentence-case titles and count chips; an empty lane says "All clear" with a check instead of "None".
+- **Layout:** on wide screens the lists sit in three content-sized columns (products | recent orders | bundles over stock) so short lists no longer leave big holes; stock alerts span the full width below.
+- **Free items won:** a compact 3-across card grid (product first, then who and when) with an icon-only Undo, showing 6 with a "Show all" toggle. Add prize became a quieter outline button.
+
+## 2026-10-14 — Offline Sales overview: more breathing room
+- Wider spacing on `/offline-sales` after the full-width layout felt cramped: grid gaps 16 → 20px (24px from laptop up), a bigger gap under the range toolbar, roomier panel padding (24px on laptop+) and KPI cells, and a little more space between list rows.
+- Top products names wrap to two lines instead of truncating, since the three-across row made columns narrower.
+
+## 2026-10-14 — Offline Sales overview: full width, responsive grid
+- **`/offline-sales` now uses the whole screen** (dropped the `max-w-5xl` cap, like Events and Transactions) and lays out on a 12-column grid that reflows by width:
+  - **Wide (xl):** one hero row with event (3), daily goal (4) and KPIs (5); Sales over time (8) beside Pet mix (4); then Top products, Top bundles and Recent orders three across; Stock beside Stock alerts.
+  - **Laptop (lg):** event + goal side by side, KPIs 4 across under them; chart and pet mix full width.
+  - **Tablet (md):** lists two across. **Phone:** single column.
+- **KPIs are one segmented card** (hairline dividers) instead of four boxes: less chrome, reads as one summary.
+- **Range and payment option share one toolbar** under the title, since both scope every number below; Refresh sits top right.
+- Panels in a row stretch to equal height with their "View all" footers pinned to the bottom. On wide screens the Pet mix legend turns into a row-per-pet list so it fills the space beside the chart, and the chart grows to 260px.
+- The spin-the-wheel prizes panel follows the same full width.
+- Copy: event dates read "Oct 10 to Oct 17" (was an en dash) and the Stock empty state drops its em dash.
+
+## 2026-10-13 — Motion polish: dialogs animate in and out, reduced motion app-wide
+Coop half of a POS + Coop motion audit (`design-motion-principles` skill, Emil primary / Jakub secondary). The user picked which findings to fix.
+- **Seven hand-rolled dialogs now share `ModalShell`** (`components/analyst/modal-shell.tsx`): Add stock, Move stock, New product, Bundle, Undo free taste, Edit (price/target) and Edit stock. They used to snap in and out in one frame. Now the backdrop fades over 150ms and the panel fades + scales from 0.96 over 180ms (ease-out-quint), and closing fades both over 120ms with no scale (exits are subtler than enters).
+  - *How:* the enter is pure CSS (`starting:` / @starting-style). The exit comes from `useModalExit(onClose)`. Each dialog shadows its `onClose` prop with the hook's animated `close`, so every existing close path (Escape, backdrop, X, Cancel) plays the exit without touching each call site. Parent `{open && …}` mounting is unchanged.
+- **The batch/upload review lightboxes fade in** over 150ms. An exit would need a restructure (they're inline, not components), so that was left out.
+- **Reduced motion is now app-wide:** one `prefers-reduced-motion: reduce` rule in `globals.css` collapses every transition and animation. Before, only 15 of ~80 animating components had their own guard. Loading spinners keep turning (functional, not decorative), and `useModalExit` closes immediately.
+- **Kept as is (user call):** the Ask Coop shine, the "Happening now" ping and the channel chip hint. The Chat and Playbook drawer exits weren't chosen this round.
+- Verified: typecheck, 2610 tests, and in the browser (Add stock open + Escape close, with and without reduced motion).
+
+## 2026-10-13 — Transactions filters: fewer visible choices, removable filter pills
+- **The filter bar on `/offline-sales/orders` now shows five category triggers (Method, Date, Price, Status, Event) instead of every option at once.** Each opens its own dropdown; picking an option applies it straight away.
+  - *Why (Hick's law):* the old bar laid out about 14 choices inline (two segmented controls plus three popovers) and felt cramped. Fewer visible choices means a faster decision, and the full list is still one click away.
+- **Applied filters read back as pills** ("Method Cash ×", "Price ₱100 to ₱500 ×") below the bar. Each pill removes just that filter, and **Clear all** resets everything. Triggers keep a fixed label with a dot when applied, so the bar never shifts width as filters change.
+- **Date quick ranges:** Today, Yesterday, Last 7 days, Last 30 days apply in one click; the calendar stays for custom ranges. A matching range shows its preset name in the pill.
+- Fixed en dashes in the date and price labels ("Sep 1 – Sep 9"): they now read "Sep 1 to Sep 9", per the no-dash UI copy rule.
+- Dropdowns animate from their trigger (origin-aware scale + fade, 150ms ease-out), matching the env switcher.
+
+## 2026-10-13 — Event lead contacts: an "Update leads" button replaces the CSV round trip
+- **New "Update leads" button on `/customers/leads`.** It pulls every spin-the-wheel lead from the storefront and adds the ones Coop doesn't have yet, then shows how many were added.
+  - *Why:* each event meant exporting a CSV from zoomyforpets.com/admin/spin-wheel and running `scripts/import-spin-leads.mjs` by hand.
+  - *Where leads really live:* the booth form saves them in **Shopify**, in the shop's `custom.newsletter_subscribers` metafield (rows tagged `source: 'spin-win'`), not in a storefront Supabase table as the old comments said. Coop has no Shopify access, so it reads them through the CRM worker's new read-only `GET /api/spin-leads` (zoomy-crm `feat/api-spin-leads`), using the existing `CRM_API_URL` / `CRM_API_READ_TOKEN`. No new secrets.
+  - **Insert-only.** Existing rows are never updated or removed, and pressing the button again is harmless.
+  - *Decision:* a lead counts as new when its **contact** (email or Instagram handle) isn't in the table yet. The storefront allows one spin per contact, so this is safe. The table's own key (contact + time) can't be used: CSV-imported rows hold minute-rounded times and Shopify holds seconds, so every existing lead would have looked new.
+  - *Decision:* a new lead's `collected_at` is its **consent time**, i.e. the spin itself. Shopify keeps a returning subscriber's original signup date, which is why a few CSV-imported leads show June/July dates. Existing rows are left as they are.
+  - Prize ids (`peso300`, `toy-collar`, …) are mapped to the labels the table already uses (`src/spin-leads-sync.ts`). A prize Coop hasn't seen keeps its raw id until it is added there.
+  - Fails loudly, never as "0 new": if the CRM worker or Shopify can't answer, the button says so and nothing is written.
+- **New "Picky eater" field** (Oct 2026 booth form). It is saved by the button and by the CSV import, and shown as a column once any lead has it. Needs `supabase/spin_wheel_leads_picky.sql` (additive: one new column), **run on prod before the button is used**.
+- The leads cache is now tagged, so new leads show up straight away instead of after the 30s cache window.
+- Unchanged: unsubscribes. A lead removed from the Shopify list stays in Coop, because the button only adds.
+
+## 2026-10-13 — Transactions page redesign
+- **`/offline-sales/orders` uses the full width and groups sales by day.** Each day gets a header ("Sat, Oct 10, 2026 · 2 sales", or "Today" / "Yesterday"), and each row shows just the time, so the date isn't repeated on every sale.
+  - Rows lead with what was bought, then the method, event, free-item, IG handle, edited/voided/oversold tags and a unit count. The total sits at the right.
+  - Edit and Void are compact icon buttons beside the total (dimmed until you hover the row on a mouse, always shown on touch). Unvoid stays a labelled button on voided sales.
+  - The running row number was dropped; it changed with every filter and page and didn't identify a sale.
+- **Filters sit in one toolbar box.** On a phone the Method choices scroll sideways inside it instead of running off screen.
+- **Count and pager:** "150 transactions" above the list and "Showing 1 to 10 of 150" with page numbers below (always visible). `PageInfo` now carries `total` (the filtered row count it already queried).
+
+## 2026-10-13 — New/Edit event as a slide-over; persistent pager; colored statuses
+- **Creating or editing an event opens a right-side panel** instead of an inline card that stretched across the full-width page. The list (or the event page) stays visible behind it.
+  - Fields are grouped: Event (name, organizer), Where (venue, city), When, Cash, and Close out when editing.
+  - **One date-range picker** replaces the two native date inputs: pick the first and last day on a calendar (future days allowed), see "Sun, Oct 18 to Tue, Oct 20, 2026 · 3 days". One pick makes a single-day event. The "runs alongside" note is unchanged.
+  - Opening float has a ₱ prefix and quick picks (₱1,000 / ₱2,000 / ₱3,000 / ₱5,000). Errors show under the field they belong to.
+  - Close out: Active / Closed toggle; "Counted at close" appears once Closed is picked.
+  - Esc or the backdrop closes it; Cmd/Ctrl+Enter saves.
+  - `Calendar` gained an `allowFuture` prop (default off, so the sales date pickers still block future days).
+- **The Events pager is always visible**: "Showing 1 to 8 of 8 events", page numbers, and Per page 12 / 24 / 48 (multiples of 12 so tiles fill whole rows). `Pagination` gained `alwaysShow` (default off; other tables unchanged).
+- **Status pills are color-coded** everywhere they appear (tiles, table, event page): Happening now green with a pulsing dot, Upcoming blue with a clock, Done neutral with a check.
+
+## 2026-10-13 — Events pages use the full width
+- **`/offline-sales/events` and each event page now span the whole content area** beside the sidebar (was a centered 896px column that left wide empty margins on desktop).
+  - Tiles go up to 4 across on wide screens (`xl`), so a 12-event page always fills whole rows.
+  - On wide screens the search box sits on the same row as the When/Sort filters instead of stretching across the page.
+
+## 2026-10-13 — Events: Tiles / Table toggle
+- **A Tiles / Table switch sits beside the event count on `/offline-sales/events`.** Table shows Event (name + place), Status, Dates, Orders and Revenue per row. Live events keep a green left edge. Clicking a row opens the event page, and the name is also a real link.
+  - Search, When, Sort and pagination apply to both views, so switching keeps your place.
+  - *Decision:* the chosen view is remembered per browser (`localStorage`, guarded) and defaults to Tiles. It's a viewing preference, not shared state, so it doesn't belong in the URL or the database.
+
+## 2026-10-13 — Events page is a tile grid; each event has its own page
+- **`/offline-sales/events` now lists events as a grid of tiles** (3 across on desktop, 2 on tablet, 1 on phone, 12 per page). Each tile shows the status pill, name, dates, place, revenue and order count, and the whole tile links to the event.
+  - *Why:* every event was a full card with its cash box and analytics stacked inline (the live one expanded), so reaching older events meant scrolling past several screens of charts. Tiles keep the whole list scannable in one view.
+  - Search, When/Sort filters, pagination, "New event", and pinning live events to the top (with the green ring) are unchanged.
+- **New per-event page `/offline-sales/events/[eventId]`** holds what the card used to: header (status, dates, venue, organizer, revenue), Edit (inline form), cash reconciliation, and the full analytics panel, always expanded.
+  - Orders use the same read-time event attribution as the list (`resolveOrderEvents`), so tile and page totals agree. Unknown ids 404.
+  - The event-scoped "View all products" rankings page now goes back to that event instead of the list.
+- Shared bits moved to `components/analyst/event-parts.tsx` (status pill, date range, cash reconciliation). Date ranges now read "Oct 10, 2026 to Oct 17, 2026" (no en dash, per the UI copy rule) and format in UTC so a date never shifts by a day.
+
 ## 2026-10-10 — One review view for a batch; unsaved edits are kept
 - **A page in an open batch always opens in the batch review, on that page's tab.**
   - *Why:* clicking a file in a bulk upload opened the single-scan review, while "Review & commit N pages" opened the batch review: two different screens for the same pages, each with its own store and period fields, and edits made in one were not in the other.
@@ -80,6 +179,33 @@ Dates are local working dates (GMT+8). Newest first.
 
 ## 2026-10-07 — Ask Coop fast path (Train 1)
 - **Ask Coop fast path (Train 1).** The per-turn context no longer calls contacts, free-form questions or stock unavailable when Explore is on (it did on every turn in PROD). The chat now sends the open page, and dashboard links pasted in a question are described from a page map, so "this" means the page's data. Explore can read stock (5 views over 4 zoomy-pos sources; `coop_explore_stock_event` is the default) with sellable Event stock as the default basis, because two kinds of "stock" exist and the dashboard forecast uses Event. `pos_locations` was left out (it may not exist on staging or PROD), and `coop_chat_explore.sql` now stops in step 0 with a clear message if a stock source or `pos_inventory_by_location.location` is missing. Needs `supabase/coop_chat_explore.sql` re-applied on staging and PROD.
+
+## 2026-10-08 — BoxMe (Online) inventory is live data, not a stub
+- **What:** the BoxMe channel of `/inventory?channel=online` now shows real BoxMe warehouse stock and replaces the D13 stub. Per SKU it shows Available, Awaiting pick, Reserved, Incoming, Damaged, next expiry, the Stratpoint Offline count (Office + Event) and a "Lasts" estimate. Above the table:
+  - a freshness pill
+  - a four-total strip
+  - status chips that also filter the table
+  - Line pills and search
+- **Below the table:**
+  - an Expiring soon list
+  - a Catalog match card listing POS products not at BoxMe and BoxMe SKUs unknown to POS
+  - the existing marketplace analytics, under their own heading (D13 kept)
+- **Product page:** `/inventory/[sku]` gets a BoxMe card with the per-warehouse split and a daily available-units trend. The KPI block is now labelled "Stratpoint (Offline)" instead of a hard-coded subtitle. Arriving from the BoxMe table shows the BoxMe card first, and Back returns to the BoxMe tab.
+- **Decisions:**
+  - **Separate `boxme_*` tables, not a `'boxme'` row in `pos_locations`.** BoxMe owns its numbers, so mirroring them into POS lots would collide with POS sales, FEFO and the stock RPCs.
+  - **Writer is zoomy-observability.** Its `boxme-sync` job (GitHub Actions, daily 07:30 Manila, ahead of the 08:00 stock digest) owns `supabase/boxme_inventory.sql`. This app only reads.
+  - **No fixed IP.** BoxMe's docs say an IP whitelist is mandatory, but our key works from unregistered IPs (VPN and local tests). A static-IP proxy (`BOXME_PROXY_URL`) is the fallback if BoxMe starts enforcing it.
+  - **Join on `seller_sku = product_id`.** All 20 BoxMe SKUs match `pos_products` on Staging.
+  - **Status:** Out at 0 available. Low at or under BoxMe `min_quantity` (or the POS threshold when that is unset), or under 14 days of cover.
+  - **"Lasts":** uses day-over-day drops in stock (restocks ignored) once 7 days of daily snapshots exist. Until then it reads "Building history".
+  - **Freshness:** stale after 26h, a banner on a failed or partial run, and a key-expiry warning inside 14 days.
+- **Files:**
+  - `src/boxme-inventory-{data,compute}.ts`, `src/boxme-format.ts`, `src/boxme-mock.ts` (demo data from a real BoxMe dry run)
+  - `components/analyst/boxme-{inventory-view,inventory-table,sku-card}.tsx`
+  - `src/inventory-status.ts`: the shared status pill styles, now importable by server components
+  - new `POS_TAGS.boxme` tag
+- **Database:** `boxme_*` applied to **Staging only**. Prod waits for sign-off.
+- **Tests:** `test/boxme-inventory-compute.test.ts` (15).
 
 ## 2026-10-07 — Event tiles get "View all products" (event-scoped rankings)
 - **Each event tile's Top sellers block now ends with "View all products →".** It opens Product rankings scoped to that event (`/offline-sales/rankings?event=<id>`), with the Products and Bundles tabs, sort, search and paging the overview's View all already has.
