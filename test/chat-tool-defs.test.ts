@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {CHAT_TOOLS, exploreTools} from '../src/chat/tool-defs';
+import {CHAT_TOOLS, chatTools, exploreTools} from '../src/chat/tool-defs';
 import {METRIC_IDS, METRICS} from '../src/chat/metrics-registry';
 import {assertRequestShape} from '../src/chat/request-shape';
 
@@ -13,6 +13,12 @@ const SINK = {info: () => undefined, error: () => undefined};
 describe('CHAT_TOOLS', () => {
   it('has exactly the eleven tools in order', () => {
     expect(CHAT_TOOLS.map((t) => t.name)).toEqual(['describe_data', 'query_metric', 'get_digest', 'get_channel_report', 'lookup_product', 'render_kpi', 'render_chart', 'render_table', 'set_report_filters', 'remove_block', 'set_report_title']);
+  });
+
+  it('with Explore and the CRM on, only the three list_crm_* tools are not strict (the API grammar cap), and no more than 20 are strict', () => {
+    const all = chatTools({explore: true, crm: true});
+    expect(all.filter((t) => !t.strict).map((t) => t.name)).toEqual(['list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']);
+    expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20);
   });
 
   it('meets the strict-mode limits', () => {

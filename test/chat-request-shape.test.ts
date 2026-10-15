@@ -73,6 +73,11 @@ describe('assertRequestShape', () => {
     expect(() => assertRequestShape(req({tools: [tool(t)]}), sink())).toThrow();
   });
 
+  it('lets only the three CRM list tools be strict false (grammar cap)', () => {
+    for (const name of ['list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']) expect(() => assertRequestShape(req({tools: [tool({name, strict: false})]}), sink())).not.toThrow();
+    expect(() => assertRequestShape(req({tools: [tool({name: 'query_metric', strict: false})]}), sink())).toThrow(/strict/);
+  });
+
   it('fails a tool without strict true, and unexpected tool keys', () => {
     expect(() => assertRequestShape(req({tools: [tool({strict: undefined})]}), sink())).toThrow(/strict/);
     expect(() => assertRequestShape(req({tools: [tool({strict: false})]}), sink())).toThrow(/strict/);
