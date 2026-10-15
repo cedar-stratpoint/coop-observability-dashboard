@@ -10,7 +10,7 @@ import type {ChartBlock, ColorToken, Series} from '@/src/chat/block-types';
 import type {MetricRow} from '@/src/chat/result-types';
 import {ChartContainer, type ChartConfig} from '@/components/ui/chart';
 import {cn} from '@/lib/utils';
-import {NEUTRAL_TOKEN, ariaSummary, formatAxis, formatCategory, formatValue, pieSlices, shortLabel, tokenToCssVar, type PieSlice} from './chat-blocks-format';
+import {NEUTRAL_TOKEN, ariaSummary, resolveForm, formatAxis, formatCategory, formatValue, pieSlices, shortLabel, tokenToCssVar, type PieSlice} from './chat-blocks-format';
 
 const GRID = 'var(--border)'; // hairline, one shade off the card surface; solid, never dashed
 const SURFACE = 'var(--card)'; // the 2px gap between stacked fills is a surface-colored stroke
@@ -116,7 +116,7 @@ function PiePlot({block, aria}: {block: ChartBlock; aria: string}) {
   );
 }
 
-function BarPlot({block, aria}: {block: ChartBlock; aria: string}) {
+function BarPlot({block, aria, max, bare = false}: {block: ChartBlock; aria: string; max?: number; bare?: boolean}) {
   const {chart} = block;
   const {form, rows, series, x} = chart;
   const horizontal = chart.orientation === 'horizontal';
@@ -139,7 +139,7 @@ function BarPlot({block, aria}: {block: ChartBlock; aria: string}) {
   const minWidth = scrolls ? n * perCat : undefined;
   // Horizontal bars: height holds the bars plus the value-axis band, so the chart never scrolls vertically.
   const perRow = grouped ? series.length * (size + 2) + 16 : BAR_THICKNESS + 16;
-  const height = horizontal ? Math.max(130, n * perRow + 40) : 240;
+  const height = horizontal ? Math.max(bare ? 64 : 130, n * perRow + 40) : 240;
   const catWidth = labelWidth(labels, 18);
 
   const bars = diverging ? (
@@ -180,13 +180,13 @@ function BarPlot({block, aria}: {block: ChartBlock; aria: string}) {
         <CartesianGrid vertical={horizontal} horizontal={!horizontal} stroke={GRID} strokeDasharray="0" />
         {horizontal ? (
           <>
-            <XAxis type="number" tickLine={false} axisLine={false} tick={tick} tickMargin={6} tickCount={4} tickFormatter={valueTick} domain={pct ? [0, 1] : undefined} />
-            <YAxis type="category" dataKey={(r: MetricRow) => cat(r, x.key)} width={catWidth} tickLine={false} axisLine={{stroke: GRID}} tick={tick} interval={0} tickFormatter={(v) => shortLabel(formatCategory(v, x.unit), 18)} />
+            <XAxis type="number" tickLine={false} axisLine={false} tick={tick} tickMargin={6} tickCount={4} tickFormatter={valueTick} domain={pct ? [0, 1] : max !== undefined ? [0, max] : undefined} />
+            <YAxis type="category" hide={bare} dataKey={(r: MetricRow) => cat(r, x.key)} width={bare ? 0 : catWidth} tickLine={false} axisLine={{stroke: GRID}} tick={tick} interval={0} tickFormatter={(v) => shortLabel(formatCategory(v, x.unit), 18)} />
           </>
         ) : (
           <>
             <XAxis dataKey={(r: MetricRow) => cat(r, x.key)} tickLine={false} axisLine={{stroke: GRID}} tick={tick} tickMargin={8} interval={scrolls ? 0 : 'preserveStartEnd'} minTickGap={10} tickFormatter={(v) => shortLabel(formatCategory(v, x.unit), scrolls ? 10 : 12)} />
-            <YAxis width="auto" tickLine={false} axisLine={false} tick={tick} tickMargin={4} tickCount={5} tickFormatter={valueTick} domain={pct ? [0, 1] : undefined} />
+            <YAxis width="auto" tickLine={false} axisLine={false} tick={tick} tickMargin={4} tickCount={5} tickFormatter={valueTick} domain={pct ? [0, 1] : max !== undefined ? [0, max] : undefined} />
           </>
         )}
         {diverging && (horizontal ? <ReferenceLine x={0} stroke={GRID} /> : <ReferenceLine y={0} stroke={GRID} />)}
@@ -196,7 +196,7 @@ function BarPlot({block, aria}: {block: ChartBlock; aria: string}) {
     </ChartContainer>
   );
 
-  const legend = diverging ? (
+  const legend = bare ? null : diverging ? (
     <Legend items={[{label: 'Increase', token: series[0].color}, {label: 'Decrease', token: DOWN_TOKEN}]} />
   ) : series.length >= 2 ? (
     <Legend items={series.map((s) => ({label: s.label, token: s.color}))} />
@@ -275,6 +275,32 @@ function LinePlot({block, aria}: {block: ChartBlock; aria: string}) {
   );
 }
 
+/** Small multiples (2c.1): one small horizontal bar chart per group, every panel on the same value scale, one legend for all. */
+function SmallMultiplesPlot({block}: {block: ChartBlock}) {
+  const {chart} = block;
+  const values = chart.rows.flatMap((r) => chart.series.map((s) => r[s.key])).filter((v): v is number => typeof v === 'number');
+  const max = Math.max(0, ...values);
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+        {chart.rows.map((r, i) => {
+          const name = formatCategory(cat(r, chart.x.key), chart.x.unit);
+          const panel: ChartBlock = {...block, chart: {...chart, form: 'grouped_bar', orientation: 'horizontal', rows: [r], folded: null}};
+          return (
+            <figure key={`${i}-${name}`} className="m-0 flex min-w-0 flex-col gap-1">
+              <figcaption className="truncate text-[12px] font-medium text-foreground" title={name}>
+                {name}
+              </figcaption>
+              <BarPlot block={panel} aria={`${block.title}: ${name}`} max={max} bare />
+            </figure>
+          );
+        })}
+      </div>
+      {chart.series.length >= 2 && <Legend items={chart.series.map((s) => ({label: s.label, token: s.color}))} />}
+    </>
+  );
+}
+
 /** Draws one ChartBlock. A single series needs no legend (the title names it); 2+ series always get one. */
 export function ChartView({block}: {block: ChartBlock}) {
   const {chart} = block;
@@ -282,9 +308,12 @@ export function ChartView({block}: {block: ChartBlock}) {
     return <p className="text-[12px] text-muted-foreground">Nothing to draw. See the table.</p>;
   }
   const aria = ariaSummary(block);
+  // A form this renderer cannot draw falls back to grouped bars (resolveForm), never blank or a crash.
+  const form = resolveForm(chart.form);
+  const drawn: ChartBlock = form === chart.form ? block : {...block, chart: {...chart, form}};
   return (
     <div className="flex flex-col gap-2">
-      {chart.form === 'pie' ? <PiePlot block={block} aria={aria} /> : chart.form === 'line' || chart.form === 'area' ? <LinePlot block={block} aria={aria} /> : <BarPlot block={block} aria={aria} />}
+      {form === 'pie' ? <PiePlot block={drawn} aria={aria} /> : form === 'small_multiples' ? <SmallMultiplesPlot block={drawn} /> : form === 'line' || form === 'area' ? <LinePlot block={drawn} aria={aria} /> : <BarPlot block={drawn} aria={aria} />}
     </div>
   );
 }

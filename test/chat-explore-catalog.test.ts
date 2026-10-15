@@ -70,7 +70,7 @@ describe('the rendered text', () => {
   });
   it('names every view and every column', () => {
     for (const v of EXPLORE_VIEW_NAMES) {
-      expect(text).toContain(`${v}:`);
+      expect(text).toContain(`${v} (from `);
       for (const c of allColumns(v)) expect(text, `${v}.${c}`).toMatch(new RegExp(`\\b${c}\\b`));
     }
   });
@@ -78,5 +78,19 @@ describe('the rendered text', () => {
     expect(text).toMatch(/pet_type[^\n]*null/);
     expect(text).toMatch(/line_total[^\n]*0/);
     expect(text).toMatch(/pet[^\n]*name \/ breed/);
+  });
+});
+
+describe('the catalog names each view source', () => {
+  it('every view header carries (from <source>', () => {
+    const text = buildExploreCatalogText();
+    for (const v of EXPLORE_VIEW_NAMES) {
+      const header = text.split('\n').find((l) => l.startsWith(`${v} (from `)) ?? '';
+      expect(header, v).toContain(`(from ${EXPLORE_VIEWS[v].source}`);
+    }
+  });
+  it('stock_event carries the location where-clause', () => {
+    const header = buildExploreCatalogText().split('\n').find((l) => l.startsWith('coop_explore_stock_event ')) ?? '';
+    expect(header).toContain("(from pos_inventory_by_location where location = 'event')");
   });
 });

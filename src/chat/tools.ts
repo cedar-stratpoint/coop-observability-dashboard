@@ -14,8 +14,15 @@ export const TOOL_ALLOWLIST = Object.freeze([
   'remove_block',
   'set_report_title',
   'get_digest',
+  'get_channel_report',
+  'get_crm_metrics',
+  'list_crm_orders',
+  'list_crm_customers',
+  'list_crm_checkouts',
   'lookup_product',
   'run_query',
+  'list_tables',
+  'describe_table',
 ] as const);
 
 export type AllowedTool = (typeof TOOL_ALLOWLIST)[number];

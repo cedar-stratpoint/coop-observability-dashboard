@@ -30,7 +30,7 @@ export const COOP_KNOWLEDGE = `
 - **Website** — Meta (Facebook/Instagram) ads. **Not yet connected**, so Website ad spend / ROAS is unavailable; say so rather than guessing.
 
 ### Reporting
-- A digest covers a **rolling 30-day window** (the "period"). Comparisons "vs last month" use the compact prior-period figures provided.
+- A digest covers a window of varying length (weekly or about a month), the "period". Every answer names the window it used. Comparisons "vs last month" use the compact prior-period figures provided.
 
 ### Policies (team-maintained — currently unspecified)
 - Shipping, returns/refunds, and current promotions are **not loaded** here yet. If asked, say you don't have the store's policy details and suggest checking with the team, rather than inventing them.

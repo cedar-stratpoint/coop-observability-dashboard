@@ -1,6 +1,8 @@
 import {describe, it, expect} from 'vitest';
-import {buildDegradedPreamble, buildPreamble, buildStaticCatalog} from '../src/chat/preamble';
+import {buildDegradedPreamble, buildPreamble, buildStaticCatalog, digestIndexLine} from '../src/chat/preamble';
 import {METRICS, METRIC_IDS} from '../src/chat/metrics-registry';
+import {dedupeReruns, windowOf} from '../src/digest-windows';
+import {SEPTEMBER_ROWS} from './support/channel-report-fixture';
 import type {MetricData} from '../src/chat/result-types';
 import type {PosOrder} from '../src/pos-sales-types';
 
@@ -30,10 +32,31 @@ describe('buildPreamble', () => {
   it('does not forbid pet and event questions as "customer-level data"', () => {
     const p = buildPreamble(data(), now);
     expect(p).not.toMatch(/customer-level/i);
-    expect(p).toMatch(/Contact details \(email, phone, instagram\) are not exposed/);
     expect(p).toMatch(/Pet type and event ARE available/);
-    expect(p).toMatch(/free-form query tool is planned, not available yet/);
     expect(buildDegradedPreamble(now)).not.toMatch(/customer-level/i);
+  });
+
+  it('Explore off: says contacts and free-form questions are out of reach', () => {
+    const p = buildPreamble(data(), now);
+    expect(p).toMatch(/Contact details \(email, phone, instagram\) are not exposed by the metrics/);
+    expect(p).toMatch(/Questions no metric covers cannot be answered/);
+  });
+
+  it('Explore on: never calls contacts, free-form questions or stock unavailable', () => {
+    const p = buildPreamble(data(), now, undefined, 'Explore coverage line', {explore: true});
+    expect(p).not.toMatch(/not exposed/i);
+    expect(p).not.toMatch(/planned, not available/i);
+    expect(p).not.toMatch(/cannot be answered/i);
+    expect(p).not.toMatch(/stock[^.]*not available/i);
+    expect(p).toMatch(/run_query/);
+  });
+
+  it('puts the page line after the base line and before the Explore coverage line', () => {
+    const p = buildPreamble(data(), now, undefined, 'Explore coverage line', {explore: true, page: '[page] PAGE LINE'});
+    const base = p.indexOf('If a question is outside this range');
+    expect(base).toBeGreaterThan(-1);
+    expect(p.indexOf('[page] PAGE LINE')).toBeGreaterThan(base);
+    expect(p.indexOf('Explore coverage line')).toBeGreaterThan(p.indexOf('[page] PAGE LINE'));
   });
 
   it('is deterministic', () => {
@@ -54,7 +77,7 @@ describe('buildPreamble', () => {
 
   it('stays short and has no money or other percentages', () => {
     const p = buildPreamble(data(), now);
-    expect(p.length).toBeLessThan(600);
+    expect(p.length).toBeLessThan(1200); // was 600 before the catalog-built "Not in the database" line (measured 1068)
     expect(p).not.toMatch(/₱|PHP|\$/);
     expect(p.match(/\d+%/g)).toEqual(['33%']);
   });
@@ -98,5 +121,22 @@ describe('buildDegradedPreamble', () => {
     expect(text).toMatch(/Live offline POS data is not available right now/);
     expect(text).not.toMatch(/\d+%|₱|\d+ completed orders/);
     expect(buildDegradedPreamble(new Date('2026-09-30T17:00:00Z'))).toBe(text);
+  });
+});
+
+describe('F.5 the [digests] line', () => {
+  const now = new Date('2026-10-07T04:00:00Z');
+  const idx = dedupeReruns(SEPTEMBER_ROWS.map(windowOf), (w) => w);
+  it('lists every stored window in PH dates, newest first, re-runs once, exact times when not PH-aligned', () => {
+    const line = digestIndexLine(idx) as string;
+    expect(line).toContain('[digests] Stored digest windows, newest first (lengths vary: weekly or about a month): Sep 28 to Oct 4, 2026; Sep 21 to Sep 27, 2026; Sep 1 to Sep 27, 2026; Aug 1, 2026 08:00 to Sep 1, 2026 08:00 (PH time); Jul 10, 2026 11:40 to Aug 9, 2026 11:40 (PH time).');
+    expect(line).toContain('get_digest window "covering"');
+  });
+  it('caps the list and is null when nothing is stored', () => {
+    expect(digestIndexLine(idx, 2)).toContain('Sep 21 to Sep 27, 2026; and 3 older.');
+    expect(digestIndexLine([])).toBeNull();
+  });
+  it('rides in the per-turn preamble after the page line', () => {
+    expect(buildPreamble(data(), now, undefined, null, {page: '[page] x', digests: '[digests] y'})).toMatch(/\[page\] x\n\[digests\] y$/);
   });
 });

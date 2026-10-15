@@ -73,6 +73,9 @@ describe.skipIf(!local)('ro_role equals guarded_service on the local stack', () 
     const ro = guardedClient('ro_role');
     const dataSvc = await loadMetricData(svc.client, 'guarded_service');
     const dataRo = await loadMetricData(ro.client, 'ro_role');
+    // the stock read is stamped with the clock at load time: align the stamps, the rows must still be identical
+    expect(dataRo.stock).not.toBeNull();
+    if (dataRo.stock && dataSvc.stock) dataRo.stock = {...dataRo.stock, asOf: dataSvc.stock.asOf};
     // identical data; only the relation NAMES inside bulkReads differ (tables vs views), so compare their row counts
     expect({...dataRo, bulkReads: dataRo.bulkReads.map((r) => r.rows)}).toEqual({...dataSvc, bulkReads: dataSvc.bulkReads.map((r) => r.rows)});
     expect(dataRo.orders.length).toBeGreaterThan(0);

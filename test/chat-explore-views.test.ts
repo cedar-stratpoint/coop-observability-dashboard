@@ -14,12 +14,14 @@ const code = (sql: string) => sql.replace(/--.*$/gm, '');
 const EXPECTED_ORDER = [
   'coop_explore_orders', 'coop_explore_order_items', 'coop_explore_products', 'coop_explore_bundles', 'coop_explore_bundle_items',
   'coop_explore_events', 'coop_explore_prices', 'coop_explore_price_changes', 'coop_explore_event_leads', 'coop_explore_digest',
+  'coop_explore_inventory', 'coop_explore_inventory_by_location', 'coop_explore_inventory_lots', 'coop_explore_stock_movements',
+  'coop_explore_stock_event',
 ];
 
 describe('EXP-02 views.ts', () => {
-  it('has exactly the ten views of spec 2.2, in order', () => {
+  it('has the fifteen views, in order', () => {
     expect(EXPLORE_VIEW_NAMES).toEqual(EXPECTED_ORDER);
-    expect(EXPLORE_VIEW_NAMES).toHaveLength(10);
+    expect(EXPLORE_VIEW_NAMES).toHaveLength(15);
   });
 
   it('maps every view to its source table', () => {
@@ -27,8 +29,14 @@ describe('EXP-02 views.ts', () => {
       coop_explore_orders: 'pos_orders', coop_explore_order_items: 'pos_order_items', coop_explore_products: 'pos_products',
       coop_explore_bundles: 'pos_bundles', coop_explore_bundle_items: 'pos_bundle_items', coop_explore_events: 'pos_events',
       coop_explore_prices: 'pos_prices', coop_explore_price_changes: 'pos_price_changes', coop_explore_event_leads: 'spin_wheel_leads',
-      coop_explore_digest: 'digest_archive',
+      coop_explore_digest: 'digest_archive', coop_explore_inventory: 'pos_inventory', coop_explore_inventory_by_location: 'pos_inventory_by_location',
+      coop_explore_inventory_lots: 'pos_inventory_lots', coop_explore_stock_movements: 'pos_stock_movements',
+      coop_explore_stock_event: 'pos_inventory_by_location',
     });
+  });
+
+  it('the Event-stock default view is filtered to the event location in SQL', () => {
+    expect(SQL).toMatch(/create view public\.coop_explore_stock_event as select product_id, stock from public\.pos_inventory_by_location where location = 'event'/);
   });
 
   it('lists the verified columns of spec 2.2 (the leads view carries instagram and pet; orders carry the contact and cash fields)', () => {
@@ -81,7 +89,8 @@ describe('EXP-02 supabase/coop_chat_explore.sql stays in step with views.ts and 
   const pairs = [...pairsBlock.matchAll(/'([a-z_]+)',\s*'([a-z_]+)'/g)].map((m) => [m[1], m[2]]);
 
   it('builds exactly the views of views.ts from the sources of views.ts, in order', () => {
-    expect(pairs).toEqual(EXPLORE_VIEW_NAMES.map((v) => [v, EXPLORE_VIEWS[v].source]));
+    // coop_explore_stock_event is not a pass-through: it is the derived filter view built after the generator
+    expect(pairs).toEqual(EXPLORE_VIEW_NAMES.filter((v) => v !== 'coop_explore_stock_event').map((v) => [v, EXPLORE_VIEWS[v].source]));
   });
 
   it('the blocked-name pattern appears once in the SQL and is the same string as in types.ts', () => {
@@ -128,7 +137,9 @@ describe('EXP-02 supabase/coop_chat_explore.sql stays in step with views.ts and 
     expect(c).toMatch(/revoke all on public\.%I from public, anon, authenticated/);
     expect(c).toMatch(/grant select on public\.%I to coop_explore_ro/);
     const grants = [...c.matchAll(/\bgrant\b[^;]*;/gi)].map((m) => m[0].replace(/\s+/g, ' '));
-    expect(grants).toEqual([expect.stringContaining('grant select on public.%I to coop_explore_ro'), 'grant usage on schema public to coop_explore_ro;']);
+    expect(grants).toEqual([
+      expect.stringContaining('grant select on public.%I to coop_explore_ro'), 'grant select on public.coop_explore_stock_event to coop_explore_ro;', 'grant usage on schema public to coop_explore_ro;',
+    ]);
     expect(c).not.toMatch(/grant\s+(all|insert|update|delete|truncate|references|trigger|execute|create)/i);
     expect(c).not.toMatch(/grant\s+[a-z_]+\s+to\s+coop_explore_ro/i); // no role membership
     expect(c).not.toMatch(/on\s+(table|sequence|function|all)\b/i);
@@ -140,6 +151,19 @@ describe('EXP-02 supabase/coop_chat_explore.sql stays in step with views.ts and 
     expect(c).not.toMatch(/(create|alter|drop)\s+(or replace\s+)?(table|view)\s+(if (not )?exists\s+)?public\.pos_/i);
     expect(c).not.toMatch(/coop_chat_/);
     expect(c).not.toMatch(/notify\s+pgrst/i);
+  });
+
+  it('fails loudly, before any change, when a stock source or the location column is missing', () => {
+    const c = code(SQL);
+    const gate = c.indexOf("to_regclass('public.' || t)");
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(c.indexOf('create role'));
+    for (const t of ['pos_inventory', 'pos_inventory_by_location', 'pos_inventory_lots', 'pos_stock_movements']) {
+      expect(c, t).toContain(`'${t}'`);
+    }
+    expect(c).toMatch(/table_name = 'pos_inventory_by_location' and column_name = 'location'/);
+    expect(c).toMatch(/raise exception 'missing stock source/);
+    expect(c).toMatch(/raise exception 'public\.pos_inventory_by_location has no location column/);
   });
 
   it('fails loudly when the lead tables are missing (prerequisite check)', () => {
@@ -169,7 +193,7 @@ describe('EXP-02 supabase/coop_chat_explore_checks.sql stays in step with views.
   it('(h) drift values list (view, source) equals views.ts', () => {
     const block = /from \(values([\s\S]*?)\) s\(view_name, source_table\)/.exec(CHECKS)?.[1] ?? '';
     const rows = [...block.matchAll(/\('([a-z_]+)',\s*'([a-z_]+)'\)/g)].map((m) => [m[1], m[2]]);
-    expect(rows).toEqual(EXPLORE_VIEW_NAMES.map((v: ExploreViewName) => [v, EXPLORE_VIEWS[v].source]));
+    expect(rows).toEqual(EXPLORE_VIEW_NAMES.filter((v) => v !== 'coop_explore_stock_event').map((v: ExploreViewName) => [v, EXPLORE_VIEWS[v].source]));
   });
 
   it('has every required query (a) to (j) and states an expected result for each', () => {

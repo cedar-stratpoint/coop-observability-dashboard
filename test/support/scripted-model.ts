@@ -9,7 +9,7 @@ import {buildPreamble} from '../../src/chat/preamble';
 import {openReportSession, type ReportSession} from '../../src/chat/report-session';
 import type {DigestSource} from '../../src/chat/digest-lookup';
 import type {MetricData} from '../../src/chat/result-types';
-import type {ChatStreamEvent} from '../../src/chat/stream-types';
+import type {ChatStreamEvent, ChatToolContext} from '../../src/chat/stream-types';
 import {CHAT_TOOLS} from '../../src/chat/tool-defs';
 import {createExecutors} from '../../src/chat/tool-executors';
 import type {ToolExecutors} from '../../src/chat/tools';
@@ -116,6 +116,7 @@ export interface RunOptions {
   /** The report the drawer sends back (the spec of the previous turn), or null/absent for none. */
   report?: ReportSpec | null;
   digest?: DigestSource | null;
+  crmOrders?: ChatToolContext['crmOrders'];
   /** Default: the real per-turn preamble the route builds (coverage plus the open dashboard's outline). */
   preamble?: string;
   system?: SystemBlock[];
@@ -162,6 +163,7 @@ export async function runScripted(o: RunOptions): Promise<RunResult> {
   const real = createExecutors({
     data: async () => o.data, now, user: 'scripted', report: session,
     emitBlock: (b) => blocks.push(b), emitReport: (s) => reports.push(s),
+    ...(o.crmOrders ? {crmOrders: o.crmOrders} : {}),
     ...(o.digest !== undefined ? {digest: async () => o.digest as DigestSource} : {}),
   });
   const executed: string[] = [];

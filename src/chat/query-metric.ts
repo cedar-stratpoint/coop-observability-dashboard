@@ -1,8 +1,10 @@
 import type {PosEvent, PosOrder} from '../pos-sales-types';
 import {manilaDayKey, resolveOrderEvents} from '../pos-sales-compute';
 import {buildPriceHistory} from '../pos-price-history';
+import {isCompletedOrder} from './order-status';
 import {resolveRange} from './range';
 import {METRICS, METRIC_IDS, type ComputeOutput} from './metrics-registry';
+import {isStockMetric, runStockMetric} from './stock-metrics';
 import {runChecks} from './checks';
 import {buildInsights} from './insights';
 import type {Check, ChecksInput, Coverage, Insight, MetricData, MetricError, MetricId, MetricRequest, MetricResult, MetricRow, ResultColumn} from './result-types';
@@ -175,11 +177,12 @@ const insightsOf = (out: ComputeOutput, prev: ComputeOutput | null): Insight[] =
 export function runMetric(input: unknown, data: MetricData, now: Date): MetricResult | MetricError {
   const req = validate(input, data);
   if ('error' in req) return req;
+  if (isStockMetric(req.metric)) return runStockMetric(req, data, now); // "as of now": no orders, range or checks
   const def = METRICS[req.metric];
   const measure = req.measure === 'default' ? def.defaultMeasure : req.measure;
 
-  // Completed orders only (the existing voided rule), with the event each order effectively belongs to.
-  const completed = data.orders.filter((o) => o.status !== 'voided');
+  // Completed orders only (every status but voided, the dashboard rule, see order-status.ts), with the event each order effectively belongs to.
+  const completed = data.orders.filter(isCompletedOrder);
   const taggedIds = new Set(completed.filter((o) => o.event_id !== null).map((o) => o.id)); // explicit POS tag, before date attribution
   const resolved = resolveOrderEvents(completed, data.events);
   const dated: DatedOrder[] = [];

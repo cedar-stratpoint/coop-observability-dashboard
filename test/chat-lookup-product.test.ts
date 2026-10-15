@@ -56,7 +56,7 @@ describe('lookup_product: found', () => {
       {sku: 'P1', name: 'Chicken Jerky', price: 260, units_direct: 3, units_in_bundles: 3, revenue_direct: 750, orders: 3, first_sold: '2026-09-02', last_sold: '2026-09-09'},
     ]);
     expect(r.meta.measures[0].method).toMatch(/not voided/);
-    expect(r.meta.caveats.join(' ')).toMatch(/Stock levels are not available/);
+    expect(r.meta.caveats.join(' ')).toMatch(/This lookup has no stock levels/);
   });
 
   it('matches a SKU or an exact name without regard to case, and a unique partial name', () => {

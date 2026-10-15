@@ -8,9 +8,14 @@ import {trailingRepeat} from './degenerate';
 import {checkNumbers} from './number-check';
 import {stripMarkdownTables} from './strip-tables';
 import {assertRequestShape} from './request-shape';
+import {COST_CAP_TEXT, costUnits} from './cost';
 import type {ChatStreamEvent, ChatUsage, ToolDefinition} from './stream-types';
 import {statusFor} from './tool-executors';
 import {dispatchToolCall, RUN_QUERY_TOOL, type ToolExecutors, type ToolResult} from './tools';
+
+/** Tools whose results carry text typed by customers or staff. After one succeeds, the stream says `untrusted` once, and the drawer
+ *  renders every link in that answer as plain text (no exfiltration by a clicked, injected link; images are never rendered). */
+export const UNTRUSTED_TEXT_TOOLS: ReadonlySet<string> = new Set(['run_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']);
 
 /** The only part of the Anthropic SDK the loop touches. The real `new Anthropic()` satisfies it. */
 export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> {
@@ -52,6 +57,8 @@ export interface ChatLoopOptions {
   sink?: AuditSink;
   /** Explore: the shape facts of the finals that succeeded (fingerprints, views), for the once-per-question chat_registry_gap line. */
   exploreGap?: () => {fingerprints: string[]; views: string[]};
+  /** Cost cap per turn in input-token equivalents (cost.ts costUnits); undefined = no cap. */
+  turnBudget?: number;
 }
 
 export interface ChatLoopSummary {
@@ -101,6 +108,8 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
   const seen: unknown[] = [];
   // EXP-04 (spec 7): after a run_query FINAL succeeded, the text of this turn is held until the number check has passed.
   let exploreUsed = false;
+  let untrustedSent = false;
+  let reportUsed = false; // a get_channel_report result succeeded: the app draws it when the model typed a table instead (live A8)
   let registryUsed = false; // a query_metric result succeeded: the app may draw it when the model forgot (backstop)
   // An Explore-capable turn (the run_query tool was sent) holds ALL text until its step ends: narration in a step that only calls tools
   // ("Fix the grouping.") is dropped, and only text before a render call or from the final no-tool step is the answer.
@@ -175,7 +184,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
 
   // Explore backstop: if the model finishes without drawing the last final result, the app draws it (no model call, no model-typed numbers).
   const backstop = async (): Promise<void> => {
-    if (!(exploreUsed || (registryUsed && exploreTurn)) || !opts.executors.autoRender) return;
+    if (!(exploreUsed || reportUsed || (registryUsed && exploreTurn)) || !opts.executors.autoRender) return;
     try {
       if ((await opts.executors.autoRender()).length > 0) drawn = true;
     } catch {
@@ -207,7 +216,14 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       emit({t: 'text', d: `${answer.trim() ? '\n\n' : ''}${DEADLINE_TEXT}`});
       return finish('deadline', true);
     }
-    if (!wrapping && seen.length > 0 && clock() - t0 > softMs) {
+    const overBudget = opts.turnBudget !== undefined && costUnits(usage) >= opts.turnBudget;
+    if (overBudget && (wrapping || seen.length === 0)) {
+      await backstop();
+      releaseHeld(false);
+      emit({t: 'text', d: `${answer.trim() ? '\n\n' : ''}${COST_CAP_TEXT}`});
+      return finish('cost_cap', true);
+    }
+    if (!wrapping && seen.length > 0 && (clock() - t0 > softMs || overBudget)) {
       wrapping = true;
       const last = convo[convo.length - 1];
       if (last?.role === 'user' && Array.isArray(last.content)) convo[convo.length - 1] = {role: 'user', content: [...last.content, {type: 'text', text: WRAP_UP_TEXT}]};
@@ -301,7 +317,9 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       }
       // Explore: the answer is checked before anyone sees it. One rewrite on a violation (it consumes a step), then the note.
       // A rewrite never starts past the hard deadline: the held answer is shown with its note instead.
-      const bad = releaseHeld(!numberRetried && steps < maxSteps && clock() - t0 <= deadlineMs);
+      // Nor past the cost cap: a rewrite would be thrown away by the cap check, so the held answer is shown with its note instead.
+      const capped = opts.turnBudget !== undefined && costUnits(usage) >= opts.turnBudget;
+      const bad = releaseHeld(!numberRetried && !capped && steps < maxSteps && clock() - t0 <= deadlineMs);
       if (bad === null) return finish(endReason, true);
       numberRetried = true;
       dropHeld();
@@ -359,9 +377,14 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
     }
     for (const r of results) if (!r.is_error) seen.push(r.content);
     calls.forEach((c, i) => {
+      if (!untrustedSent && UNTRUSTED_TEXT_TOOLS.has(String(c.name)) && !results[i].is_error) {
+        untrustedSent = true;
+        emit({t: 'untrusted'});
+      }
       const content = results[i].content as {id?: unknown} | null;
       if (c.name === 'run_query' && !results[i].is_error && typeof content?.id === 'string') exploreUsed = true;
       if (c.name === 'query_metric' && !results[i].is_error && typeof content?.id === 'string') registryUsed = true;
+      if (c.name === 'get_channel_report' && !results[i].is_error && typeof content?.id === 'string') reportUsed = true;
       if (isRender(c.name) && !results[i].is_error && (content as {ok?: unknown} | null)?.ok === true) drawn = true;
     });
     convo.push({

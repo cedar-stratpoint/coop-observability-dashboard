@@ -9,10 +9,13 @@ const titles = files.flatMap((f) => [...readFileSync(`test/${f}`, 'utf8').matchA
 describe('EXP rules each have a test title naming them', () => {
   const codeRules = RULES.filter((r) => r.id.startsWith('EXP-') && r.enforcedBy === 'code');
   it('there are code-enforced EXP rules to check', () => {
-    expect(codeRules.map((r) => r.id)).toEqual(['EXP-01', 'EXP-02', 'EXP-03', 'EXP-04', 'EXP-05']);
+    expect(codeRules.map((r) => r.id)).toEqual(['EXP-01', 'EXP-02', 'EXP-03', 'EXP-04', 'EXP-05', 'EXP-07']);
   });
   it.each(codeRules.map((r) => r.id))('%s has at least one test title that contains it', (id) => {
     expect(titles.filter((t) => t.includes(id)).length, id).toBeGreaterThan(0);
+  });
+  it('EXP-08 is a guide rule (the framing of a group claim) and needs no test title', () => {
+    expect(RULES.find((r) => r.id === 'EXP-08')?.enforcedBy).toBe('guide');
   });
   it('EXP-06 is a guide rule and needs no test title', () => {
     expect(RULES.find((r) => r.id === 'EXP-06')?.enforcedBy).toBe('guide');

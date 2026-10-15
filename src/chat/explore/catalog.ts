@@ -166,7 +166,7 @@ const eventLeads: ViewDoc = {
 };
 
 const digest: ViewDoc = {
-  about: 'Stored weekly digests (jsonb).',
+  about: 'Stored digests (jsonb); one row per run, windows vary (weekly or about a month).',
   grain: EXPLORE_VIEWS.coop_explore_digest.grain,
   columns: {
     id: col('digest id'),
@@ -175,6 +175,63 @@ const digest: ViewDoc = {
     bundle: col('raw evidence (jsonb)', [], FILLED, ["extract with -> and ->>; selecting it whole fails as too big"]),
     digest: col('the written digest (jsonb)', [], FILLED, ["extract with -> and ->>; selecting it whole fails as too big"]),
     created_at: col('when stored', TS),
+  },
+};
+
+const inventory: ViewDoc = {
+  about: 'Stock on hand per product across all locations (event + office). Not the sellable figure: for "how much can we sell" use stock_event.',
+  grain: EXPLORE_VIEWS.coop_explore_inventory.grain,
+  columns: {
+    product_id: col('product; joins to products.product_id'),
+    stock: col('units on hand, all locations'),
+    next_expiry: col('earliest expiry date that still has stock', ["'2026-12-31'"], 'null when no stock or no expiry'),
+  },
+};
+const inventoryByLocation: ViewDoc = {
+  about: 'Stock on hand per product per location. location event = sellable at the booth; office = back stock.',
+  grain: EXPLORE_VIEWS.coop_explore_inventory_by_location.grain,
+  columns: {
+    product_id: col('product; joins to products.product_id'),
+    location: col('where the stock is', ["'event'", "'office'"]),
+    stock: col('units on hand at that location'),
+  },
+};
+const inventoryLots: ViewDoc = {
+  about: 'Stock lots (batches) with expiry; the source under the two stock views. Stock is used earliest expiry first.',
+  grain: EXPLORE_VIEWS.coop_explore_inventory_lots.grain,
+  columns: {
+    lot_id: col('lot id'),
+    product_id: col('product; joins to products.product_id'),
+    location: col('where the lot is', ["'event'", "'office'"]),
+    lot_code: col('lot label', ["'opening'", "'adjust'", "'SUP-123'"]),
+    expires_on: col('expiry date', ["'2026-12-31'"], 'may be null'),
+    qty_received: col('units received in the lot'),
+    qty_on_hand: col('units left in the lot'),
+    received_at: col('when received', TS),
+    updated_at: col('last change', TS),
+  },
+};
+const stockMovements: ViewDoc = {
+  about: 'Append-only stock ledger. delta is signed: sales are negative.',
+  grain: EXPLORE_VIEWS.coop_explore_stock_movements.grain,
+  columns: {
+    id: col('movement id'),
+    product_id: col('product; joins to products.product_id'),
+    delta: col('units in (+) or out (-)'),
+    reason: col('why stock moved', ["'sale'", "'receipt'", "'add-void'", "'recount'"], FILLED, ['probe distinct values first; other reasons exist']),
+    created_by: col('staff email who moved it'),
+    created_at: col('when', TS, FILLED, ["use at time zone 'Asia/Manila' for a Manila day"]),
+    lot_id: col('lot moved', [], 'may be null or absent'),
+    location: col('location moved', ["'event'", "'office'"], 'may be null or absent'),
+    order_id: col('sale that caused it; joins to orders.id', [], 'null unless reason is sale'),
+  },
+};
+const stockEvent: ViewDoc = {
+  about: 'DEFAULT for stock questions: sellable stock at the event location, one row per product.',
+  grain: EXPLORE_VIEWS.coop_explore_stock_event.grain,
+  columns: {
+    product_id: col('product; joins to products.product_id'),
+    stock: col('sellable units at the event location'),
   },
 };
 
@@ -189,9 +246,18 @@ export const CATALOG: Record<ExploreViewName, ViewDoc> = {
   coop_explore_price_changes: priceChanges,
   coop_explore_event_leads: eventLeads,
   coop_explore_digest: digest,
+  coop_explore_inventory: inventory,
+  coop_explore_inventory_by_location: inventoryByLocation,
+  coop_explore_inventory_lots: inventoryLots,
+  coop_explore_stock_movements: stockMovements,
+  coop_explore_stock_event: stockEvent,
 };
 
 const typeOf = (view: ExploreViewName, column: string): string => (EXPLORE_VIEWS[view].types as Record<string, string>)[column] ?? '?';
+
+// Page lines name base tables; the header names the base table so the model can map one to the other.
+const sourceOf = (view: ExploreViewName): string =>
+  view === 'coop_explore_stock_event' ? `${EXPLORE_VIEWS[view].source} where location = 'event'` : EXPLORE_VIEWS[view].source;
 
 /** One compact, deterministic block. A column line: `  col type meaning | e.g. samples | coverage | rules`. Default coverage is left out. */
 export function buildExploreCatalogText(): string {
@@ -201,7 +267,7 @@ export function buildExploreCatalogText(): string {
   ];
   for (const view of EXPLORE_VIEW_NAMES) {
     const doc = CATALOG[view];
-    lines.push('', `${view}: ${doc.about} (grain: ${doc.grain})`);
+    lines.push('', `${view} (from ${sourceOf(view)}): ${doc.about} (grain: ${doc.grain})`);
     for (const [name, d] of Object.entries(doc.columns)) {
       const parts = [`  ${name} ${typeOf(view, name)} ${d.meaning}`];
       if (d.samples.length) parts.push(`e.g. ${d.samples.join(' ')}`);

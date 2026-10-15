@@ -3,12 +3,15 @@
 import 'server-only';
 import {logExploreEvent, type AuditSink} from './audit';
 import {createRunQuery} from './explore/client';
+import {loadDrift, type DriftStatus} from './explore/drift';
 import {loadCoverageLine, loadLeadFacts} from './explore/coverage';
 import {createExploreExecutor, type ExploreExecutor, type RunQuery} from './explore/executor';
 import {resolveExploreAccess} from './explore/config';
 import {describeExploreEnv} from './health';
 import {probeExplore, type ExploreProbe} from './explore/probe';
 import {validateExploreSql} from './explore/parse';
+import {createLiveValidator, createSchemaTools, listOpenTables, type SchemaTools} from './explore/schema-tools';
+import {catalogTable} from './catalog';
 import {exploreDayCounter} from './explore/rate';
 import type {ExploreEnv} from './explore/types';
 import type {MetricResult} from './result-types';
@@ -16,6 +19,7 @@ import type {MetricResult} from './result-types';
 export interface ExploreSetup {
   executor: ExploreExecutor;
   coverageLine: () => Promise<string | null>;
+  schema: SchemaTools;
 }
 
 let offLogged = false;
@@ -33,12 +37,14 @@ export function setupExplore(args: {env: ExploreEnv; email: string | null; now: 
     }
     const runQuery = args.runQuery ?? createRunQuery(access);
     const {limits} = access;
+    const dayGate = () => exploreDayCounter(args.user, limits.maxPerUserDay, args.now); // one allowance for run_query and the schema tools
     const executor = createExploreExecutor({
-      runQuery, validate: validateExploreSql, limits, now: args.now, user: args.user, store: args.store, sink: args.sink,
+      runQuery, validate: createLiveValidator(runQuery), limits, now: args.now, user: args.user, store: args.store, sink: args.sink,
       leadFacts: () => loadLeadFacts({runQuery, validate: validateExploreSql, limits, sink: args.sink}),
-      dayGate: () => exploreDayCounter(args.user, limits.maxPerUserDay, args.now),
+      dayGate,
     });
-    return {executor, coverageLine: () => loadCoverageLine({runQuery, validate: validateExploreSql, limits, sink: args.sink})};
+    const schema = createSchemaTools(runQuery, {user: args.user, sink: args.sink, dayGate});
+    return {executor, coverageLine: () => loadCoverageLine({runQuery, validate: validateExploreSql, limits, sink: args.sink}), schema};
   } catch {
     return null; // fail closed
   }
@@ -46,21 +52,27 @@ export function setupExplore(args: {env: ExploreEnv; email: string | null; now: 
 
 /**
  * The `explore` object of /api/chat/health for the signed-in person: whether Explore is on for THEM (reason code if not), flags without
- * values, and, only when enabled, one fixed probe through the real read-only envelope. Never throws; never echoes a URL, list or driver text.
+ * values, and, only when enabled, one fixed probe and the latest drift count through the real read-only envelope. Never throws; never echoes a URL, list or driver text.
  */
-export async function exploreHealth(env: ExploreEnv, email: string | null, deps: {runQuery?: RunQuery} = {}): Promise<{enabled: boolean; reason?: string; probe?: ExploreProbe} & ReturnType<typeof describeExploreEnv>> {
+export async function exploreHealth(env: ExploreEnv, email: string | null, deps: {runQuery?: RunQuery} = {}): Promise<{enabled: boolean; reason?: string; probe?: ExploreProbe; drift?: DriftStatus; uncatalogued?: number | null} & ReturnType<typeof describeExploreEnv>> {
   const flags = describeExploreEnv(env);
   try {
     const access = resolveExploreAccess(env, email);
     if (!access.enabled) return {enabled: false, reason: access.reason, ...flags};
     let probe: ExploreProbe;
+    let drift: DriftStatus;
+    let uncatalogued: number | null = null;
     try {
       const runQuery = deps.runQuery ?? createRunQuery(access);
       probe = await probeExplore(runQuery);
+      drift = await loadDrift(runQuery, new Date()); // the daily drift job's newest row: time and count only (spec 1.6)
+      // open live tables the data catalog does not describe yet (a count, never names)
+      uncatalogued = await listOpenTables(runQuery).then((ts) => ts.filter((t) => !catalogTable(t.name)).length).catch(() => null);
     } catch {
       probe = {ok: false, code: 'other'};
+      drift = {checkedAt: null, findings: null, stale: true};
     }
-    return {enabled: true, ...flags, probe};
+    return {enabled: true, ...flags, probe, drift, uncatalogued};
   } catch {
     return {enabled: false, reason: 'url_invalid', ...flags};
   }

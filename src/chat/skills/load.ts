@@ -2,12 +2,12 @@
 // vitest can import it. Reads the markdown once per process and caches the result.
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
-import {EXPLORE_TOPICS, SKILL_CONSTANTS, SKILL_TOPICS} from './rules';
+import {CRM_TOPICS, EXPLORE_TOPICS, SKILL_CONSTANTS, SKILL_TOPICS} from './rules';
 
 const DEFAULT_SKILL_DIR = 'src/chat/skills/ask-coop-data-analyst';
 const PLACEHOLDER = /\{\{([A-Za-z0-9_]+)\}\}/g;
 
-const cached: {base: string | null; explore: string | null} = {base: null, explore: null};
+const cached = new Map<string, string>();
 
 function parseFrontmatter(raw: string): {name: string; description: string; body: string} {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
@@ -56,23 +56,25 @@ export function applyVariant(text: string, explore: boolean): string {
 
 /**
  * The whole skill as one string: the core, then each topic under a heading in SKILL_TOPICS order (plus EXPLORE_TOPICS when
- * `explore`). Cached per variant for the default directory; an injected `dir` or `constants` (tests) is always read fresh.
+ * `explore`, and CRM_TOPICS when `crm`). Cached per variant for the default directory; an injected `dir` or `constants` (tests) is always read fresh.
  */
-export function renderSkill(opts?: {explore?: boolean; dir?: string; constants?: Record<string, number>}): string {
+export function renderSkill(opts?: {explore?: boolean; crm?: boolean; dir?: string; constants?: Record<string, number>}): string {
   const explore = opts?.explore === true;
-  const slot = explore ? 'explore' : 'base';
+  const crm = opts?.crm === true;
+  const slot = `${explore ? 'explore' : 'base'}${crm ? '+crm' : ''}`;
   const isDefault = !opts?.dir && !opts?.constants;
-  if (isDefault && cached[slot] !== null) return cached[slot] as string;
+  const hit = isDefault ? cached.get(slot) : undefined;
+  if (hit !== undefined) return hit;
   const dir = opts?.dir ?? path.join(process.cwd(), DEFAULT_SKILL_DIR);
   const {name, description, body} = parseFrontmatter(readFileSync(path.join(dir, 'SKILL.md'), 'utf8'));
   // The name and description live only in the heading line of the rendered text.
   const core = applyVariant(body, explore).trim().replace(/^# (.+)$/m, (_h, title: string) => `# ${title} (${name}): ${description}`);
-  const names: readonly string[] = explore ? [...SKILL_TOPICS, ...EXPLORE_TOPICS] : SKILL_TOPICS;
+  const names: readonly string[] = [...SKILL_TOPICS, ...(explore ? EXPLORE_TOPICS : []), ...(crm ? CRM_TOPICS : [])];
   const topics = names.map((topic) => {
     const text = applyVariant(readFileSync(path.join(dir, 'topics', `${topic}.md`), 'utf8'), explore).trim();
     return text.replace(/^# (.+)$/m, (_h, title: string) => `## Topic: ${topic} (${title})`);
   });
   const rendered = fillConstants([core, ...topics].join('\n\n'), opts?.constants ?? SKILL_CONSTANTS);
-  if (isDefault) cached[slot] = rendered;
+  if (isDefault) cached.set(slot, rendered);
   return rendered;
 }

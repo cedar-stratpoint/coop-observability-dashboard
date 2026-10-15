@@ -5,7 +5,9 @@
 #   scripts/local-supabase/up.sh --reapply  re-run ONLY the SQL files against the running stack
 #   scripts/local-supabase/up.sh --explore  (alone or with --reapply) ALSO build the Ask Coop Explore data layer: the booth-lead tables,
 #                                           scripts/coop-explore-fixture.sql (fictional rows with deliberate traps), supabase/coop_chat_explore.sql
-#                                           (role coop_explore_ro + ten views), its password, and print supabase/coop_chat_explore_checks.sql
+#                                           (role coop_explore_ro + fifteen views), supabase/coop_chat_explore_direct.sql
+#                                           (direct reads: grants, trigger, cron) and scripts/coop-direct-fixture.sql (secret and tenant traps), its password, and print supabase/coop_chat_explore_direct_checks.sql
+#                                           (the direct-read state; coop_chat_explore_checks.sql is for the Train 1 state only)
 # Uses only the cached images (nothing is pulled), its own network `coop-local`, containers `coop-local-db` (127.0.0.1:54421)
 # and `coop-local-rest` (127.0.0.1:54423), and the proxy on 127.0.0.1:54420. No volume: scripts/local-supabase/down.sh = clean slate.
 # Secrets are generated on first run into the gitignored scripts/local-supabase/.local-env and never printed.
@@ -83,13 +85,13 @@ fi
 set -a; . "$ENVF"; set +a
 
 # ---- the SQL, in order ----------------------------------------------------------------------------------------------
-EXPLORE_VIEWS="coop_explore_orders coop_explore_order_items coop_explore_products coop_explore_bundles coop_explore_bundle_items coop_explore_events coop_explore_prices coop_explore_price_changes coop_explore_event_leads coop_explore_digest"
+PRE_DROP_VIEWS="pos_orders_completed coop_explore_orders coop_explore_order_items coop_explore_products coop_explore_bundles coop_explore_bundle_items coop_explore_events coop_explore_prices coop_explore_price_changes coop_explore_event_leads coop_explore_digest coop_explore_inventory coop_explore_inventory_by_location coop_explore_inventory_lots coop_explore_stock_movements coop_explore_stock_event"
 
 apply_sql() {
   local f out v
-  # The explore views depend on the pos_* tables, which scripts/coop-chat-ro-fixture.sql drops and recreates: drop them first (harmless if absent).
-  for v in $EXPLORE_VIEWS; do psql_pg -o /dev/null -c "set client_min_messages = warning; drop view if exists public.$v" || die "could not drop $v"; done
-  for f in scripts/coop-chat-ro-fixture.sql scripts/local-supabase/seed-digest.sql supabase/coop_chat_readonly.sql supabase/coop_chat_digest.sql supabase/coop_reports.sql; do
+  # The explore views and pos_orders_completed depend on the pos_* tables, which scripts/coop-chat-ro-fixture.sql drops and recreates: drop them first (harmless if absent).
+  for v in $PRE_DROP_VIEWS; do psql_pg -o /dev/null -c "set client_min_messages = warning; drop view if exists public.$v" || die "could not drop $v"; done
+  for f in scripts/coop-chat-ro-fixture.sql scripts/coop-stock-fixture.sql scripts/local-supabase/seed-digest.sql supabase/coop_chat_readonly.sql supabase/coop_chat_digest.sql supabase/coop_chat_stock.sql supabase/coop_reports.sql; do
     if [ ! -f "$ROOT/$f" ]; then echo "skipped $f (not found yet; run scripts/local-supabase/up.sh --reapply once it exists)"; continue; fi
     out="$(psql_pg -o /dev/null < "$ROOT/$f" 2>&1)" || { echo "$out" | grep -v '^NOTICE:' >&2; die "failed applying $f"; }
     echo "applied $f"
@@ -102,14 +104,17 @@ apply_sql() {
 apply_explore() {
   local f out
   [ -n "${EXPLORE_PG_PASSWORD:-}" ] || die 'EXPLORE_PG_PASSWORD is not in .local-env'
-  for f in supabase/spin_wheel_leads.sql supabase/spin_wheel_leads_instagram.sql scripts/coop-explore-fixture.sql supabase/coop_chat_explore.sql; do
+  for f in supabase/spin_wheel_leads.sql supabase/spin_wheel_leads_instagram.sql scripts/coop-explore-fixture.sql supabase/coop_chat_explore.sql supabase/coop_chat_explore_direct.sql supabase/coop_chat_default_views.sql scripts/coop-direct-fixture.sql; do
     out="$(psql_pg -o /dev/null < "$ROOT/$f" 2>&1)" || { echo "$out" | grep -v '^NOTICE:' >&2; die "failed applying $f"; }
     echo "applied $f"
+    # direct reads: say whether the event trigger and the cron guard were installed (the file never fails on either)
+    echo "$out" | grep -E '^NOTICE: +(event trigger (coop|NOT)|pg_cron (job|is|could))' | sed 's/^NOTICE: */  /' || true
   done
   # the password is a hex string from .local-env: safe to inline, never printed
   psql_pg -o /dev/null -c "alter role coop_explore_ro with password '${EXPLORE_PG_PASSWORD}'" || die 'could not set the coop_explore_ro password'
-  echo '--- supabase/coop_chat_explore_checks.sql (read the output: see the expected result above each query) ---'
-  psql_pg -P pager=off < "$ROOT/supabase/coop_chat_explore_checks.sql" || die 'the checks failed to run'
+  # the direct-read state: coop_chat_explore_checks.sql describes the Train 1 state only and would read BAD here by design
+  echo '--- supabase/coop_chat_explore_direct_checks.sql (read the output: see the expected result above each query) ---'
+  psql_pg -P pager=off < "$ROOT/supabase/coop_chat_explore_direct_checks.sql" || die 'the checks failed to run'
 }
 
 REAPPLY=0

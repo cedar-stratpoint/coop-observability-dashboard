@@ -34,7 +34,7 @@ headers and body, binds 127.0.0.1 only, and refuses any request whose `Host` hea
 ## SQL applied, in order
 
 1. `scripts/coop-chat-ro-fixture.sql`: the synthetic `pos_*` tables (6 orders, 4 products, events, prices).
-2. `scripts/local-supabase/seed-digest.sql`: `digest_archive` with two fictional weekly digests. The `bundle` column holds
+2. `scripts/local-supabase/seed-digest.sql`: `digest_archive` with six fictional digests shaped like PROD (mixed windows, per-day data on three). The `bundle` column holds
    the marker `SHOULD-NEVER-BE-SELECTED`: if it ever shows up in a chat result, a read went wrong.
 3. `supabase/coop_chat_readonly.sql`: the `coop_chat_ro` role, the seven `coop_chat_*` views, the read-only pre-request hook.
 4. `supabase/coop_chat_digest.sql`: the `coop_chat_digest` view (digest columns only) for `ro_role` mode.

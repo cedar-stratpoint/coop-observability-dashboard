@@ -75,6 +75,7 @@ Checks I ran (paste real output; mock mode is fine when archive env is unset):
 | `DigestDocument` change is additive-only; mirrored with backend; mocks updated | ☐ | ☐ |
 | Hand-kept copies updated together (QRR, forecast, repricer labels) | ☐ | ☐ |
 | No `pos_*` DDL added here (owned by `zoomy-pos`) | ☐ | ☐ |
+| Data catalog updated (tables / APIs / pages) and `check.mjs` passes | ☐ | ☐ |
 
 ## Rollout / risk
 

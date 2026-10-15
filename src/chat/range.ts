@@ -39,6 +39,9 @@ function dayMs(key: string): number | null {
   return new Date(ms).toISOString().slice(0, 10) === key ? ms : null; // rejects 2026-02-30
 }
 
+/** True for a real calendar date written YYYY-MM-DD (false for 2026-02-30). */
+export const isRealDay = (key: string): boolean => dayMs(key) !== null;
+
 const keyOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 const addDays = (key: string, n: number): string => keyOf((dayMs(key) as number) + n * DAY_MS);
 /** Inclusive number of days from..to. */
