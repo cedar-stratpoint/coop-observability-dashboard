@@ -284,8 +284,10 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       stepMs.push(clock() - stepStart);
     } catch (err) {
       if (signal?.aborted) return finish('aborted', false);
-      const e = err as {name?: unknown; status?: unknown};
-      (sink ?? console).error(JSON.stringify({event: 'chat_error', name: String(e?.name ?? 'Error'), status: typeof e?.status === 'number' ? e.status : null, user: opts.user}));
+      const e = err as {name?: unknown; status?: unknown; message?: unknown};
+      // A 400 means the API rejected the request shape; its message names the field, not our data. Keep 300 characters so the cause shows in the logs.
+      const detail = e?.status === 400 ? String(e?.message ?? '').slice(0, 300) : undefined;
+      (sink ?? console).error(JSON.stringify({event: 'chat_error', name: String(e?.name ?? 'Error'), status: typeof e?.status === 'number' ? e.status : null, ...(detail ? {detail} : {}), user: opts.user}));
       emit({t: 'error', message: e.status === 400 && /credit balance/i.test(String((err as {message?: unknown})?.message ?? '')) ? ACCOUNT_ERROR_TEXT : SAFE_ERROR_TEXT});
       return finish('error', false);
     }
