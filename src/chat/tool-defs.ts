@@ -167,7 +167,7 @@ const listCrmOrders: ToolDefinition = {
     'Website (Shopify) orders from the live website CRM for the owner\'s dates, in Philippine time. group_by "none" lists orders newest first (order number, PH day, email, total, units, payment and fulfillment status), paged with limit and offset; ' +
     '"day", "week" (Monday to Sunday) or "month" gives orders, revenue, AOV and units per period with empty periods as zero; "financial_status" or "fulfillment_status" gives the split. The totals are in meta.checks: quote them, never add rows yourself. ' +
     'Revenue counts every order in the payment status you pass ("all" is the same basis as get_channel_report\'s Website row). Call it for "website orders this week", "website sales by day in September" or "unpaid website orders". ' + UNTRUSTED,
-  strict: true,
+  strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
     type: 'object',
     properties: {
@@ -188,7 +188,7 @@ const listCrmCustomers: ToolDefinition = {
   description:
     'Website customers from the live website CRM: name, email, phone, membership tier, orders and spend computed from the CRM\'s captured orders (paid orders for spend, plus spend this membership year for the Platinum threshold), pet name and birthday, email marketing state and the PH day they joined. ' +
     'Filter by tier, buyers or join dates ("" and "" for any date); group_by gives counts per tier, join month or email marketing state. Show contact details only when the owner asks for a list of customers. ' + UNTRUSTED,
-  strict: true,
+  strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
     type: 'object',
     properties: {
@@ -211,7 +211,7 @@ const listCrmCheckouts: ToolDefinition = {
   description:
     'Abandoned website checkouts (carts) from the live website CRM for the owner\'s dates, by the PH day the cart started: email, cart value, how far the shopper got (stage: Started, Email, Shipping, Payment), status (Active, Recovered = bought after a reminder, Converted = bought without one), reminders sent and whether the win-back went out. ' +
     'group_by gives carts and value per day, week, stage or status. It never returns checkout links or discount codes; if asked, say they are withheld on purpose. ' + UNTRUSTED,
-  strict: true,
+  strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
     type: 'object',
     properties: {
