@@ -655,7 +655,7 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
       ) : (
         /* comparing 2+ channels — merged recs (2-col) beside the comparison chart */
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-          <section className="flex min-w-0 flex-col lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
+          <section className="flex min-w-0 flex-col lg:sticky lg:top-[calc(3.5rem+1rem)] lg:max-h-[calc(100vh-5.5rem)]">
             <div className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/80">
               <Sparkles className="size-3.5 text-primary" /> Recommended actions
               <InfoTip text="AI-generated actions from this period's digest, grounded in the numbers. Reordered so those relevant to the chart metric come first." />
@@ -711,7 +711,7 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
             </div>
           </section>
 
-          <main className="min-w-0 space-y-6 lg:sticky lg:top-4 lg:self-start">
+          <main className="min-w-0 space-y-6 lg:sticky lg:top-[calc(3.5rem+1rem)] lg:self-start">
             <ComparisonChart metrics={metrics} channels={selected} metric={metric} setMetric={setMetric} custom={custom} />
             <TopProducts row={row} channels={selected} custom={custom} />
           </main>

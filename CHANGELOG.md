@@ -10,6 +10,21 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-15 — v1.7.0: Goldline (Nichido) on Coop, multi-role access, env switcher (prod release)
+Minor bump (SemVer): new features. **Needs database and env steps on prod before the merge** (below). Ships to `main` as one cherry-picked release (74 commits from staging, squashed); per-feature detail is in the staging CHANGELOG entries from 2026-10-05 to 2026-10-13.
+
+- **Goldline Cosmetics (NICHIDO) as a second, walled-off company.** `companies` / `company_users` tenancy; a data-blind Coop Admin; Zoomy-only pages and Ask Coop are fenced so a Goldline viewer never sees Zoomy data.
+- **Goldline pages:** Overview, Stores, Inventory board (counts + forecast + warehouse supply), product page (month by month), Stock forecast, Action Feed, Store health, Uploads.
+- **Uploads:** POS sales CSV, and handwritten inventory-form PDFs read by Claude Vision (pages 1 to 5, page auto-detect), a confidence-first review workbench, multi-file batches with an all-or-nothing commit (`gl_commit_batch`), and a scan reader that learns each writer's handwriting from reviewed pages (learns from prod's own reviews; nothing carries over from Staging).
+- **Multi-role access:** a person can hold several roles and switch views (header switcher with company wordmarks); Users & Roles console for Coop Admins; starting view per user.
+  - **Sign-in is now membership-driven.** `ALLOWED_EMAILS` is no longer read: only someone with an active row in `company_users` can sign in.
+- **Environment switcher (Staging ↔ Production)** for Coop Admin role holders, `/admin/environments`, public `/api/health`; on Production, Suspend and Remove access require typing PRODUCTION.
+- **Polish:** sign-out confirmation; shared `ModalShell` so Zoomy inventory dialogs animate in and out; `prefers-reduced-motion` honored app-wide; scan lightbox fade; Goldline phone layouts.
+- *Not included (staging only):* multi-event and the BoxMe online stock channel.
+- *Before merging (prod DB, co-worker's project), apply in order:* `companies.sql` (seeds Zoomy access from `pos_dashboard_users`), `goldline.sql` (+ private `goldline-uploads` bucket), `multi_role.sql`, `company_user_prefs.sql`, `goldline_inventory_snapshots.sql`, `goldline_upload_batches.sql`, `goldline_supply.sql` (no sample warehouse data), `goldline_perf_indexes.sql`, `seed_goldline_catalog.sql`, `company_user_audit_env.sql`, plus `goldline_prod_gaps.sql` (`gl_uploads.error_detail` + the `goldline-uploads` bucket, which existed on Staging but in no file). Then check every current `ALLOWED_EMAILS` address has a `company_users` row, seed the Goldline company + its user and a Coop Admin, and set `GOLDLINE_ANTHROPIC_API_KEY` on the prod Vercel project (PDF extraction; CSV works without it).
+- *Decision:* Goldline reads its **own** key, `GOLDLINE_ANTHROPIC_API_KEY`, separate from Ask Coop's `ANTHROPIC_API_KEY`, with **no fallback**, so Goldline usage is never billed to Ask Coop's key (the two keys are kept separate on purpose). Without it, PDFs are stored for manual review instead of being read.
+- *Decision:* promoted by cherry-pick, not by merging staging, so staging-only multi-event and BoxMe stay off prod. Hand-resolved conflicts: chat route keeps the CRM import plus the tenant guard; inventory table takes `ModalShell` without the BoxMe status refactor.
+
 ## 2026-10-15 — v1.6.1: Ask Coop answers again on prod (prod release)
 Patch bump (SemVer): a bug fix to v1.6.0; no new feature, no schema or env change.
 

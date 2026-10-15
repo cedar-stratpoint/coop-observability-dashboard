@@ -615,16 +615,14 @@ export function HealthView({snapshot}: {snapshot: BusinessHealthSnapshot}) {
     setKnobs((prev) => ({...prev, [ch]: baseKnobs[ch]}));
     setNonces((prev) => ({...prev, [ch]: (prev[ch] ?? 0) + 1})); // remount that card's inputs
   };
-  // Condense the header once the cards start scrolling under it. The scroll
-  // container is the shell's <main id="coop-scroll">, not the window.
+  // Condense the header once the cards start scrolling under it. The window is the
+  // scroll container (the shell's <main> only clips horizontally).
   const [condensed, setCondensed] = useState(false);
   useEffect(() => {
-    const el = document.getElementById('coop-scroll');
-    if (!el) return;
-    const onScroll = () => setCondensed(el.scrollTop > 40);
+    const onScroll = () => setCondensed(window.scrollY > 40);
     onScroll();
-    el.addEventListener('scroll', onScroll, {passive: true});
-    return () => el.removeEventListener('scroll', onScroll);
+    window.addEventListener('scroll', onScroll, {passive: true});
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   const views: {key: 'cards' | 'trend' | 'heatmap'; label: string}[] = [
@@ -637,7 +635,7 @@ export function HealthView({snapshot}: {snapshot: BusinessHealthSnapshot}) {
     <div className="mx-auto max-w-[1560px] space-y-6 px-6 pb-6 max-md:px-4">
       <style>{`@keyframes healthPop{0%{transform:scale(1)}35%{transform:scale(1.22)}100%{transform:scale(1)}}.health-pop{animation:healthPop .4s ease-out}@media (prefers-reduced-motion: reduce){.health-pop{animation:none}}`}</style>
       <header
-        className={`sticky top-0 z-20 -mx-6 flex flex-wrap items-end justify-between gap-3 border-b px-6 pb-4 transition-[padding,background-color,border-color] duration-300 max-md:-mx-4 max-md:px-4 ${
+        className={`sticky top-14 z-20 -mx-6 flex flex-wrap items-end justify-between gap-3 border-b px-6 pb-4 transition-[padding,background-color,border-color] duration-300 max-md:-mx-4 max-md:px-4 ${
           condensed ? 'border-border bg-background/85 pt-3 backdrop-blur-md' : 'border-border bg-background pt-6'
         }`}
       >

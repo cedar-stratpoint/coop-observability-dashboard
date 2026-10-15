@@ -4,11 +4,18 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useSearchParams} from 'next/navigation';
 import {signOut} from 'next-auth/react';
-import {Activity, BarChart3, CalendarDays, Contact, ChevronDown, ChevronLeft, ChevronRight, FileBarChart, Gauge, Home, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Tag, Users} from 'lucide-react';
+import {Activity, BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Contact, FileBarChart, Gauge, HeartPulse, Home, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
 import type {DigestArchiveRow} from '../../src/types';
 import {cn} from '@/lib/utils';
 import {fmtRange, hasNoSalesData, periodKind} from '../../src/week';
 import {ThemeToggle} from './theme-toggle';
+import {ViewSwitcher} from './company-switcher';
+import {EnvStrip, EnvSwitcher} from './env-switcher';
+import {UploadQueueProvider} from './upload-queue';
+import {UploadQueueIndicator} from './upload-queue-indicator';
+import {BrandMark} from './brand-mark';
+import {brandFor} from '@/src/brands';
+import {shouldRedirectFromZoomy} from '@/src/company-nav';
 import {PlaybookProvider} from './playbook';
 import {CoopChatProvider, AskCoopPill} from './coop-chat';
 import {CustomRangePicker} from './custom-range-picker';
@@ -80,11 +87,22 @@ function CoopMark() {
 export function DashboardShell({
   digests,
   user,
+  nav,
   children,
 }: {
   digests: DigestArchiveRow[];
   usingMock?: boolean;
   user?: {name?: string | null; email?: string | null; image?: string | null};
+  /** Tenant chrome: active company + companies to switch between. Absent = the
+   *  single-tenant (Zoomy) path, which renders exactly as before. */
+  nav?: {
+    activeKey: string;
+    companyId: string | null;
+    isCoopAdmin: boolean;
+    views: {key: string; companyId: string | null; role: string; name: string}[];
+    holdsCoopAdmin?: boolean;
+    env?: 'staging' | 'production';
+  };
   children: React.ReactNode;
 }) {
   const pathname = usePathname() || '/';
@@ -92,6 +110,9 @@ export function DashboardShell({
   // Mobile "More" sheet (below md). Deterministic false default → matches SSR, so
   // desktop hydration is unaffected (mirrors the navExpanded pattern below).
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Sign-out confirmation — signing out is easy to hit by accident and costs a
+  // re-auth, so both entry points open a confirm dialog instead of acting directly.
+  const [signOutOpen, setSignOutOpen] = useState(false);
   const initials = (user?.name || user?.email || 'ZY')
     .split(/[\s@.]+/)
     .filter(Boolean)
@@ -177,30 +198,80 @@ export function DashboardShell({
     if (overviewGroupActive) setOverviewOpen(true);
   }, [overviewGroupActive]);
 
+  // Per-view nav. nav absent => legacy single-tenant Zoomy (incl. local dev-auth
+  // bypass). Zoomy keeps its exact legacy tabs. The data-blind Coop Admin view gets
+  // the role console; any other company view (Goldline) gets its own tabs. Pages are
+  // guarded server-side regardless. The active view drives all of this.
+  const isZoomy = !shouldRedirectFromZoomy(nav ?? null);
+  const showUploads = !isZoomy; // Ask Coop (Zoomy-only) is hidden for non-Zoomy views
+  const isCoopAdminView = Boolean(nav?.isCoopAdmin);
+  const activeView = nav?.views.find((v) => v.key === nav.activeKey);
+  const activeName = isCoopAdminView ? 'Coop Admin' : (activeView?.name ?? 'Zoomy');
+  // Wordmark for the single-view label: the active company's brand. Only with no nav
+  // at all (local dev bypass / legacy staff) is it assumed to be Zoomy.
+  const staticBrand = brandFor(isCoopAdminView ? null : nav ? activeView?.companyId : 'zoomy');
+
+  const uploadsTab: NavItem = {href: '/uploads', label: 'Uploads', icon: Upload};
+  const overviewTab: NavItem = {href: '/overview', label: 'Overview', icon: BarChart3};
+  const storesTab: NavItem = {href: '/stores', label: 'Stores', icon: Store};
+  const stockTab: NavItem = {href: '/stock', label: 'Inventory', icon: Package};
+  const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
+  const healthTab: NavItem = {href: '/store-health', label: 'Health', icon: HeartPulse};
+  const usersTab: NavItem = {href: '/admin/users', label: 'Users & Roles', icon: Users};
+  // Settings for non-Zoomy views only matters to multi-role users (Starting view).
+  const multiView = Boolean(nav && nav.views.length > 1);
+  const settingsTab: NavItem = {href: '/settings', label: 'Settings', icon: Settings};
+
+  const overviewChildren = isZoomy ? OVERVIEW_CHILDREN : [];
+  const flatTabs = isZoomy
+    ? FLAT_TABS
+    : isCoopAdminView
+      ? [usersTab, ...(multiView ? [settingsTab] : [])]
+      : [overviewTab, storesTab, stockTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
+
   // ── Mobile nav model (below md only) ──────────────────────────────────────
-  // The left rail is hidden under md; these drive a bottom tab bar (5 primary
-  // destinations) + a "More" sheet for the rest. Reuses leafActive so highlight
-  // logic is identical to the rail. Desktop never renders any of this (md:hidden).
-  const mobileTabs = [
-    {href: '/', label: 'Home', icon: Home, active: leafActive('/', pathname, channel)},
-    {href: '/?channel=all', label: 'Sales', icon: BarChart3, active: leafActive('/?channel=all', pathname, channel)},
-    {href: '/inventory', label: 'Inventory', icon: Package, active: leafActive('/inventory', pathname, channel)},
-    {href: '/offline-sales', label: 'Offline', icon: Receipt, active: leafActive('/offline-sales', pathname, channel)},
-  ];
-  const moreItems: NavItem[] = [
-    {href: '/health', label: 'Business Health', icon: Gauge},
-    {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
-    {href: '/offline-sales/events', label: 'Events', icon: CalendarDays},
-    {href: '/customers', label: 'Customers', icon: Users},
-    {href: '/reports', label: 'Reports', icon: FileBarChart},
-    {href: '/traffic', label: 'Traffic', icon: Activity},
-    {href: '/repricer', label: 'Repricer', icon: Tag},
-    {href: '/settings', label: 'Settings', icon: Settings},
-  ];
+  // The left rail is hidden under md; these drive a bottom tab bar + a "More" sheet.
+  // Reuses leafActive so highlight logic matches the rail. Desktop never renders this.
+  const mobileTabs = isZoomy
+    ? [
+        {href: '/', label: 'Home', icon: Home, active: leafActive('/', pathname, channel)},
+        {href: '/?channel=all', label: 'Sales', icon: BarChart3, active: leafActive('/?channel=all', pathname, channel)},
+        {href: '/inventory', label: 'Inventory', icon: Package, active: leafActive('/inventory', pathname, channel)},
+        {href: '/offline-sales', label: 'Offline', icon: Receipt, active: leafActive('/offline-sales', pathname, channel)},
+      ]
+    : isCoopAdminView
+      ? [
+          {href: '/admin/users', label: 'Users', icon: Users, active: leafActive('/admin/users', pathname, channel)},
+        ]
+      : [
+          {href: '/overview', label: 'Overview', icon: BarChart3, active: leafActive('/overview', pathname, channel)},
+          {href: '/stock', label: 'Inventory', icon: Package, active: leafActive('/stock', pathname, channel)},
+          {href: '/action-feed', label: 'Actions', icon: ListChecks, active: leafActive('/action-feed', pathname, channel)},
+          {href: '/uploads', label: 'Uploads', icon: Upload, active: leafActive('/uploads', pathname, channel)},
+        ];
+  const moreItems: NavItem[] = isZoomy
+    ? [
+        {href: '/health', label: 'Business Health', icon: Gauge},
+        {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
+        {href: '/offline-sales/events', label: 'Events', icon: CalendarDays},
+        {href: '/customers', label: 'Customers', icon: Users},
+        {href: '/reports', label: 'Reports', icon: FileBarChart},
+        {href: '/traffic', label: 'Traffic', icon: Activity},
+        {href: '/repricer', label: 'Repricer', icon: Tag},
+        {href: '/settings', label: 'Settings', icon: Settings},
+      ]
+    : isCoopAdminView
+      ? multiView
+        ? [settingsTab]
+        : []
+      : [storesTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 
   return (
     <PlaybookProvider>
+    {/* Upload queue lives in the shell so uploads keep running across in-app navigation. */}
+    <UploadQueueProvider company={nav?.companyId ?? null}>
+    <UploadQueueIndicator />
     <CoopChatProvider scopeLabel={currentRange || undefined}>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
@@ -208,6 +279,7 @@ export function DashboardShell({
           sticky rail (which pins at top-14 = this bar's height). z-30 keeps it
           over both the rail and the scrolling canvas. */}
       <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/60 px-4 backdrop-blur-sm">
+        {nav?.holdsCoopAdmin && nav.env && <EnvStrip env={nav.env} />}
         <Link href="/" aria-label="Coop home" className="flex items-center gap-2 rounded-lg transition-opacity hover:opacity-70">
           <CoopMark />
           <span className="hidden text-[13px] font-medium tracking-tight text-muted-foreground sm:inline">
@@ -215,17 +287,32 @@ export function DashboardShell({
           </span>
         </Link>
 
-        {/* Brand switcher (Zoomy) — visual for now. Hidden on the narrowest
-            screens so the mobile header (period + Ask + theme + avatar) doesn't
-            overflow; visible from sm up, so desktop is unchanged. */}
-        <button
-          type="button"
-          className="ml-1 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted max-sm:hidden"
-        >
-          <span className="size-1.5 rounded-full" style={{backgroundColor: 'var(--primary)'}} />
-          Zoomy
-          <ChevronDown className="size-3.5 text-muted-foreground" />
-        </button>
+        {/* View switcher. The only place to switch views (company role(s) and/or Coop
+            Admin), so it shows at every width, phones included. A single-view user gets
+            a plain label: no chevron, since there's nothing to open. */}
+        {nav && nav.views.length > 1 ? (
+          <div className="ml-1 min-w-0">
+            <ViewSwitcher views={nav.views} activeKey={nav.activeKey} />
+          </div>
+        ) : (
+          <span className="ml-1 inline-flex h-8 items-center gap-2 rounded-full border border-border bg-background px-3 text-sm font-medium max-sm:hidden">
+            {staticBrand ? (
+              <>
+                <BrandMark brand={staticBrand} size={staticBrand.style === 'thin' ? 11 : 13} />
+                <span className="sr-only">{activeName}</span>
+              </>
+            ) : (
+              <>
+                <span className="size-1.5 rounded-full" style={{backgroundColor: 'var(--primary)'}} />
+                {activeName}
+              </>
+            )}
+          </span>
+        )}
+
+        {/* Environment switcher (Staging ↔ Production) — anyone holding a Coop Admin
+            role, whatever view is active. */}
+        {nav?.holdsCoopAdmin && nav.env && <EnvSwitcher env={nav.env} />}
 
         {/* Source switcher — the Customers hub's three contact lists */}
         {showSource && (
@@ -353,7 +440,8 @@ export function DashboardShell({
 
         {/* Right cluster: Ask Coop · theme · avatar */}
         <div className="ml-auto flex items-center gap-2">
-          <AskCoopPill />
+          {/* Ask Coop reads Zoomy data; hidden for non-Zoomy companies (the API 403s them). */}
+          {!showUploads && <AskCoopPill />}
           <ThemeToggle />
           <div className="relative">
             <button
@@ -375,7 +463,10 @@ export function DashboardShell({
                     {user?.email && <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>}
                   </div>
                   <button
-                    onClick={() => signOut({callbackUrl: '/signin'})}
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setSignOutOpen(true);
+                    }}
                     className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] text-foreground transition-colors hover:bg-muted"
                   >
                     <LogOut className="size-3.5 text-muted-foreground" /> Sign out
@@ -403,8 +494,9 @@ export function DashboardShell({
           )}
         >
           {/* Overview — a group: an accordion in the expanded rail, a single
-              icon in the collapsed rail (its children need the labels). */}
-          {navExpanded ? (
+              icon in the collapsed rail (its children need the labels). Zoomy only;
+              non-Zoomy companies get a flat Overview tab below instead (no duplicate). */}
+          {isZoomy && (navExpanded ? (
             <div className="flex flex-col">
               <div className="flex items-center gap-1">
                 <Link
@@ -433,7 +525,7 @@ export function DashboardShell({
               </div>
               {overviewOpen && (
                 <div className="ml-3 mt-1 flex flex-col gap-1 border-l border-sidebar-border pl-3">
-                  {OVERVIEW_CHILDREN.map((c) => {
+                  {overviewChildren.map((c) => {
                     const active = leafActive(c.href, pathname, channel);
                     return (
                       <Link
@@ -488,7 +580,7 @@ export function DashboardShell({
                 <>
                   <button className="fixed inset-0 z-20 cursor-default" aria-hidden onClick={() => setOverviewFlyout(false)} />
                   <div role="menu" className="absolute left-full top-0 z-30 ml-2 w-52 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
-                    {[OVERVIEW, ...OVERVIEW_CHILDREN].map((item) => {
+                    {[OVERVIEW, ...overviewChildren].map((item) => {
                       const active = leafActive(item.href, pathname, channel);
                       return (
                         <Link
@@ -511,9 +603,9 @@ export function DashboardShell({
                 </>
               )}
             </div>
-          )}
+          ))}
 
-          {FLAT_TABS.map((t) => {
+          {flatTabs.map((t) => {
             const active = leafActive(t.href, pathname, channel);
             return (
               <Link
@@ -549,7 +641,10 @@ export function DashboardShell({
           </button>
         </nav>
 
-        <main id="coop-scroll" className="coop-app-in min-w-0 flex-1 overflow-y-auto max-md:pb-[calc(4rem+env(safe-area-inset-bottom))]">
+        {/* The window scrolls, not <main>: overflow-x-clip (not overflow-auto) keeps <main>
+            from becoming a scroll container, so position:sticky inside pages pins to the
+            viewport (review scan, commit bars, Health header). */}
+        <main id="coop-scroll" className="coop-app-in min-w-0 flex-1 overflow-x-clip max-md:pb-[calc(4rem+env(safe-area-inset-bottom))]">
           {children}
         </main>
       </div>
@@ -616,6 +711,7 @@ export function DashboardShell({
           )}
         >
           <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-border" aria-hidden />
+          {moreItems.length > 0 && (
           <div className="grid grid-cols-3 gap-1 p-3">
             {moreItems.map((item) => {
               const active = leafActive(item.href, pathname, channel);
@@ -636,13 +732,17 @@ export function DashboardShell({
               );
             })}
           </div>
-          <div className="border-t border-border px-3 py-3">
+          )}
+          <div className={cn('px-3 py-3', moreItems.length > 0 && 'border-t border-border')}>
             <div className="mb-2 px-1">
               <div className="truncate text-[13px] font-medium text-foreground">{user?.name || 'Signed in'}</div>
               {user?.email && <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>}
             </div>
             <button
-              onClick={() => signOut({callbackUrl: '/signin'})}
+              onClick={() => {
+                setMobileNavOpen(false);
+                setSignOutOpen(true);
+              }}
               className="flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-muted active:scale-[0.99]"
             >
               <LogOut className="size-4 text-muted-foreground" /> Sign out
@@ -651,7 +751,51 @@ export function DashboardShell({
         </div>
       </div>
     </div>
+    {signOutOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signout-title"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setSignOutOpen(false);
+        }}
+      >
+        <button
+          type="button"
+          aria-label="Cancel sign out"
+          onClick={() => setSignOutOpen(false)}
+          className="absolute inset-0 cursor-default bg-foreground/30 backdrop-blur-[1px]"
+        />
+        <div className="relative z-10 w-full max-w-xs overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
+          <div className="flex flex-col gap-1 px-5 pt-5">
+            <h2 id="signout-title" className="font-heading text-base font-semibold text-foreground">
+              Sign out of Coop?
+            </h2>
+            <p className="text-sm text-muted-foreground">You&apos;ll need to sign in again to get back in.</p>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-border bg-muted/40 px-4 py-3">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setSignOutOpen(false)}
+              className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => signOut({callbackUrl: '/signin'})}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/20 focus-visible:ring-2 focus-visible:ring-destructive/40 focus-visible:outline-none"
+            >
+              <LogOut className="size-3.5" /> Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </CoopChatProvider>
+    </UploadQueueProvider>
     </PlaybookProvider>
   );
 }

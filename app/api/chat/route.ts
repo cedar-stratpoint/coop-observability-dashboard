@@ -17,6 +17,7 @@ import {getChatDigest, getChatDigestIndex, getChatMetricDataOrDegrade} from '@/s
 import type {ChatStreamEvent} from '@/src/chat/stream-types';
 import {auth} from '@/auth';
 import {websiteOrdersForReport} from '@/src/chat/crm/executors';
+import {getActiveContext} from '@/src/active-context';
 import {devAuthEnabled, DEV_SESSION} from '@/src/dev-auth';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,16 @@ export async function POST(req: Request) {
   const started = Date.now();
   const session = devAuthEnabled() ? DEV_SESSION : await auth();
   if (!session?.user) return new Response('Please sign in to use Coop.', {status: 401});
+
+  // Ask Coop reads Zoomy digests (no company dimension), so fence it to Zoomy:
+  // a non-Zoomy viewer (Goldline / data-blind Coop Admin) must not query it. Skipped
+  // under dev-auth bypass so the bypass never consults auth() (keeps that invariant).
+  if (!devAuthEnabled()) {
+    const chatCtx = await getActiveContext();
+    if (chatCtx && chatCtx.companyId !== 'zoomy') {
+      return new Response('Ask Coop is only available for Zoomy.', {status: 403});
+    }
+  }
 
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return new Response('Coop chat is not configured (missing API key).', {status: 503});
