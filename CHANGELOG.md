@@ -18,7 +18,7 @@ Every committed form row now goes through the plan's checks, and each finding na
 - **Flag queue** (`/flags`, nav "Flags"): open counts per cause, the latest month's form vs. sales coverage, open and closed lists with a plain sentence per flag and a link to the form page. Close as checked or dismissed with a required remark, change the cause (the check's original is kept), or log a sales gap as a loss, which records an adjustment, closes the flag and re-runs the store's checks. Store-scoped roles see and touch only their stores. Writes live in `src/goldline-flags-writes.ts`.
 - **Adjustments** (F5, same page): pull-out, damage or loss per store, item and cycle; adding or deleting one re-runs that store's checks.
 - **Stock value** (F9): the Inventory board shows stock on hand and the latest count's deliveries in pesos at selling price (no cost or margin in v1), with unpriced items called out.
-- **Scan marks** (F3): the reader now returns per-cell `marks` (overwritten, unclear, straddle) with what was first written, instead of free-text "flag it"; review rows show them and the checks turn them into unreadable flags. *Not yet tested against the live API*: `ANTHROPIC_API_KEY` is empty in local `.env.local`.
+- **Scan marks** (F3): the reader now returns per-cell `marks` (overwritten, unclear, straddle) with what was first written, instead of free-text "flag it"; review rows show them and the checks turn them into unreadable flags. Uses Goldline's own `GOLDLINE_ANTHROPIC_API_KEY` (the Oct 15 change, which had only reached `main`, is now on this branch too).
 - **Verified on Staging** with temporary counts for Cubao in Aug and Sep (months with POS data): the beauty sponge matched (16 = 16), the curler was flagged (form 24 vs. POS 14), "Log as a loss" closed it and the re-run left it a match; closing with a cause change, re-run keeping it closed, an out-of-scope refusal and reopen all behaved. Test data removed.
 
 ## 2026-10-26 — Goldline P1: Watsons SKUs matched to Nichido items, and a SKU links screen
@@ -161,6 +161,7 @@ Minor bump (SemVer): new, backward-compatible features. Selective release by che
 - *Manual SQL (optional, not needed to release):* the table (`supabase/marketplace_daily_sales.sql` in `zoomy-observability`, PR #47, needs #42) and then `supabase/coop_chat_marketplace_daily.sql` here. Nothing fills the table until the backend writer is deployed.
 - *Catalog:* only the `marketplace_daily_sales` entry was added to `src/chat/catalog/catalog.json` (digest domain); the knowledge base is ahead of `main`, so a full regeneration would describe things `main` does not have.
 - Per-change detail is in the entries below.
+
 ## 2026-10-21 — Ask Coop: an API spend cap says "account needs attention", not "try again"
 When the provider refuses with a usage-limit 400 ("You have reached your specified API usage limits"), Ask Coop now shows the same account message as a low credit balance instead of the generic "Coop hit a problem answering that. Please try again." Found when two identical questions failed with the generic text and the cause could not be told apart from a code fault. No provider text is shown to the user.
 
@@ -169,6 +170,7 @@ Ask Coop's channel report now merges the backend's `marketplace_daily_sales` row
 
 ## 2026-10-21 — Sales range: totals can come from the backend's per-day rows
 `src/marketplace-daily-data.ts` reads `marketplace_daily_sales` (one row per PH day per Shopee or Lazada channel, written by every digest run; backend PR #47) and `src/daily-sales-digests.ts` shapes the rows, grouped by the run window that wrote them, as digests carrying `daily`. The Sales range view's rollup merges them with the stored digests unchanged (newest run wins per day, a day inside a run's window with no row is a zero), so a custom span is summed from rows where they exist. Ad spend, ROAS and top products still read whole digest windows. Soft by design: mock mode, a missing table or a failed read gives no rows and the page behaves exactly as before. Decision: Ask Coop does not read the table yet; its read guard only allows registry views, so that needs a `coop_chat_*` view and a hand-applied grant (parked). Verified against the local Docker Postgres, not a hosted project.
+
 ## 2026-10-21 — Ask Coop: one product's offline sales in one answer, bundles shared out
 `lookup_product` takes `show: "sales"` with the owner's dates (`""` and `""` for all data): direct orders, units and revenue, units picked inside bundles with the bundle's price shared out, and the combined total, in one registered result instead of free SQL. Decision (owner rule, assumed until said otherwise): the bundle share is an **equal share per unit** (the bundle's price divided by all units in it, times this product's units); the list-price weighted share (the dashboard's `bundle_picks`) sits beside it in its own column. The older-sales caveat (bundle revenue with no pick detail) is kept. Clarify-first still applies to a misspelled product.
 
@@ -212,6 +214,7 @@ All of this appears only when custom dates or "All time" are picked; the weekly 
 - **Shared pieces touched:** `Calendar` gets an optional `weekStartsOn` (default Sunday, so every other caller is unchanged); the shell gets the "Sales range" nav item (desktop rail and mobile More) and hides the weekly period switcher on this page.
 - **Data catalog:** `/sales-range` added to `knowledge/data-catalog/pages.md`; `catalog.json` regenerated.
 - Tests: `test/span-windows.test.ts` (19) and `test/sales-range.test.ts` (22), including the real staging windows.
+
 ## 2026-10-20 — Ask Coop: confidence matches, "might these be the same person?" (P4 of 4)
 - **Asked:** same customer across platforms by same phone, email, pet name, with a confidence.
 - **What changed:** `contacts` gets mode `matches` (scope: one person by query, an event's leads, or two sources; `min_tier` narrows). Every link has a score, a tier (confirmed 100, likely 60 to 99, possible 30 to 59, weak below 30), the reasons and a signals key, best first, top 50. Points (owner-agreed starting weights, in `WEIGHTS` in `src/chat/contacts/match.ts`): email 100, mobile 100, Instagram handle 60, same name 40, similar name 20, same pet name 20, capped at 100.
@@ -277,9 +280,16 @@ All of this appears only when custom dates or "All time" are picked; the weekly 
 - **Measured:** probes against the live API at `max_tokens: 1`: base 11 and Explore 14 pass, base plus the four CRM tools (15) and all 18 fail; with the three list tools non-strict all 18 pass. `test/chat-tools-grammar.integration.test.ts` repeats this (skipped without an API key): run it before a deploy that touches `metrics-registry.ts`, `tool-defs.ts` or `crm/tools.ts`, because a new metric or dimension grows `query_metric`'s enums and uses up the headroom.
 - Also logged: `chat_error` carries the first 300 characters of a 400's message (#195).
 
+## 2026-10-15 — Goldline reads its own Anthropic key (`GOLDLINE_ANTHROPIC_API_KEY`)
+- Goldline PDF extraction now reads **`GOLDLINE_ANTHROPIC_API_KEY`**, not `ANTHROPIC_API_KEY` (Ask Coop's). **No fallback.** Without it, a PDF is stored for manual review instead of being read.
+- *Why:* Ask Coop and Goldline are billed on separate Anthropic keys; reading the shared variable put Goldline usage on Ask Coop's key.
+- *Action:* set `GOLDLINE_ANTHROPIC_API_KEY` on the **Staging** Vercel project (and prod, with the v1.7.0 release), or Staging PDF uploads stop being read once this lands.
+- Same change shipped to prod in the v1.7.0 release (#200). Test: `src/goldline-extract-run.test.ts`.
+
 ## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
 - Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
 - Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".
+
 ## 2026-10-14 — Free items won: show which event each prize was given at
 - Each prize card on `/offline-sales` now names its **event**, linking to that event's page; prizes with no event read "No event".
   - *How:* the prize's order event tag (`pos_orders.event_id`), else the event covering the order's date, the same read-time fill the Events page uses (`resolveOrderEvents`). Read-only, no schema change.

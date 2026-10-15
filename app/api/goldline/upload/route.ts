@@ -296,7 +296,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     return json({
       uploadId,
       status: 'needs_review',
-      note: 'Stored. Extraction is not configured (ANTHROPIC_API_KEY missing), so review it manually.',
+      note: 'Stored. Extraction is not configured (GOLDLINE_ANTHROPIC_API_KEY missing), so review it manually.',
     });
   }
 
