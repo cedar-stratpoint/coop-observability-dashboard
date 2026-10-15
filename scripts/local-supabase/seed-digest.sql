@@ -12,19 +12,24 @@ create table if not exists public.digest_archive (
 );
 alter table public.digest_archive enable row level security;   -- no policies: service role only, like the real table
 
--- Two weekly digests (latest = Sep 21 to 27, previous = Sep 14 to 20). All figures are invented.
+-- PROD-shaped digests (spec evidence log, 2026-10-07), all FICTIONAL. Same rows as test/support/channel-report-fixture.ts:
+-- three PH-aligned rows with per-day `daily` (28 Sep-4 Oct, 21-27 Sep, 1-27 Sep), an August row at UTC midnight (08:00 PH boundaries,
+-- no `daily`) and two re-runs of a rolling window 30 minutes apart. September 2026: Shopee 29,800 / 65 orders / 91 units,
+-- Lazada 42,400 / 91 / 120 (Sep 15 has no sales; 21-27 Sep from the newer row only).
+delete from public.digest_archive where bundle->>'marker' = 'SHOULD-NEVER-BE-SELECTED';
+
 insert into public.digest_archive (window_from, window_to, bundle, digest, created_at) values
 (
-  '2026-09-21T00:00:00Z', '2026-09-27T23:59:59Z',
+  '2026-09-27T16:00:00Z', '2026-10-04T16:00:00Z',
   '{"marker": "SHOULD-NEVER-BE-SELECTED", "evidence": [{"quotes": ["SHOULD-NEVER-BE-SELECTED customer@example.test"]}]}'::jsonb,
   $d1${
-    "window": {"label": "week of Sep 21 to 27", "from": "2026-09-21T00:00:00.000Z", "to": "2026-09-27T23:59:59.000Z"},
+    "window": {"label": "week of Sep 28 to Oct 4", "from": "2026-09-27T16:00:00.000Z", "to": "2026-10-04T16:00:00.000Z"},
     "degraded": false,
     "headline": "Lazada and Shopee both grew; Lazada led on revenue.",
     "themes": [{"theme": "joints", "displayName": "Joint pain", "quote": "FICTIONAL verbatim quote about stiff hips", "conversationId": "local-1"}],
     "comparison": {
-      "shopee":  {"revenue": 18400.5, "orders": 41, "aov": 448.8, "units": 77, "adSpend": 3100, "roas": 2.9},
-      "lazada":  {"revenue": 26250, "orders": 52, "aov": 504.81, "units": 96, "adSpend": 4200.25, "roas": 3.4},
+      "shopee":  {"revenue": 5600, "orders": 14, "aov": 400, "units": 14, "adSpend": 1100, "roas": 2.9},
+      "lazada":  {"revenue": 6300, "orders": 14, "aov": 450, "units": 21, "adSpend": 1400.25, "roas": 3.4},
       "website": {"revenue": 9120, "orders": 14, "aov": 651.43, "units": 25, "adSpend": null, "roas": null}
     },
     "figures": [
@@ -35,71 +40,65 @@ insert into public.digest_archive (window_from, window_to, bundle, digest, creat
     "recommendations": ["Restock Joint Support Chews before the weekend."],
     "sales": {
       "headline": "Website revenue was steady.",
-      "figures": [
-        {"label": "Net revenue this week (PHP)", "value": 9120, "timeBasis": "window"},
-        {"label": "Orders this week", "value": 14, "timeBasis": "window"},
-        {"label": "Revenue change vs prior week (%)", "value": 5, "timeBasis": "window"}
-      ],
-      "topProducts": [{"title": "Joint Support Chews", "revenue": 2400}, {"title": "Freeze Dried Munchies", "revenue": 1750.5}],
+      "figures": [{"label": "Net revenue this week (PHP)", "value": 9120, "timeBasis": "window"}, {"label": "Orders this week", "value": 14, "timeBasis": "window"}],
+      "topProducts": [{"title": "Joint Support Chews", "revenue": 2400}],
       "watch": [], "recommendations": []
     },
     "customers": {
       "headline": "Two new customers.",
-      "figures": [
-        {"label": "New customers this week", "value": 2, "timeBasis": "window"},
-        {"label": "Total customers (all-time)", "value": 64, "timeBasis": "allTime"}
-      ],
+      "figures": [{"label": "New customers this week", "value": 2, "timeBasis": "window"}],
       "outreach": [{"name": "Maria Santos", "list": "vip", "canEmail": true, "note": "FICTIONAL outreach note"}],
       "recommendations": []
-    },
-    "shopee": {
-      "sales": {
-        "headline": "Shopee sales were healthy.",
-        "figures": [{"label": "Sales (PHP)", "value": 18400.5, "timeBasis": "window"}, {"label": "Buyers", "value": 38, "timeBasis": "window"}],
-        "recommendations": [],
-        "window": {"from": "2026-09-21", "to": "2026-09-27", "label": "21/09/2026 - 27/09/2026"}
-      },
-      "products": {
-        "headline": "Two products led.",
-        "figures": [{"label": "Active listings", "value": 12, "timeBasis": "window"}],
-        "recommendations": [],
-        "topProducts": [{"title": "Freeze Dried Munchies", "revenue": 5200, "units": 21}, {"title": "Meaty Treats", "revenue": 3900.5, "units": 15}]
-      }
-    },
-    "lazada": {
-      "sales": {
-        "headline": "Lazada sales led all channels.",
-        "figures": [{"label": "Sales (PHP)", "value": 26250, "timeBasis": "window"}, {"label": "Orders", "value": 52, "timeBasis": "window"}],
-        "recommendations": [],
-        "window": {"from": "2026-09-21", "to": "2026-09-27", "label": "21/09/2026 - 27/09/2026"},
-        "topProducts": [{"title": "Joint Support Chews", "revenue": 7800, "units": 30}, {"title": "Meaty Treats", "revenue": 4100, "units": 16}]
-      },
-      "ads": {
-        "headline": "Ads returned 3.4x.",
-        "figures": [{"label": "Ad spend (PHP)", "value": 4200.25, "timeBasis": "window"}, {"label": "ROAS", "value": 3.4, "timeBasis": "window"}],
-        "recommendations": []
-      }
     }
-  }$d1$::jsonb,
+  }$d1$::jsonb
+  || jsonb_build_object('daily', jsonb_build_object(
+    'shopee', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 800, 'orders', 2, 'units', 2) order by d) from generate_series(date '2026-09-28', date '2026-10-04', interval '1 day') d),
+    'lazada', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 900, 'orders', 2, 'units', 3) order by d) from generate_series(date '2026-09-28', date '2026-10-04', interval '1 day') d))),
+  '2026-10-05T01:00:00Z'
+),
+(
+  '2026-09-20T16:00:00Z', '2026-09-27T16:00:00Z', '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
+  $d2${"window": {"label": "week of Sep 21 to 27", "from": "2026-09-20T16:00:00.000Z", "to": "2026-09-27T16:00:00.000Z"}, "degraded": false,
+    "headline": "A quieter week on every channel.", "themes": [], "figures": [], "recommendations": [],
+    "comparison": {"shopee": {"revenue": 8400, "orders": 21, "aov": 400, "units": 28, "adSpend": null, "roas": null},
+                   "lazada": {"revenue": 11200, "orders": 28, "aov": 400, "units": 35, "adSpend": null, "roas": null}}}$d2$::jsonb
+  || jsonb_build_object('daily', jsonb_build_object(
+    'shopee', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 1200, 'orders', 3, 'units', 4) order by d) from generate_series(date '2026-09-21', date '2026-09-27', interval '1 day') d),
+    'lazada', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 1600, 'orders', 4, 'units', 5) order by d) from generate_series(date '2026-09-21', date '2026-09-27', interval '1 day') d))),
   '2026-09-28T01:00:00Z'
 ),
 (
-  '2026-09-14T00:00:00Z', '2026-09-20T23:59:59Z',
-  '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
-  $d2${
-    "window": {"label": "week of Sep 14 to 20", "from": "2026-09-14T00:00:00.000Z", "to": "2026-09-20T23:59:59.000Z"},
-    "degraded": false,
-    "headline": "A quieter week on every channel.",
-    "themes": [],
-    "comparison": {
-      "shopee":  {"revenue": 15900, "orders": 36, "aov": 441.67, "units": 66, "adSpend": 2800, "roas": 2.6},
-      "lazada":  {"revenue": 21400.75, "orders": 45, "aov": 475.57, "units": 80, "adSpend": 3900, "roas": 3.1},
-      "website": {"revenue": 8700, "orders": 13, "aov": 669.23, "units": 23, "adSpend": null, "roas": null}
-    },
-    "figures": [{"label": "Conversations this week", "value": 31, "timeBasis": "window"}],
-    "recommendations": []
-  }$d2$::jsonb,
-  '2026-09-21T01:00:00Z'
+  '2026-08-31T16:00:00Z', '2026-09-27T16:00:00Z', '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
+  $d3${"window": {"label": "Sep 1 to 27", "from": "2026-08-31T16:00:00.000Z", "to": "2026-09-27T16:00:00.000Z"}, "degraded": false,
+    "headline": "September so far.", "themes": [], "figures": [], "recommendations": [],
+    "comparison": {"shopee": {"revenue": 26000, "orders": 52, "aov": 500, "units": 78, "adSpend": null, "roas": null},
+                   "lazada": {"revenue": 39000, "orders": 78, "aov": 500, "units": 104, "adSpend": null, "roas": null}}}$d3$::jsonb
+  || jsonb_build_object('daily', jsonb_build_object(
+    'shopee', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 1000, 'orders', 2, 'units', 3) order by d) from generate_series(date '2026-09-01', date '2026-09-27', interval '1 day') d where d <> date '2026-09-15'),
+    'lazada', (select jsonb_agg(jsonb_build_object('day', to_char(d, 'YYYY-MM-DD'), 'revenue', 1500, 'orders', 3, 'units', 4) order by d) from generate_series(date '2026-09-01', date '2026-09-27', interval '1 day') d where d <> date '2026-09-15'))),
+  '2026-09-27T20:00:00Z'
+),
+(
+  '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
+  $d4${"window": {"label": "August", "from": "2026-08-01T00:00:00.000Z", "to": "2026-09-01T00:00:00.000Z"}, "degraded": false,
+    "headline": "August (UTC month).", "themes": [], "figures": [], "recommendations": [],
+    "comparison": {"shopee": {"revenue": 30000, "orders": 60, "aov": 500, "units": 90, "adSpend": null, "roas": null},
+                   "lazada": {"revenue": 41000, "orders": 80, "aov": 512.5, "units": 110, "adSpend": null, "roas": null}}}$d4$::jsonb,
+  '2026-09-01T02:00:00Z'
+),
+(
+  '2026-07-10T03:40:00Z', '2026-08-09T03:40:00Z', '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
+  $d5${"window": {"label": "30 days", "from": "2026-07-10T03:40:00.000Z", "to": "2026-08-09T03:40:00.000Z"}, "degraded": false,
+    "headline": "Re-run (newer).", "themes": [], "figures": [], "recommendations": [],
+    "comparison": {"shopee": {"revenue": 28000, "orders": 56, "aov": 500, "units": 84, "adSpend": null, "roas": null}}}$d5$::jsonb,
+  '2026-08-09T03:45:00Z'
+),
+(
+  '2026-07-10T03:12:00Z', '2026-08-09T03:12:00Z', '{"marker": "SHOULD-NEVER-BE-SELECTED"}'::jsonb,
+  $d6${"window": {"label": "30 days", "from": "2026-07-10T03:12:00.000Z", "to": "2026-08-09T03:12:00.000Z"}, "degraded": false,
+    "headline": "Re-run (older).", "themes": [], "figures": [], "recommendations": [],
+    "comparison": {"shopee": {"revenue": 27900, "orders": 55, "aov": 507.27, "units": 83, "adSpend": null, "roas": null}}}$d6$::jsonb,
+  '2026-08-09T03:15:00Z'
 )
 on conflict (window_from, window_to) do update set bundle = excluded.bundle, digest = excluded.digest, created_at = excluded.created_at;
 

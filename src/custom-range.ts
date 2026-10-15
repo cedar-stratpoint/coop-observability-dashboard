@@ -10,9 +10,9 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** PH calendar day (YYYY-MM-DD) an instant falls on. */
-const phDay = (ms: number) => new Date(ms + PH_MS).toISOString().slice(0, 10);
+export const phDay = (ms: number) => new Date(ms + PH_MS).toISOString().slice(0, 10);
 /** The instant a PH calendar day begins. */
-const phDayStart = (day: string) => Date.parse(`${day}T00:00:00+08:00`);
+export const phDayStart = (day: string) => Date.parse(`${day}T00:00:00+08:00`);
 
 /** First and last PH day a period touches — the picker's selectable bounds. */
 export function periodDays(windowFrom: string, windowTo: string): {min: string; max: string} {
@@ -48,7 +48,7 @@ type LineItem = {title: string; quantity: number; unitPrice: number; discount: n
 
 // Port of the batch's parseLineItems (zoomy-observability src/observability/sales.js)
 // so a full-period range reconciles to the digest. Tolerant; never throws.
-function parseLineItems(raw: unknown): LineItem[] {
+export function parseLineItems(raw: unknown): LineItem[] {
   let items: unknown;
   try {
     items = typeof raw === 'string' ? JSON.parse(raw) : raw;

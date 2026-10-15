@@ -4,7 +4,7 @@ import {describe, expect, it, vi} from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import {renderSkill} from '../src/chat/skills/load';
-import {buildExploreCatalogText} from '../src/chat/explore/catalog';
+import {buildDataIndexText} from '../src/chat/catalog/prompt';
 import {buildExamplesText} from '../src/chat/explore/examples';
 
 const FORBIDDEN_FIGURES = ['106,950', '147,300', '40,350', '71,050', '18,050', '17,850', '139,360', '32,410', '23.3', '66.4', '16.9', '16.7', '11,822', '99,250'];
@@ -39,12 +39,12 @@ describe('the rendered explore skill', () => {
 });
 
 describe('the cached blocks are deterministic and clean', () => {
-  it('the catalog and the examples are byte-identical across calls', () => {
-    expect(buildExploreCatalogText()).toBe(buildExploreCatalogText());
+  it('the data index and the examples are byte-identical across calls', () => {
+    expect(buildDataIndexText()).toBe(buildDataIndexText());
     expect(buildExamplesText()).toBe(buildExamplesText());
   });
   it('they contain no forbidden figure and no first-person action claim', () => {
-    for (const t of [buildExploreCatalogText(), buildExamplesText()]) {
+    for (const t of [buildDataIndexText(), buildExamplesText()]) {
       for (const f of FORBIDDEN_FIGURES) expect(t, f).not.toContain(f);
       expect(t).not.toMatch(/\bI('ve| have) (logged|saved|reported|sent|notified)\b/i);
     }

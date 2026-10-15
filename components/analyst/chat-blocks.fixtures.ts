@@ -232,6 +232,22 @@ export const stacked100 = chart({
   rows: bundleRows.slice(0, 3),
 });
 
+export const smallMultiples = chart({
+  id: 'f-c12',
+  title: 'Revenue by event and pet',
+  form: 'small_multiples',
+  orientation: 'horizontal',
+  xKey: 'event',
+  xLabel: 'Event',
+  series: [ser('untagged', 'untagged', 'chart-5'), ser('dog', 'dog', 'cat-1'), ser('cat', 'cat', 'cat-2'), ser('both', 'both', 'cat-3')],
+  rows: [
+    {event: 'Pop-up Market', untagged: 3000, dog: null, cat: null, both: null},
+    {event: 'Pet Fair North', untagged: 370, dog: 960, cat: 1124, both: 450},
+    {event: 'Weekend Expo', untagged: 150, dog: 1275, cat: 600, both: 499},
+  ],
+  over: {caveats: ['Pop-up Market: 100% of revenue has no pet tag.']},
+});
+
 export const previewGroups: {label: string; blocks: ChatBlock[]}[] = [
   {label: 'KPI row (4 tiles)', blocks: kpiRow},
   {label: 'Horizontal stacked bar with a separate No tag bar', blocks: [stackedHorizontal]},
@@ -243,6 +259,7 @@ export const previewGroups: {label: string; blocks: ChatBlock[]}[] = [
   {label: 'Area, 1 series', blocks: [areaOne]},
   {label: 'Diverging bar', blocks: [diverging]},
   {label: '100% stacked bar', blocks: [stacked100]},
+  {label: 'Small multiples, one panel per event (shared scale)', blocks: [smallMultiples]},
   {label: 'Table with a total row', blocks: [tableTotal]},
   {label: 'Not reliable', blocks: [unreliable]},
   {label: 'With caveats and a long label', blocks: [withCaveats]},

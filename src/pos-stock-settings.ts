@@ -8,42 +8,15 @@ import {
   type ForecastConfig,
   type NextEventPlan,
 } from './pos-forecast-compute';
+import {numMap, numOr, parseStockConfig} from './pos-stock-config';
+
+export {parseStockConfig} from './pos-stock-config';
 
 // SERVER-ONLY. Reads the Stock Forecast config + next-event surge plan from
 // pos_settings (keys seeded in the pos_stock_forecast_settings migration). Both
 // readers are FAIL-SOFT to the compiled-in defaults: a missing key, malformed
 // JSON, or a read error simply yields the Phase-1 constants, so the forecast
 // always renders. Mirrors src/pos-target.ts.
-
-function numOr(v: unknown, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-function numMap(v: unknown): Record<string, number> {
-  if (!v || typeof v !== 'object') return {};
-  const out: Record<string, number> = {};
-  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
-    const n = Number(raw);
-    if (Number.isFinite(n) && n >= 0) out[k] = n;
-  }
-  return out;
-}
-
-/** Parse the stored config blob into a ForecastConfig, defaulting each field. */
-export function parseStockConfig(value: unknown): ForecastConfig {
-  const v = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
-  const days = Array.isArray(v.event_days)
-    ? (v.event_days as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
-    : [];
-  return {
-    threshold: numOr(v.threshold, DEFAULT_FORECAST_CONFIG.threshold),
-    thresholdOverrides: numMap(v.threshold_overrides),
-    targetCoverEventDays: numOr(v.target_cover_events, DEFAULT_FORECAST_CONFIG.targetCoverEventDays),
-    leadTimeDays: numOr(v.lead_time_days, DEFAULT_FORECAST_CONFIG.leadTimeDays),
-    earlyWarningEvents: numOr(v.early_warning_events, DEFAULT_FORECAST_CONFIG.earlyWarningEvents),
-    eventWeekdays: days.length ? days : DEFAULT_FORECAST_CONFIG.eventWeekdays,
-  };
-}
 
 /** Parse the stored surge plan into a NextEventPlan, defaulting each field. */
 export function parseNextEventPlan(value: unknown): NextEventPlan {

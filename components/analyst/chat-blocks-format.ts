@@ -95,11 +95,17 @@ const FORM_WORD: Record<ChartBlock['chart']['form'], string> = {
   grouped_bar: 'grouped bar chart',
   stacked_bar: 'stacked bar chart',
   stacked_bar_100: '100% stacked bar chart',
+  small_multiples: 'small multiples (one small bar chart per group)',
   line: 'line chart',
   area: 'area chart',
   pie: 'pie chart',
   diverging_bar: 'diverging bar chart',
 };
+
+/** The form the renderer will actually draw: a form it does not know (a newer server, a bad payload) falls back to grouped bars, never blank. */
+export function resolveForm(form: string | undefined): ChartBlock['chart']['form'] {
+  return form && Object.hasOwn(FORM_WORD, form) ? (form as ChartBlock['chart']['form']) : 'grouped_bar';
+}
 
 /** A plain sentence for assistive tech: what the block is and its largest values. The full rows are in the table twin. */
 export function ariaSummary(block: ChatBlock, top = 3): string {
@@ -111,7 +117,7 @@ export function ariaSummary(block: ChatBlock, top = 3): string {
   }
   const {chart} = block;
   const first = chart.series[0];
-  const head = `${block.title}: ${FORM_WORD[chart.form]} of ${chart.rows.length} ${chart.rows.length === 1 ? 'category' : 'categories'}`;
+  const head = `${block.title}: ${FORM_WORD[resolveForm(chart.form)]} of ${chart.rows.length} ${chart.rows.length === 1 ? 'category' : 'categories'}`;
   if (!first) return `${head}.`;
   const key = first.key;
   const ranked = chart.rows

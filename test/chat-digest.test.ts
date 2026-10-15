@@ -15,6 +15,8 @@ import type {ChatToolContext} from '../src/chat/stream-types';
 import type {ChatBlock} from '../src/chat/block-types';
 import type {MetricData} from '../src/chat/result-types';
 import type {DigestDocument} from '../src/types';
+import {dedupeReruns, sameWindow, windowOf} from '../src/digest-windows';
+import {SEPTEMBER_ROWS} from './support/channel-report-fixture';
 
 // F10 get_digest (design Slice 5): the digest adapter and its guard, the shaping, and the executor.
 const NOW = new Date('2026-09-30T04:00:00Z'); // Philippine time: Sep 30
@@ -58,13 +60,19 @@ const doc = (over: Partial<DigestDocument> = {}): DigestDocument => ({
   },
   ...over,
 });
-const row = (d: DigestDocument, to: string): DigestRow => ({window_from: '2026-09-14T00:00:00+00:00', window_to: to, created_at: '2026-09-28T01:00:00+00:00', digest: d});
-const LATEST = row(doc(), '2026-09-27T23:59:59+00:00');
-const PREVIOUS = row(doc({headline: 'Quieter.', window: {label: 'week of Sep 14 to 20', from: '2026-09-14T00:00:00.000Z', to: '2026-09-20T23:59:59.000Z'}}), '2026-09-20T23:59:59+00:00');
+const row = (d: DigestDocument, from: string, to: string, created = '2026-09-28T01:00:00+00:00'): DigestRow => ({window_from: from, window_to: to, created_at: created, digest: d});
+const LATEST = row(doc(), '2026-09-20T16:00:00+00:00', '2026-09-27T16:00:00+00:00');
+const PREVIOUS = row(doc({headline: 'Quieter.'}), '2026-09-13T16:00:00+00:00', '2026-09-20T16:00:00+00:00', '2026-09-21T01:00:00+00:00');
 const live = (rows: DigestRow[] = [LATEST, PREVIOUS]): DigestSource => ({source: 'live', rows});
+const septSource = (): DigestSource => ({
+  source: 'live',
+  rows: SEPTEMBER_ROWS.slice(0, 3),
+  index: dedupeReruns(SEPTEMBER_ROWS.map(windowOf), (w) => w),
+  rowAt: async (w) => SEPTEMBER_ROWS.find((r) => sameWindow(windowOf(r), w)) ?? null,
+});
 
 type Out = Exclude<ReturnType<typeof shapeDigest>, {error: string}>;
-const ok = (input: {window: string; section: string}, src: DigestSource | null = live(), now = NOW): Out => {
+const ok = (input: Record<string, string>, src: DigestSource | null = live(), now = NOW): Out => {
   const out = shapeDigest(input, src, now);
   if ('error' in out) throw new Error(out.error);
   return out;
@@ -211,8 +219,8 @@ describe('shapeDigest: a digest-sourced result (Slice 5 criterion 2)', () => {
     expect(result.meta.source).toBe('digest');
     expect(result.metric).toBe('digest');
     expect(result.dimension).toBe('comparison');
-    expect(result.meta.range).toEqual({from: '2026-09-21', to: '2026-09-27', label: 'week of Sep 21 to 27'});
-    expect(window).toMatchObject({which: 'latest', label: 'week of Sep 21 to 27'});
+    expect(result.meta.range).toEqual({from: '2026-09-21', to: '2026-09-27', label: 'Sep 21 to Sep 27, 2026'});
+    expect(window).toMatchObject({which: 'latest', label: 'Sep 21 to Sep 27, 2026'});
     expect(headline).toBe('Lazada and Shopee both grew.');
     expect(result.rows.map((r) => r.channel)).toEqual(['Shopee', 'Lazada', 'Website']);
     expect(result.rows[1]).toEqual({channel: 'Lazada', revenue: 26250, orders: 52, aov: 504.81, units: 96, ad_spend: 4200.25, roas: 3.4});
@@ -225,7 +233,7 @@ describe('shapeDigest: a digest-sourced result (Slice 5 criterion 2)', () => {
   it('returns the previous window from the second row', () => {
     const {result, headline, window} = ok({window: 'previous', section: 'figures'});
     expect(headline).toBe('Quieter.');
-    expect(window.label).toBe('week of Sep 14 to 20');
+    expect(window.label).toBe('Sep 14 to Sep 20, 2026');
     expect(result.meta.range.from).toBe('2026-09-14');
   });
 
@@ -268,7 +276,7 @@ describe('shapeDigest: a digest-sourced result (Slice 5 criterion 2)', () => {
     const mock = ok({window: 'latest', section: 'comparison'}, {source: 'mock', rows: [LATEST, PREVIOUS]});
     expect(mock.result.meta.checks.some((c) => c.code === 'mock_source' && c.status === 'warn')).toBe(true);
     expect(mock.result.meta.source).toBe('digest');
-    const degraded = ok({window: 'latest', section: 'comparison'}, live([row(doc({degraded: true}), LATEST.window_to)]));
+    const degraded = ok({window: 'latest', section: 'comparison'}, live([row(doc({degraded: true}), LATEST.window_from, LATEST.window_to)]));
     expect(degraded.result.meta.checks.some((c) => /degraded/.test(c.text))).toBe(true);
   });
 });
@@ -287,13 +295,13 @@ describe('shapeDigest: steering errors', () => {
   });
 
   it('says so plainly when there is no digest, and when there is no previous one', () => {
-    expect(err({window: 'latest', section: 'figures'}, null)).toMatch(/not available right now/);
-    expect(err({window: 'latest', section: 'figures'}, live([]))).toMatch(/not available right now/);
+    expect(err({window: 'latest', section: 'figures'}, null)).toMatch(/No stored digest is available right now/);
+    expect(err({window: 'latest', section: 'figures'}, live([]))).toMatch(/No stored digest is available right now/);
     expect(err({window: 'previous', section: 'figures'}, live([LATEST]))).toMatch(/no previous window/);
   });
 
   it('lists the sections the digest does have when one is missing', () => {
-    const bare = row(doc({comparison: undefined, shopee: null, lazada: undefined, customers: null}), LATEST.window_to);
+    const bare = row(doc({comparison: undefined, shopee: null, lazada: undefined, customers: null}), LATEST.window_from, LATEST.window_to);
     expect(err({window: 'latest', section: 'comparison'}, live([bare]))).toMatch(/no comparison section\. Sections it has: figures, sales, products/);
   });
 });
@@ -336,7 +344,7 @@ describe('the get_digest executor', () => {
     for (const digest of [undefined, async () => Promise.reject(new Error('relation does not exist'))]) {
       const out = (await make(digest).ex.get_digest?.(input)) as {error: string};
       expect(Object.keys(out)).toEqual(['error']);
-      expect(out.error).toMatch(/not available right now/);
+      expect(out.error).toMatch(/No stored digest is available right now/);
       expect(out.error).not.toMatch(/relation does not exist/);
     }
   });
@@ -366,63 +374,57 @@ describe('a digest read goes through the digest adapter, not src/data.ts (Slice 
   });
 });
 
-describe('get_digest recent_weeks / weekly_revenue (owner: online and offline week by week as a line)', () => {
-  const week = (from: string, to: string, rev: {s: number | null; l: number | null; w: number | null}): DigestRow => ({
-    window_from: `${from}T00:00:00.000Z`, window_to: `${to}T23:59:59.000Z`, created_at: `${to}T12:00:00.000Z`,
-    digest: doc({
-      window: {label: `${from} to ${to}`, from: `${from}T00:00:00.000Z`, to: `${to}T23:59:59.000Z`},
-      comparison: {
-        shopee: {revenue: rev.s, orders: 1, aov: 1, units: 1, adSpend: null, roas: null},
-        lazada: {revenue: rev.l, orders: 1, aov: 1, units: 1, adSpend: null, roas: null},
-        website: {revenue: rev.w, orders: 1, aov: 1, units: 1, adSpend: null, roas: null},
-      },
-    }),
-  });
-  // newest first, like the reader returns them
-  const src: DigestSource = {source: 'live', rows: [week('2026-09-21', '2026-09-27', {s: 300, l: 400, w: 100}), week('2026-09-14', '2026-09-20', {s: 200, l: 350, w: 90}), week('2026-09-07', '2026-09-13', {s: 150, l: 300, w: null})]};
-  const offline = (from: string): number | null => ({'2026-09-07': 1000, '2026-09-14': 1100, '2026-09-21': null}[from] ?? null);
+const err = (input: Record<string, string>, src: DigestSource | null = live(), now = NOW): string => {
+  const out = shapeDigest(input, src, now);
+  if (!('error' in out)) throw new Error('expected an error');
+  return out.error;
+};
 
-  it('gives one row per stored week, oldest first, online as published and Offline POS for the same dates', () => {
-    const out = shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-07', to: '2026-09-27'}, src, NOW, offline);
-    if ('error' in out) throw new Error(out.error);
-    expect(out.result.rows.map((r) => r.week)).toEqual(['2026-09-07', '2026-09-14', '2026-09-21']);
-    expect(out.result.rows[0]).toMatchObject({shopee: 150, lazada: 300, website: null, offline_pos: 1000});
-    expect(out.result.rows[2]).toMatchObject({shopee: 300, offline_pos: null}); // no POS data for that week: null, never 0
-    expect(out.result.meta.source).toBe('digest');
-    expect(out.result.columns.map((c) => c.key)).toEqual(['week', 'shopee', 'lazada', 'website', 'offline_pos']);
+describe('F.5 get_digest window "covering" (PH days, re-runs removed)', () => {
+  it('picks the digest that covers a date: PH 28 Sep is the 28 Sep to 4 Oct digest, never the week before', () => {
+    const out = ok({window: 'covering', section: 'comparison', from: '2026-09-28', to: ''}, septSource());
+    expect(out.window).toEqual({which: 'covering', label: 'Sep 28 to Oct 4, 2026', from: '2026-09-28', to: '2026-10-04'});
+    expect(out.result.meta.range).toEqual({from: '2026-09-28', to: '2026-10-04', label: 'Sep 28 to Oct 4, 2026'});
   });
-  it('says which weeks of the OWNER\'s range have no online figures and that Offline POS is shown for every week', () => {
-    const out = shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-07', to: '2026-10-11'}, src, NOW, (f) => (f === '2026-09-28' ? 500 : 100));
-    if ('error' in out) throw new Error(out.error);
-    const text = out.result.meta.caveats.join(' ');
-    expect(text).toMatch(/3 of 5 weeks/);
-    expect(text).toMatch(/starting 2026-09-28, 2026-10-05/);
-    expect(out.result.meta.coverage).toBe('partial');
-    expect(out.result.rows.map((r) => r.week)).toEqual(['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05']);
-    expect(out.result.rows[3]).toMatchObject({shopee: null, offline_pos: 500}); // offline still shown where there is no digest
+  it('a range picks the window that overlaps it most and warns which part it covers', () => {
+    const out = ok({window: 'covering', section: 'comparison', from: '2026-09-01', to: '2026-09-30'}, septSource());
+    expect(out.window.label).toBe('Sep 1 to Sep 27, 2026');
+    const warn = out.result.meta.checks.find((c) => c.status === 'warn' && /covers Sep 1 to Sep 27, 2026 of it/.test(c.text));
+    expect(warn?.text).toMatch(/You asked about Sep 1 to Sep 30, 2026/);
+    expect(out.result.meta.checks.some((c) => /weekly or about a month/.test(c.text) && /not a full month/.test(c.text))).toBe(true);
   });
-  it('without the owner\'s dates it asks for them and picks none itself', () => {
-    for (const bad of [{}, {from: '', to: ''}, {from: '2026-09-07', to: ''}, {from: 'last week', to: 'now'}]) {
-      const out = shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', ...bad}, src, NOW, offline);
-      expect('error' in out && out.error).toMatch(/needs the owner's dates/);
+  it('a tie on overlap prefers the shorter window', () => {
+    expect(ok({window: 'covering', section: 'comparison', from: '2026-09-24', to: ''}, septSource()).window.label).toBe('Sep 21 to Sep 27, 2026');
+  });
+  it('no overlap returns the nearest windows, not "not available"', () => {
+    const e = err({window: 'covering', section: 'comparison', from: '2026-06-01', to: ''}, septSource());
+    expect(e).toMatch(/^No stored digest covers Jun 1, 2026\. The nearest stored windows are: Jul 10, 2026 11:40 to Aug 9, 2026 11:40 \(PH time\); Aug 1, 2026 08:00/);
+    expect(e).not.toMatch(/not available/);
+  });
+  it('covering rejects an impossible date instead of rolling it over', () => {
+    for (const bad of ['2026-02-30', '2026-13-01', '2026-09-31']) {
+      expect(err({window: 'covering', section: 'comparison', from: bad, to: ''}, septSource())).toMatch(/needs the owner's date|not a real date/);
+      expect(err({window: 'covering', section: 'comparison', from: '2026-09-01', to: bad}, septSource())).toMatch(/needs the owner's date|not a real date/);
     }
-    expect('error' in shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-10-01', to: '2026-09-01'}, src, NOW, offline)).toBe(true);
-    expect('error' in shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2024-01-01', to: '2026-09-27'}, src, NOW, offline)).toBe(true); // more than 26 weeks
+    expect(ok({window: 'covering', section: 'comparison', from: '2026-09-28', to: ''}, septSource()).window.which).toBe('covering');
   });
-  it('draws as a multi-series line over time (the default form for this shape)', async () => {
-    const {recommendView} = await import('../src/chat/recommend-view');
-    const out = shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-07', to: '2026-09-27'}, src, NOW, offline);
-    if ('error' in out) throw new Error(out.error);
-    const d = recommendView({...out.result, id: 'r1'}, {kind: 'auto', orientation: 'auto'}).decisions[0];
-    expect(d.block).toBe('chart');
-    if (d.block === 'chart') expect([d.chart.form, d.chart.series.length]).toEqual(['line', 4]);
+  it('covering without the owner\'s date asks for it; a pick that is not loaded says so', () => {
+    expect(err({window: 'covering', section: 'comparison', from: '', to: ''}, septSource())).toMatch(/needs the owner's date/);
+    expect(err({window: 'covering', section: 'comparison', from: '2026-08-15', to: ''}, septSource())).toMatch(/could not be loaded/);
   });
-  it('the window and the section go together', () => {
-    expect('error' in shapeDigest({window: 'recent_weeks', section: 'comparison', from: '', to: ''}, src, NOW)).toBe(true);
-    expect('error' in shapeDigest({window: 'latest', section: 'weekly_revenue', from: '', to: ''}, src, NOW)).toBe(true);
+  it('"previous" is never a re-run of "latest" (same window within an hour)', () => {
+    const reruns: DigestSource = {source: 'live', rows: SEPTEMBER_ROWS.slice(4)};
+    expect(err({window: 'previous', section: 'comparison'}, reruns)).toMatch(/Only one digest is stored/);
+    expect(ok({window: 'latest', section: 'comparison'}, reruns).result.rows[0]).toMatchObject({channel: 'Shopee', revenue: 28000});
   });
-  it('an empty or missing digest is a plain steering error', () => {
-    expect('error' in shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-07', to: '2026-09-27'}, {source: 'live', rows: []}, NOW)).toBe(true);
-    expect('error' in shapeDigest({window: 'recent_weeks', section: 'weekly_revenue', from: '2026-09-07', to: '2026-09-27'}, null, NOW)).toBe(true);
+});
+
+describe('F.5 the get_digest executor loads an older digest for "covering"', () => {
+  it('reads it through rowAt and labels it with exact PH boundaries', async () => {
+    const data: MetricData = {source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []};
+    const ex = createExecutors({data: async () => data, now: NOW, user: null, digest: async () => septSource()});
+    const r = (await ex.get_digest?.({window: 'covering', section: 'comparison', from: '2026-08-15', to: ''})) as Record<string, any>;
+    expect(r.window).toEqual({which: 'covering', label: 'Aug 1, 2026 08:00 to Sep 1, 2026 08:00 (PH time)', from: '2026-08-01', to: '2026-09-01'});
+    expect(r.rows.find((x: {channel: string}) => x.channel === 'Shopee')).toMatchObject({revenue: 30000, orders: 60});
   });
 });

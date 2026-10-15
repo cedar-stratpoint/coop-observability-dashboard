@@ -12,16 +12,16 @@ vi.mock('server-only', () => ({}));
 import {computeExpected, parseReferenceSql} from '../scripts/explore-golden-expected.mjs';
 import {validateExploreSql} from '../src/chat/explore/parse';
 import {TOOL_ALLOWLIST} from '../src/chat/tools';
-import {EXPLORE_GOLDEN, GOLDEN_IDS_25, LIVE_SET, type VerifyContext} from './support/explore-golden';
+import {EXPLORE_GOLDEN, GOLDEN_IDS, LIVE_SET, type VerifyContext} from './support/explore-golden';
 import {loadGoldenWorld, localWorldEnv, runGoldenCase, scoreGolden, scriptedModelFor, type GoldenWorld} from './support/explore-golden-run';
 
 const REFERENCE_SQL = readFileSync(new URL('../scripts/explore-golden-reference.sql', import.meta.url), 'utf8');
 const KEYS = parseReferenceSql(REFERENCE_SQL).map((b) => b.key);
 
 describe('EXP-03 the golden set is well formed', () => {
-  it('EXP-03 has the 25 questions G01..G25 once each, plus the regression R01 and the live-only variant G08b', () => {
-    expect(GOLDEN_IDS_25).toEqual(Array.from({length: 25}, (_, i) => `G${String(i + 1).padStart(2, '0')}`));
-    expect(EXPLORE_GOLDEN.map((c) => c.id).filter((id) => !GOLDEN_IDS_25.includes(id)).sort()).toEqual(['G08b', 'R01']);
+  it('EXP-03 has the 35 questions G01..G35 once each, plus the regression R01, the live-only variant G08b and the A7 pet-split case A07', () => {
+    expect(GOLDEN_IDS).toEqual(Array.from({length: 35}, (_, i) => `G${String(i + 1).padStart(2, '0')}`));
+    expect(EXPLORE_GOLDEN.map((c) => c.id).filter((id) => !GOLDEN_IDS.includes(id)).sort()).toEqual(['A07', 'G08b', 'R01']);
     expect(new Set(EXPLORE_GOLDEN.map((c) => c.id)).size).toBe(EXPLORE_GOLDEN.length);
   });
 
@@ -63,7 +63,7 @@ describe('EXP-03 the golden set is well formed', () => {
   });
 
   it('EXP-03 every scripted run_query passes the real validator, except the write and the secret probe that must be refused', async () => {
-    const refused: Record<string, string> = {G22: 'E_NOT_SELECT', G23: 'E_BLOCKED_COLUMN'};
+    const refused: Record<string, string> = {G22: 'E_NOT_SELECT', G23: 'E_BLOCKED_COLUMN', G35: 'E_BLOCKED_COLUMN'};
     for (const c of EXPLORE_GOLDEN) {
       for (const call of c.script.flat().filter((x) => x.name === 'run_query')) {
         const v = await validateExploreSql(call.input.sql);
@@ -78,8 +78,8 @@ describe('EXP-03 the golden set is well formed', () => {
     }
   });
 
-  it('EXP-03 the Day 6 live set is 8 questions: G01 first, then R01, the injection, the no-period ranking, the partial event name, the repair case and two more', () => {
-    expect(LIVE_SET.map((c) => c.id)).toEqual(['G01', 'G04', 'G08b', 'G14', 'G15', 'G20', 'G25', 'R01']);
+  it('EXP-03 the live set is 11 questions: the Day 6 eight plus the stock, stock-cover and completed-basis cases (Task 8 fix 1)', () => {
+    expect(LIVE_SET.map((c) => c.id)).toEqual(['G01', 'G04', 'G08b', 'G14', 'G15', 'G20', 'G25', 'R01', 'G26', 'G28', 'G33']);
     expect(LIVE_SET.every((c) => c.liveWhy && c.liveWhy.length > 20)).toBe(true);
   });
 });

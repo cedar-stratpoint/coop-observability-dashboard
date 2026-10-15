@@ -2,7 +2,7 @@
 // we compute our own: a shape hash without literals, and a separate truncated hash of the literal values. Neither is reversible and
 // neither contains SQL text, a literal or a row, so both are safe to log.
 //
-// Hashing lives in THIS one file. `createHash(...).update(...)` trips the architecture scanner's ban on `.update(` (a database write
+// Hashing lives in THIS one file, and the CRM tools' params fingerprint. `createHash(...).update(...)` trips the architecture scanner's ban on `.update(` (a database write
 // method); the fix is a pinned exception for exactly this file and method in WRITE_CALL_EXCEPTIONS (test/support/chat-arch-scan.ts),
 // not a contorted hashing API (lesson fix-the-gate-not-the-code.md). The same call in any other file is still flagged.
 import {createHash} from 'node:crypto';
@@ -47,4 +47,16 @@ export function fingerprintStatement(stmt: unknown): StatementFingerprint {
     literalsHash: sha(JSON.stringify(constants)).slice(0, 12),
     literalCount: constants.length,
   };
+}
+
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canonical)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])]))
+      : v;
+
+/** Train 4: a one-way 12-hex hash of a tool's parameters for the chat_crm_call audit line. Key order does not matter; not reversible. */
+export function paramsFingerprint(params: unknown): string {
+  return sha(JSON.stringify(canonical(params ?? null))).slice(0, 12);
 }

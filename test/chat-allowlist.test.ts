@@ -2,10 +2,11 @@ import {describe, expect, it} from 'vitest';
 import {TOOL_ALLOWLIST, isAllowedTool} from '../src/chat/tools';
 
 describe('tool allowlist', () => {
-  it('has exactly the eleven read-only tools (ten plus run_query, which is only SENT to Explore users)', () => {
+  it('has exactly the eighteen read-only tools (run_query, list_tables and describe_table only SENT to Explore users, the four CRM tools only when the CRM is configured)', () => {
     expect([...TOOL_ALLOWLIST]).toEqual([
       'describe_data', 'query_metric', 'render_chart', 'render_table', 'render_kpi',
-      'set_report_filters', 'remove_block', 'set_report_title', 'get_digest', 'lookup_product', 'run_query',
+      'set_report_filters', 'remove_block', 'set_report_title', 'get_digest', 'get_channel_report', 'get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'lookup_product', 'run_query',
+      'list_tables', 'describe_table',
     ]);
   });
 
@@ -15,7 +16,7 @@ describe('tool allowlist', () => {
     expect(() => list.push('update_price')).toThrow();
     expect(() => { list[0] = 'update_price'; }).toThrow();
     expect(() => list.pop()).toThrow();
-    expect(TOOL_ALLOWLIST).toHaveLength(11);
+    expect(TOOL_ALLOWLIST).toHaveLength(18);
     expect(isAllowedTool('update_price')).toBe(false);
   });
 

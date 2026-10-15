@@ -289,3 +289,15 @@ describe('EXP-04 Explore number context holds only user and app figures, not ear
     expect(lines(t.s.info).filter((l) => l.event === 'chat_number_violation')).toHaveLength(0);
   });
 });
+
+describe('2.8 a finished Explore answer survives the cost cap (Task 8 fix 1, finding 2)', () => {
+  it('over budget, the wrap-up answer fails the number check: it is shown with its note, not replaced by the cap text', async () => {
+    const m = new FakeModel((n) => (n === 1 ? toolTurn('', RUN()) : {text: ['Dogs made ₱9,999 in sales.'], stop_reason: 'end_turn'}));
+    const t = run(m, {turnBudget: 5});
+    const sum = await t.go();
+    expect(text(t.events)).toContain('Dogs made ₱9,999 in sales.');
+    expect(text(t.events)).toMatch(/Note: some figures here could not be matched/);
+    expect(text(t.events)).not.toMatch(/needed more work/);
+    expect(sum.steps).toBe(2);
+  });
+});

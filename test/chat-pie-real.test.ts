@@ -35,7 +35,7 @@ describe('a requested pie renders as a real pie (no centre hole)', () => {
   });
 
   it('the pie form is routed to PiePlot, and only the pie form', () => {
-    expect(SRC).toMatch(/chart\.form === 'pie' \? <PiePlot block=\{block\} aria=\{aria\} \/>/);
+    expect(SRC).toMatch(/form === 'pie' \? <PiePlot block=\{drawn\} aria=\{aria\} \/>/);
     expect(SRC.match(/<PiePlot\b/g)).toHaveLength(1);
   });
 });

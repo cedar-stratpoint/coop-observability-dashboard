@@ -46,7 +46,7 @@ export type EnrichedCustomer = CrmCustomer & {
  */
 export function enrichCustomers(
   customers: CrmCustomer[],
-  orders: CrmOrder[],
+  orders: Pick<CrmOrder, 'shopifyCustomerId' | 'email' | 'financialStatus' | 'totalPrice' | 'createdAt'>[],
   windowStart: string,
 ): EnrichedCustomer[] {
   const stats = new Map<string, {count: number; spent: number; spentYtd: number}>();

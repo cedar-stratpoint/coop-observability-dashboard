@@ -2,16 +2,21 @@ import Anthropic from '@anthropic-ai/sdk';
 import {getDigests} from '@/src/data';
 import {buildDigestBlock, buildLiveContextBlock, buildStaticSystem} from '@/src/chat/context';
 import {CHAT_EFFORT, COOP_CHAT} from '@/src/chat/config';
+import {turnBudgetFromEnv} from '@/src/chat/cost';
 import {CHAT_DEADLINE_MS, runChatLoop, SAFE_ERROR_TEXT} from '@/src/chat/loop';
 import {encodeEvent} from '@/src/chat/stream-protocol';
-import {buildDegradedPreamble, buildPreamble} from '@/src/chat/preamble';
+import {dashboardLinks, pageContextLine, readPageInput} from '@/src/chat/pages';
+import {buildDegradedPreamble, buildPreamble, digestIndexLine} from '@/src/chat/preamble';
 import {openReportSession} from '@/src/chat/report-session';
-import {CHAT_TOOLS, exploreTools} from '@/src/chat/tool-defs';
+import {chatTools} from '@/src/chat/tool-defs';
+import {resolveCrmAccess} from '@/src/chat/crm/config';
+import {createCrmClient, type CrmClient} from '@/src/chat/crm/client';
 import {setupExplore} from '@/src/chat/explore-setup';
 import {createExecutors} from '@/src/chat/tool-executors';
-import {getChatDigest, getChatMetricDataOrDegrade} from '@/src/chat/server';
+import {getChatDigest, getChatDigestIndex, getChatMetricDataOrDegrade} from '@/src/chat/server';
 import type {ChatStreamEvent} from '@/src/chat/stream-types';
 import {auth} from '@/auth';
+import {websiteOrdersForReport} from '@/src/chat/crm/executors';
 import {getActiveContext} from '@/src/active-context';
 import {devAuthEnabled, DEV_SESSION} from '@/src/dev-auth';
 
@@ -53,7 +58,7 @@ export async function POST(req: Request) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
   if (rateLimited(ip, Date.now())) return new Response('Too many requests — give Coop a moment.', {status: 429});
 
-  let body: {messages?: InMsg[]; week?: string; home?: boolean; report?: unknown};
+  let body: {messages?: InMsg[]; week?: string; home?: boolean; report?: unknown; page?: unknown};
   try {
     body = await req.json();
   } catch {
@@ -78,14 +83,24 @@ export async function POST(req: Request) {
   const rows = live.ok ? [] : await getDigests(); // PII-masked server-side
   const now = new Date();
   const user = session.user.email ?? null;
+  // F.2: the page the owner is on, and dashboard links pasted in the latest question. Untrusted input, validated here.
+  const pageLine = pageContextLine(readPageInput(body.page), dashboardLinks(messages[messages.length - 1].content, new URL(req.url).host));
+  // F.5: the stored digest windows (a narrow, cached read) ride in the per-turn preamble, so the model can ask for one by date.
+  const digestLine = live.ok ? digestIndexLine(await getChatDigestIndex().catch(() => [])) : null;
   // F8: the open dashboard the drawer sends back. Untrusted: validated and re-run here; invalid or oversized is ignored
   // (one log line, no content). Digest-only mode has no tools, so a report is ignored there.
   const report = live.ok ? openReportSession(body.report, live.data, now, () => console.warn(JSON.stringify({event: 'chat_report_rejected'}))) : null;
   // Explore (run_query): fail-closed. Only an allowed user on a ready read path gets the tool, the prompt block and the executor.
   const explore = live.ok && report ? setupExplore({env: process.env, email: user, now, user, store: report.store}) : null;
+  // Train 4: the GET-only website CRM client, one per request (its memo and caps are per turn). Fail-closed: no env, no client.
+  const crmAccess = resolveCrmAccess(process.env);
+  const crm: CrmClient | null = live.ok && crmAccess.enabled ? createCrmClient({baseUrl: crmAccess.baseUrl, token: crmAccess.token, fetch}) : null;
+  const crmTools = crm !== null && crmAccess.enabled && crmAccess.tools;
+  // get_channel_report reads live website (CRM) orders whenever the CRM client exists: the prompt's Website lines follow these flags.
+  const website = crm !== null;
   const system = [
-    {type: 'text' as const, text: buildStaticSystem({tools: live.ok, explore: explore !== null}), cache_control: {type: 'ephemeral' as const}},
-    {type: 'text' as const, text: live.ok ? buildLiveContextBlock({explore: explore !== null}) : buildDigestBlock(rows, body.week, {home: body.home === true}), cache_control: {type: 'ephemeral' as const}},
+    {type: 'text' as const, text: buildStaticSystem({tools: live.ok, explore: explore !== null, crm: crmTools, website}), cache_control: {type: 'ephemeral' as const}},
+    {type: 'text' as const, text: live.ok ? buildLiveContextBlock({explore: explore !== null, crm: crmTools, website}) : buildDigestBlock(rows, body.week, {home: body.home === true}), cache_control: {type: 'ephemeral' as const}},
   ];
 
   const anthropic = new Anthropic({apiKey: key});
@@ -97,12 +112,12 @@ export async function POST(req: Request) {
       maxTokens: COOP_CHAT.maxTokens,
       effort: CHAT_EFFORT,
       system,
-      tools: live.ok ? (explore ? exploreTools() : CHAT_TOOLS) : [],
+      tools: live.ok ? chatTools({explore: explore !== null, crm: crmTools}) : [],
       messages,
-      preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage) : buildDegradedPreamble(now),
+      preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, explore: explore?.executor})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, crm: crmTools && crm ? crm : undefined})
           : {},
       emit,
       user,
@@ -110,6 +125,7 @@ export async function POST(req: Request) {
       deadlineMs: Math.max(0, CHAT_DEADLINE_MS - (Date.now() - started)),
       signal: req.signal,
       exploreGap: explore?.executor.gap,
+      turnBudget: turnBudgetFromEnv(process.env),
     }).then(() => undefined),
   );
 }

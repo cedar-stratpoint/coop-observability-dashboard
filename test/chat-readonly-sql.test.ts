@@ -67,7 +67,9 @@ describe('supabase/coop_chat_readonly.sql', () => {
       coop_chat_price_changes: splitCols(reads.columns.priceChanges),
       coop_chat_events: splitCols(reads.columns.events),
     };
-    expect(reads.tables).toEqual({
+    const {stock, saleMovements, stockConfig, ...orderTables} = reads.tables; // the three stock views live in coop_chat_stock.sql
+    expect([stock, saleMovements, stockConfig]).toEqual(['coop_chat_stock_by_location', 'coop_chat_sale_movements', 'coop_chat_stock_config']);
+    expect(orderTables).toEqual({
       orders: 'coop_chat_orders',
       items: 'coop_chat_order_items',
       products: 'coop_chat_products',
@@ -77,7 +79,7 @@ describe('supabase/coop_chat_readonly.sql', () => {
       priceChanges: 'coop_chat_price_changes',
     });
     // Every ro_role relation has a view, and the views are the contract (a superset of what is read).
-    expect(Object.values(reads.tables).sort()).toEqual(Object.keys(CONTRACT).sort());
+    expect(Object.values(orderTables).sort()).toEqual(Object.keys(CONTRACT).sort());
     for (const [name, cols] of Object.entries(needed)) {
       const have = columnsOf(viewStatement(name));
       for (const c of cols) expect(have, `${name} missing ${c}`).toContain(c);

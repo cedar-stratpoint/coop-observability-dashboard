@@ -1,0 +1,1150 @@
+{
+ "version": 1,
+ "domains": [
+  {
+   "id": "pos-sales",
+   "title": "POS sales and catalogue",
+   "tables": [
+    "pos_orders",
+    "pos_orders_completed",
+    "pos_order_items",
+    "pos_products",
+    "pos_prices",
+    "pos_price_changes",
+    "pos_bundles",
+    "pos_bundle_items",
+    "pos_events"
+   ]
+  },
+  {
+   "id": "pos-prizes-sampling",
+   "title": "POS prizes and sampling",
+   "tables": [
+    "pos_order_prizes",
+    "pos_free_tastes"
+   ]
+  },
+  {
+   "id": "stock",
+   "title": "Stock and inventory",
+   "tables": [
+    "pos_inventory",
+    "pos_inventory_by_location",
+    "pos_inventory_lots",
+    "pos_stock_movements",
+    "pos_locations"
+   ]
+  },
+  {
+   "id": "forecast-settings",
+   "title": "Forecast, settings and alerts",
+   "tables": [
+    "pos_settings",
+    "pos_stock_alert_log"
+   ]
+  },
+  {
+   "id": "booth-leads",
+   "title": "Booth leads",
+   "tables": [
+    "spin_wheel_leads"
+   ]
+  },
+  {
+   "id": "lazada-uploads",
+   "title": "Lazada manual uploads",
+   "tables": [
+    "lazada_orders",
+    "lazada_uploads"
+   ]
+  },
+  {
+   "id": "digest",
+   "title": "Stored digests",
+   "tables": [
+    "digest_archive"
+   ]
+  },
+  {
+   "id": "business-health",
+   "title": "Business health",
+   "tables": [
+    "business_health"
+   ]
+  },
+  {
+   "id": "repricer",
+   "title": "Repricer audit",
+   "tables": [
+    "marketplace_price_changes"
+   ]
+  },
+  {
+   "id": "marketplace-tokens",
+   "title": "Marketplace tokens",
+   "tables": [
+    "marketplace_tokens"
+   ]
+  },
+  {
+   "id": "reports",
+   "title": "Saved reports",
+   "tables": [
+    "coop_reports",
+    "coop_report_versions"
+   ]
+  },
+  {
+   "id": "tenancy",
+   "title": "Tenancy and roles",
+   "tables": [
+    "companies",
+    "company_users",
+    "company_user_audit",
+    "company_user_prefs"
+   ]
+  },
+  {
+   "id": "goldline",
+   "title": "Goldline",
+   "tables": []
+  },
+  {
+   "id": "sync-users",
+   "title": "Sync and users",
+   "tables": [
+    "pos_sync_log",
+    "pos_dashboard_users"
+   ]
+  },
+  {
+   "id": "pawpal",
+   "title": "PawPal / storefront project",
+   "tables": []
+  }
+ ],
+ "tables": {
+  "pos_orders": {
+   "name": "pos_orders",
+   "domain": "pos-sales",
+   "about": "One row per sale made at the POS (offline: booths, bazaars, shop). Business facts live here, not in the website/Shopee/Lazada data.",
+   "columns": "id, client_uuid, subtotal, discount, total (PHP; subtotal = total + discount), oversold (bool: sold more than on hand), device_id, payment_method (cash, gcash, card, maya; null = legacy cash), customer_handle, status (completed or voided), remarks, created_at, edited_at (null = never edited), event_id (null = not tagged to an event), pet_type (dog, cat, both, null = untagged).",
+   "prefer": "pos_orders_completed for sales; this table for voided rows.",
+   "testOrders": "UNKNOWN: no marker found in code (status is only completed or voided; device_id is never written)."
+  },
+  "pos_orders_completed": {
+   "name": "pos_orders_completed",
+   "domain": "pos-sales",
+   "about": "Ask Coop default view: completed orders, the same sales the dashboard counts (every status except voided, a null status included; in practice completed); there is no test-order marker, so test orders are not separated.",
+   "columns": "the same as pos_orders.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_order_items": {
+   "name": "pos_order_items",
+   "domain": "pos-sales",
+   "about": "One row per order line. A bundle sale is a header line (bundle_id set, product_id null, paid price in line_total) plus pick lines (same bundle_group, unit_price and line_total = 0). Counting both double-counts units and revenue.",
+   "columns": "id, order_id, product_id (SKU), bundle_id, bundle_group, qty, unit_price, line_total.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_products": {
+   "name": "pos_products",
+   "domain": "pos-sales",
+   "about": "Product catalogue (SKU master). Stock is NOT on this table.",
+   "columns": "product_id, name, product_line (FDR / JRK / MEAT, Coop's SKU-decode line), category (POS display tab), subcategory (Freeze-Dried only), emoji, active (listed or unlisted), updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_prices": {
+   "name": "pos_prices",
+   "domain": "pos-sales",
+   "about": "Current price per product.",
+   "columns": "product_id, price (PHP). currency, updated_by, updated_at exist only in the local fixture.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_price_changes": {
+   "name": "pos_price_changes",
+   "domain": "pos-sales",
+   "about": "Audit trail of price changes.",
+   "columns": "id, product_id, old_price, new_price, changed_at; reason, changed_by, device_id known only from the fixture.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_bundles": {
+   "name": "pos_bundles",
+   "domain": "pos-sales",
+   "about": "Bundle definitions. bundle_type is fixed (set contents in pos_bundle_items) or pick (\"Buy Any N\": pick_count picks from line_categories).",
+   "columns": "bundle_id, name, price, active, bundle_type, pick_count, line_categories (text[]), emoji, updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_bundle_items": {
+   "name": "pos_bundle_items",
+   "domain": "pos-sales",
+   "about": "Contents of a fixed bundle.",
+   "columns": "id, bundle_id, product_id, qty. PII: no. Writes: RPC apply_pos_bundle (assumed; not verified). Reads: src/pos-data.ts. Freshness: live.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_events": {
+   "name": "pos_events",
+   "domain": "pos-sales",
+   "about": "Bazaars and markets the POS ran.",
+   "columns": "event_id, name, venue, city, organizer, starts_on, ends_on (date; null = single day, treat as starts_on), opening_cash (float at open), cash_note, closing_cash (counted at close), status (active or closed), created_by, created_at, updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_order_prizes": {
+   "name": "pos_order_prizes",
+   "domain": "pos-prizes-sampling",
+   "about": "Free items won (spin-the-wheel prizes) and attached to an order.",
+   "columns": "id, client_uuid, product_id, qty, oversold, note, won_at, voided_at (null = active), plus an order link read as pos_orders(client_uuid, customer_handle, created_at) (the FK column name is not shown in code).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_free_tastes": {
+   "name": "pos_free_tastes",
+   "domain": "pos-prizes-sampling",
+   "about": "Stock opened for pets to sample (free tastes), not sold.",
+   "columns": "id, client_uuid, product_id, qty, oversold, opened_at, voided_at (null = active); note, created_by, device_id are sent on write (src/pos-free-taste-actions.ts) but never read back.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_inventory": {
+   "name": "pos_inventory",
+   "domain": "stock",
+   "about": "Current on-hand per product (a view, per the system overview).",
+   "columns": "product_id, stock (units), next_expiry (earliest expiry that still has stock, date).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_inventory_by_location": {
+   "name": "pos_inventory_by_location",
+   "domain": "stock",
+   "about": "On-hand per product per location (a view grouped by product_id, location).",
+   "columns": "product_id, location (office or event as read by code), stock.",
+   "prefer": "coop_explore_stock_event for sellable stock (the Event location); this table for a named location.",
+   "testOrders": null
+  },
+  "pos_inventory_lots": {
+   "name": "pos_inventory_lots",
+   "domain": "stock",
+   "about": "Stock lots (batches) with expiry. Source of truth under the two views above.",
+   "columns": "lot_id, product_id, location, lot_code ('opening', 'adjust' or a supplier code), expires_on, qty_received, qty_on_hand, received_at, updated_at. FEFO: stock is consumed by earliest expires_on first.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_stock_movements": {
+   "name": "pos_stock_movements",
+   "domain": "stock",
+   "about": "Append-only stock ledger. Signed delta (sales negative).",
+   "columns": "id, product_id, delta, reason, created_by, created_at; the RPC body also writes lot_id, location, order_id. Reason values seen in code: sale, receipt (intake), add-void (undo of an intake), recount. Other reasons (transfer, prize, taste, void restock) are not confirmed.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_locations": {
+   "name": "pos_locations",
+   "domain": "stock",
+   "about": "Location master. Referenced only by supabase/set_stock_location.sql (select 1 from pos_locations where code = p_location).",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_settings": {
+   "name": "pos_settings",
+   "domain": "forecast-settings",
+   "about": "Key/value config store shared by zoomy-pos, the UI and the backend.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_stock_alert_log": {
+   "name": "pos_stock_alert_log",
+   "domain": "forecast-settings",
+   "about": "Low-stock alert state (fire on crossing, resolve on recovery).",
+   "columns": "id, product_id, level_at_fire (low or out), stock_at_fire, fired_at, resolved_at (null = open).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "spin_wheel_leads": {
+   "name": "spin_wheel_leads",
+   "domain": "booth-leads",
+   "about": "Spin-the-wheel sign-ups collected at booths. Imported by hand from CSV; no key to orders or events.",
+   "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (never surfaced by the UI), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
+   "prefer": null,
+   "testOrders": null
+  },
+  "lazada_orders": {
+   "name": "lazada_orders",
+   "domain": "lazada-uploads",
+   "about": "",
+   "columns": "order_item_id, order_number, ordered_at, status, customer_name, city, phone (not null; the buyer key), item_name, variation, paid_price, shipping_fee, pay_method, uploaded_at. Contacts are rolled up by phone at read time, never stored.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "lazada_uploads": {
+   "name": "lazada_uploads",
+   "domain": "lazada-uploads",
+   "about": "---",
+   "columns": "id, uploaded_at, file_name, rows_read, items_saved, buyers, skipped_status, skipped_phone, skipped_date, skipped_id, excluded_buyers.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "digest_archive": {
+   "name": "digest_archive",
+   "domain": "digest",
+   "about": "One archived digest per run of a window; windows vary (weekly, about a month, rolling 30 days) (the synthesized DigestDocument, plus the retrieval bundle it was built from).",
+   "columns": "id, window_from, window_to (timestamptz), digest (jsonb DigestDocument, mirrored in src/types.ts), created_at; the bundle column is not for Ask Coop.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "business_health": {
+   "name": "business_health",
+   "domain": "business-health",
+   "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
+   "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_price_changes": {
+   "name": "marketplace_price_changes",
+   "domain": "repricer",
+   "about": "Append-only audit of every repricer decision (Shopify price set about 15% under the Lazada/Shopee reference).",
+   "columns": "run_id (uuid), ran_at, dry_run, applied, marketplace ('lazada' in the DDL comment), marketplace_sku, marketplace_title, reference_price, reference_source (price | special_price), listed_price, special_price, shopify_variant_id, shopify_title, match_score, match_band (exact | auto | review | none | ambiguous), target_price, floor_price, old_price, new_price (null = nothing written), guardrail (no-floor | floor-clamp | max-change-clamp | no-op), skip_reason (listing-inactive | sku-inactive | no-reference-price | unmatched | needs-review | ambiguous), captured_at, note.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_tokens": {
+   "name": "marketplace_tokens",
+   "domain": "marketplace-tokens",
+   "about": "NEVER EXPOSE. Holds the Lazada access and refresh tokens.",
+   "columns": "marketplace, access_token, refresh_token, obtained_at (ms epoch), expires_in (s), refresh_expires_in (s), updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_reports": {
+   "name": "coop_reports",
+   "domain": "reports",
+   "about": "Saved Ask Coop reports: one row per report (title, owner, team or private, pinned, soft delete).",
+   "columns": "id, owner_email, title (1 to 120 chars), visibility (team | private), pinned, current_version, deleted_at (soft delete), created_at, updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_report_versions": {
+   "name": "coop_report_versions",
+   "domain": "reports",
+   "about": "- Writes/reads: src/reports-actions.ts, src/reports-data.ts. Ask Coop: direct read (read only; never writes). Verified: DDL.",
+   "columns": "report_id (FK to coop_reports.id), version, spec_version, spec (jsonb under 32 KB), source_prompt (max 2000 chars, never fed to a model), created_by, created_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "companies": {
+   "name": "companies",
+   "domain": "tenancy",
+   "about": "",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "company_users": {
+   "name": "company_users",
+   "domain": "tenancy",
+   "about": "",
+   "columns": "id, company_id, user_email, role (enum company_role: coop_admin, company_admin, analyst, store_manager), store_scope (text[]; null = all), status (active | invited | suspended), created_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "company_user_audit": {
+   "name": "company_user_audit",
+   "domain": "tenancy",
+   "about": "",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "company_user_prefs": {
+   "name": "company_user_prefs",
+   "domain": "tenancy",
+   "about": "---",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_sync_log": {
+   "name": "pos_sync_log",
+   "domain": "sync-users",
+   "about": "POS device sync history.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "pos_dashboard_users": {
+   "name": "pos_dashboard_users",
+   "domain": "sync-users",
+   "about": "Everyone who signed in to the dashboard; the recipients of low-stock emails.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_orders": {
+   "name": "coop_chat_orders",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_orders",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_order_items": {
+   "name": "coop_chat_order_items",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_order_items",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_products": {
+   "name": "coop_chat_products",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_products",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_bundles": {
+   "name": "coop_chat_bundles",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_bundles",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_prices": {
+   "name": "coop_chat_prices",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_prices",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_price_changes": {
+   "name": "coop_chat_price_changes",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_price_changes",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_events": {
+   "name": "coop_chat_events",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_events",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_digest": {
+   "name": "coop_chat_digest",
+   "domain": "chat-plumbing",
+   "about": "read-only view over digest_archive",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_stock_by_location": {
+   "name": "coop_chat_stock_by_location",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_inventory_by_location",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_sale_movements": {
+   "name": "coop_chat_sale_movements",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_stock_movements (where reason = 'sale')",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_stock_config": {
+   "name": "coop_chat_stock_config",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_settings (where key = 'stock_forecast_config')",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_orders": {
+   "name": "coop_explore_orders",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_orders",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_order_items": {
+   "name": "coop_explore_order_items",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_order_items",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_products": {
+   "name": "coop_explore_products",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_products",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_bundles": {
+   "name": "coop_explore_bundles",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_bundles",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_bundle_items": {
+   "name": "coop_explore_bundle_items",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_bundle_items",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_events": {
+   "name": "coop_explore_events",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_events",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_prices": {
+   "name": "coop_explore_prices",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_prices",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_price_changes": {
+   "name": "coop_explore_price_changes",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_price_changes",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_event_leads": {
+   "name": "coop_explore_event_leads",
+   "domain": "chat-plumbing",
+   "about": "read-only view over spin_wheel_leads",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_digest": {
+   "name": "coop_explore_digest",
+   "domain": "chat-plumbing",
+   "about": "read-only view over digest_archive",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_inventory": {
+   "name": "coop_explore_inventory",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_inventory",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_inventory_by_location": {
+   "name": "coop_explore_inventory_by_location",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_inventory_by_location",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_inventory_lots": {
+   "name": "coop_explore_inventory_lots",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_inventory_lots",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_stock_movements": {
+   "name": "coop_explore_stock_movements",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_stock_movements",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_stock_event": {
+   "name": "coop_explore_stock_event",
+   "domain": "chat-plumbing",
+   "about": "read-only view over pos_inventory_by_location (where location = 'event')",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_explore_drift_log": {
+   "name": "coop_explore_drift_log",
+   "domain": "chat-plumbing",
+   "about": "read-only view over coop_explore_admin.record_drift(), pg_cron job coop_explore_drift daily 22:00 UTC (06:00 PH), kept 90 days",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  }
+ },
+ "pages": [
+  {
+   "route": "/",
+   "title": "Sales overview",
+   "shows": "Home (\"What should we do today?\") and, with channel, the multi-channel Sales overview (Shopee, Lazada, Website, Offline) with period and custom date range",
+   "data": "digest_archive, bundle, pos_orders, pos_settings, daily_revenue_target, website CRM (API)",
+   "domains": [
+    "digest",
+    "pos-sales",
+    "crm-api",
+    "forecast-settings"
+   ],
+   "fenced": false,
+   "access": "partial: database yes; website CRM no (API)",
+   "redirectTo": null
+  },
+  {
+   "route": "/overview",
+   "title": "Goldline overview",
+   "shows": "Goldline sales overview for the active non-Zoomy company",
+   "data": "gl_sales, gl_stores, company_id",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/stores",
+   "title": "Goldline stores",
+   "shows": "Goldline per-store table",
+   "data": "gl_sales, gl_stores",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/uploads",
+   "title": "Goldline uploads",
+   "shows": "Goldline upload list (POS CSV and inventory PDF), new upload",
+   "data": "gl_uploads",
+   "domains": [
+    "goldline"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/uploads/[id]",
+   "title": "Goldline upload",
+   "shows": "One Goldline upload: scan, extracted rows for review, confirm",
+   "data": "gl_uploads, gl_extractions",
+   "domains": [
+    "goldline"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/uploads/batch/[id]",
+   "title": "Goldline upload batch",
+   "shows": "Review one upload batch (a store's inventory form for one period) and commit every page into one Inventory count; another tenant's batch id is a 404",
+   "data": "gl_upload_batches, gl_uploads, gl_extractions, gl_products, gl_stores, gl_commit_batch",
+   "domains": [
+    "goldline"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence: Ask Coop is Zoomy-only)",
+   "redirectTo": null
+  },
+  {
+   "route": "/admin/users",
+   "title": "Users and roles",
+   "shows": "Manage company users and roles (Coop Admin and company admins only; others are redirected)",
+   "data": "companies, company_users, company_user_audit",
+   "domains": [
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/account",
+   "title": "Your access",
+   "shows": "\"Your access\": the signed-in user's memberships and view switcher",
+   "data": "company_users",
+   "domains": [
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence)",
+   "redirectTo": null
+  },
+  {
+   "route": "/stock",
+   "title": "Goldline inventory",
+   "shows": "Goldline Inventory board: counts, forecast and the warehouse side (need, ship by, produce by); lives at /stock because /inventory is the Zoomy page",
+   "data": "gl_inventory, gl_sales, gl_shipments, gl_count_sources, gl_uploads, gl_products, gl_stores, gl_supply_settings, gl_line_lead_times, gl_store_transit, gl_warehouse_stock",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence: Ask Coop is Zoomy-only)",
+   "redirectTo": null
+  },
+  {
+   "route": "/stock/[...item]",
+   "title": "Goldline product",
+   "shows": "Goldline product page: one item's sales and stock month by month, one store or all of the caller's stores; an item with no catalog row and no counts is a 404; the item code can contain /",
+   "data": "gl_inventory, gl_inventory_snapshots, gl_sales",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence: Ask Coop is Zoomy-only)",
+   "redirectTo": null
+  },
+  {
+   "route": "/stock/forecast",
+   "title": "Goldline forecast",
+   "shows": "Redirect (redirect()) to /stock, keeping store; the Forecast tab was merged into the Inventory board",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/stock"
+  },
+  {
+   "route": "/store-health",
+   "title": "Goldline store health",
+   "shows": "Goldline store and stock health scored from stock and form data (Zoomy's /health is Zoomy-only; Goldline has no orders or acquisition cost)",
+   "data": "gl_inventory, gl_inventory_snapshots, gl_uploads",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence: Ask Coop is Zoomy-only)",
+   "redirectTo": null
+  },
+  {
+   "route": "/action-feed",
+   "title": "Goldline actions",
+   "shows": "Goldline Action Feed: action cards for all stores or one store, built from stock movement and counts",
+   "data": "gl_inventory, gl_inventory_snapshots, gl_uploads",
+   "domains": [
+    "goldline",
+    "tenancy"
+   ],
+   "fenced": true,
+   "access": "none (tenant fence: Ask Coop is Zoomy-only)",
+   "redirectTo": null
+  },
+  {
+   "route": "/settings",
+   "title": "Settings",
+   "shows": "Settings shell (account and digest preferences, mostly placeholder)",
+   "data": "",
+   "domains": [
+    "platform"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/signin",
+   "title": "Sign in",
+   "shows": "Google sign-in page (outside the auth matcher)",
+   "data": "pos_dashboard_users",
+   "domains": [
+    "platform"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/traffic",
+   "title": "Traffic",
+   "shows": "Traffic tab",
+   "data": "digest_archive",
+   "domains": [
+    "digest"
+   ],
+   "fenced": false,
+   "access": "partial: digest yes; traffic is mock, say so",
+   "redirectTo": null
+  },
+  {
+   "route": "/health",
+   "title": "Business Health",
+   "shows": "Business Health: per-channel QRR (quality of revenue) with editable knobs",
+   "data": "business_health, snapshot, pos_orders",
+   "domains": [
+    "business-health",
+    "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/repricer",
+   "title": "Repricer",
+   "shows": "Repricer audit: latest run and per-variant history (read only)",
+   "data": "marketplace_price_changes",
+   "domains": [
+    "repricer"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/offline-sales",
+   "title": "Offline sales",
+   "shows": "Offline (POS) dashboard: revenue KPIs, daily target bar, rankings, event rollups, prizes, low-stock strip",
+   "data": "pos_orders, pos_order_items, pos_products, pos_bundles, pos_events, pos_stock_movements, sale, pos_settings, pos_inventory_by_location, pos_order_prizes",
+   "domains": [
+    "pos-sales",
+    "pos-prizes-sampling",
+    "stock",
+    "forecast-settings"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/offline-sales/orders",
+   "title": "Transactions",
+   "shows": "Transactions list with filters, edit, void, event reassign",
+   "data": "pos_orders, pos_order_items, pos_order_prizes",
+   "domains": [
+    "pos-sales",
+    "pos-prizes-sampling"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/offline-sales/events",
+   "title": "Events",
+   "shows": "Event cards: sales per event, cash reconciliation, booth leads",
+   "data": "pos_events, pos_orders, spin_wheel_leads",
+   "domains": [
+    "pos-sales",
+    "booth-leads"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/offline-sales/rankings",
+   "title": "Rankings",
+   "shows": "Top products and top bundles (offline)",
+   "data": "pos_orders, pos_products, pos_bundles",
+   "domains": [
+    "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/inventory",
+   "title": "Inventory",
+   "shows": "Offline product controls and stock: on hand, by location, forecast, bundles, sampling, intake, transfers; with channel=online|boxme shows a BoxMe stub plus marketplace analytics from the digest",
+   "data": "pos_products, pos_prices, pos_inventory, pos_bundles, pos_bundle_items, pos_inventory_by_location, pos_stock_movements, pos_settings, pos_orders, pos_events, pos_free_tastes, digest_archive",
+   "domains": [
+    "stock",
+    "forecast-settings",
+    "pos-sales",
+    "pos-prizes-sampling",
+    "digest"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/inventory/[sku]",
+   "title": "Product detail",
+   "shows": "One product: stock by location, movement and price history, forecast row",
+   "data": "pos_products, pos_stock_movements, pos_orders",
+   "domains": [
+    "stock",
+    "forecast-settings",
+    "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/products",
+   "title": "Products",
+   "shows": "Redirect (redirect()) to /inventory",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/inventory"
+  },
+  {
+   "route": "/customers",
+   "title": "Customers",
+   "shows": "Redirect (redirect()) to /customers/all",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/customers/all"
+  },
+  {
+   "route": "/customers/all",
+   "title": "All customers",
+   "shows": "Merged contacts across Website CRM, Lazada uploads and booth leads",
+   "data": "lazada_orders, spin_wheel_leads, website CRM (API)",
+   "domains": [
+    "contacts-merged",
+    "crm-api",
+    "lazada-uploads",
+    "booth-leads"
+   ],
+   "fenced": false,
+   "access": "partial: database yes; website CRM no (API)",
+   "redirectTo": null
+  },
+  {
+   "route": "/customers/website-crm",
+   "title": "Website CRM",
+   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership",
+   "data": "website CRM (API)",
+   "domains": [
+    "crm-api"
+   ],
+   "fenced": false,
+   "access": "partial: CRM tools (metrics, customers, orders, checkouts); vouchers and checkout links withheld",
+   "redirectTo": null
+  },
+  {
+   "route": "/customers/leads",
+   "title": "Booth leads",
+   "shows": "Booth leads matched to orders and prizes",
+   "data": "spin_wheel_leads, pos_orders, pos_order_prizes",
+   "domains": [
+    "booth-leads",
+    "pos-sales",
+    "pos-prizes-sampling"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/customers/lazada",
+   "title": "Lazada contacts",
+   "shows": "Lazada contacts from uploaded Seller-Center exports; upload form",
+   "data": "lazada_orders, lazada_uploads",
+   "domains": [
+    "lazada-uploads"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/crm",
+   "title": "CRM",
+   "shows": "Redirect (permanentRedirect) to /customers/website-crm",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/customers/website-crm"
+  },
+  {
+   "route": "/lazada",
+   "title": "Lazada",
+   "shows": "Redirect (permanentRedirect) to /customers/lazada",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/customers/lazada"
+  },
+  {
+   "route": "/reports",
+   "title": "Saved reports",
+   "shows": "Gallery of saved Ask Coop reports (team or own private)",
+   "data": "coop_reports",
+   "domains": [
+    "reports"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/reports/[id]",
+   "title": "Saved report",
+   "shows": "One saved report re-run on live data, no model call; [id] is coop_reports.id (uuid)",
+   "data": "coop_reports, coop_report_versions",
+   "domains": [
+    "reports",
+    "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/dev/chat-blocks",
+   "title": "Chat blocks preview",
+   "shows": "DEV only preview of every chat block variant on synthetic data; 404 in production",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/dev/goldline-inventory",
+   "title": "Goldline inventory preview",
+   "shows": "DEV only preview of the Goldline Inventory board on synthetic counts; 404 in production",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/dev/goldline-product",
+   "title": "Goldline product preview",
+   "shows": "DEV only preview of the Goldline product page on synthetic counts; 404 in production",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/dev/perf",
+   "title": "Loader timings",
+   "shows": "DEV only: times the Goldline page loaders and shows timings, never data; 404 outside development",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  }
+ ],
+ "apis": [
+  {
+   "id": "crm-api",
+   "source": "Website CRM Worker (Cloudflare Worker over D1; Shopify customers, orders, checkouts)",
+   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts (GET only)"
+  },
+  {
+   "id": "shopee-files",
+   "source": "Shopee Seller-Center exports and a browser price snapshot",
+   "askCoop": "none: Shopee exports are files on the backend machine; only their digest figures are readable"
+  },
+  {
+   "id": "lazada-api",
+   "source": "Lazada Open Platform (PH gateway)",
+   "askCoop": "none: only the digest figures are readable; the Lazada token never enters the chat"
+  },
+  {
+   "id": "shopify-admin",
+   "source": "Shopify Admin GraphQL",
+   "askCoop": "none: no read-only token"
+  },
+  {
+   "id": "pawpal-supabase",
+   "source": "PawPal / storefront Supabase project",
+   "askCoop": "none: a separate project; only the digest figures are readable"
+  },
+  {
+   "id": "resend",
+   "source": "Resend email",
+   "askCoop": "n/a: sends email, not a data source"
+  },
+  {
+   "id": "anthropic",
+   "source": "Anthropic Messages API",
+   "askCoop": "n/a: not a data source"
+  }
+ ],
+ "terms": [
+  {
+   "term": "stock",
+   "default": "Event (sellable) stock (registry stock_on_hand; in SQL coop_explore_stock_event)",
+   "alternatives": "all locations (pos_inventory), office back stock (pos_inventory_by_location where location = 'office')",
+   "askWhen": "the answer drives a reorder or transfer decision and no location is named"
+  },
+  {
+   "term": "sales",
+   "default": "completed orders (pos_orders_completed)",
+   "alternatives": "including voided (pos_orders)",
+   "askWhen": "never: say the basis"
+  },
+  {
+   "term": "customers",
+   "default": "ask",
+   "alternatives": "booth leads (spin_wheel_leads), website CRM customers (see the \"Not in the database\" line for what is readable), Lazada contacts (lazada_orders)",
+   "askWhen": "always: there is no default"
+  }
+ ]
+}

@@ -47,6 +47,20 @@ describe('buildCoverage', () => {
   });
 });
 
+describe('describeData unavailable list', () => {
+  it('Explore on: nothing is called "Not exposed" or "not queryable yet"', () => {
+    const r = describeData({metric: 'all'}, data(), NOW, true) as {unavailable: {what: string; why: string}[]};
+    const text = r.unavailable.map((u) => `${u.what} ${u.why}`).join(' ');
+    expect(text).not.toMatch(/Not exposed|not queryable yet/i);
+    expect(r.unavailable.find((u) => /Shopee/.test(u.what))?.why).toBe('Only in the stored digests (get_digest).');
+  });
+
+  it('Explore off: Customer-level data is still listed as not exposed', () => {
+    const r = describeData({metric: 'all'}, data(), NOW) as {unavailable: {what: string; why: string}[]};
+    expect(r.unavailable.find((u) => u.what === 'Customer-level data')?.why).toMatch(/Not exposed/);
+  });
+});
+
 describe('describeData', () => {
   it('lists every metric for all', () => {
     const r = describeData({metric: 'all'}, data(), NOW);

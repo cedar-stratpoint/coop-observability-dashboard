@@ -57,6 +57,9 @@ insert into public.pos_bundles values ('B1','Starter Box',499),('B2','Party Pack
 -- carry values on purpose: the proof shows the views hide them.
 insert into public.pos_prices (product_id, price, updated_by)
   select 'P' || n, 100 + n * 10, 'staff-' || n from generate_series(1, 25) n;
+-- orphan price rows exist (added after the inserts, which they would violate) (P5..P25 have no product), so NOT VALID: enforced for new rows only. /inventory embeds products via this FK.
+alter table public.pos_prices add constraint pos_prices_product_id_fkey foreign key (product_id) references public.pos_products(product_id) not valid;
+
 insert into public.pos_price_changes (product_id, old_price, new_price, reason, changed_by, device_id, changed_at) values
   ('P1', 230, 250, 'supplier increase', 'staff-1', 'dev-1', '2026-09-15 02:00:00+00'),
   ('P2', null, 250, 'first price', 'staff-2', 'dev-2', '2026-09-01 02:00:00+00'),
