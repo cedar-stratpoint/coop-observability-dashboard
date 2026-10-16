@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-16 — v1.7.1: deploy notifications reach Google Chat again (prod release)
+Patch bump (SemVer): a CI fix, no app change, no schema or env change.
+
+- **What broke:** after the repo move the "Deploy notify (Google Chat)" workflow skipped every production and staging deploy. Vercel now names the production environment `Production – coop-observability-dashboard` (the project is a suffix) and reports a staging deploy as `Preview` with the commit SHA as its ref; the workflow matched `Production` / `Staging` / ref `staging` exactly. The last production notification was 2026-10-16 00:53 UTC; the staging runs (Oct 14 to 15) were all skipped.
+- **Fix:** `deploy-gchat-notify.yml` accepts `Production*` and `Staging*` by prefix, and treats a `Preview` deploy as Staging only when its SHA is the head of `staging`. A pull request's own Preview posts nothing. The Google Chat post is unchanged and reads the Actions secret `GCHAT_WEBHOOK_URL`.
+- **Why it ships to `main`:** a `deployment_status` workflow runs from the default branch, so production notifications change only once this is on `main`.
+- *Housekeeping (not code):* a repo variable named `GCHAT_WEBHOOK_URL` holds the full webhook URL in plain text; the workflow uses the secret of the same name, so the variable should be deleted (and the webhook rotated if needed).
+
 ## 2026-10-15 — v1.7.0: Goldline (Nichido) on Coop, multi-role access, env switcher (prod release)
 Minor bump (SemVer): new features. **Needs database and env steps on prod before the merge** (below). Ships to `main` as one cherry-picked release (74 commits from staging, squashed); per-feature detail is in the staging CHANGELOG entries from 2026-10-05 to 2026-10-13.
 
