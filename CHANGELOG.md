@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-16 — v1.7.2: deploy notifications only for this repo's own Vercel project (prod release)
+Patch bump (SemVer): a CI fix on top of v1.7.1, no app change, no schema or env change.
+
+- **What was wrong:** two Vercel projects deploy this repo right now, the old `coop-brand-os` and the new `coop-observability-dashboard`, so each push makes two deployments. With v1.7.1 matching `Production*` by prefix, both would notify, and the old project's message links to the old site (`coop-brand-… .vercel.app`).
+- **Fix:** `deploy-gchat-notify.yml` skips an environment named after another project (`… – coop-brand-os`) and notifies only for `… – <this repo's name>`, or a name with no project suffix. One message per deploy, linking to the right site.
+- *Housekeeping (not code):* disconnect the old Vercel project from this repo (Settings > Git) once the new project has every env var (ANTHROPIC_API_KEY, EXPLORE_*, CRM_*, CHAT_READ_MODE, GOLDLINE_ANTHROPIC_API_KEY). Until then the old project keeps deploying and is simply not notified.
+
 ## 2026-10-16 — v1.7.1: deploy notifications reach Google Chat again (prod release)
 Patch bump (SemVer): a CI fix, no app change, no schema or env change.
 
