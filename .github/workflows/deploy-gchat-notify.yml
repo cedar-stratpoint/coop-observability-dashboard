@@ -20,7 +20,14 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.deployment.sha }}
           VERCEL_ENV: ${{ github.event.deployment.environment }}
+          PROJECT: ${{ github.event.repository.name }}
         run: |
+          # Only this repo's own Vercel project notifies ("Production – <repo name>"). Another Vercel project connected to the same
+          # repo (for example the old coop-brand-os) reports "<Environment> – <its own name>" and is skipped here, so there is one
+          # message per deploy and it links to the right site. A name with no project suffix at all is accepted.
+          case "$VERCEL_ENV" in
+            *" – "*) case "$VERCEL_ENV" in *" – $PROJECT") ;; *) echo "name=" >> "$GITHUB_OUTPUT"; exit 0 ;; esac ;;
+          esac
           # Production* = main. Staging* = a custom Vercel environment named Staging, or the Preview deploy of the staging branch head.
           # Any other Preview (a pull request's deploy) does not notify.
           case "$VERCEL_ENV" in
