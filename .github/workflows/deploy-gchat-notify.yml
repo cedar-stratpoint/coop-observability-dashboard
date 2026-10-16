@@ -5,23 +5,40 @@ on:
 
 jobs:
   notify:
-    # Vercel reports each deploy to GitHub as a deployment status. Production = main; Staging = the staging branch
-    # (a Preview deploy of that branch, or a Vercel custom environment named Staging).
-    if: >-
-      github.event.deployment_status.state == 'success' &&
-      (github.event.deployment.environment == 'Production' ||
-       github.event.deployment.environment == 'Staging' ||
-       github.event.deployment.ref == 'staging')
+    # Vercel reports each deploy to GitHub as a deployment status. The environment name carries the Vercel project as a suffix
+    # ("Production – coop-observability-dashboard"), and a Preview deploy reports the commit SHA (not the branch name) as its ref,
+    # so the environment is worked out in the first step instead of matched exactly here.
+    if: github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      - name: Work out the environment
+        id: env
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.deployment.sha }}
+          VERCEL_ENV: ${{ github.event.deployment.environment }}
+        run: |
+          # Production* = main. Staging* = a custom Vercel environment named Staging, or the Preview deploy of the staging branch head.
+          # Any other Preview (a pull request's deploy) does not notify.
+          case "$VERCEL_ENV" in
+            Production*) echo "name=Production" >> "$GITHUB_OUTPUT" ;;
+            Staging*) echo "name=Staging" >> "$GITHUB_OUTPUT" ;;
+            Preview*)
+              STAGING_HEAD=$(gh api "repos/$REPO/branches/staging" --jq .commit.sha 2>/dev/null || true)
+              if [ -n "$STAGING_HEAD" ] && [ "$STAGING_HEAD" = "$SHA" ]; then echo "name=Staging" >> "$GITHUB_OUTPUT"; else echo "name=" >> "$GITHUB_OUTPUT"; fi ;;
+            *) echo "name=" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Post to Google Chat
+        if: steps.env.outputs.name != ''
         env:
           WEBHOOK: ${{ secrets.GCHAT_WEBHOOK_URL }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          ENVIRONMENT: ${{ github.event.deployment.environment == 'Production' && 'Production' || 'Staging' }}
+          ENVIRONMENT: ${{ steps.env.outputs.name }}
           SHA: ${{ github.event.deployment.sha }}
           LIVE_URL: ${{ github.event.deployment_status.environment_url }}
           LOG_URL: ${{ github.event.deployment_status.target_url }}
