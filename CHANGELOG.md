@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-16 — v1.7.3: "Merged" posts to Google Chat for pull requests into main (prod release)
+Patch bump (SemVer): a CI fix, no app change, no schema or env change.
+
+- **What was missing:** `pr-gchat-notify.yml` on `main` only had the "New PR" job. The "Merged" job (who pressed merge, the author, the branches and the merge commit) lives on `develop` and `staging`, so a pull request into `main` (every release PR) never posted a "Merged" message. A `pull_request` workflow runs from the base branch, which is why only `main` was affected.
+- **Fix:** `main` now carries the same `pr-gchat-notify.yml` as `develop` and `staging` (the workflow also runs on `closed` and the `merged` job fires only for a merged pull request, not one closed unmerged).
+- *Housekeeping (not code):* the Actions secret `GCHAT_WEBHOOK_URL` posts to the Google Chat space `AAQAybivOZg`; the old repo variable of the same name points to a different space. If messages seem missing, look in that space.
+
 ## 2026-10-16 — v1.7.2: deploy notifications only for this repo's own Vercel project (prod release)
 Patch bump (SemVer): a CI fix on top of v1.7.1, no app change, no schema or env change.
 
