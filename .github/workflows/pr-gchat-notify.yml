@@ -2,11 +2,11 @@ name: PR notify (Google Chat)
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, closed]
 
 jobs:
   notify:
-    if: github.event.pull_request.draft == false
+    if: github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Post to Google Chat
@@ -23,4 +23,27 @@ jobs:
           if [ -z "$WEBHOOK" ]; then echo "GCHAT_WEBHOOK_URL not set (fork PR or missing secret); skipping"; exit 0; fi
           jq -n --arg t "🔀 *New PR* <$URL|$REPO#$NUM> $TITLE
           $AUTHOR · \`$HEAD\` → \`$BASE\`" '{text: $t}' \
+            | curl -sS --fail-with-body -X POST -H "Content-Type: application/json; charset=UTF-8" -d @- "$WEBHOOK"
+
+  merged:
+    # Fires once when a PR is merged (not when it is closed unmerged). merged_by is who pressed the merge button.
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Google Chat
+        env:
+          WEBHOOK: ${{ secrets.GCHAT_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          NUM: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          MERGER: ${{ github.event.pull_request.merged_by.login }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "GCHAT_WEBHOOK_URL not set (fork PR or missing secret); skipping"; exit 0; fi
+          jq -n --arg t "✅ *Merged* <$URL|$REPO#$NUM> $TITLE
+          merged by *$MERGER* · author $AUTHOR · \`$HEAD\` → \`$BASE\` · \`${SHA:0:7}\`" '{text: $t}' \
             | curl -sS --fail-with-body -X POST -H "Content-Type: application/json; charset=UTF-8" -d @- "$WEBHOOK"
