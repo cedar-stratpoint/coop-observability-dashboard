@@ -83,7 +83,7 @@ describe('METRICS registry', () => {
   it('declares the dimensions and measures of the brief', () => {
     const dims = (id: MetricId) => METRICS[id].dimensions.map((x) => x.key);
     const measures = (id: MetricId) => METRICS[id].measures.map((x) => x.key);
-    for (const id of ['offline_revenue', 'offline_orders', 'offline_aov'] as const) expect(dims(id)).toEqual(['none', 'day', 'week']);
+    for (const id of ['offline_revenue', 'offline_orders', 'offline_aov'] as const) expect(dims(id)).toEqual(['none', 'day', 'week', 'month']);
     for (const id of ['top_products', 'payment_mix', 'event_rollup', 'pet_mix'] as const) expect(dims(id)).toEqual(['none']);
     expect(dims('bundle_sales')).toEqual(['none', 'pet_type', 'bundle', 'bundle_by_pet']);
     expect(dims('bundle_picks')).toEqual(['sku', 'sku_by_pet', 'bundle_by_sku']);

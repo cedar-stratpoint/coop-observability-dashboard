@@ -18,6 +18,8 @@ import type {ToolExecutors} from './tools';
 import type {ChatToolContext} from './stream-types';
 
 export const MAX_PAYLOAD_ROWS = 100;
+/** A6: a day series longer than this is unreadable as a chart; the chat shows weeks instead and says so. */
+export const MAX_DAY_POINTS = 92;
 
 /** The tool executors plus the app-side Explore backstop (never reachable by the model: it is not a tool). */
 export type ChatExecutors = ToolExecutors & Pick<RenderExecutors, 'autoRender'>;
@@ -44,8 +46,18 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep}) : {}),
     describe_data: async (input) => describeData(input as {metric: string}, await data(), ctx.now, !!ctx.explore, !!ctx.crm, !!ctx.crmOrders || !!ctx.crm),
     query_metric: async (input) => {
-      const result = runMetric(input, await data(), ctx.now);
+      let result = runMetric(input, await data(), ctx.now);
       if ('error' in result) return {error: result.error};
+      if (result.dimension === 'day' && result.rows.length > MAX_DAY_POINTS) {
+        // A6: too many days to read. Weeks instead, said first; the owner can ask for a shorter range to see days.
+        const days = result.rows.length;
+        input = {...(input as object), dimension: 'week'};
+        const weekly = runMetric(input, await data(), ctx.now);
+        if (!('error' in weekly)) {
+          weekly.meta.caveats.unshift(`Shown by week: by day would be ${days} points, too many to read. Ask for a range of ${MAX_DAY_POINTS} days or less to see days.`);
+          result = weekly;
+        }
+      }
       const outside = noDataAsk(result);
       if (outside) return outside; // the loop asks the owner and ends the turn
       counter += 1;
