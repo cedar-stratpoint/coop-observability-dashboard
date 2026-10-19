@@ -80,6 +80,8 @@ export const CHAT_DEADLINE_MS = 50_000;
 export const TOOL_DEADLINE_MS = 30_000;
 export const WRAP_UP_TEXT = 'Time is short: answer now from the results above, and say what you could not check. Plain text only: you cannot call tools now, so do not write tool calls or tags such as <render_chart>.';
 export const DEADLINE_TEXT = 'That took longer than I allow. Try a narrower question.';
+/** A7: the same stop when a chart or table is already on screen: what was drawn is the answer so far, not a failure. */
+export const DEADLINE_DRAWN_TEXT = 'Here is what I found before time ran out. Ask a narrower question for more.';
 export const MAX_STEPS_TEXT = 'That took more steps than I allow. Try asking a narrower question.';
 // DASH-01 as a gate: the first time a step asks to render before any text was written, every render call in that step is
 // refused once with this message. After that the calls go through even if no text came (bounded cost: one extra step).
@@ -214,7 +216,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
     if (clock() - t0 > deadlineMs) {
       await backstop();
       releaseHeld(false);
-      emit({t: 'text', d: `${answer.trim() ? '\n\n' : ''}${DEADLINE_TEXT}`});
+      emit({t: 'text', d: `${answer.trim() ? '\n\n' : ''}${drawn ? DEADLINE_DRAWN_TEXT : DEADLINE_TEXT}`});
       return finish('deadline', true);
     }
     const overBudget = opts.turnBudget !== undefined && costUnits(usage) >= opts.turnBudget;
