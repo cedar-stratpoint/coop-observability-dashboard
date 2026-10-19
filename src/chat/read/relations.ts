@@ -1,5 +1,6 @@
 // The relations Ask Coop may read, per read mode. One allowlist, used by the
 // runtime guard (guarded-fetch.ts), the client type and the tests.
+import {BOXME_COLUMNS} from '../../boxme-feed';
 
 export const CHAT_READ_MODES = ['ro_role', 'guarded_service'] as const;
 export type ChatReadMode = (typeof CHAT_READ_MODES)[number];
@@ -49,6 +50,13 @@ const COLUMNS = Object.freeze({
   stock: STOCK_COLS,
   saleMovements: SALE_MOVEMENT_COLS,
   stockConfig: STOCK_CONFIG_COLS,
+  // BoxMe (online warehouse, synced daily by zoomy-observability). Sync runs: no error text, no API key expiry.
+  boxmeProducts: BOXME_COLUMNS.products,
+  boxmeWarehouses: BOXME_COLUMNS.warehouses,
+  boxmeStock: BOXME_COLUMNS.stock,
+  boxmeDaily: BOXME_COLUMNS.daily,
+  boxmeLots: BOXME_COLUMNS.lots,
+  boxmeRuns: BOXME_COLUMNS.runs,
 });
 
 export const CHAT_RELATIONS = Object.freeze({
@@ -64,6 +72,12 @@ export const CHAT_RELATIONS = Object.freeze({
       stock: 'coop_chat_stock_by_location',
       saleMovements: 'coop_chat_sale_movements',
       stockConfig: 'coop_chat_stock_config',
+      boxmeProducts: 'coop_chat_boxme_products',
+      boxmeWarehouses: 'coop_chat_boxme_warehouses',
+      boxmeStock: 'coop_chat_boxme_stock',
+      boxmeDaily: 'coop_chat_boxme_stock_daily',
+      boxmeLots: 'coop_chat_boxme_stock_lots',
+      boxmeRuns: 'coop_chat_boxme_sync_runs',
     }),
     columns: COLUMNS,
   }),
@@ -79,6 +93,12 @@ export const CHAT_RELATIONS = Object.freeze({
       stock: 'pos_inventory_by_location',
       saleMovements: 'pos_stock_movements',
       stockConfig: 'pos_settings',
+      boxmeProducts: 'boxme_products',
+      boxmeWarehouses: 'boxme_warehouses',
+      boxmeStock: 'boxme_stock',
+      boxmeDaily: 'boxme_stock_daily',
+      boxmeLots: 'boxme_stock_lots',
+      boxmeRuns: 'boxme_sync_runs',
     }),
     columns: COLUMNS,
   }),
@@ -100,6 +120,12 @@ export interface ChatRelationMap {
   stock: string;
   saleMovements: string;
   stockConfig: string;
+  boxmeProducts: string;
+  boxmeWarehouses: string;
+  boxmeStock: string;
+  boxmeDaily: string;
+  boxmeLots: string;
+  boxmeRuns: string;
 }
 
 export interface ChatRelationSet {

@@ -67,7 +67,9 @@ describe('supabase/coop_chat_readonly.sql', () => {
       coop_chat_price_changes: splitCols(reads.columns.priceChanges),
       coop_chat_events: splitCols(reads.columns.events),
     };
-    const {stock, saleMovements, stockConfig, ...orderTables} = reads.tables; // the three stock views live in coop_chat_stock.sql
+    // the three stock views live in coop_chat_stock.sql, the six BoxMe views in coop_chat_boxme.sql
+    const {stock, saleMovements, stockConfig, boxmeProducts, boxmeWarehouses, boxmeStock, boxmeDaily, boxmeLots, boxmeRuns, ...orderTables} = reads.tables;
+    expect([boxmeProducts, boxmeWarehouses, boxmeStock, boxmeDaily, boxmeLots, boxmeRuns].every((t) => t.startsWith('coop_chat_boxme_'))).toBe(true);
     expect([stock, saleMovements, stockConfig]).toEqual(['coop_chat_stock_by_location', 'coop_chat_sale_movements', 'coop_chat_stock_config']);
     expect(orderTables).toEqual({
       orders: 'coop_chat_orders',
