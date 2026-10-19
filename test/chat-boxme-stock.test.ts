@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {runMetric} from '../src/chat/query-metric';
+import {lookupProduct} from '../src/chat/digest-lookup';
 import {describeData} from '../src/chat/coverage';
 import type {BoxmeFeed} from '../src/boxme-feed';
 import type {MetricData, MetricResult, StockData} from '../src/chat/result-types';
@@ -101,3 +102,23 @@ describe('BoxMe freshness and connection (B4)', () => {
   });
 });
 
+describe('lookup_product stock with BoxMe (B3)', () => {
+  it('adds BoxMe available to the locations and the total, and says reserved, incoming, damaged, expiry and the sync time', () => {
+    const r = lookupProduct({query: 'P1', show: 'stock'}, data(), NOW) as MetricResult;
+    expect(r.rows).toEqual([{product: 'Chicken Jerky (P1)', event_units: 10, office_units: 5, online_units: 20, stock_units: 35}]);
+    expect(r.columns.map((c) => c.label)).toEqual(['Product', 'Event (sellable)', 'Office (back)', 'BoxMe available (online)', 'Total']);
+    const c = r.meta.caveats.join(' ');
+    expect(c).toMatch(/BoxMe also has 2 reserved for orders, 5 incoming, 1 damaged/);
+    expect(c).toMatch(/Next BoxMe expiry: 6 units on 2026-11-18 \(30 days\)/);
+    expect(c).toMatch(/as of the last good sync, 2026-10-19 09:30 PHT/);
+  });
+  it('a BoxMe-only product resolves by name; a POS-only product says BoxMe does not stock it', () => {
+    expect((lookupProduct({query: 'duck treats', show: 'stock'}, data(), NOW) as MetricResult).rows).toEqual([{product: 'Duck Treats (P7)', online_units: 4, stock_units: 4}]);
+    expect((lookupProduct({query: 'P2', show: 'stock'}, data(), NOW) as MetricResult).meta.caveats.join(' ')).toMatch(/BoxMe does not stock this product/);
+  });
+  it('BoxMe not connected: offline stock only, said first', () => {
+    const r = lookupProduct({query: 'P1', show: 'stock'}, data(null), NOW) as MetricResult;
+    expect(r.rows).toEqual([{product: 'Chicken Jerky (P1)', event_units: 10, office_units: 5, stock_units: 15}]);
+    expect(r.meta.caveats[0]).toMatch(/^BoxMe \(online\) stock is not connected here.*This is offline stock only\./);
+  });
+});

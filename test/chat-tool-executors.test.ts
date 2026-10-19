@@ -24,8 +24,8 @@ const data = (orders = ORDERS): MetricData => ({source: 'live', orders, events: 
 const ctx = (d: MetricData = data()) => ({data: vi.fn(async () => d), now: NOW, user: null});
 
 describe('executors', () => {
-  it('provides the eleven tools, plus the app-side autoRender backstop that is not a tool', () => {
-    expect(Object.keys(createExecutors(ctx())).sort()).toEqual(['autoRender', 'describe_data', 'get_channel_report', 'get_digest', 'lookup_product', 'query_metric', 'remove_block', 'render_chart', 'render_kpi', 'render_table', 'set_report_filters', 'set_report_title']);
+  it('provides the twelve tools, plus the app-side autoRender backstop that is not a tool', () => {
+    expect(Object.keys(createExecutors(ctx())).sort()).toEqual(['ask_owner', 'autoRender', 'describe_data', 'get_channel_report', 'get_digest', 'lookup_product', 'query_metric', 'remove_block', 'render_chart', 'render_kpi', 'render_table', 'set_report_filters', 'set_report_title']);
   });
 
   it('describe_data follows Explore: on drops the contact caveat, off keeps it', async () => {
@@ -107,15 +107,17 @@ describe('executors', () => {
     const t = (await ex.query_metric?.({...BASE, metric: 'top_products', limit: 25})) as Record<string, any>;
     expect(t.rows.length).toBeLessThanOrEqual(25);
     expect(JSON.stringify(t).length / 3.5).toBeLessThan(3000);
-    // Worst case: a daily series over many days is capped at 100 rows.
+    // Worst case: a daily series over many days. A6: past 92 days it is shown by week (said first), so it stays small.
     const days = Array.from({length: 130}, (_, i) => {
       const d = new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
       return ord(i, d, 100 + i);
     });
     const s = (await createExecutors(ctx(data(days))).query_metric?.({...BASE, dimension: 'day', range: 'all_available', from: '', to: ''})) as Record<string, any>;
     expect(s.error).toBeUndefined();
-    expect(s.rows).toHaveLength(100);
-    expect(s.truncated).toEqual({shown: 100, total: 130});
+    expect(s.dimension).toBe('week');
+    expect(s.rows).toHaveLength(19);
+    expect(s.truncated).toBeUndefined();
+    expect(s.meta.caveats[0]).toMatch(/by day would be 130 points/);
     expect(JSON.stringify(s).length).toBeLessThan(60_000);
   });
 

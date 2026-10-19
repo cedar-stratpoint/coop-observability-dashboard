@@ -2,7 +2,7 @@ import type {PosEvent, PosOrder} from '../pos-sales-types';
 import {manilaDayKey, resolveOrderEvents} from '../pos-sales-compute';
 import {buildPriceHistory} from '../pos-price-history';
 import {isCompletedOrder} from './order-status';
-import {resolveRange} from './range';
+import {periodDays, resolveRange} from './range';
 import {METRICS, METRIC_IDS, type ComputeOutput} from './metrics-registry';
 import {isStockMetric, runStockMetric} from './stock-metrics';
 import {runChecks} from './checks';
@@ -252,6 +252,9 @@ export function runMetric(input: unknown, data: MetricData, now: Date): MetricRe
     } else if (prevCov.coverage === 'partial') {
       caveats.push(`The previous period (${range.previous.from} to ${range.previous.to}) is only partly covered by data (data starts ${dataFrom}), so the comparison may understate it.`);
     }
+    const curDays = periodDays(range);
+    const prevDays = periodDays(range.previous);
+    if (curDays !== prevDays) caveats.push(`The two periods are calendar months of different length (${curDays} and ${prevDays} days), so totals are not exactly like for like.`);
     if (measure === 'orders' && out.compare.keyColumn === null && prevOrders.length > 0) {
       change = {previous: prevOrders.length, current: orders.length};
     }
