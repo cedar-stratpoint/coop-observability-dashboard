@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import {readFileSync} from 'node:fs';
-import {runChatLoop, UNTRUSTED_TEXT_TOOLS, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
+import {runChatLoop, UNTRUSTED_TEXT_TOOLS, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, DEADLINE_DRAWN_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
 import {COST_CAP_TEXT} from '../src/chat/cost';
 import {assertRequestShape} from '../src/chat/request-shape';
 import {CHAT_TOOLS, chatTools, exploreTools} from '../src/chat/tool-defs';
@@ -379,6 +379,16 @@ describe('runChatLoop', () => {
       await runChatLoop(opts);
       expect(events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d)).toEqual(['Looking.', `\n\n${DEADLINE_TEXT}`]);
       expect(client.requests).toHaveLength(1);
+    });
+
+    it('A7: a deadline after a block was drawn says what is on screen is the answer so far, not a failure', async () => {
+      let t = 0;
+      const render = {block: 'new', source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: 'Chart'};
+      const client = new FakeClient((n) => (n === 1 ? {...toolTurn(toolUse('t1', 'render_chart', render)), text: ['Sales by day.']} : {text: ['never']}));
+      client.onCall = () => void (t += 60_000);
+      const {events, opts} = setup(client, {clock: () => t, executors: {render_chart: async () => ({ok: true, block: 'b1'})}});
+      await runChatLoop(opts);
+      expect(events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d)).toEqual(['Sales by day.', `\n\n${DEADLINE_DRAWN_TEXT}`]);
     });
 
     it('a fast turn is untouched (no deadline text, normal done)', async () => {
