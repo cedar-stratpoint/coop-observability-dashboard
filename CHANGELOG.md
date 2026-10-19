@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — BoxMe (Online) inventory and Ask Coop online stock reach main (prod release, BoxMe only)
+- **What:** promotes only the BoxMe work from staging, by cherry-pick, because staging and main have diverged (a full staging → main merge conflicts in 35 files). Ships the BoxMe channel on `/inventory?channel=online` and the BoxMe card on `/inventory/[sku]` (see the 2026-10-08 entry), plus Ask Coop's BoxMe answers through `query_metric`: `stock_on_hand` dimensions `online`, `all_channels`, `expiring_online` and `stock_cover` dimension `online`, each saying the last good sync time and saying first when the sync is stale, failed or not connected.
+- **Left out on purpose:** `lookup_product` show `stock` (one product's stock as stat tiles, with BoxMe added). It builds on the staging-only "Ask Coop asks before it guesses" work (`clarify.ts`, `product-resolve.ts`) and `ede079a`, so it waits for the next full release.
+- **Database (prod):** needs zoomy-observability's `supabase/boxme_inventory.sql` and its daily sync running on prod, then `supabase/coop_chat_boxme.sql` (chat views for `coop_chat_ro`). Until the tables exist the page and the chat say BoxMe is not connected, never 0.
+
 ## 2026-10-16 — v1.7.3: "Merged" posts to Google Chat for pull requests into main (prod release)
 Patch bump (SemVer): a CI fix, no app change, no schema or env change.
 
