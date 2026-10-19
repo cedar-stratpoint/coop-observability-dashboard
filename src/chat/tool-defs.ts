@@ -55,7 +55,7 @@ const queryMetric: ToolDefinition = {
       channel: {type: 'string', enum: ['offline', 'all'], description: 'This tool reads offline POS only: "all" here still means offline POS. For all channels (Shopee, Lazada, Website and offline) use get_channel_report.'},
       event: {type: 'string', description: 'An event name or "all"'},
       pet: {type: 'string', enum: ['all', 'dog', 'cat', 'both', 'untagged'], description: 'Filter by the pet the sale was tagged for.'},
-      compare_to: {type: 'string', enum: ['none', 'previous_period'], description: 'Add the previous period of equal length.'},
+      compare_to: {type: 'string', enum: ['none', 'previous_period'], description: 'Add the previous period of equal length (whole calendar months: the previous whole months).'},
       sort: {type: 'string', enum: ['default', 'value_desc', 'value_asc'], description: 'Row order for ranked lists.'},
       limit: {type: 'integer', enum: [3, 5, 10, 25], description: 'Maximum rows for ranked lists.'},
     },

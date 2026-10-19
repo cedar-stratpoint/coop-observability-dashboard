@@ -218,16 +218,16 @@ Use this to interpret the numbers and answer brand/definitional questions. Figur
 - Shipping, returns/refunds, and current promotions are **not loaded** here yet. If asked, say you don't have the store's policy details and suggest checking with the team, rather than inventing them.
 
 Metric catalog (the only numbers you can query):
-- offline_revenue: Offline revenue. Revenue from offline POS sales (bazaars, events and walk-ins), in total or by day or week.
-  dimensions: none, day, week (default none)
+- offline_revenue: Offline revenue. Revenue from offline POS sales (bazaars, events and walk-ins), in total or by day, week or month.
+  dimensions: none, day, week, month (default none)
   measure revenue [measured]: Sum of order totals, completed (not voided) orders only
   default measure revenue; pet filter yes, event filter yes, compare yes
-- offline_orders: Offline orders. Number of offline POS orders, in total or by day or week.
-  dimensions: none, day, week (default none)
+- offline_orders: Offline orders. Number of offline POS orders, in total or by day, week or month.
+  dimensions: none, day, week, month (default none)
   measure orders [measured]: Number of completed (not voided) orders
   default measure orders; pet filter yes, event filter yes, compare yes
-- offline_aov: Offline average order value. Average spend per offline POS order, in total or by day or week.
-  dimensions: none, day, week (default none)
+- offline_aov: Offline average order value. Average spend per offline POS order, in total or by day, week or month.
+  dimensions: none, day, week, month (default none)
   measure aov [derived]: Revenue divided by number of orders, derived; empty when there are no orders
   default measure aov; pet filter yes, event filter yes, compare yes
 - top_products: Top products. Products ranked by itemized revenue or units sold (bundle picks count as units with no revenue).

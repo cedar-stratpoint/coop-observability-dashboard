@@ -31,3 +31,28 @@ describe('query_metric: dates outside the data (A4)', () => {
     expect(out.id).toBe('r1');
   });
 });
+
+describe('query_metric granularity (A6)', () => {
+  const series = (dimension: string, from: string, to: string) => ({...q(from, to), dimension});
+  type Out = {dimension?: string; rows?: {period: string; revenue: number}[]; meta?: {caveats: string[]}};
+
+  it('by month: one row per calendar month, a partial first month is said', async () => {
+    const out = (await ex().query_metric?.(series('month', '2026-03-03', '2026-10-18'))) as Out;
+    expect(out.dimension).toBe('month');
+    expect(out.rows?.map((r) => r.period)).toEqual(['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01']);
+    expect(out.rows?.[0].revenue).toBe(250);
+    expect(out.meta?.caveats.join(' ')).toMatch(/first or last month is partial/);
+  });
+
+  it('by day over more than 92 days is shown by week, and says why first', async () => {
+    const out = (await ex().query_metric?.(series('day', '2026-03-03', '2026-10-18'))) as Out;
+    expect(out.dimension).toBe('week');
+    expect(out.meta?.caveats[0]).toMatch(/^Shown by week: by day would be 230 points/);
+  });
+
+  it('by day over a short range stays by day', async () => {
+    const out = (await ex().query_metric?.(series('day', '2026-10-01', '2026-10-18'))) as Out;
+    expect(out.dimension).toBe('day');
+    expect(out.rows).toHaveLength(18);
+  });
+});
