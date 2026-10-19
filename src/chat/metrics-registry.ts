@@ -772,12 +772,16 @@ const DEFS: MetricDef[] = [
   {
     id: 'stock_on_hand',
     label: 'Stock on hand',
-    description: 'Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all locations, or per location.',
+    description: 'Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all POS locations, per location, BoxMe online, all channels (POS + BoxMe), or BoxMe lots expiring soon.',
+    // Reads coop_chat_stock_by_location (POS) and the coop_chat_boxme_* views (BoxMe, synced daily; supabase/coop_chat_boxme.sql).
     dimensions: [
       {key: 'sellable', label: 'Per product, Event (sellable) stock', shape: 'category'},
       {key: 'office', label: 'Per product, Office (back) stock', shape: 'category'},
-      {key: 'all_locations', label: 'Per product, all locations', shape: 'category'},
+      {key: 'all_locations', label: 'Per product, all POS locations', shape: 'category'},
       {key: 'by_location', label: 'Per product and location', shape: 'matrix'},
+      {key: 'online', label: 'Per product, BoxMe (online warehouse) available', shape: 'category'},
+      {key: 'all_channels', label: 'Per product, Event + Office + BoxMe and the total', shape: 'category'},
+      {key: 'expiring_online', label: 'BoxMe lots expiring soon', shape: 'category'},
     ],
     measures: [{key: 'units', label: 'Stock', kind: 'measured', unit: 'units', method: 'Units on hand in the stock lots, per location, as of now'}],
     defaultMeasure: 'units',
@@ -789,8 +793,11 @@ const DEFS: MetricDef[] = [
   {
     id: 'stock_cover',
     label: 'Stock cover',
-    description: 'How many selling days the Event (sellable) stock lasts per product, with status (out, low, healthy): the Inventory page forecast, as of now.',
-    dimensions: [{key: 'sku', label: 'Per product', shape: 'category'}],
+    description: 'How long stock lasts per product, with status (out, low, healthy), as of now: Event (sellable) stock in selling days (the Inventory forecast), or BoxMe online stock in days.',
+    dimensions: [
+      {key: 'sku', label: 'Per product, Event (sellable) stock in selling days', shape: 'category'},
+      {key: 'online', label: 'Per product, BoxMe online stock in days (sales speed estimated from stock drops)', shape: 'category'},
+    ],
     measures: [{key: 'cover', label: 'Cover (selling days)', kind: 'derived', unit: 'ratio', method: 'Event stock divided by units sold per selling day over the last 60 days (the Inventory forecast), as of now'}],
     defaultMeasure: 'cover',
     defaultDimension: 'sku',
