@@ -326,7 +326,7 @@
    "name": "spin_wheel_leads",
    "domain": "booth-leads",
    "about": "Spin-the-wheel sign-ups collected at booths. Imported by hand from CSV; no key to orders or events.",
-   "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (the contact's FIRST sign-up consent time, never updated; shown to allowlisted owners in the Ask Coop contacts table, still not on the pages), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
+   "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (first sign-up consent time, never updated), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
    "prefer": null,
    "testOrders": null
   },
