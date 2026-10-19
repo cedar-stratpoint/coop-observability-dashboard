@@ -21,8 +21,9 @@ const exploreText = renderSkill({explore: true});
 const exploreTags = tagsOf(exploreText);
 // sha256 of the non-explore render (16,089 characters). Re-pinned 2026-10-07 (Train 3): the page-context topic (PAGE-01) was added on purpose.
 // Re-pinned again 2026-10-07 (Train 3 Task 8 fix 1): THINK-01 gained the stock-has-no-period exception.
+// Re-pinned 2026-10-19 (clarify-first, plan 2026-10-19-ask-coop-inventory-plan.md A3): THINK-01 asks through ask_owner and passes product names as typed; BI-10 (A5) whole months compare with whole months.
 // The original pre-Explore hash was 963c0e5c4a98... (15,668 characters, fix/ask-coop b28abd0).
-const BASELINE_SHA256 = 'b129c1b98d92a62a2dff8171df601726f9da79ece7df10709c22aac2489be9ce';
+const BASELINE_SHA256 = '13f32d15f5d490366499e4876918814b8d6543fa6f6196564fa44da6077e799b';
 
 function fixtureDir(files: {skill: string; topic?: string}): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'skill-'));
@@ -75,7 +76,7 @@ describe('explore markers', () => {
       expect(exploreText).toContain(s);
       expect(text).not.toContain(s);
     }
-    for (const s of ['ask which dates before any tool call', 'Say "not available" only when no metric declares the measure, and then']) {
+    for (const s of ['call ask_owner with about "period" before any data tool', 'Say "not available" only when no metric declares the measure, and then']) {
       expect(text).toContain(s);
     }
   });

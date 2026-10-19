@@ -143,10 +143,14 @@ describe('skill rules enforced by code', () => {
     expect(sum(r, 'share')).toBeLessThan(100);
   });
 
-  it('BI-10: compare_to previous_period uses the period of equal length ending the day before the current one', () => {
+  it('BI-10: compare_to previous_period uses the period of equal length ending the day before the current one (whole months: the previous whole months)', () => {
     const bounds = {dataFrom: '2026-09-01', dataTo: '2026-09-30'};
     const span = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 86_400_000 + 1;
-    for (const [range, from, to] of [['custom', '2026-09-17', '2026-09-27'], ['last_week', '', ''], ['last_month', '', '']] as const) {
+    const month = resolveRange({range: 'last_month', from: '', to: ''}, NOW, bounds);
+    if (!month.ok) throw new Error(month.error);
+    expect(month.previous.from.endsWith('-01')).toBe(true);
+    expect(Date.parse(month.previous.to) + 86_400_000).toBe(Date.parse(month.from));
+    for (const [range, from, to] of [['custom', '2026-09-17', '2026-09-27'], ['last_week', '', '']] as const) {
       const r = resolveRange({range, from, to}, NOW, bounds);
       if (!r.ok) throw new Error(r.error);
       expect(span(r.previous.from, r.previous.to)).toBe(span(r.from, r.to));
@@ -156,6 +160,11 @@ describe('skill rules enforced by code', () => {
     const orders = [one('out', 5, 999), one('p1', 6, 100), one('p2', 16, 50), one('c1', 17, 70), one('c2', 27, 30)];
     const r = run({metric: 'offline_revenue', range: 'custom', from: '2026-09-17', to: '2026-09-27', compare_to: 'previous_period'}, data(orders));
     expect(r.rows[0]).toMatchObject({revenue: 100, previous_revenue: 150, delta: -50});
+    // A5: September (30 days) vs the whole of August (31 days): the August 1 order counts, and the uneven length is said
+    const aug1 = mkOrder('a1', '2026-08-01T10:00:00+08:00', [line('p', 'Item', 1, 40)], {pet: null});
+    const m = run({metric: 'offline_revenue', range: 'custom', from: '2026-09-01', to: '2026-09-30', compare_to: 'previous_period'}, data([aug1, ...orders]));
+    expect(m.rows[0]).toMatchObject({previous_revenue: 40});
+    expect(m.meta.caveats.join(' ')).toMatch(/calendar months of different length \(30 and 31 days\)/);
   });
 
   it('BI-11: an empty earlier period gives null previous, change and percent change, never 0', () => {

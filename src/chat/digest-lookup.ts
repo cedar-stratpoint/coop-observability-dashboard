@@ -10,6 +10,8 @@ import {dedupeReruns, nearestWindows, pickCovering, sameWindow, windowDays, wind
 import {phtDate} from './coverage';
 import {isRealDay, rangeLabel} from './range';
 import type {DigestRow} from './read/digest';
+import type {ClarifyResult} from './clarify';
+import {resolveProduct, type CatalogProduct} from './product-resolve';
 import type {Check, MeasureDecl, MetricData, MetricError, MetricResult, MetricRow, ResultColumn} from './result-types';
 
 // ---- shared ---------------------------------------------------------------------------------------------------------
@@ -275,7 +277,6 @@ export function shapeDigest(input: unknown, src: DigestSource | null, now: Date)
 
 export const PRODUCT_SHOWS = ['details', 'price_history'] as const;
 export const MAX_QUERY = 80;
-const MAX_LISTED = 5;
 
 const DETAIL_COLUMNS: ResultColumn[] = [
   col('sku', 'SKU', 'text', 'category'),
@@ -302,13 +303,10 @@ const LOOKUP_MEASURE: MeasureDecl = {
   method: 'Counted from completed (not voided) POS orders. Revenue is direct sales only: units picked inside a bundle carry no revenue of their own (see query_metric bundle_picks for allocated revenue).',
 };
 
-interface Known {
-  sku: string;
-  name: string;
-}
-
-function knownProducts(data: MetricData): Known[] {
-  const seen = new Map<string, Known>();
+/** Every product the chat knows: the POS catalog (stock names, so unsold products resolve too), then sold-line names. */
+function catalogOf(data: MetricData): CatalogProduct[] {
+  const seen = new Map<string, CatalogProduct>();
+  for (const [sku, name] of Object.entries(data.stock?.names ?? {})) seen.set(sku, {sku, name: name || sku});
   for (const order of data.orders) {
     for (const line of order.items) {
       if (line.product_id && !seen.has(line.product_id)) seen.set(line.product_id, {sku: line.product_id, name: line.name || line.product_id});
@@ -317,68 +315,28 @@ function knownProducts(data: MetricData): Known[] {
   return [...seen.values()].sort((a, b) => a.sku.localeCompare(b.sku));
 }
 
-function levenshtein(a: string, b: string): number {
-  const prev = Array.from({length: b.length + 1}, (_, j) => j);
-  for (let i = 1; i <= a.length; i += 1) {
-    let diag = prev[0];
-    prev[0] = i;
-    for (let j = 1; j <= b.length; j += 1) {
-      const up = prev[j];
-      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
-      diag = up;
-    }
-  }
-  return prev[b.length];
-}
+const label = (p: CatalogProduct): string => (p.name === p.sku ? p.sku : `${p.name} (${p.sku})`);
 
-const label = (p: Known): string => (p.name === p.sku ? p.sku : `${p.sku} (${p.name})`);
-
-/** Close matches for a query that found nothing: a shared word, or a small edit distance to the SKU or name. */
-function closeMatches(q: string, products: Known[]): Known[] {
-  const words = q.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
-  return products
-    .map((p) => {
-      const name = p.name.toLowerCase();
-      const sku = p.sku.toLowerCase();
-      const shared = words.filter((w) => name.includes(w) || sku.includes(w)).length;
-      const dist = Math.min(levenshtein(q, sku), levenshtein(q, name));
-      return {p, score: shared > 0 ? shared * 10 - dist : dist <= 2 ? 5 - dist : 0};
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || a.p.sku.localeCompare(b.p.sku))
-    .slice(0, 3)
-    .map((x) => x.p);
-}
-
-export function lookupProduct(input: unknown, data: MetricData): MetricResult | MetricError {
+export function lookupProduct(input: unknown, data: MetricData): MetricResult | MetricError | ClarifyResult {
   const o = isRec(input) ? input : {};
   if (typeof o.show !== 'string' || !(PRODUCT_SHOWS as readonly string[]).includes(o.show)) return fail(`show ${JSON.stringify(o.show ?? null)} is not allowed. Allowed values for show: ${list(PRODUCT_SHOWS)}.`);
   const query = typeof o.query === 'string' ? o.query.trim() : '';
   if (query === '') return fail('query must be a product name or SKU (not empty). To list the products that sold, use query_metric with top_products.');
   if (query.length > MAX_QUERY) return fail(`query is too long (at most ${MAX_QUERY} characters): give a product name or a SKU.`);
 
-  const products = knownProducts(data);
-  if (products.length === 0) return fail('No products are known yet (there are no sold lines in the data). Use describe_data to see what is available.');
+  const products = catalogOf(data);
+  if (products.length === 0) return fail('No products are known yet (no POS catalog and no sold lines). Use describe_data to see what is available.');
 
-  const q = query.toLowerCase();
-  const bySku = products.find((p) => p.sku.toLowerCase() === q);
-  const byName = products.filter((p) => p.name.toLowerCase() === q);
-  const partial = products.filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
-  const exact = bySku ?? (byName.length === 1 ? byName[0] : undefined);
-  const found = exact ?? (partial.length === 1 ? partial[0] : undefined);
-
-  if (!found) {
-    if (partial.length > 1 || byName.length > 1) {
-      const some = (byName.length > 1 ? byName : partial).slice(0, MAX_LISTED).map(label);
-      return fail(`More than one product matches "${query}": ${list(some)}. Call lookup_product again with the exact SKU.`);
-    }
-    const close = closeMatches(q, products);
-    return fail(
-      close.length
-        ? `No product has the SKU or name "${query}". Close matches: ${list(close.map(label))}. Call lookup_product again with one of these SKUs, or use query_metric with top_products to see what sold.`
-        : `No product has the SKU or name "${query}". Use query_metric with top_products to see the products that sold, then call lookup_product with an exact SKU.`,
-    );
+  // Owner rule: never guess a product. Anything but an exact match ends the turn with a question (clarify.ts).
+  const r = resolveProduct(query, products);
+  if (r.kind === 'confirm') {
+    return {clarify: {question: r.candidates.length === 1 ? `Did you mean **${r.candidates[0].name}**?` : `Which product did you mean by "${query}"?`, options: r.candidates.map(label)}};
   }
+  if (r.kind === 'none') {
+    if (r.nearest.length === 0) return fail(`No product has the SKU or name "${query}". Say so to the owner; use query_metric with top_products to see the products that sold.`);
+    return {clarify: {question: `I couldn't find a product called "${query}". Did you mean one of these?`, options: r.nearest.map(label)}};
+  }
+  const found = r.product;
 
   const completed = data.orders.filter((o2) => isCompletedOrder(o2) && !Number.isNaN(Date.parse(o2.created_at)));
   let dataFrom: string | null = null;

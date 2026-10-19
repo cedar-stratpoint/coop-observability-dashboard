@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import {readFileSync} from 'node:fs';
-import {runChatLoop, UNTRUSTED_TEXT_TOOLS, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
+import {runChatLoop, UNTRUSTED_TEXT_TOOLS, CHAT_DEADLINE_MS, TOOL_DEADLINE_MS, WRAP_UP_TEXT, CUT_OFF_TEXT, DEGENERATE_TEXT, DEADLINE_TEXT, DEADLINE_DRAWN_TEXT, MAX_STEPS_TEXT, ACCOUNT_ERROR_TEXT, ORDER_NUDGE_TEXT, REFUSAL_TEXT, SAFE_ERROR_TEXT, type ChatLoopOptions, type MessagesClient} from '../src/chat/loop';
 import {COST_CAP_TEXT} from '../src/chat/cost';
 import {assertRequestShape} from '../src/chat/request-shape';
 import {CHAT_TOOLS, chatTools, exploreTools} from '../src/chat/tool-defs';
@@ -381,6 +381,16 @@ describe('runChatLoop', () => {
       expect(client.requests).toHaveLength(1);
     });
 
+    it('A7: a deadline after a block was drawn says what is on screen is the answer so far, not a failure', async () => {
+      let t = 0;
+      const render = {block: 'new', source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: 'Chart'};
+      const client = new FakeClient((n) => (n === 1 ? {...toolTurn(toolUse('t1', 'render_chart', render)), text: ['Sales by day.']} : {text: ['never']}));
+      client.onCall = () => void (t += 60_000);
+      const {events, opts} = setup(client, {clock: () => t, executors: {render_chart: async () => ({ok: true, block: 'b1'})}});
+      await runChatLoop(opts);
+      expect(events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d)).toEqual(['Sales by day.', `\n\n${DEADLINE_DRAWN_TEXT}`]);
+    });
+
     it('a fast turn is untouched (no deadline text, normal done)', async () => {
       const client = new FakeClient(() => ({text: ['Fine.']}));
       const {events, opts} = setup(client, {clock: () => 0});
@@ -604,5 +614,46 @@ describe('automatic prompt caching (ai-expert audit, 2026-10-02)', () => {
       const explicit = [...r.system, ...r.tools].filter((b) => b.cache_control).length;
       expect(explicit + 1).toBeLessThanOrEqual(4);
     }
+  });
+});
+
+describe('runChatLoop: clarifying questions end the turn (A2, plan 2026-10-19-ask-coop-inventory-plan.md)', () => {
+  const ASK = {clarify: {question: 'Did you mean **Freeze Dried Yogurt Cubes**?', options: ['Freeze Dried Yogurt Cubes (ZMY1)']}};
+
+  it('the app writes the question with chips and stops: no second model step, no guess', async () => {
+    const client = new FakeClient(() => toolTurn(toolUse('t1', 'lookup_product', {query: 'yoghurt cubes', show: 'details'})));
+    const {events, s, opts} = setup(client, {executors: {lookup_product: async () => ASK}});
+    const sum = await runChatLoop(opts);
+    expect(client.requests).toHaveLength(1);
+    expect(sum.stopReason).toBe('clarify');
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toBe('Did you mean **Freeze Dried Yogurt Cubes**?\n\n<suggest>Freeze Dried Yogurt Cubes (ZMY1)</suggest>');
+    expect(events.at(-1)).toMatchObject({t: 'done'});
+    expect(turnLines(s)[0].stopReason).toBe('clarify');
+  });
+
+  it('text the model already streamed stays, and the question follows it after a blank line', async () => {
+    const client = new FakeClient(() => ({...toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})), text: ['Let me check.']}));
+    const {events, opts} = setup(client, {executors: {lookup_product: async () => ASK}});
+    await runChatLoop(opts);
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toMatch(/^Let me check\.\n\nDid you mean/);
+  });
+
+  it('in an Explore turn the held narration is dropped, only the question is shown', async () => {
+    const client = new FakeClient(() => ({...toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})), text: ['Fix the grouping.']}));
+    const {events, opts} = setup(client, {tools: exploreTools(), executors: {lookup_product: async () => ASK}});
+    await runChatLoop(opts);
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toMatch(/^Did you mean/);
+    expect(text).not.toMatch(/grouping/);
+  });
+
+  it('a refusal ({error}) is not a question: the model gets it and carries on', async () => {
+    const client = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})) : {text: ['No such product.']}));
+    const {opts} = setup(client, {executors: {lookup_product: async () => ({error: 'No product has the SKU or name "x".'})}});
+    const sum = await runChatLoop(opts);
+    expect(client.requests).toHaveLength(2);
+    expect(sum.stopReason).toBe('end_turn');
   });
 });

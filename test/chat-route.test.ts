@@ -500,11 +500,11 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     expect(h.exploreRuns).toEqual([]);
   });
 
-  it('on for an allowed user: run_query, list_tables and describe_table are sent (14 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
+  it('on for an allowed user: run_query, list_tables and describe_table are sent (15 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
     ON();
     await drain(await post(ask()));
     expect(toolNames(lastRequest())).toEqual(expect.arrayContaining(['run_query', 'list_tables', 'describe_table']));
-    expect(toolNames(lastRequest())).toHaveLength(14);
+    expect(toolNames(lastRequest())).toHaveLength(15);
     expect(systemOf(lastRequest())[0].text).toBe(buildStaticSystem({tools: true, explore: true}));
     expect(systemOf(lastRequest())[1].text).toBe(buildLiveContextBlock({explore: true}));
     expect(h.exploreRuns).toHaveLength(1); // the fixed coverage statement, wrapped in the cursor, through the injected driver
@@ -517,7 +517,7 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     ON();
     vi.stubEnv('EXPLORE_ALLOWED_EMAILS', 'someone.else@example.test');
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toHaveLength(11);
+    expect(toolNames(lastRequest())).toHaveLength(12);
     expect(h.exploreRuns).toEqual([]);
   });
 
@@ -525,7 +525,7 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     ON();
     vi.stubEnv('EXPLORE_DATABASE_URL', 'postgres://postgres:pw@127.0.0.1:54421/postgres');
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toHaveLength(11);
+    expect(toolNames(lastRequest())).toHaveLength(12);
   });
 
   it('on but the live read path is degraded (digest-only): no tools at all, so no run_query', async () => {

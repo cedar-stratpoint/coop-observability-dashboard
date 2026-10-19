@@ -1,7 +1,8 @@
-// F5 + F7 + F8 + F10: the strict tool definitions sent to the Messages API, built from the registry. Frozen. Eleven base tools; Explore
-// users get fourteen (plus run_query, list_tables, describe_table); the four website CRM tools add to either (fifteen, or eighteen with
+// F5 + F7 + F8 + F10: the strict tool definitions sent to the Messages API, built from the registry. Frozen. Twelve base tools; Explore
+// users get fifteen (plus run_query, list_tables, describe_table); the four website CRM tools add to either (sixteen, or nineteen with
 // Explore; see chatTools). Strict-mode limits honoured: at most 20 strict tools per request, no optional parameters, no unions, no
 // min/max/pattern/format keywords.
+import {ASK_ABOUT} from './clarify';
 import {CHECKOUT_GROUPS, CHECKOUT_STAGES, CHECKOUT_STATUSES, CRM_LIMIT_VALUES, CUSTOMER_BUYERS, CUSTOMER_GROUPS, CUSTOMER_SORTS, CUSTOMER_TIERS, ORDER_GROUPS, ORDER_STATUSES} from './crm/tools';
 import {DIGEST_SECTIONS, DIGEST_WINDOWS, PRODUCT_SHOWS} from './digest-lookup';
 import {METRICS, METRIC_IDS} from './metrics-registry';
@@ -51,10 +52,10 @@ const queryMetric: ToolDefinition = {
       range: {type: 'string', enum: ['last_week', 'this_week', 'last_month', 'all_available', 'custom'], description: 'The period, in Philippine time.'},
       from: {type: 'string', description: 'YYYY-MM-DD or "" unless range is custom'},
       to: {type: 'string', description: 'YYYY-MM-DD or "" unless range is custom'},
-      channel: {type: 'string', enum: ['offline', 'all'], description: 'Only offline POS is connected.'},
+      channel: {type: 'string', enum: ['offline', 'all'], description: 'This tool reads offline POS only: "all" here still means offline POS. For all channels (Shopee, Lazada, Website and offline) use get_channel_report.'},
       event: {type: 'string', description: 'An event name or "all"'},
       pet: {type: 'string', enum: ['all', 'dog', 'cat', 'both', 'untagged'], description: 'Filter by the pet the sale was tagged for.'},
-      compare_to: {type: 'string', enum: ['none', 'previous_period'], description: 'Add the previous period of equal length.'},
+      compare_to: {type: 'string', enum: ['none', 'previous_period'], description: 'Add the previous period of equal length (whole calendar months: the previous whole months).'},
       sort: {type: 'string', enum: ['default', 'value_desc', 'value_asc'], description: 'Row order for ranked lists.'},
       limit: {type: 'integer', enum: [3, 5, 10, 25], description: 'Maximum rows for ranked lists.'},
     },
@@ -132,7 +133,8 @@ const lookupProduct: ToolDefinition = {
   description:
     'Look up ONE product by SKU or name in the offline POS data: its current price, units and revenue sold, first and last sale, or its price changes. ' +
     'Call it when the owner names a specific product or SKU. To rank or list products use query_metric (top_products) instead. ' +
-    'If the name is ambiguous or unknown it returns the matches or close matches: call it again with the exact SKU. It does not return stock levels.',
+    'Pass the name exactly as the owner typed it, typos included: never correct or guess it yourself. If it is not an exact match, the app asks the owner to confirm and ends your turn; ' +
+    'when the owner then picks "Name (SKU)", call it again with that SKU. It does not return stock levels.',
   strict: true,
   input_schema: {
     type: 'object',
@@ -343,7 +345,24 @@ const setReportTitle: ToolDefinition = {
   cache_control: {type: 'ephemeral'},
 };
 
-export const CHAT_TOOLS: readonly ToolDefinition[] = deepFreeze([describeData, queryMetric, getDigest, getChannelReport, lookupProduct, renderKpi, renderChart, renderTable, setReportFilters, removeBlock, setReportTitle]);
+// A3: one question that ends the turn. The app writes the question and its tap choices (clarify.ts ASKS); the model picks only the topic.
+const askOwner: ToolDefinition = {
+  name: 'ask_owner',
+  description:
+    'Ask the owner ONE clarifying question and end your turn; the app writes the question and its tap choices. Call it BEFORE any data tool when the question is missing something you need: ' +
+    '"period" when it names no dates; "channel" when it asks about sales or revenue without saying which channel and the page or the chat so far does not say; ' +
+    '"comparison" when it asks to compare without saying with what. Never ask what the owner already said, never ask about stock (stock has no period, and shows every location), and ask about one thing at a time.',
+  // Not strict: adds nothing to the compiled grammar (the full strict set sits near the API cap, see list_crm_*); askOwner() refuses any other topic.
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {about: {type: 'string', enum: [...ASK_ABOUT], description: 'What is missing from the question.'}},
+    required: ['about'],
+    additionalProperties: false,
+  },
+};
+
+export const CHAT_TOOLS: readonly ToolDefinition[] = deepFreeze([describeData, queryMetric, getDigest, getChannelReport, lookupProduct, askOwner, renderKpi, renderChart, renderTable, setReportFilters, removeBlock, setReportTitle]);
 
 // Schema tools (spec 2.3): live from the database as the read-only login, merged with the catalog notes. Only domains with an open table.
 const listTables: ToolDefinition = {
@@ -364,7 +383,7 @@ const VARIANTS = new Map<string, readonly ToolDefinition[]>();
 /**
  * The tool list for one request: CHAT_TOOLS, plus run_query, list_tables and describe_table after query_metric (Explore users), plus
  * the four CRM tools after get_channel_report (CRM configured and CHAT_CRM_TOOLS not off). set_report_title stays last and keeps the
- * cache breakpoint. Sizes: 11 base, 14 with Explore, 15 with the CRM tools, 18 with both (strict-tool limit 20).
+ * cache breakpoint. Sizes: 12 base, 15 with Explore, 16 with the CRM tools, 19 with both (strict-tool limit 20).
  */
 export function chatTools(opts: {explore: boolean; crm: boolean}): readonly ToolDefinition[] {
   const key = `${opts.explore}-${opts.crm}`;
