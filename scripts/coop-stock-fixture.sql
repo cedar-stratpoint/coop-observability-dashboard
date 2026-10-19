@@ -15,6 +15,9 @@ create table if not exists public.pos_stock_movements (
 );
 create or replace view public.pos_inventory_by_location as
   select product_id, location, sum(qty_on_hand)::integer as stock from public.pos_inventory_lots group by product_id, location;
+-- Like staging (zoomy-pos): security_invoker. A definer view over it checks the CALLER's table privileges, so a chat view built on it
+-- fails for coop_chat_ro ("permission denied"). The fixture keeps that setting so the local stack catches this (2026-10-19).
+alter view public.pos_inventory_by_location set (security_invoker = on);
 create or replace view public.pos_inventory as
   select product_id, sum(qty_on_hand)::integer as stock, min(expires_on) filter (where qty_on_hand > 0) as next_expiry
   from public.pos_inventory_lots group by product_id;
