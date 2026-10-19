@@ -8,7 +8,7 @@ import type {LazadaCustomer} from '../../lazada-types';
 import {manilaDayKey} from '../../pos-sales-compute';
 import type {SpinLead} from '../../spin-leads-types';
 import type {MetricRow, ResultColumn} from '../result-types';
-import {clean, type LeadsTable} from './leads';
+import {clean, type FindInput, type LeadsTable, type OverlapInput} from './leads';
 
 export const PEOPLE_FIND_MAX = 10;
 export const PEOPLE_OVERLAP_MAX = 200;
@@ -22,16 +22,7 @@ export interface PeopleSource {
   website?: EnrichedCustomer[] | null;
   websiteNote?: string | null;
 }
-export interface FindInput {
-  mode: 'find';
-  query: string;
-}
-export interface OverlapInput {
-  mode: 'overlap';
-  a: ContactSource;
-  b: ContactSource;
-}
-
+export type { FindInput, OverlapInput };
 export interface PeopleOutcome {
   table: LeadsTable;
   model: {counts: Record<string, number>; rows: MetricRow[]; notes: string[]};

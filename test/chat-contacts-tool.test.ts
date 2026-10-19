@@ -5,6 +5,7 @@ import {assertRequestShape} from '../src/chat/request-shape';
 import type {LeadsSource} from '../src/chat/contacts/leads';
 import type {ChatBlock} from '../src/chat/block-types';
 import type {MetricData} from '../src/chat/result-types';
+import {fakeCrmClient} from './support/crm-fixtures';
 
 const SOURCE: LeadsSource = {
   events: [{event_id: 'e1', name: 'Modern Market Sept 2026', starts_on: '2026-09-26', ends_on: '2026-09-28'}],
@@ -63,5 +64,32 @@ describe('contacts tool', () => {
     expect(all.some((t) => t.name === 'contacts')).toBe(true);
     expect(all.length).toBeLessThanOrEqual(20);
     expect(() => assertRequestShape({model: 'm', max_tokens: 1, tools: all, messages: []})).not.toThrow();
+  });
+
+  it('find reads the website customers through the GET-only CRM client, merges with booth and Lazada, and audits without the query', async () => {
+    const blocks: ChatBlock[] = [];
+    const info = vi.fn();
+    const {client, gets} = fakeCrmClient();
+    const source: LeadsSource = {...SOURCE, lazada: [{phone: '09170000001', name: 'Ana Lz', city: null, lastOrderAt: '2026-08-01T00:00:00Z', firstOrderAt: '2026-05-01T00:00:00Z', lastProduct: null, payMethod: null, totalSpent: 100, avgOrder: 100, orderCount: 1, daysSince: 3}]};
+    const ex = createExecutors({data: async () => data, now: NOW, user: 'boss@x.com', leads: async () => source, crm: client, emitBlock: (b) => blocks.push(b), sink: {info, error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'find', query: 'ana@example.com'})) as {shown: boolean; rows: {sources: string}[]};
+    expect(out.shown).toBe(true);
+    expect(out.rows[0].sources).toBe('website, booth, lazada');
+    expect(gets.sort()).toEqual(['customers', 'membership', 'orders']);
+    expect(blocks[0]).toMatchObject({kind: 'table', pii: true});
+    const lines = info.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => l.includes('chat_pii_read'))).toBe(true);
+    expect(lines.join('\n')).not.toMatch(/ana@example|0917/);
+  });
+  it('find without a CRM client still answers from booth and Lazada and says the website is missing', async () => {
+    const ex = createExecutors({data: async () => data, now: NOW, user: null, leads: async () => SOURCE, emitBlock: () => undefined, sink: {info: vi.fn(), error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'find', query: 'ana@example.com'})) as {notes: string[]};
+    expect(out.notes.join(' ')).toMatch(/website CRM is not included/);
+  });
+  it('overlap refuses to answer when the website CRM cannot be read', async () => {
+    const {client} = fakeCrmClient({});
+    const ex = createExecutors({data: async () => data, now: NOW, user: null, leads: async () => SOURCE, crm: client, emitBlock: () => undefined, sink: {info: vi.fn(), error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'overlap', a: 'website', b: 'booth'})) as {error: string};
+    expect(out.error).toMatch(/website CRM/i);
   });
 });

@@ -24,6 +24,8 @@ export interface LeadsSource {
   events: LeadsEvent[];
   /** What each lead bought at the till, by leadKey(). Optional: absent when the orders could not be read. */
   matches?: Record<string, LeadBought>;
+  /** Lazada buyers (the Customers page's rollup by phone). Optional: absent when they could not be read. */
+  lazada?: import('../../lazada-types').LazadaCustomer[] | null;
 }
 
 export const CONTACT_KINDS = ['all', 'email', 'mobile', 'instagram_only'] as const;
@@ -52,15 +54,37 @@ export interface DraftInput extends Target {
   /** Messages the model wrote for numbered rows of the list (a small batch). */
   per_lead?: {n: number; text: string}[];
 }
-export type ContactsInput = ListInput | DraftInput;
+export interface FindInput {
+  mode: 'find';
+  /** A name, email, mobile number or pet name. */
+  query: string;
+}
+export interface OverlapInput {
+  mode: 'overlap';
+  a: 'website' | 'booth' | 'lazada';
+  b: 'website' | 'booth' | 'lazada';
+}
+export type ContactsInput = ListInput | DraftInput | FindInput | OverlapInput;
+export const MAX_QUERY = 80;
 
 export function readContactsInput(input: unknown): ContactsInput | {error: string} {
   const i = input !== null && typeof input === 'object' ? (input as Record<string, unknown>) : {};
-  if (i.mode !== 'list_leads' && i.mode !== 'draft') return {error: 'mode must be "list_leads" or "draft".'};
+  if (i.mode === 'find') {
+    if (typeof i.query !== 'string' || i.query.trim() === '' || i.query.length > MAX_QUERY) return {error: `query must be a name, email, mobile number or pet name (1 to ${MAX_QUERY} characters).`};
+    return {mode: 'find', query: i.query.trim()};
+  }
+  if (i.mode === 'overlap') {
+    const ok = (v: unknown) => v === 'website' || v === 'booth' || v === 'lazada';
+    if (!ok(i.a) || !ok(i.b) || i.a === i.b) return {error: 'a and b must be two different sources: website, booth or lazada.'};
+    return {mode: 'overlap', a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b']};
+  }
+  if (i.mode !== 'list_leads' && i.mode !== 'draft') return {error: 'mode must be "list_leads", "draft", "find" or "overlap".'};
   if (typeof i.event !== 'string' || i.event.trim() === '' || i.event.length > 120) return {error: 'event must be the event name the owner gave (1 to 120 characters).'};
-  if (!(CONTACT_KINDS as readonly unknown[]).includes(i.contact)) return {error: `contact must be one of: ${CONTACT_KINDS.join(', ')}.`};
-  if (!(LEAD_LIMITS as readonly unknown[]).includes(i.limit)) return {error: `limit must be one of: ${LEAD_LIMITS.join(', ')}.`};
-  const target: Target = {event: i.event.trim(), contact: i.contact as Target['contact'], limit: i.limit as Target['limit']};
+  const contact = i.contact ?? 'all';
+  const limit = i.limit ?? 100;
+  if (!(CONTACT_KINDS as readonly unknown[]).includes(contact)) return {error: `contact must be one of: ${CONTACT_KINDS.join(', ')}.`};
+  if (!(LEAD_LIMITS as readonly unknown[]).includes(limit)) return {error: `limit must be one of: ${LEAD_LIMITS.join(', ')}.`};
+  const target: Target = {event: i.event.trim(), contact: contact as Target['contact'], limit: limit as Target['limit']};
   if (i.mode === 'list_leads') return {mode: 'list_leads', ...target};
   if (!(CHANNELS as readonly unknown[]).includes(i.channel)) return {error: `channel must be one of: ${CHANNELS.join(', ')}.`};
   const hasTemplate = typeof i.template === 'string' && i.template.trim() !== '';

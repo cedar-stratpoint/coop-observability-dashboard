@@ -43,7 +43,7 @@ describe('real tree', () => {
   });
 
   it('the leads seam reaches only the loaders the leads page itself uses', () => {
-    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/lead-order-match', '@/src/pos-prize-data', '@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
+    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/lazada-data', '@/src/lazada-export', '@/src/lead-order-match', '@/src/pos-prize-data', '@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
   });
 
   it('no chat module or the chat route mentions src/crm-data.ts in any import form', () => {

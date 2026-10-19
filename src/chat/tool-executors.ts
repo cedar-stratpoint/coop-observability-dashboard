@@ -1,6 +1,9 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
 import {draftLeads} from './contacts/draft';
+import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
+import {tracked} from './crm/executors';
+import {crmEnrichedCustomers} from './crm/tools';
 import {listEventLeads, readContactsInput} from './contacts/leads';
 import {logPiiRead} from './audit';
 import {askOwner, isClarify, type ClarifyResult} from './clarify';
@@ -40,6 +43,14 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     const id = `r${counter}`;
     session.store.set(id, {...r, id});
     return compact(r, id);
+  };
+
+  // The website side of find/overlap goes through the chat's own GET-only CRM client (one chat_crm_call line per read); never src/crm-data.ts.
+  const peopleSource = async (s: import('./contacts/leads').LeadsSource): Promise<PeopleSource> => {
+    const base = {leads: s.leads, lazada: s.lazada ?? null};
+    if (!ctx.crm) return {...base, website: null, websiteNote: 'the website CRM is not connected for this chat'};
+    const out = await tracked({client: ctx.crm, user: ctx.user, sink: ctx.sink}, 'contacts', {endpoint: 'customers'}, (get) => crmEnrichedCustomers(get, ctx.now), (r) => r.enriched.length);
+    return 'error' in out ? {...base, website: null, websiteNote: out.error.split('. ')[0].toLowerCase()} : {...base, website: out.enriched};
   };
 
   return {
@@ -130,7 +141,13 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       const req = readContactsInput(input);
       if ('error' in req) return {error: req.error};
       const source = await ctx.leads!();
-      const out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
+      let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
+      if (req.mode === 'find' || req.mode === 'overlap') {
+        const people = await peopleSource(source);
+        out = req.mode === 'find' ? findPeople(req, people) : overlapPeople(req, people);
+      } else {
+        out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
+      }
       if ('table' in out) {
         contactBlocks += 1;
         ctx.emitBlock?.({kind: 'table', id: `c${contactBlocks}`, source: `contacts:${out.audit.eventId}`, ...out.table});
