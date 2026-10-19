@@ -64,7 +64,24 @@ export interface OverlapInput {
   a: 'website' | 'booth' | 'lazada';
   b: 'website' | 'booth' | 'lazada';
 }
-export type ContactsInput = ListInput | DraftInput | FindInput | OverlapInput;
+export const MATCH_SCOPES = ['person', 'event', 'sources'] as const;
+export const MATCH_TIERS = ['weak', 'possible', 'likely', 'confirmed'] as const;
+export type MatchTier = (typeof MATCH_TIERS)[number];
+export interface MatchInput {
+  mode: 'matches';
+  scope: (typeof MATCH_SCOPES)[number];
+  /** scope person: a name, email, mobile or pet name. */
+  query?: string;
+  /** scope event: the event name. */
+  event?: string;
+  /** scope sources: the two sources to link. */
+  a?: OverlapInput['a'];
+  b?: OverlapInput['b'];
+  /** Show links at this tier or better. */
+  min_tier: MatchTier;
+  limit: (typeof LEAD_LIMITS)[number];
+}
+export type ContactsInput = ListInput | DraftInput | FindInput | OverlapInput | MatchInput;
 export const MAX_QUERY = 80;
 
 export function readContactsInput(input: unknown): ContactsInput | {error: string} {
@@ -78,7 +95,26 @@ export function readContactsInput(input: unknown): ContactsInput | {error: strin
     if (!ok(i.a) || !ok(i.b) || i.a === i.b) return {error: 'a and b must be two different sources: website, booth or lazada.'};
     return {mode: 'overlap', a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b']};
   }
-  if (i.mode !== 'list_leads' && i.mode !== 'draft') return {error: 'mode must be "list_leads", "draft", "find" or "overlap".'};
+  if (i.mode === 'matches') {
+    const minTier = i.min_tier ?? 'weak';
+    const lim = i.limit ?? 50;
+    if (!(MATCH_SCOPES as readonly unknown[]).includes(i.scope)) return {error: `scope must be one of: ${MATCH_SCOPES.join(', ')}.`};
+    if (!(MATCH_TIERS as readonly unknown[]).includes(minTier)) return {error: `min_tier must be one of: ${MATCH_TIERS.join(', ')}.`};
+    if (!(LEAD_LIMITS as readonly unknown[]).includes(lim)) return {error: `limit must be one of: ${LEAD_LIMITS.join(', ')}.`};
+    const base = {mode: 'matches' as const, scope: i.scope as MatchInput['scope'], min_tier: minTier as MatchTier, limit: lim as MatchInput['limit']};
+    if (i.scope === 'person') {
+      if (typeof i.query !== 'string' || i.query.trim() === '' || i.query.length > MAX_QUERY) return {error: `scope person needs query: a name, email, mobile number or pet name (1 to ${MAX_QUERY} characters).`};
+      return {...base, query: i.query.trim()};
+    }
+    if (i.scope === 'event') {
+      if (typeof i.event !== 'string' || i.event.trim() === '' || i.event.length > 120) return {error: 'scope event needs event: the event name the owner gave (1 to 120 characters).'};
+      return {...base, event: i.event.trim()};
+    }
+    const ok = (v: unknown) => v === 'website' || v === 'booth' || v === 'lazada';
+    if (!ok(i.a) || !ok(i.b) || (i.a === i.b && i.a !== 'booth')) return {error: 'scope sources needs a and b: two different sources (website, booth, lazada), or booth with booth.'};
+    return {...base, a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b']};
+  }
+  if (i.mode !== 'list_leads' && i.mode !== 'draft') return {error: 'mode must be "list_leads", "draft", "find", "overlap" or "matches".'};
   if (typeof i.event !== 'string' || i.event.trim() === '' || i.event.length > 120) return {error: 'event must be the event name the owner gave (1 to 120 characters).'};
   const contact = i.contact ?? 'all';
   const limit = i.limit ?? 100;
