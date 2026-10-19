@@ -9,7 +9,7 @@ import {ChevronRight, FlaskConical, TriangleAlert} from 'lucide-react';
 import type {ChartBlock, ChatBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
 import type {MetricRow, ResultColumn} from '@/src/chat/result-types';
 import {cn} from '@/lib/utils';
-import {downloadCsv} from '@/src/csv';
+import {downloadCsv} from '../../src/csv';
 import {copyList, csvRows, formatCategory, formatValue} from './chat-blocks-format';
 
 // Recharts is an async chunk (same pattern as charts-lazy.tsx); the skeleton holds the height so there is no layout jump.
