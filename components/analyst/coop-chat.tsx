@@ -72,7 +72,7 @@ const APP_PATHS = new Set(['/', '/traffic', '/health', '/repricer', '/offline-sa
  *  actions, tolerating partially-streamed hidden tags. */
 function parseAssistant(raw: string): {text: string; suggestions: string[]; actions: NavAction[]} {
   const sm = raw.match(/<suggest>([\s\S]*?)<\/suggest>/);
-  const suggestions = sm ? sm[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 3) : [];
+  const suggestions = sm ? sm[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 5) : []; // 5: a clarifying question offers up to 5 choices (src/chat/clarify.ts)
 
   const gm = raw.match(/<go>([\s\S]*?)<\/go>/);
   const actions: NavAction[] = gm

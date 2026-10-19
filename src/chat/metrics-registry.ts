@@ -134,12 +134,14 @@ function uniqueLabels(items: {label: string; id: string}[]): string[] {
 
 interface Bucket {period: string; revenueC: number; orders: number}
 
-/** Day or week buckets inside the covered part of the range. Empty days inside coverage are real zeros. */
-function timeBuckets(ctx: ComputeContext, by: 'day' | 'week'): Bucket[] {
+type Grain = 'day' | 'week' | 'month';
+
+/** Day, week or month buckets inside the covered part of the range. Empty days inside coverage are real zeros. */
+function timeBuckets(ctx: ComputeContext, by: Grain): Bucket[] {
   const {from, to} = ctx.covered;
   if (!from || !to) return [];
   const daily = new Map(salesByDay(ctx.orders).map((d) => [d.day, d]));
-  const keyOf = (day: string): string => (by === 'day' ? day : mondayOf(day));
+  const keyOf = (day: string): string => (by === 'day' ? day : by === 'week' ? mondayOf(day) : `${day.slice(0, 7)}-01`);
   const buckets = new Map<string, Bucket>();
   for (const day of dayKeysBetween(from, to)) {
     const k = keyOf(day);
@@ -159,6 +161,13 @@ function weekNote(ctx: ComputeContext): string[] {
   if (!from || !to) return [];
   const partial = mondayOf(from) !== from || addDaysKey(mondayOf(to), 6) !== to;
   return partial ? ['Weeks run Monday to Sunday; the first or last week is partial because the range does not start on a Monday or end on a Sunday.'] : [];
+}
+
+function monthNote(ctx: ComputeContext): string[] {
+  const {from, to} = ctx.covered;
+  if (!from || !to) return [];
+  const partial = !from.endsWith('-01') || addDaysKey(to, 1).slice(8) !== '01';
+  return partial ? ['The first or last month is partial because the range does not start on a 1st or end on a month end.'] : [];
 }
 
 type TotalsKey = 'revenue' | 'orders' | 'aov';
@@ -183,10 +192,10 @@ function computeTotals(ctx: ComputeContext, measure: TotalsKey): ComputeOutput {
     return out;
   }
 
-  const by = ctx.dimension === 'week' ? 'week' : 'day';
+  const by: Grain = ctx.dimension === 'week' || ctx.dimension === 'month' ? ctx.dimension : 'day';
   const buckets = timeBuckets(ctx, by);
-  out.notes = by === 'week' ? weekNote(ctx) : [];
-  const periodCol = col('period', by === 'week' ? 'Week starting (Monday)' : 'Day', 'date', 'time');
+  out.notes = by === 'week' ? weekNote(ctx) : by === 'month' ? monthNote(ctx) : [];
+  const periodCol = col('period', by === 'week' ? 'Week starting (Monday)' : by === 'month' ? 'Month starting' : 'Day', 'date', 'time');
   if (measure === 'aov') {
     out.columns = [periodCol, col('orders', 'Orders', 'count', 'measure'), col('revenue', 'Revenue', 'PHP', 'measure'), col('aov', 'Average order value', 'PHP', 'measure')];
     out.rows = buckets.map((b) => ({period: b.period, orders: b.orders, revenue: b.revenueC / 100, aov: b.orders === 0 ? null : r2(b.revenueC / 100 / b.orders)}));
@@ -619,6 +628,7 @@ const NONE_DAY_WEEK: DimensionDecl[] = [
   {key: 'none', label: 'Total for the range', shape: 'aggregate'},
   {key: 'day', label: 'By day (Philippine time)', shape: 'series'},
   {key: 'week', label: 'By week (Monday start)', shape: 'series'},
+  {key: 'month', label: 'By calendar month', shape: 'series'},
 ];
 const NONE_ONLY: DimensionDecl[] = [{key: 'none', label: 'Ranked list', shape: 'category'}];
 
@@ -635,7 +645,7 @@ const DEFS: MetricDef[] = [
   {
     id: 'offline_revenue',
     label: 'Offline revenue',
-    description: 'Revenue from offline POS sales (bazaars, events and walk-ins), in total or by day or week.',
+    description: 'Revenue from offline POS sales (bazaars, events and walk-ins), in total or by day, week or month.',
     dimensions: NONE_DAY_WEEK,
     measures: [REVENUE],
     defaultMeasure: 'revenue',
@@ -647,7 +657,7 @@ const DEFS: MetricDef[] = [
   {
     id: 'offline_orders',
     label: 'Offline orders',
-    description: 'Number of offline POS orders, in total or by day or week.',
+    description: 'Number of offline POS orders, in total or by day, week or month.',
     dimensions: NONE_DAY_WEEK,
     measures: [ORDERS],
     defaultMeasure: 'orders',
@@ -659,7 +669,7 @@ const DEFS: MetricDef[] = [
   {
     id: 'offline_aov',
     label: 'Offline average order value',
-    description: 'Average spend per offline POS order, in total or by day or week.',
+    description: 'Average spend per offline POS order, in total or by day, week or month.',
     dimensions: NONE_DAY_WEEK,
     measures: [AOV],
     defaultMeasure: 'aov',
@@ -762,12 +772,16 @@ const DEFS: MetricDef[] = [
   {
     id: 'stock_on_hand',
     label: 'Stock on hand',
-    description: 'Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all locations, or per location.',
+    description: 'Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all POS locations, per location, BoxMe online, all channels (POS + BoxMe), or BoxMe lots expiring soon.',
+    // Reads coop_chat_stock_by_location (POS) and the coop_chat_boxme_* views (BoxMe, synced daily; supabase/coop_chat_boxme.sql).
     dimensions: [
       {key: 'sellable', label: 'Per product, Event (sellable) stock', shape: 'category'},
       {key: 'office', label: 'Per product, Office (back) stock', shape: 'category'},
-      {key: 'all_locations', label: 'Per product, all locations', shape: 'category'},
+      {key: 'all_locations', label: 'Per product, all POS locations', shape: 'category'},
       {key: 'by_location', label: 'Per product and location', shape: 'matrix'},
+      {key: 'online', label: 'Per product, BoxMe (online warehouse) available', shape: 'category'},
+      {key: 'all_channels', label: 'Per product, Event + Office + BoxMe and the total', shape: 'category'},
+      {key: 'expiring_online', label: 'BoxMe lots expiring soon', shape: 'category'},
     ],
     measures: [{key: 'units', label: 'Stock', kind: 'measured', unit: 'units', method: 'Units on hand in the stock lots, per location, as of now'}],
     defaultMeasure: 'units',
@@ -779,8 +793,11 @@ const DEFS: MetricDef[] = [
   {
     id: 'stock_cover',
     label: 'Stock cover',
-    description: 'How many selling days the Event (sellable) stock lasts per product, with status (out, low, healthy): the Inventory page forecast, as of now.',
-    dimensions: [{key: 'sku', label: 'Per product', shape: 'category'}],
+    description: 'How long stock lasts per product, with status (out, low, healthy), as of now: Event (sellable) stock in selling days (the Inventory forecast), or BoxMe online stock in days.',
+    dimensions: [
+      {key: 'sku', label: 'Per product, Event (sellable) stock in selling days', shape: 'category'},
+      {key: 'online', label: 'Per product, BoxMe online stock in days (sales speed estimated from stock drops)', shape: 'category'},
+    ],
     measures: [{key: 'cover', label: 'Cover (selling days)', kind: 'derived', unit: 'ratio', method: 'Event stock divided by units sold per selling day over the last 60 days (the Inventory forecast), as of now'}],
     defaultMeasure: 'cover',
     defaultDimension: 'sku',

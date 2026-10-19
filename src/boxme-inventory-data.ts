@@ -6,11 +6,8 @@ import {getLocationStock} from './pos-location-data';
 import {getStockConfig} from './pos-stock-settings';
 import {POS_TAGS, POS_CACHE_REVALIDATE} from './pos-cache';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {
-  buildBoxmeInventory, syncInfo,
-  type BoxmeInventoryResult, type BoxmeProduct, type BoxmeWarehouse, type BoxmeStockRow,
-  type BoxmeDailyRow, type BoxmeLotRow, type BoxmeSyncRun, type PosRef, type BoxmeInventoryRow,
-} from './boxme-inventory-compute';
+import {buildBoxmeInventory, syncInfo, type BoxmeInventoryResult, type PosRef, type BoxmeInventoryRow} from './boxme-inventory-compute';
+import {BOXME_COLUMNS, BOXME_HISTORY_DAYS, mapBoxmeFeed, type BoxmeFeed} from './boxme-feed';
 import {MOCK_BOXME_PRODUCTS, MOCK_BOXME_WAREHOUSES, mockBoxmeFeed} from './boxme-mock';
 
 // SERVER-ONLY. The BoxMe (Online) channel of /inventory. Reads the boxme_* tables
@@ -26,74 +23,33 @@ export interface BoxmePageData extends BoxmeInventoryResult {
   loadError: string | null;
 }
 
-/** Days of daily snapshots to load for the sales-speed estimate. */
-const HISTORY_DAYS = 35;
-
-interface RawFeed {
-  products: BoxmeProduct[];
-  warehouses: BoxmeWarehouse[];
-  stock: BoxmeStockRow[];
-  daily: BoxmeDailyRow[];
-  lots: BoxmeLotRow[];
-  runs: BoxmeSyncRun[];
-}
-
-const n = (v: unknown) => Number(v ?? 0) || 0;
-
 // The feed changes once a day, so the shared 30s window is plenty; the tag lets a
 // future "sync now" action invalidate it.
-const boxmeFeedCached = unstable_cache(async (): Promise<RawFeed> => {
+const boxmeFeedCached = unstable_cache(async (): Promise<BoxmeFeed> => {
   const sb = posClient();
-  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const since = new Date(Date.now() - BOXME_HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
   const [products, warehouses, stock, daily, lots, runsRes] = await Promise.all([
-    fetchAllRows('boxme_products', (from, to) =>
-      sb.from('boxme_products').select('seller_sku,name,active,sale_price,min_quantity,expiry_threshold,image_url').order('seller_sku').range(from, to)),
-    fetchAllRows('boxme_warehouses', (from, to) =>
-      sb.from('boxme_warehouses').select('pickup_id,warehouse_code,pickup_name').order('pickup_id').range(from, to)),
-    fetchAllRows('boxme_stock', (from, to) =>
-      sb.from('boxme_stock')
-        .select('seller_sku,pickup_id,stock,awaiting,reserved,available,incoming,damaged_stock,damaged_available,synced_at')
-        .order('seller_sku').order('pickup_id').range(from, to)),
+    fetchAllRows('boxme_products', (from, to) => sb.from('boxme_products').select(BOXME_COLUMNS.products).order('seller_sku').range(from, to)),
+    fetchAllRows('boxme_warehouses', (from, to) => sb.from('boxme_warehouses').select(BOXME_COLUMNS.warehouses).order('pickup_id').range(from, to)),
+    fetchAllRows('boxme_stock', (from, to) => sb.from('boxme_stock').select(BOXME_COLUMNS.stock).order('seller_sku').order('pickup_id').range(from, to)),
     fetchAllRows('boxme_stock_daily', (from, to) =>
-      sb.from('boxme_stock_daily').select('snapshot_date,seller_sku,pickup_id,stock,available')
+      sb.from('boxme_stock_daily').select(BOXME_COLUMNS.daily)
         .gte('snapshot_date', since)
         .order('snapshot_date').order('seller_sku').order('pickup_id').range(from, to)),
     fetchAllRows('boxme_stock_lots', (from, to) =>
-      sb.from('boxme_stock_lots').select('seller_sku,warehouse_code,batch_lot,expire_date,quantity,synced_at')
+      sb.from('boxme_stock_lots').select(BOXME_COLUMNS.lots)
         .order('seller_sku').order('warehouse_code').order('batch_lot').order('expire_date').range(from, to)),
-    // Bounded: only the recent runs matter for freshness.
+    // Bounded: only the recent runs matter for freshness. The page also shows the error and the API key expiry.
     sb.from('boxme_sync_runs')
-      .select('id,started_at,finished_at,status,skus_seen,skus_written,error,key_expires_at')
+      .select(`${BOXME_COLUMNS.runs},error,key_expires_at`)
       .order('started_at', {ascending: false}).limit(20),
   ]);
   if (runsRes.error) throw new Error(`boxme_sync_runs read failed: ${runsRes.error.message}`);
-
-  return {
-    products: products.map((p) => ({
-      seller_sku: String(p.seller_sku), name: String(p.name ?? p.seller_sku), active: p.active !== false,
-      sale_price: p.sale_price == null ? null : n(p.sale_price), min_quantity: n(p.min_quantity),
-      expiry_threshold: p.expiry_threshold == null ? null : n(p.expiry_threshold), image_url: (p.image_url as string | null) ?? null,
-    })),
-    warehouses: warehouses.map((w) => ({pickup_id: String(w.pickup_id), warehouse_code: (w.warehouse_code as string | null) ?? null, pickup_name: (w.pickup_name as string | null) ?? null})),
-    stock: stock.map((r) => ({
-      seller_sku: String(r.seller_sku), pickup_id: String(r.pickup_id), stock: n(r.stock), awaiting: n(r.awaiting), reserved: n(r.reserved),
-      available: n(r.available), incoming: n(r.incoming), damaged_stock: n(r.damaged_stock), damaged_available: n(r.damaged_available), synced_at: String(r.synced_at),
-    })),
-    daily: daily.map((r) => ({snapshot_date: String(r.snapshot_date), seller_sku: String(r.seller_sku), pickup_id: String(r.pickup_id), stock: n(r.stock), available: n(r.available)})),
-    lots: lots.map((l) => ({
-      seller_sku: String(l.seller_sku), warehouse_code: String(l.warehouse_code), batch_lot: String(l.batch_lot ?? ''),
-      expire_date: String(l.expire_date), quantity: n(l.quantity), synced_at: String(l.synced_at),
-    })),
-    runs: (runsRes.data ?? []).map((r) => ({
-      id: n(r.id), started_at: String(r.started_at), finished_at: (r.finished_at as string | null) ?? null,
-      status: r.status as BoxmeSyncRun['status'], skus_seen: n(r.skus_seen), skus_written: n(r.skus_written),
-      error: (r.error as string | null) ?? null, key_expires_at: (r.key_expires_at as string | null) ?? null,
-    })),
-  };
+  return mapBoxmeFeed({products, warehouses, stock, daily, lots, runs: (runsRes.data ?? []) as Record<string, unknown>[]});
 }, ['boxme-feed'], {tags: [POS_TAGS.boxme], revalidate: POS_CACHE_REVALIDATE});
 
 /** The raw feed for this request: demo data, the cached tables, or the read error. */
-const loadFeed = cache(async (): Promise<{feed: RawFeed; mock: boolean} | {error: string}> => {
+const loadFeed = cache(async (): Promise<{feed: BoxmeFeed; mock: boolean} | {error: string}> => {
   if (usingPosMock()) {
     return {feed: {products: MOCK_BOXME_PRODUCTS, warehouses: MOCK_BOXME_WAREHOUSES, ...mockBoxmeFeed(new Date())}, mock: true};
   }

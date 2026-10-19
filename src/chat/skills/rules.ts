@@ -26,7 +26,7 @@ export const RULES: readonly {id: string; enforcedBy: RuleEnforcement; where: st
   {id: 'BI-06', enforcedBy: 'code', where: 'src/chat/query-metric.ts "No tag" bucket kept on its own'},
   {id: 'BI-07', enforcedBy: 'code', where: 'src/chat/query-metric.ts shares from unrounded values'},
   {id: 'BI-08', enforcedBy: 'code', where: 'src/chat/query-metric.ts "Showing the first N of M" caveat (claim restriction is guide)'},
-  {id: 'BI-10', enforcedBy: 'code', where: 'src/chat/range.ts previous period of equal length'},
+  {id: 'BI-10', enforcedBy: 'code', where: 'src/chat/range.ts previous period of equal length, or the previous whole calendar months'},
   {id: 'BI-11', enforcedBy: 'code', where: 'src/chat/query-metric.ts empty earlier period is null, never 0'},
   {id: 'BI-12', enforcedBy: 'guide', where: 'guide'},
   {id: 'BI-13', enforcedBy: 'code', where: 'src/chat/checks.ts small_sample'},

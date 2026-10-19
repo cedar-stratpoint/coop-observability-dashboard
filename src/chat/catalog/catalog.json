@@ -32,7 +32,13 @@
     "pos_inventory_by_location",
     "pos_inventory_lots",
     "pos_stock_movements",
-    "pos_locations"
+    "pos_locations",
+    "boxme_products",
+    "boxme_warehouses",
+    "boxme_stock",
+    "boxme_stock_daily",
+    "boxme_stock_lots",
+    "boxme_sync_runs"
    ]
   },
   {
@@ -248,6 +254,54 @@
    "name": "pos_locations",
    "domain": "stock",
    "about": "Location master. Referenced only by supabase/set_stock_location.sql (select 1 from pos_locations where code = p_location).",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_products": {
+   "name": "boxme_products",
+   "domain": "stock",
+   "about": "BoxMe catalogue. PK seller_sku. Columns read: seller_sku, name, active, sale_price, min_quantity, expiry_threshold (days), image_url; also bsin, approve, require_expire, shelf_life, synced_at. PII: no. Ask Coop: registry view coop_chat_boxme_products; direct read. Verified: DDL (backend) + code.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_warehouses": {
+   "name": "boxme_warehouses",
+   "domain": "stock",
+   "about": "BoxMe warehouses (\"pickups\"). PK pickup_id. Columns: pickup_id, warehouse_code, pickup_name, active, synced_at. PII: no. Ask Coop: registry view coop_chat_boxme_warehouses; direct read. Verified: DDL (backend) + code.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_stock": {
+   "name": "boxme_stock",
+   "domain": "stock",
+   "about": "Current stock per SKU per warehouse, from the latest sync that saw the SKU. PK (seller_sku, pickup_id). Columns: stock (physically there), available (sellable now; the headline), reserved (held for orders), awaiting, incoming (not received yet), damaged_stock, damaged_available, synced_at. PII: no. Ask Coop: registry view coop_chat_boxme_stock (query_metric stock_on_hand online / all_channels, stock_cover online, lookup_product stock); direct read (apply the current-rows filter). Verified: DDL (backend) + code.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_stock_daily": {
+   "name": "boxme_stock_daily",
+   "domain": "stock",
+   "about": "One snapshot per Manila day of boxme_stock. PK (snapshot_date, seller_sku, pickup_id). Columns: snapshot_date, seller_sku, pickup_id, stock, available. Used for the online \"sold per day\" ESTIMATE from day-over-day stock drops (restock days ignored; needs 7 days): never an order count. Ask Coop: registry view coop_chat_boxme_stock_daily; direct read. Verified: DDL (backend) + code.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_stock_lots": {
+   "name": "boxme_stock_lots",
+   "domain": "stock",
+   "about": "Lots with expiry per SKU per warehouse. PK (seller_sku, warehouse_code, batch_lot, expire_date); expire_date 9999-12-31 means no expiry. Columns: quantity, stock_date, synced_at. PII: no. Ask Coop: registry view coop_chat_boxme_stock_lots (stock_on_hand expiring_online); direct read (apply the current-rows filter). Verified: DDL (backend) + code.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "boxme_sync_runs": {
+   "name": "boxme_sync_runs",
+   "domain": "stock",
+   "about": "One row per sync run. Columns: id, started_at, finished_at, status (running, ok, partial, failed), skus_seen, skus_written, error, key_expires_at. A run older than 26 hours is stale. Ask Coop: registry view coop_chat_boxme_sync_runs WITHOUT error and key_expires_at; direct read (the key-named column is hidden). Verified: DDL (backend) + code.",
    "columns": "",
    "prefer": null,
    "testOrders": null
@@ -476,6 +530,54 @@
    "prefer": null,
    "testOrders": null
   },
+  "coop_chat_boxme_products": {
+   "name": "coop_chat_boxme_products",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_products",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_boxme_warehouses": {
+   "name": "coop_chat_boxme_warehouses",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_warehouses",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_boxme_stock": {
+   "name": "coop_chat_boxme_stock",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_stock",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_boxme_stock_daily": {
+   "name": "coop_chat_boxme_stock_daily",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_stock_daily",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_boxme_stock_lots": {
+   "name": "coop_chat_boxme_stock_lots",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_stock_lots",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "coop_chat_boxme_sync_runs": {
+   "name": "coop_chat_boxme_sync_runs",
+   "domain": "chat-plumbing",
+   "about": "read-only view over boxme_sync_runs",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
   "coop_explore_orders": {
    "name": "coop_explore_orders",
    "domain": "chat-plumbing",
@@ -696,6 +798,18 @@
    "redirectTo": null
   },
   {
+   "route": "/admin/environments",
+   "title": "Manage environments",
+   "shows": "Read-only list of the Coop environments (each its own deployment and database) with a live health check of each; for Coop Admin role holders only, others are redirected",
+   "data": "",
+   "domains": [
+    "platform"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
    "route": "/account",
    "title": "Your access",
    "shows": "\"Your access\": the signed-in user's memberships and view switcher",
@@ -874,6 +988,19 @@
    "redirectTo": null
   },
   {
+   "route": "/offline-sales/events/[eventId]",
+   "title": "Event detail",
+   "shows": "One event: header, cash reconciliation and its analytics (KPIs, revenue trend, payment split, pet mix, top sellers, booth leads); unknown id gives 404",
+   "data": "pos_events, pos_orders, spin_wheel_leads",
+   "domains": [
+    "pos-sales",
+    "booth-leads"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
    "route": "/offline-sales/rankings",
    "title": "Rankings",
    "shows": "Top products and top bundles (offline)",
@@ -888,8 +1015,8 @@
   {
    "route": "/inventory",
    "title": "Inventory",
-   "shows": "Offline product controls and stock: on hand, by location, forecast, bundles, sampling, intake, transfers; with channel=online|boxme shows a BoxMe stub plus marketplace analytics from the digest",
-   "data": "pos_products, pos_prices, pos_inventory, pos_bundles, pos_bundle_items, pos_inventory_by_location, pos_stock_movements, pos_settings, pos_orders, pos_events, pos_free_tastes, digest_archive",
+   "shows": "Offline product controls and stock: on hand, by location, forecast, bundles, sampling, intake, transfers; with channel=online|boxme shows the BoxMe (online warehouse) channel: available, reserved, incoming, status, days left, expiring lots and sync freshness, plus marketplace analytics from the digest",
+   "data": "pos_products, pos_prices, pos_inventory, pos_bundles, pos_bundle_items, pos_inventory_by_location, pos_stock_movements, pos_settings, pos_orders, pos_events, pos_free_tastes, digest_archive, boxme_products, boxme_warehouses, boxme_stock, boxme_stock_daily, boxme_stock_lots, boxme_sync_runs",
    "domains": [
     "stock",
     "forecast-settings",
@@ -1045,6 +1172,18 @@
    "route": "/dev/chat-blocks",
    "title": "Chat blocks preview",
    "shows": "DEV only preview of every chat block variant on synthetic data; 404 in production",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
+   "route": "/dev/env-switcher",
+   "title": "Environment switcher preview",
+   "shows": "DEV only preview of the environment strip and switcher for staging and production; 404 outside development",
    "data": "",
    "domains": [
     "n/a"
