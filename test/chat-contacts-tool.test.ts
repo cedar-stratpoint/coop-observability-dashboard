@@ -31,6 +31,24 @@ describe('contacts tool', () => {
     expect(JSON.parse(line)).toMatchObject({event: 'chat_pii_read', event_id: 'e1', rows: 1, user: 'boss@x.com', consent_filter: 'none'});
     expect(line).not.toMatch(/example\.com|0917|Mimi|modern market/i);
   });
+  it('draft mode draws a Drafts table with Copy all, tells the model only a few samples, and the audit line holds no message text', async () => {
+    const blocks: ChatBlock[] = [];
+    const info = vi.fn();
+    const ex = createExecutors({data: async () => data, now: NOW, user: 'boss@x.com', leads: async () => SOURCE, emitBlock: (b) => blocks.push(b), sink: {info, error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'draft', event: 'modern market', contact: 'all', limit: 200, channel: 'email', template: 'Hi {{pet}}, secret-promo-text'})) as {shown: boolean; counts: {drafted: number}; samples: string[]};
+    expect(out).toMatchObject({shown: true, counts: {drafted: 1}});
+    expect(blocks[0]).toMatchObject({kind: 'table', pii: true, copyColumns: {messages: 'message'}});
+    const line = String(info.mock.calls[0][0]);
+    expect(JSON.parse(line)).toMatchObject({event: 'chat_pii_read', mode: 'draft', rows: 1});
+    expect(line).not.toMatch(/secret-promo|Mimi|example\.com/);
+  });
+  it('a bad draft request is refused with the reason and draws nothing', async () => {
+    const blocks: ChatBlock[] = [];
+    const ex = createExecutors({data: async () => data, now: NOW, user: null, leads: async () => SOURCE, emitBlock: (b) => blocks.push(b), sink: {info: vi.fn(), error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'draft', event: 'modern market', contact: 'all', limit: 200, channel: 'email', template: 'Hi {{email}}'})) as {error: string};
+    expect(out.error).toMatch(/Unknown placeholder/);
+    expect(blocks).toHaveLength(0);
+  });
   it('an unclear event returns a question and draws nothing', async () => {
     const blocks: ChatBlock[] = [];
     const ex = createExecutors({data: async () => data, now: NOW, user: null, leads: async () => SOURCE, emitBlock: (b) => blocks.push(b), sink: {info: vi.fn(), error: vi.fn()}});

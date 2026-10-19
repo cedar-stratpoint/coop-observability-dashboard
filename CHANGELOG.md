@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — Ask Coop: draft messages for an event's leads (P2 of 4)
+- **Asked:** "write a thank-you with the promo for those leads", and a personal one for a few.
+- **What changed:** `contacts` gets mode `draft` (same allowlist, seam and audit line as P1). Big list: the model writes ONE template and the app fills `{{pet}}`, `{{prize}}`, `{{event}}`, `{{treats}}`, `{{collected_date}}` for each lead in a single pass; unknown placeholders are refused. Small batch (up to 25): the model writes each message itself, addressed by the row numbers of the list. Channel is email, SMS text or Instagram DM text; a lead without that contact is skipped and counted. The owner gets a Drafts table with Copy all messages and Download CSV. The model only sees counts and 5 sample drafts, never the full list. **Nothing is sent.**
+- **Also:** the leads table now has a row number and a "Bought at the till" column (the leads page's own time-based order match; an unsure match is labelled). The seam loads orders for it and fails soft, like the leads page.
+- **Decision:** values a customer typed are stripped of markup, links and braces, and merged once, so a pet field holding `{{prize}}` or a link cannot expand or be sent along. Messages stay copy-out only (owner decision 2026-10-19). Identical drafts are all kept when copying.
+- **Tests:** draft module (placeholders, one-pass merge, cleaning, per-lead, channel skips), tool wiring and audit, Copy all; Explore prompt snapshot + contacts topic text. Live model check and staging test are for a person.
+
 ## 2026-10-19 — Ask Coop: the leads of an event, with contacts (P1 of 4)
 - **Asked:** "give me all the leads from this event with emails, mobiles, Instagram and pets". Plan `knowledge/tasks/2026-10-19-ask-coop-customer-leads-plan.md`; practice note `knowledge/best-practices/chat-customer-data-access.md`.
 - **What changed:** a new `contacts` tool (mode `list_leads`) for the people on the SQL explorer's allowlist only (same gate: no explore, no tool). The app draws the table itself (email, mobile, Instagram, pet as typed, estimated species, picky, prize, collected date, first sign-up consent date) with Copy emails, Copy mobiles and Download CSV. The model gets the counts and the first 50 rows and the notes, never a tool to write or send anything. An unclear event name asks "Which event?" first (same matcher as products).

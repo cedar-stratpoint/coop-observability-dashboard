@@ -1,5 +1,6 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {draftLeads} from './contacts/draft';
 import {listEventLeads, readContactsInput} from './contacts/leads';
 import {logPiiRead} from './audit';
 import {askOwner, isClarify, type ClarifyResult} from './clarify';
@@ -128,7 +129,8 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...(ctx.leads ? {contacts: async (input: unknown) => {
       const req = readContactsInput(input);
       if ('error' in req) return {error: req.error};
-      const out = listEventLeads(req, await ctx.leads!());
+      const source = await ctx.leads!();
+      const out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
       if ('table' in out) {
         contactBlocks += 1;
         ctx.emitBlock?.({kind: 'table', id: `c${contactBlocks}`, source: `contacts:${out.audit.eventId}`, ...out.table});
