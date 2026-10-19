@@ -306,17 +306,18 @@ const LOOKUP_MEASURE: MeasureDecl = {
 };
 
 const LOCATION_LABEL: Record<string, string> = {event: 'Event (sellable)', office: 'Office (back)'};
-const STOCK_COLUMNS: ResultColumn[] = [col('location', 'Location', 'text', 'category'), col('stock_units', 'Stock', 'units', 'measure')];
 const STOCK_MEASURE: MeasureDecl = {key: 'stock', label: 'Stock on hand', kind: 'measured', unit: 'units', method: 'Units on hand in the POS stock lots per location, as of now'};
 /**
- * B1 + B3: one product's stock now: each POS location, BoxMe (online) available, and the total. No date range.
- * BoxMe's reserved, incoming, damaged, next expiry and sync time are said in the caveats; a stale or failed sync is said first.
+ * B1 + B3: one product's stock now, as ONE row: a column per POS location, BoxMe (online) available, and the total, so it draws as
+ * stat tiles (one row, up to four numbers). No date range. BoxMe's reserved, incoming, damaged, next expiry and sync time are said in
+ * the caveats; a stale or failed sync is said first.
  */
 function productStock(p: CatalogProduct, data: MetricData, now: Date): MetricResult | MetricError {
   const s = data.stock;
   if (!s) return fail('Stock data is not available right now. Say so, and point to the Inventory page.');
   const at = s.byLocation.filter((r) => r.product_id === p.sku).sort((a, b) => a.location.localeCompare(b.location));
-  const rows: MetricRow[] = at.map((r) => ({location: LOCATION_LABEL[r.location] ?? r.location, stock_units: r.stock}));
+  const columns: ResultColumn[] = [col('product', 'Product', 'text', 'category'), ...at.map((r) => col(`${r.location}_units`, LOCATION_LABEL[r.location] ?? r.location, 'units', 'measure'))];
+  const row: MetricRow = {product: `${p.name} (${p.sku})`, ...Object.fromEntries(at.map((r) => [`${r.location}_units`, r.stock]))};
   let total = at.reduce((n, r) => n + r.stock, 0);
   const today = new Date(Date.parse(s.asOf) + 8 * 3_600_000).toISOString().slice(0, 10);
   const caveats = [`${p.name} (${p.sku}): offline (POS) stock as of now (${phtStamp(s.asOf)}); stock has no date range.`];
@@ -329,7 +330,8 @@ function productStock(p: CatalogProduct, data: MetricData, now: Date): MetricRes
       caveats.push(online.basis);
       if (!b) caveats.push('BoxMe does not stock this product (online stock 0).');
       else {
-        rows.push({location: 'BoxMe available (online)', stock_units: b.available});
+        columns.push(col('online_units', 'BoxMe available (online)', 'units', 'measure'));
+        row.online_units = b.available;
         total += b.available;
         const extra = [b.reserved && `${b.reserved} reserved for orders`, b.incoming && `${b.incoming} incoming`, b.damaged && `${b.damaged} damaged`].filter(Boolean);
         if (extra.length) caveats.push(`BoxMe also has ${extra.join(', ')} (not in the available figure).`);
@@ -338,14 +340,16 @@ function productStock(p: CatalogProduct, data: MetricData, now: Date): MetricRes
       }
     }
   }
-  rows.push({location: 'Total (all locations)', stock_units: total});
+  columns.push(col('stock_units', 'Total', 'units', 'measure'));
+  row.stock_units = total;
+  const rows = [row];
   if (total === 0 && at.length === 0) caveats.push('No stock is recorded for this product at any location, so the total is 0.');
   if (data.source === 'mock') caveats.push('This is sample data, not real stock.');
   return {
     id: '',
     metric: 'product_lookup',
     dimension: 'stock',
-    columns: STOCK_COLUMNS,
+    columns,
     rows,
     meta: {
       source: data.source, range: {from: today, to: today, label: 'as of now'}, dataFrom: null, dataTo: null, rowCount: rows.length,

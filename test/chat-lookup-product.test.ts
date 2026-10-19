@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {lookupProduct, PRODUCT_SHOWS} from '../src/chat/digest-lookup';
+import {recommendView} from '../src/chat/recommend-view';
 import {createExecutors} from '../src/chat/tool-executors';
 import {dispatchToolCall} from '../src/chat/tools';
 import type {MetricData} from '../src/chat/result-types';
@@ -144,21 +145,19 @@ describe('lookup_product show "stock" (B1): one product, per location and in tot
   const withStock = (byLocation: {product_id: string; location: string; stock: number}[]) =>
     data({stock: {byLocation, names: {P1: 'Chicken Jerky', P9: 'Duck Necks'}, sales: [], config: {} as never, asOf: '2026-10-19T02:30:00Z'}});
 
-  it('lists each location with a plain label, then the total; no dates', () => {
+  it('one row: a column per location with a plain label, then the total; no dates; draws as stat tiles', () => {
     const r = ok({query: 'P1', show: 'stock'}, withStock([{product_id: 'P1', location: 'office', stock: 18}, {product_id: 'P1', location: 'event', stock: 42}, {product_id: 'P2', location: 'event', stock: 5}]));
     expect(r.dimension).toBe('stock');
-    expect(r.rows).toEqual([
-      {location: 'Event (sellable)', stock_units: 42},
-      {location: 'Office (back)', stock_units: 18},
-      {location: 'Total (all locations)', stock_units: 60},
-    ]);
+    expect(r.rows).toEqual([{product: 'Chicken Jerky (P1)', event_units: 42, office_units: 18, stock_units: 60}]);
+    expect(r.columns.map((c) => c.label)).toEqual(['Product', 'Event (sellable)', 'Office (back)', 'Total']);
+    expect(recommendView(r, {kind: 'auto', orientation: 'auto'}).decisions[0].block).toBe('kpi');
     expect(r.meta.range.label).toBe('as of now');
     expect(r.meta.caveats[0]).toBe('Chicken Jerky (P1): offline (POS) stock as of now (2026-10-19 10:30 PHT); stock has no date range.');
   });
 
   it('a product with no stock row anywhere says the total is 0 on purpose', () => {
     const r = ok({query: 'duck necks', show: 'stock'}, withStock([]));
-    expect(r.rows).toEqual([{location: 'Total (all locations)', stock_units: 0}]);
+    expect(r.rows).toEqual([{product: 'Duck Necks (P9)', stock_units: 0}]);
     expect(r.meta.caveats.join(' ')).toMatch(/No stock is recorded for this product at any location/);
   });
 
