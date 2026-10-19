@@ -147,7 +147,7 @@ describe('CHAT_TOOLS', () => {
     expect(get_digest.description).not.toMatch(/WEEKLY DIGEST|published once a week/);
     expect(props(get_digest).section.enum).toEqual(['comparison', 'figures', 'sales', 'customers', 'shopee', 'lazada', 'products']);
     expect(Object.keys(props(lookup_product))).toEqual(['query', 'show']);
-    expect(props(lookup_product).show.enum).toEqual(['details', 'price_history']);
+    expect(props(lookup_product).show.enum).toEqual(['details', 'price_history', 'stock']);
     expect(props(lookup_product).query.enum).toBeUndefined();
     expect(get_digest.description).toMatch(/Shopee and Lazada figures, and the website's figures as published/);
     expect(get_digest.description).toMatch(/query_metric/);
