@@ -16,7 +16,7 @@ import {dispatchToolCall, RUN_QUERY_TOOL, type ToolExecutors, type ToolResult} f
 
 /** Tools whose results carry text typed by customers or staff. After one succeeds, the stream says `untrusted` once, and the drawer
  *  renders every link in that answer as plain text (no exfiltration by a clicked, injected link; images are never rendered). */
-export const UNTRUSTED_TEXT_TOOLS: ReadonlySet<string> = new Set(['run_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']);
+export const UNTRUSTED_TEXT_TOOLS: ReadonlySet<string> = new Set(['run_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'contacts']);
 
 /** The only part of the Anthropic SDK the loop touches. The real `new Anthropic()` satisfies it. */
 export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> {
@@ -401,6 +401,7 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       if (c.name === 'query_metric' && !results[i].is_error && typeof content?.id === 'string') registryUsed = true;
       if (c.name === 'get_channel_report' && !results[i].is_error && typeof content?.id === 'string') reportUsed = true;
       if (c.name === 'lookup_product' && !results[i].is_error && typeof content?.id === 'string' && (content as {dimension?: unknown}).dimension === 'stock') stockUsed = true;
+      if (c.name === 'contacts' && !results[i].is_error && (content as {shown?: unknown} | null)?.shown === true) drawn = true; // the app drew the contact table itself
       if (isRender(c.name) && !results[i].is_error && (content as {ok?: unknown} | null)?.ok === true) drawn = true;
     });
     convo.push({

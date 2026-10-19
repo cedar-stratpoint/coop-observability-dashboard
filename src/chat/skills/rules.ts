@@ -91,7 +91,7 @@ export const SKILL_CONSTANTS: Record<string, number> = {SMALL_SAMPLE_N, KPI_MAX,
 export const SKILL_TOPICS = ['bi-reconciliation', 'period-comparison', 'allocation-and-prices', 'data-quality', 'viz-forms', 'dashboard-composition', 'page-context'] as const;
 
 /** Topics appended after SKILL_TOPICS, only in the explore variant. */
-export const EXPLORE_TOPICS = ['sql-explore'] as const;
+export const EXPLORE_TOPICS = ['sql-explore', 'contacts'] as const;
 
 /** Topics appended last, only when the website CRM tools are sent (Train 4). */
 export const CRM_TOPICS = ['crm-tools'] as const;

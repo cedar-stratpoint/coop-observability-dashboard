@@ -1,5 +1,7 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {listEventLeads, readContactsInput} from './contacts/leads';
+import {logPiiRead} from './audit';
 import {askOwner, isClarify, type ClarifyResult} from './clarify';
 import {rangeLabel} from './range';
 import {describeData} from './coverage';
@@ -28,6 +30,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
   let loaded: ReturnType<ChatToolContext['data']> | null = null;
   const data = () => (loaded ??= ctx.data());
   let counter = 0;
+  let contactBlocks = 0;
   // The open report (F8) owns the result store: results are reachable by result id and by block id. Empty when none is open.
   const session = ctx.report ?? createReportSession();
   // Train 4: CRM results go into the same store as every other tool (charts and the number check work on them).
@@ -122,6 +125,19 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       session.store.set(id, {...result, id});
       return compact(result, id);
     },
+    ...(ctx.leads ? {contacts: async (input: unknown) => {
+      const req = readContactsInput(input);
+      if ('error' in req) return {error: req.error};
+      const out = listEventLeads(req, await ctx.leads!());
+      if ('table' in out) {
+        contactBlocks += 1;
+        ctx.emitBlock?.({kind: 'table', id: `c${contactBlocks}`, source: `contacts:${out.audit.eventId}`, ...out.table});
+        logPiiRead({tool: 'contacts', mode: req.mode, ok: true, code: null, eventId: out.audit.eventId, rows: out.audit.rows, columns: out.audit.columns, user: ctx.user}, ctx.sink);
+        return {ok: true, shown: true, block: `c${contactBlocks}`, ...out.model};
+      }
+      logPiiRead({tool: 'contacts', mode: req.mode, ok: false, code: isClarify(out) ? 'clarify' : 'no_result', eventId: null, rows: null, columns: [], user: ctx.user}, ctx.sink);
+      return out;
+    }} : {}),
     ask_owner: async (input) => askOwner(input), // a question: the loop writes it and ends the turn
     lookup_product: async (input) => {
       const result = lookupProduct(input, await data(), ctx.now);
@@ -182,6 +198,7 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';
   if (name === 'lookup_product') return 'Looking up a product';
+  if (name === 'contacts') return 'Looking up contacts';
   if (name === 'ask_owner') return 'Checking what you mean';
   if (name === 'render_kpi') return 'Adding a tile';
   if (name === 'render_chart') return 'Drawing a chart';

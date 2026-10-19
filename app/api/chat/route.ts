@@ -91,6 +91,7 @@ export async function POST(req: Request) {
   // (one log line, no content). Digest-only mode has no tools, so a report is ignored there.
   const report = live.ok ? openReportSession(body.report, live.data, now, () => console.warn(JSON.stringify({event: 'chat_report_rejected'}))) : null;
   // Explore (run_query): fail-closed. Only an allowed user on a ready read path gets the tool, the prompt block and the executor.
+  // Contact data (the `contacts` tool) is offered to the same people, on the same fail-closed gate: no explore, no contacts.
   const explore = live.ok && report ? setupExplore({env: process.env, email: user, now, user, store: report.store}) : null;
   // Train 4: the GET-only website CRM client, one per request (its memo and caps are per turn). Fail-closed: no env, no client.
   const crmAccess = resolveCrmAccess(process.env);
@@ -112,12 +113,12 @@ export async function POST(req: Request) {
       maxTokens: COOP_CHAT.maxTokens,
       effort: CHAT_EFFORT,
       system,
-      tools: live.ok ? chatTools({explore: explore !== null, crm: crmTools}) : [],
+      tools: live.ok ? chatTools({explore: explore !== null, crm: crmTools, contacts: explore !== null}) : [],
       messages,
       preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, crm: crmTools && crm ? crm : undefined})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined})
           : {},
       emit,
       user,
