@@ -17,7 +17,7 @@ export interface ResolvedRange {
   from: string;
   to: string;
   label: string;
-  /** The period of equal length immediately before [from, to]. */
+  /** The period immediately before [from, to]: the same number of whole calendar months when [from, to] is whole months, else equal length. */
   previous: {from: string; to: string};
 }
 
@@ -72,11 +72,29 @@ export function rangeLabel(from: string, to: string): string {
   return `${fmt(from, true)} to ${fmt(to, true)}`;
 }
 
+/** The last day of the month a valid day is in. */
+const monthEnd = (key: string): string => addDays(`${addDays(`${key.slice(0, 7)}-28`, 4).slice(0, 7)}-01`, -1);
+/** Months from..to spans, when it is whole calendar months (from is a 1st, to a month end); else null. */
+function wholeMonths(from: string, to: string): number | null {
+  if (!from.endsWith('-01') || to !== monthEnd(to)) return null;
+  return (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1;
+}
+
 function build(from: string, to: string): ResolvedRange {
-  const n = spanDays(from, to);
   const prevTo = addDays(from, -1);
+  // A5: "September vs the previous period" is August 1 to 31, not the 30 days before (Aug 2 to 31). Lengths may then differ by a few days.
+  const months = wholeMonths(from, to);
+  if (months !== null) {
+    let prevFrom = `${prevTo.slice(0, 7)}-01`;
+    for (let i = 1; i < months; i += 1) prevFrom = `${addDays(prevFrom, -1).slice(0, 7)}-01`;
+    return {ok: true, from, to, label: rangeLabel(from, to), previous: {from: prevFrom, to: prevTo}};
+  }
+  const n = spanDays(from, to);
   return {ok: true, from, to, label: rangeLabel(from, to), previous: {from: addDays(prevTo, -(n - 1)), to: prevTo}};
 }
+
+/** Inclusive length in days of a resolved period (for the "lengths differ" caveat). */
+export const periodDays = (p: {from: string; to: string}): number => spanDays(p.from, p.to);
 
 const fail = (error: string): RangeError => ({ok: false, error});
 

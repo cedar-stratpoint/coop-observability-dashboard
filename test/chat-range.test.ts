@@ -51,10 +51,19 @@ describe('presets (PHT, Monday to Sunday)', () => {
     expect(r.label).toBe('Dec 28, 2026 to Jan 3, 2027');
   });
 
-  it('last_month = the full previous calendar month; previous = equal length before', () => {
+  it('last_month = the full previous calendar month; previous = the whole month before it (A5: August 1 to 31, not Aug 2 to 31)', () => {
     const r = ok(resolveRange(preset('last_month'), THU, BOUNDS));
     expect([r.from, r.to]).toEqual(['2026-09-01', '2026-09-30']);
-    expect(r.previous).toEqual({from: '2026-08-02', to: '2026-08-31'});
+    expect(r.previous).toEqual({from: '2026-08-01', to: '2026-08-31'});
+  });
+
+  it('A5: whole calendar months compare with the same number of whole months before; any other range keeps equal length', () => {
+    const custom = (from: string, to: string) => ok(resolveRange({range: 'custom', from, to}, THU, BOUNDS)).previous;
+    expect(custom('2026-03-01', '2026-03-31')).toEqual({from: '2026-02-01', to: '2026-02-28'});
+    expect(custom('2026-07-01', '2026-09-30')).toEqual({from: '2026-04-01', to: '2026-06-30'}); // a quarter: the quarter before
+    expect(custom('2026-01-01', '2026-01-31')).toEqual({from: '2025-12-01', to: '2025-12-31'}); // across a year
+    expect(custom('2026-09-01', '2026-09-29')).toEqual({from: '2026-08-03', to: '2026-08-31'}); // not a month end: equal length
+    expect(custom('2026-09-02', '2026-09-30')).toEqual({from: '2026-08-04', to: '2026-09-01'}); // not a 1st: equal length
   });
 
   it('last_month in January is the previous December', () => {
@@ -65,7 +74,7 @@ describe('presets (PHT, Monday to Sunday)', () => {
   it('last_month handles a leap February', () => {
     const r = ok(resolveRange(preset('last_month'), new Date('2028-03-10T04:00:00Z'), BOUNDS));
     expect([r.from, r.to]).toEqual(['2028-02-01', '2028-02-29']);
-    expect(r.previous).toEqual({from: '2028-01-03', to: '2028-01-31'});
+    expect(r.previous).toEqual({from: '2028-01-01', to: '2028-01-31'});
   });
 
   it('all_available = dataFrom..dataTo, and errors with "no data yet" when null', () => {
