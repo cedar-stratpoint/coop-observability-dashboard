@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — v1.8.0: BoxMe (Online) inventory and Ask Coop online stock (prod release)
+Minor bump (SemVer): a new feature, no breaking change; one manual SQL file on prod (below), no new env vars.
+
+- **What:** promotes only the BoxMe work from staging, by cherry-pick, because staging and main have diverged (a full staging → main merge conflicts in 35 files). Ships the BoxMe channel on `/inventory?channel=online` and the BoxMe card on `/inventory/[sku]` (see the 2026-10-08 entry), plus Ask Coop's BoxMe answers through `query_metric`: `stock_on_hand` dimensions `online`, `all_channels`, `expiring_online` and `stock_cover` dimension `online`, each saying the last good sync time and saying first when the sync is stale, failed or not connected.
+- **Left out on purpose:** `lookup_product` show `stock` (one product's stock as stat tiles, with BoxMe added). It builds on the staging-only "Ask Coop asks before it guesses" work (`clarify.ts`, `product-resolve.ts`) and `ede079a`, so it waits for the next full release.
+- **Database (prod):** the `boxme_*` tables already exist on prod (zoomy-observability's `supabase/boxme_inventory.sql`, applied 2026-10-19) and are filled by its `boxme-sync` GitHub workflow, which now has a production leg. Still to apply by hand on prod: `supabase/coop_chat_boxme.sql` (chat views for `coop_chat_ro`), so Ask Coop can read BoxMe. Until then the chat says BoxMe is not connected, never 0.
+
 ## 2026-10-16 — v1.7.3: "Merged" posts to Google Chat for pull requests into main (prod release)
 Patch bump (SemVer): a CI fix, no app change, no schema or env change.
 
@@ -145,6 +152,33 @@ Promotes this session's Events work from staging to prod by cherry-pick (develop
 
 ## 2026-10-07 — Ask Coop fast path (Train 1)
 - **Ask Coop fast path (Train 1).** The per-turn context no longer calls contacts, free-form questions or stock unavailable when Explore is on (it did on every turn in PROD). The chat now sends the open page, and dashboard links pasted in a question are described from a page map, so "this" means the page's data. Explore can read stock (5 views over 4 zoomy-pos sources; `coop_explore_stock_event` is the default) with sellable Event stock as the default basis, because two kinds of "stock" exist and the dashboard forecast uses Event. `pos_locations` was left out (it may not exist on staging or PROD), and `coop_chat_explore.sql` now stops in step 0 with a clear message if a stock source or `pos_inventory_by_location.location` is missing. Needs `supabase/coop_chat_explore.sql` re-applied on staging and PROD.
+
+## 2026-10-08 — BoxMe (Online) inventory is live data, not a stub
+- **What:** the BoxMe channel of `/inventory?channel=online` now shows real BoxMe warehouse stock and replaces the D13 stub. Per SKU it shows Available, Awaiting pick, Reserved, Incoming, Damaged, next expiry, the Stratpoint Offline count (Office + Event) and a "Lasts" estimate. Above the table:
+  - a freshness pill
+  - a four-total strip
+  - status chips that also filter the table
+  - Line pills and search
+- **Below the table:**
+  - an Expiring soon list
+  - a Catalog match card listing POS products not at BoxMe and BoxMe SKUs unknown to POS
+  - the existing marketplace analytics, under their own heading (D13 kept)
+- **Product page:** `/inventory/[sku]` gets a BoxMe card with the per-warehouse split and a daily available-units trend. The KPI block is now labelled "Stratpoint (Offline)" instead of a hard-coded subtitle. Arriving from the BoxMe table shows the BoxMe card first, and Back returns to the BoxMe tab.
+- **Decisions:**
+  - **Separate `boxme_*` tables, not a `'boxme'` row in `pos_locations`.** BoxMe owns its numbers, so mirroring them into POS lots would collide with POS sales, FEFO and the stock RPCs.
+  - **Writer is zoomy-observability.** Its `boxme-sync` job (GitHub Actions, daily 07:30 Manila, ahead of the 08:00 stock digest) owns `supabase/boxme_inventory.sql`. This app only reads.
+  - **No fixed IP.** BoxMe's docs say an IP whitelist is mandatory, but our key works from unregistered IPs (VPN and local tests). A static-IP proxy (`BOXME_PROXY_URL`) is the fallback if BoxMe starts enforcing it.
+  - **Join on `seller_sku = product_id`.** All 20 BoxMe SKUs match `pos_products` on Staging.
+  - **Status:** Out at 0 available. Low at or under BoxMe `min_quantity` (or the POS threshold when that is unset), or under 14 days of cover.
+  - **"Lasts":** uses day-over-day drops in stock (restocks ignored) once 7 days of daily snapshots exist. Until then it reads "Building history".
+  - **Freshness:** stale after 26h, a banner on a failed or partial run, and a key-expiry warning inside 14 days.
+- **Files:**
+  - `src/boxme-inventory-{data,compute}.ts`, `src/boxme-format.ts`, `src/boxme-mock.ts` (demo data from a real BoxMe dry run)
+  - `components/analyst/boxme-{inventory-view,inventory-table,sku-card}.tsx`
+  - `src/inventory-status.ts`: the shared status pill styles, now importable by server components
+  - new `POS_TAGS.boxme` tag
+- **Database:** `boxme_*` applied to **Staging only**. Prod waits for sign-off.
+- **Tests:** `test/boxme-inventory-compute.test.ts` (15).
 
 ## 2026-10-07 — Event tiles get "View all products" (event-scoped rankings)
 - **Each event tile's Top sellers block now ends with "View all products →".** It opens Product rankings scoped to that event (`/offline-sales/rankings?event=<id>`), with the Products and Bundles tabs, sort, search and paging the overview's View all already has.

@@ -172,6 +172,8 @@ export interface MetricData {
   /** Row counts of the bulk reads, for the round-row-count check. */
   bulkReads: {relation: string; rows: number}[];
   stock?: StockData | null;
+  /** B2: the BoxMe (online warehouse) feed, synced daily. undefined = not loaded here; null = the read failed or the views are missing. */
+  boxme?: import('../boxme-feed').BoxmeFeed | null;
 }
 
 /** Stock for the registry stock metrics (Train 3). "As of now": stock has no date range. null = the stock read failed. */
