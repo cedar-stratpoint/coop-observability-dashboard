@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — Fix: Ask Coop stock answers failed on staging (permission denied for table pos_products)
+- **Symptom (staging):** "How many … yogurt cubes" confirmed the product, then "the stock lookup returned an error". Earlier, the same question timed out because the model fell back to its own SQL.
+- **Cause:** `coop_chat_stock_by_location` selected from zoomy-pos's `pos_inventory_by_location`, which is `security_invoker=on` on staging. A security_invoker view checks its base tables against the caller (`coop_chat_ro`, no table grants by design), so the read failed and the stock data was null. The local fixture had a plain view, so tests and local runs passed.
+- **Fix:** `supabase/coop_chat_stock.sql` now builds that view from the base tables (`pos_products` x `pos_locations` left join `pos_inventory_lots`, a hand-kept copy of the zoomy-pos body, same rows and a bigint `stock`), inside one transaction (drop and create, so a failure changes nothing). No `pos_*` object is touched and no grant is added. The local fixture now sets `security_invoker = on` like staging, and a test pins that the chat view never reads `pos_inventory_by_location`.
+- **Verified:** reproduced locally (definer view over a security_invoker view: permission denied; straight over the table: works); with `security_invoker` on, the new view reads as `coop_chat_ro` with the same numbers (P1 12/60, P2 0/25), raw tables still denied, and the app in `CHAT_READ_MODE=ro_role` answers with the four tiles. 3196 tests, data catalog OK.
+- **To apply (a person):** re-run `coop_chat_stock.sql` on staging (SQL only; no deploy). Lesson: `knowledge/lessons/definer-view-over-security-invoker-view.md`.
+
 ## 2026-10-19 — Ask Coop answers inventory: one product in one call, and BoxMe online stock
 - **Why:** "How many inventory do we have for the yoghurt cubes" had no single-product stock tool (the model wrote its own SQL and timed out), and Ask Coop could not see BoxMe at all, although the Inventory page reads it.
 - **One product:** `lookup_product` show `stock` returns ONE row (Event, Office, BoxMe available, Total), drawn as stat tiles; the app draws them when the model does not. BoxMe's reserved, incoming, damaged, per-warehouse split and next expiry are in the notes. A misspelled name is still confirmed first (previous entry). Live on the local Supabase: 2 steps, about 6 s.
