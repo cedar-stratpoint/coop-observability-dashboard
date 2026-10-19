@@ -52,7 +52,7 @@ const queryMetric: ToolDefinition = {
       range: {type: 'string', enum: ['last_week', 'this_week', 'last_month', 'all_available', 'custom'], description: 'The period, in Philippine time.'},
       from: {type: 'string', description: 'YYYY-MM-DD or "" unless range is custom'},
       to: {type: 'string', description: 'YYYY-MM-DD or "" unless range is custom'},
-      channel: {type: 'string', enum: ['offline', 'all'], description: 'Only offline POS is connected.'},
+      channel: {type: 'string', enum: ['offline', 'all'], description: 'This tool reads offline POS only: "all" here still means offline POS. For all channels (Shopee, Lazada, Website and offline) use get_channel_report.'},
       event: {type: 'string', description: 'An event name or "all"'},
       pet: {type: 'string', enum: ['all', 'dog', 'cat', 'both', 'untagged'], description: 'Filter by the pet the sale was tagged for.'},
       compare_to: {type: 'string', enum: ['none', 'previous_period'], description: 'Add the previous period of equal length.'},

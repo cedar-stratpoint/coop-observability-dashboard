@@ -1,6 +1,7 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
-import {askOwner, isClarify} from './clarify';
+import {askOwner, isClarify, type ClarifyResult} from './clarify';
+import {rangeLabel} from './range';
 import {describeData} from './coverage';
 import {createCrmExecutors} from './crm/executors';
 import {digestsFor, readReportInput, shapeChannelReport} from './channel-report';
@@ -45,6 +46,8 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     query_metric: async (input) => {
       const result = runMetric(input, await data(), ctx.now);
       if ('error' in result) return {error: result.error};
+      const outside = noDataAsk(result);
+      if (outside) return outside; // the loop asks the owner and ends the turn
       counter += 1;
       const id = `r${counter}`;
       session.remember(id, input as MetricRequest, {...result, id}); // runMetric accepted the input, so it IS a MetricRequest
@@ -118,6 +121,17 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       return compact(result, id);
     },
   };
+}
+
+/**
+ * A4: dates the POS data does not reach at all would read as "₱0". The chat asks instead (saved-report re-runs keep the plain result).
+ * Stock is "as of now" and never outside the data.
+ */
+export function noDataAsk(r: MetricResult): ClarifyResult | null {
+  const {coverage, dataFrom, dataTo, range} = r.meta;
+  if (coverage !== 'none' || !dataFrom || !dataTo) return null;
+  const covered = rangeLabel(dataFrom, dataTo);
+  return {clarify: {question: `The offline (POS) sales data covers ${covered}, so there is nothing for ${range.label}. Use the dates the data covers?`, options: [`Use ${covered}`]}};
 }
 
 function compact(r: MetricResult, id: string) {
