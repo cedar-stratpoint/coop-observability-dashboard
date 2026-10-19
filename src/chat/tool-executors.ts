@@ -124,7 +124,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     },
     ask_owner: async (input) => askOwner(input), // a question: the loop writes it and ends the turn
     lookup_product: async (input) => {
-      const result = lookupProduct(input, await data());
+      const result = lookupProduct(input, await data(), ctx.now);
       if ('error' in result) return {error: result.error};
       if (isClarify(result)) return result; // the loop asks the owner and ends the turn
       counter += 1;
