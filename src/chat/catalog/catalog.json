@@ -509,7 +509,7 @@
   "coop_chat_stock_by_location": {
    "name": "coop_chat_stock_by_location",
    "domain": "chat-plumbing",
-   "about": "read-only view over pos_inventory_by_location",
+   "about": "read-only view over pos_products x pos_locations left join pos_inventory_lots (a hand-kept copy of the body of pos_inventory_by_location; NOT a select from that view, see the note under it)",
    "columns": "",
    "prefer": null,
    "testOrders": null
