@@ -42,8 +42,8 @@ describe('real tree', () => {
     expect(closure.files.has('src/crm-data.ts')).toBe(false);
   });
 
-  it('the leads seam reaches only the leads and events loaders', () => {
-    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
+  it('the leads seam reaches only the loaders the leads page itself uses', () => {
+    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/lead-order-match', '@/src/pos-prize-data', '@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
   });
 
   it('no chat module or the chat route mentions src/crm-data.ts in any import form', () => {

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {listEventLeads, readContactsInput, type ContactsInput, type LeadsSource} from '../src/chat/contacts/leads';
+import {listEventLeads, readContactsInput, type ListInput, type LeadsSource} from '../src/chat/contacts/leads';
 import type {SpinLead} from '../src/spin-leads-types';
 
 // Synthetic people only. 2026-09-26 02:00Z is 10:00 in Manila.
@@ -17,7 +17,7 @@ const SOURCE: LeadsSource = {
     lead({collectedAt: '2026-10-10T03:00:00Z', email: 'later@example.com'}), // other event
   ],
 };
-const ask = (event: string, extra: Record<string, unknown> = {}) => ({mode: 'list_leads', event, contact: 'all', limit: 200, ...extra}) as ContactsInput;
+const ask = (event: string, extra: Record<string, unknown> = {}) => ({mode: 'list_leads', event, contact: 'all', limit: 200, ...extra}) as ListInput;
 
 describe('readContactsInput', () => {
   it('rejects an unknown mode, an empty event, and a limit outside the enum', () => {

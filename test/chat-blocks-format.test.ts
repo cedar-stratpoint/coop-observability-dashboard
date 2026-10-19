@@ -233,6 +233,10 @@ describe('contact tables and storage', () => {
     expect(copyList(b, 'emails')).toBe('a@example.com');
     expect(copyList(b, 'mobiles')).toBe('0917 000 0001\n0917 000 0002');
   });
+  it('copyList keeps every message (even identical ones) with a divider between them', () => {
+    const b = {...(table(true) as Extract<ChatBlock, {kind: 'table'}>), copyColumns: {messages: 'email'}};
+    expect(copyList(b, 'messages')).toBe('a@example.com\n\n---\n\na@example.com');
+  });
   it('csvRows writes the shown labels as the header and the rows in column order', () => {
     const b = table(true) as Extract<ChatBlock, {kind: 'table'}>;
     expect(csvRows(b)).toEqual([['Email', 'Mobile'], ['a@example.com', '0917 000 0001'], ['', '0917 000 0002'], ['a@example.com', '']]);

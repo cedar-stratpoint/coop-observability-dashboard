@@ -72,8 +72,8 @@ export interface TableBlock extends BlockBase {
   total: MetricRow | null; // a total row when the parts add to a whole (computed by code)
   /** Contact data (the `contacts` tool): the UI offers Copy and CSV, and never saves this block or the turn's text in the browser. */
   pii?: true;
-  /** Which row keys feed the Copy emails / Copy mobiles buttons. */
-  copyColumns?: {emails: string; mobiles: string};
+  /** Which row keys feed the Copy emails / Copy mobiles / Copy all messages buttons (a button shows only for a key that is set). */
+  copyColumns?: {emails?: string; mobiles?: string; messages?: string};
   /** File name for the CSV download. */
   csvName?: string;
 }

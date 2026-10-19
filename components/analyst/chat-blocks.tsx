@@ -167,7 +167,7 @@ const ACTION_BTN = 'rounded-md border border-border px-2.5 py-1 text-[11px] font
 /** Copy and CSV for a contact table. Nothing is sent anywhere: the owner pastes or opens the file themselves. */
 function ContactActions({block}: {block: TableBlock}) {
   const [done, setDone] = useState<string | null>(null);
-  const copy = async (which: 'emails' | 'mobiles') => {
+  const copy = async (which: 'emails' | 'mobiles' | 'messages') => {
     try {
       await navigator.clipboard.writeText(copyList(block, which));
       setDone(which);
@@ -178,8 +178,9 @@ function ContactActions({block}: {block: TableBlock}) {
   };
   return (
     <div className="flex flex-wrap items-center gap-1.5" aria-label="Contact list actions">
-      <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('emails')}>{done === 'emails' ? 'Copied' : 'Copy emails'}</button>
-      <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('mobiles')}>{done === 'mobiles' ? 'Copied' : 'Copy mobiles'}</button>
+      {block.copyColumns?.emails && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('emails')}>{done === 'emails' ? 'Copied' : 'Copy emails'}</button>}
+      {block.copyColumns?.mobiles && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('mobiles')}>{done === 'mobiles' ? 'Copied' : 'Copy mobiles'}</button>}
+      {block.copyColumns?.messages && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('messages')}>{done === 'messages' ? 'Copied' : 'Copy all messages'}</button>}
       <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => downloadCsv(block.csvName ?? 'contacts.csv', csvRows(block))}>Download CSV</button>
       {done === 'failed' && <span role="status" className="text-[11px] text-muted-foreground">Could not copy. Use Download CSV.</span>}
     </div>
