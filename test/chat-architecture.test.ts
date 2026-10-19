@@ -7,6 +7,7 @@ import {
   WRITE_CALL_EXCEPTIONS,
   buildClosure,
   extractImports,
+  LEADS_SEAM,
   forbiddenInClosure,
   impureInClosure,
   importersOf,
@@ -36,9 +37,13 @@ describe('real tree', () => {
   });
 
   it('the only legacy exception is the old digest import, and it is not traversed (Train 4 removed the CRM one)', () => {
-    expect([...closure.legacyHits]).toEqual(['src/data.ts']);
+    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/leads-seam.ts', 'src/data.ts']);
     expect(closure.files.has('src/data.ts')).toBe(false);
     expect(closure.files.has('src/crm-data.ts')).toBe(false);
+  });
+
+  it('the leads seam reaches only the leads and events loaders', () => {
+    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
   });
 
   it('no chat module or the chat route mentions src/crm-data.ts in any import form', () => {

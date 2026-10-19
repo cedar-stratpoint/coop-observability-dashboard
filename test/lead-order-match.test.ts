@@ -75,3 +75,13 @@ describe('follow-up copy', () => {
     expect(addDays('2026-09-27', 5)).toBe('2026-10-02');
   });
 });
+
+describe('estimatedSpecies', () => {
+  const lead = (pet: string | null) => ({email: 'a@x.com', instagram: null, pet, picky: null, mobile: null, prize: 'x', campaign: null, collectedAt: '2026-09-27T02:00:00Z'});
+  it('reads cat breeds as cat, other typed breeds as dog, and nothing typed as null', async () => {
+    const {estimatedSpecies} = await import('../src/lead-order-match');
+    expect(estimatedSpecies(lead('Mimi / Puspin'))).toBe('cat');
+    expect(estimatedSpecies(lead('Bruno / Shih Tzu'))).toBe('dog');
+    expect(estimatedSpecies(lead(null))).toBeNull();
+  });
+});

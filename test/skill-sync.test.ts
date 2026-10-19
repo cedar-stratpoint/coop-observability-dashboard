@@ -122,13 +122,14 @@ describe('size and caching', () => {
   });
   // Train 2 (2026-10-07): +EXP-07, EXP-08 and the EXP-04 label rule (explore only).
   // Train 3 (2026-10-07): +EXP-09..11, PAGE-01, the base-table stock bullet. Budgets were 4,500 and 6,600; measured 4,597 and 6,861, plus 5%.
-  it('the explore variant fits its budget (7,210) and puts sql-explore after dashboard-composition', () => {
+  // Ask Coop leads P1 (2026-10-19): +the `contacts` topic (explore only). Budget was 7,210; measured 7,387, plus 3%.
+  it('the explore variant fits its budget (7,610) and puts sql-explore after dashboard-composition', () => {
     const tokens = estimateTokens(exploreText);
     console.log(`explore skill: ${exploreText.length} characters, about ${tokens} tokens`);
-    expect(tokens).toBeLessThan(7210);
+    expect(tokens).toBeLessThan(7610);
     expect(exploreText.indexOf('## Topic: dashboard-composition')).toBeGreaterThan(-1);
     expect(exploreText.indexOf('## Topic: dashboard-composition')).toBeLessThan(exploreText.indexOf('## Topic: sql-explore'));
-    expect([...EXPLORE_TOPICS]).toEqual(['sql-explore']);
+    expect([...EXPLORE_TOPICS]).toEqual(['sql-explore', 'contacts']);
   });
   it('the non-explore text never promises the Explore tool', () => {
     expect(text).not.toMatch(/run_query|sql-explore|Exploratory/);

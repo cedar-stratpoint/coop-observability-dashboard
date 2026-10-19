@@ -1,6 +1,9 @@
 import {describe, expect, it} from 'vitest';
-import type {ColorToken} from '../src/chat/block-types';
+import type {ChatBlock, ColorToken} from '../src/chat/block-types';
 import {
+  copyList,
+  csvRows,
+  redactForStorage,
   pieSlices,
   resolveForm,
   ariaSummary,
@@ -205,5 +208,33 @@ describe('small multiples (2c.1)', () => {
     expect(resolveForm('pie')).toBe('pie');
     expect(resolveForm('radar')).toBe('grouped_bar');
     expect(resolveForm(undefined)).toBe('grouped_bar');
+  });
+});
+
+// Contact tables (the `contacts` tool): shown and copyable, never written to the browser's storage.
+describe('contact tables and storage', () => {
+  const table = (pii?: true): ChatBlock => ({kind: 'table', id: 'c1', source: 'contacts:e1', title: 'Leads: X', reliable: true, caveats: [], basis: null, columns: [{key: 'email', label: 'Email', unit: 'text', role: 'category'}, {key: 'mobile', label: 'Mobile', unit: 'text', role: 'category'}], rows: [{email: 'a@example.com', mobile: '0917 000 0001'}, {email: null, mobile: '0917 000 0002'}, {email: 'a@example.com', mobile: null}], total: null, ...(pii ? {pii, copyColumns: {emails: 'email', mobiles: 'mobile'}, csvName: 'leads-x.csv'} : {})});
+
+  it('redactForStorage drops a contact table and the text of that turn, and keeps every other message', () => {
+    const msgs = [
+      {role: 'user' as const, content: 'leads of X'},
+      {role: 'assistant' as const, content: 'ana@example.com is lead one', blocks: [{at: 0, block: table(true)}]},
+      {role: 'assistant' as const, content: 'plain answer', blocks: [{at: 0, block: table()}]},
+    ];
+    const out = redactForStorage(msgs);
+    expect(JSON.stringify(out[1])).not.toMatch(/example\.com|0917/);
+    expect(out[1].blocks).toBeUndefined();
+    expect(out[1].content).toMatch(/not saved/i);
+    expect(out[0]).toEqual(msgs[0]);
+    expect(out[2]).toEqual(msgs[2]);
+  });
+  it('copyList returns the distinct non-empty values of one column, one per line', () => {
+    const b = table(true) as Extract<ChatBlock, {kind: 'table'}>;
+    expect(copyList(b, 'emails')).toBe('a@example.com');
+    expect(copyList(b, 'mobiles')).toBe('0917 000 0001\n0917 000 0002');
+  });
+  it('csvRows writes the shown labels as the header and the rows in column order', () => {
+    const b = table(true) as Extract<ChatBlock, {kind: 'table'}>;
+    expect(csvRows(b)).toEqual([['Email', 'Mobile'], ['a@example.com', '0917 000 0001'], ['', '0917 000 0002'], ['a@example.com', '']]);
   });
 });

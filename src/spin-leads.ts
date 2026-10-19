@@ -59,5 +59,6 @@ const spinLeadsCached = unstable_cache(async (): Promise<SpinLead[]> => {
     prize: (l.prize as string | null) ?? 'Unknown',
     campaign: (l.campaign as string | null) ?? null,
     collectedAt: l.collected_at as string,
+    consentAt: (l.consent_at as string | null) ?? null,
   }));
 }, ['spin-wheel-leads'], {revalidate: POS_CACHE_REVALIDATE, tags: [SPIN_LEADS_TAG]});

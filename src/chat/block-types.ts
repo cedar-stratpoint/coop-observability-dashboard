@@ -70,6 +70,12 @@ export interface TableBlock extends BlockBase {
   columns: ResultColumn[];
   rows: MetricRow[]; // exactly the stored rows for the chosen columns, plus nothing else
   total: MetricRow | null; // a total row when the parts add to a whole (computed by code)
+  /** Contact data (the `contacts` tool): the UI offers Copy and CSV, and never saves this block or the turn's text in the browser. */
+  pii?: true;
+  /** Which row keys feed the Copy emails / Copy mobiles buttons. */
+  copyColumns?: {emails: string; mobiles: string};
+  /** File name for the CSV download. */
+  csvName?: string;
 }
 
 export interface ChartBlock extends BlockBase {

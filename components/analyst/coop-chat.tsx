@@ -6,7 +6,7 @@ import {Sparkles, X, ArrowUp, Plus, Copy, Check, Square, RotateCcw, ArrowRight, 
 import {cn} from '@/lib/utils';
 import {createLineDecoder} from '@/src/chat/stream-protocol';
 import {ChatBlocks} from './chat-blocks';
-import {interleave, sanitizeBlocks, type PlacedBlock} from './chat-blocks-format';
+import {interleave, redactForStorage, sanitizeBlocks, type PlacedBlock} from './chat-blocks-format';
 import {ChatMarkdown} from './chat-markdown';
 import {applyStreamEvents, closeStream, startStream, StreamSlot} from './chat-stream-state';
 import {describeFilters, reportBody, sanitizeReport} from './report-state';
@@ -169,7 +169,7 @@ export function CoopChatProvider({children, scopeLabel}: {children: React.ReactN
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(messages));
+      localStorage.setItem(STORE_KEY, JSON.stringify(redactForStorage(messages))); // contact tables are never saved
     } catch {
       /* ignore */
     }

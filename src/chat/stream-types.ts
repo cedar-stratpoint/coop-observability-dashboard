@@ -56,6 +56,8 @@ export interface ChatToolContext {
   exploreSchema?: {list_tables: (input: unknown) => Promise<unknown>; describe_table: (input: unknown) => Promise<unknown>};
   /** Train 4: the GET-only website CRM client for this request; present only when the CRM is configured and CHAT_CRM_TOOLS is not off. Absent means the four CRM tools are not registered. */
   crm?: import('./crm/client').CrmClient;
+  /** The `contacts` tool's source: booth leads and events, read lazily by the route's server seam (app/api/chat/leads-seam.ts). Present only for an allowlisted user; absent means the tool is not registered. */
+  leads?: () => Promise<import('./contacts/leads').LeadsSource>;
   /** Where audit lines go (tests pass a fake). Absent means console. */
   sink?: import('./audit').AuditSink;
 }
