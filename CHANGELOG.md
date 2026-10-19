@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — v1.9.0: Ask Coop asks before it guesses, and answers "how many do we have" in one call (prod release)
+Minor bump (SemVer): new, backward-compatible Ask Coop features. Selective release by cherry-pick from `staging`, on top of v1.8.0 (the BoxMe release): v1.8.0 left the one-product stock lookup out because it needed this work, and it ships here. Verified on staging 2026-10-19 (see below).
+
+- **Asks before it guesses:** a misspelled or ambiguous product ("yogrt cubs") gets "Did you mean **Freeze-Dried Yoghurt Cubes**?" with a tap button. A question with no dates, no channel or no comparison target gets one fixed question with tap buttons (`ask_owner`). Dates the offline data does not cover are asked about, not answered as ₱0.
+- **Stock in one call:** "how many X do we have" is one `lookup_product` call (show `stock`), drawn as tiles: Event, Office, BoxMe available, Total, with reserved, incoming, damaged, next expiry and the BoxMe sync time in the notes.
+- **Dates and comparisons:** a calendar month compares with the previous calendar month (September vs August 1 to 31, not Aug 2 to 31); offline sales gain a by-month series; a daily series over 92 days is shown by week, said first. A timeout after a chart is drawn no longer reads as a failure.
+- **Fix:** the chat's stock view read zoomy-pos's `security_invoker` view, so as the read-only role every stock answer failed with `permission denied for table pos_products`. It now reads the base tables (`supabase/coop_chat_stock.sql`).
+- *Database step (not part of this PR; by hand, the co-worker owns the prod project):* re-run the updated `supabase/coop_chat_stock.sql` **only if the stock views exist on prod**. First check `select reloptions from pg_class where relname = 'pos_inventory_by_location'`. It is one transaction and drops and recreates only `coop_chat_stock_by_location`. No env change; `coop_chat_boxme.sql` is v1.8.0's.
+- *Verified:* on staging (real data, read-only role), "How many inventory do we have for the yogrt cubs" confirmed the product and drew the four tiles (Event 6, Office 0, BoxMe 1,038, Total 1,044). On this branch: typecheck, unit tests, build and the live tool-size probe. *Not verified:* the prod database and env.
+- Per-change detail is in the entries below.
+
 ## 2026-10-19 — v1.8.0: BoxMe (Online) inventory and Ask Coop online stock (prod release)
 Minor bump (SemVer): a new feature, no breaking change; one manual SQL file on prod (below), no new env vars.
 
