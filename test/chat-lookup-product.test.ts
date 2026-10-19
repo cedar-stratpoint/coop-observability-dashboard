@@ -128,8 +128,8 @@ describe('lookup_product: confirms instead of guessing (owner rule 2026-10-19)',
   });
 
   it('names the allowed values for a bad show, and refuses an empty or oversized query', () => {
-    expect(err({query: 'P1', show: 'stock'})).toMatch(/Allowed values for show: details, price_history/);
-    expect(PRODUCT_SHOWS).toEqual(['details', 'price_history']);
+    expect(err({query: 'P1', show: 'inventory'})).toMatch(/Allowed values for show: details, price_history, stock/);
+    expect(PRODUCT_SHOWS).toEqual(['details', 'price_history', 'stock']);
     expect(err({query: '   ', show: 'details'})).toMatch(/top_products/);
     expect(err({query: 'x'.repeat(81), show: 'details'})).toMatch(/too long/);
     expect(err(null)).toMatch(/show/);
@@ -137,6 +137,37 @@ describe('lookup_product: confirms instead of guessing (owner rule 2026-10-19)',
 
   it('says so when no product is known yet', () => {
     expect(err({query: 'P1', show: 'details'}, data({orders: []}))).toMatch(/No products are known yet/);
+  });
+});
+
+describe('lookup_product show "stock" (B1): one product, per location and in total, as of now', () => {
+  const withStock = (byLocation: {product_id: string; location: string; stock: number}[]) =>
+    data({stock: {byLocation, names: {P1: 'Chicken Jerky', P9: 'Duck Necks'}, sales: [], config: {} as never, asOf: '2026-10-19T02:30:00Z'}});
+
+  it('lists each location with a plain label, then the total; no dates', () => {
+    const r = ok({query: 'P1', show: 'stock'}, withStock([{product_id: 'P1', location: 'office', stock: 18}, {product_id: 'P1', location: 'event', stock: 42}, {product_id: 'P2', location: 'event', stock: 5}]));
+    expect(r.dimension).toBe('stock');
+    expect(r.rows).toEqual([
+      {location: 'Event (sellable)', stock_units: 42},
+      {location: 'Office (back)', stock_units: 18},
+      {location: 'Total (all locations)', stock_units: 60},
+    ]);
+    expect(r.meta.range.label).toBe('as of now');
+    expect(r.meta.caveats[0]).toBe('Chicken Jerky (P1): offline (POS) stock as of now (2026-10-19 10:30 PHT); stock has no date range.');
+  });
+
+  it('a product with no stock row anywhere says the total is 0 on purpose', () => {
+    const r = ok({query: 'duck necks', show: 'stock'}, withStock([]));
+    expect(r.rows).toEqual([{location: 'Total (all locations)', stock_units: 0}]);
+    expect(r.meta.caveats.join(' ')).toMatch(/No stock is recorded for this product at any location/);
+  });
+
+  it('a misspelled name still asks first, before any stock is read', () => {
+    expect(asks({query: 'chiken jerky', show: 'stock'}, withStock([]))).toMatchObject({question: 'Did you mean **Chicken Jerky**?'});
+  });
+
+  it('stock that could not be read is said, never 0', () => {
+    expect(err({query: 'P1', show: 'stock'}, data({stock: null}))).toMatch(/Stock data is not available right now/);
   });
 });
 

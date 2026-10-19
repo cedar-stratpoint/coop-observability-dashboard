@@ -275,7 +275,7 @@ export function shapeDigest(input: unknown, src: DigestSource | null, now: Date)
 
 // ---- lookup_product -------------------------------------------------------------------------------------------------
 
-export const PRODUCT_SHOWS = ['details', 'price_history'] as const;
+export const PRODUCT_SHOWS = ['details', 'price_history', 'stock'] as const;
 export const MAX_QUERY = 80;
 
 const DETAIL_COLUMNS: ResultColumn[] = [
@@ -302,6 +302,37 @@ const LOOKUP_MEASURE: MeasureDecl = {
   unit: 'text',
   method: 'Counted from completed (not voided) POS orders. Revenue is direct sales only: units picked inside a bundle carry no revenue of their own (see query_metric bundle_picks for allocated revenue).',
 };
+
+const LOCATION_LABEL: Record<string, string> = {event: 'Event (sellable)', office: 'Office (back)'};
+const STOCK_COLUMNS: ResultColumn[] = [col('location', 'Location', 'text', 'category'), col('stock_units', 'Stock', 'units', 'measure')];
+const STOCK_MEASURE: MeasureDecl = {key: 'stock', label: 'Stock on hand', kind: 'measured', unit: 'units', method: 'Units on hand in the POS stock lots per location, as of now'};
+/** "2026-09-28 12:00 PHT": the as-of stamp the owner reads (Philippine time). */
+const phtStamp = (iso: string): string => `${new Date(Date.parse(iso) + 8 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')} PHT`;
+
+/** B1: one product's stock per location and in total, as of now (no date range). */
+function productStock(p: CatalogProduct, data: MetricData): MetricResult | MetricError {
+  const s = data.stock;
+  if (!s) return fail('Stock data is not available right now. Say so, and point to the Inventory page.');
+  const at = s.byLocation.filter((r) => r.product_id === p.sku).sort((a, b) => a.location.localeCompare(b.location));
+  const rows: MetricRow[] = at.map((r) => ({location: LOCATION_LABEL[r.location] ?? r.location, stock_units: r.stock}));
+  rows.push({location: 'Total (all locations)', stock_units: at.reduce((n, r) => n + r.stock, 0)});
+  const today = new Date(Date.parse(s.asOf) + 8 * 3_600_000).toISOString().slice(0, 10);
+  const caveats = [`${p.name} (${p.sku}): offline (POS) stock as of now (${phtStamp(s.asOf)}); stock has no date range.`];
+  if (at.length === 0) caveats.push('No stock is recorded for this product at any location, so the total is 0.');
+  if (data.source === 'mock') caveats.push('This is sample data, not real stock.');
+  return {
+    id: '',
+    metric: 'product_lookup',
+    dimension: 'stock',
+    columns: STOCK_COLUMNS,
+    rows,
+    meta: {
+      source: data.source, range: {from: today, to: today, label: 'as of now'}, dataFrom: null, dataTo: null, rowCount: rows.length,
+      coverage: 'full', coveredFrom: today, coveredTo: today, caveats, share_basis: null,
+      measure: STOCK_MEASURE.key, measures: [STOCK_MEASURE], insights: [], checks: [], reliable: true,
+    },
+  };
+}
 
 /** Every product the chat knows: the POS catalog (stock names, so unsold products resolve too), then sold-line names. */
 function catalogOf(data: MetricData): CatalogProduct[] {
@@ -337,6 +368,7 @@ export function lookupProduct(input: unknown, data: MetricData): MetricResult | 
     return {clarify: {question: `I couldn't find a product called "${query}". Did you mean one of these?`, options: r.nearest.map(label)}};
   }
   const found = r.product;
+  if (o.show === 'stock') return productStock(found, data);
 
   const completed = data.orders.filter((o2) => isCompletedOrder(o2) && !Number.isNaN(Date.parse(o2.created_at)));
   let dataFrom: string | null = null;
