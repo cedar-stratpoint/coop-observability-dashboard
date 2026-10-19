@@ -24,8 +24,8 @@ const data = (orders = ORDERS): MetricData => ({source: 'live', orders, events: 
 const ctx = (d: MetricData = data()) => ({data: vi.fn(async () => d), now: NOW, user: null});
 
 describe('executors', () => {
-  it('provides the eleven tools, plus the app-side autoRender backstop that is not a tool', () => {
-    expect(Object.keys(createExecutors(ctx())).sort()).toEqual(['autoRender', 'describe_data', 'get_channel_report', 'get_digest', 'lookup_product', 'query_metric', 'remove_block', 'render_chart', 'render_kpi', 'render_table', 'set_report_filters', 'set_report_title']);
+  it('provides the twelve tools, plus the app-side autoRender backstop that is not a tool', () => {
+    expect(Object.keys(createExecutors(ctx())).sort()).toEqual(['ask_owner', 'autoRender', 'describe_data', 'get_channel_report', 'get_digest', 'lookup_product', 'query_metric', 'remove_block', 'render_chart', 'render_kpi', 'render_table', 'set_report_filters', 'set_report_title']);
   });
 
   it('describe_data follows Explore: on drops the contact caveat, off keeps it', async () => {

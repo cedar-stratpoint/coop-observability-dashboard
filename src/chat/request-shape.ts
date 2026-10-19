@@ -5,8 +5,8 @@ import {isAllowedTool} from './tools';
 
 const TOP_KEYS = new Set(['model', 'max_tokens', 'thinking', 'system', 'messages', 'tools', 'tool_choice', 'cache_control', 'output_config']);
 const EFFORTS = new Set(['low', 'medium', 'high']);
-// The only tools sent with strict: false (grammar cap, see tool-defs.ts); their input is validated in crm/tools.ts.
-const NON_STRICT_OK = new Set(['list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']);
+// The only tools sent with strict: false (grammar cap, see tool-defs.ts); their input is validated in crm/tools.ts and clarify.ts askOwner.
+const NON_STRICT_OK = new Set(['list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'ask_owner']);
 const TOOL_KEYS = new Set(['name', 'description', 'input_schema', 'strict', 'cache_control', 'type']);
 
 function fail(rule: string, detail: unknown, sink?: AuditSink): never {

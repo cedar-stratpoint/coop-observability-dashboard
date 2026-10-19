@@ -3,6 +3,7 @@
 // (thinking blocks included), all tool_result blocks go back in ONE user message with results first, and the
 // system + tools prefix is identical on every request so the prompt cache holds.
 import type Anthropic from '@anthropic-ai/sdk';
+import {clarifyText, isClarify, type ClarifyResult} from './clarify';
 import {logNumberCheckFailed, logNumberViolation, logRegistryGap, logTurn, type AuditSink} from './audit';
 import {trailingRepeat} from './degenerate';
 import {checkNumbers} from './number-check';
@@ -376,6 +377,15 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       held = '';
       emit({t: 'text', d: REFUSAL_TEXT});
       return finish('guard_trip', true);
+    }
+    // A tool asked the owner to clarify (a product that is not an exact match, a missing period or channel): the app writes the
+    // question with its tap options and ends the turn, so the model can neither skip the question nor guess past it.
+    const asked = results.find((r) => !r.is_error && isClarify(r.content));
+    if (asked) {
+      const shown = answer.slice(0, answer.length - held.length).trim() !== '';
+      dropHeld();
+      emit({t: 'text', d: `${shown ? '\n\n' : ''}${clarifyText((asked.content as ClarifyResult).clarify)}`});
+      return finish('clarify', true);
     }
     for (const r of results) if (!r.is_error) seen.push(r.content);
     calls.forEach((c, i) => {
