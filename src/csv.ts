@@ -9,3 +9,13 @@ export function csvCell(v: unknown): string {
 }
 
 export const toCsv = (rows: readonly (readonly unknown[])[]): string => rows.map((r) => r.map(csvCell).join(',')).join('\n');
+
+/** Browser only (call it from a click handler): saves the rows as a CSV file. */
+export function downloadCsv(filename: string, rows: readonly (readonly unknown[])[]): void {
+  const url = URL.createObjectURL(new Blob([toCsv(rows)], {type: 'text/csv'}));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

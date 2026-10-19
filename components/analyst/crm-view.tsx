@@ -5,7 +5,7 @@
 // groups, then one table at a time — carts, orders, customers — each searchable
 // and exportable. Read-only by design: the reminder and win-back sends stay on
 // the storefront admin, so nothing here can email a customer.
-import {toCsv} from '@/src/csv';
+import {downloadCsv} from '@/src/csv';
 import {useMemo, useState} from 'react';
 import {
   AlertTriangle,
@@ -109,15 +109,6 @@ function FilterSelect({
       </select>
     </label>
   );
-}
-
-function downloadCsv(filename: string, rows: string[][]) {
-  const url = URL.createObjectURL(new Blob([toCsv(rows)], {type: 'text/csv'}));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 export function CrmView({

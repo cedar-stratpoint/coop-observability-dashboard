@@ -9,7 +9,8 @@ import {ChevronRight, FlaskConical, TriangleAlert} from 'lucide-react';
 import type {ChartBlock, ChatBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
 import type {MetricRow, ResultColumn} from '@/src/chat/result-types';
 import {cn} from '@/lib/utils';
-import {formatCategory, formatValue} from './chat-blocks-format';
+import {downloadCsv} from '@/src/csv';
+import {copyList, csvRows, formatCategory, formatValue} from './chat-blocks-format';
 
 // Recharts is an async chunk (same pattern as charts-lazy.tsx); the skeleton holds the height so there is no layout jump.
 const ChartView = dynamic(() => import('./chat-charts').then((m) => m.ChartView), {
@@ -161,6 +162,30 @@ function ViewToggle({view, onChange}: {view: 'chart' | 'table'; onChange: (v: 'c
   );
 }
 
+const ACTION_BTN = 'rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted motion-reduce:transition-none';
+
+/** Copy and CSV for a contact table. Nothing is sent anywhere: the owner pastes or opens the file themselves. */
+function ContactActions({block}: {block: TableBlock}) {
+  const [done, setDone] = useState<string | null>(null);
+  const copy = async (which: 'emails' | 'mobiles') => {
+    try {
+      await navigator.clipboard.writeText(copyList(block, which));
+      setDone(which);
+      setTimeout(() => setDone(null), 1500);
+    } catch {
+      setDone('failed');
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label="Contact list actions">
+      <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('emails')}>{done === 'emails' ? 'Copied' : 'Copy emails'}</button>
+      <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('mobiles')}>{done === 'mobiles' ? 'Copied' : 'Copy mobiles'}</button>
+      <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => downloadCsv(block.csvName ?? 'contacts.csv', csvRows(block))}>Download CSV</button>
+      {done === 'failed' && <span role="status" className="text-[11px] text-muted-foreground">Could not copy. Use Download CSV.</span>}
+    </div>
+  );
+}
+
 function BlockCard({block, toggle, children}: {block: TableBlock | ChartBlock; toggle?: React.ReactNode; children: React.ReactNode}) {
   const adjustments = block.kind === 'chart' ? block.chosen.adjustments : [];
   return (
@@ -217,6 +242,7 @@ export function ChatBlocks({blocks}: {blocks: ChatBlock[]}) {
         <ChartCard key={b.id} block={b} />
       ) : (
         <BlockCard key={b.id} block={b}>
+          {b.pii && <ContactActions block={b} />}
           <DataTable columns={b.columns} rows={b.rows} total={b.total} label={b.title} />
         </BlockCard>
       ),
