@@ -261,12 +261,12 @@ Metric catalog (the only numbers you can query):
   measure list_value [derived]: The picks valued at their list price on the day they sold
   measure units [measured]: Sum of pick quantities on completed bundle sales
   default measure revenue; pet filter yes, event filter yes, compare yes
-- stock_on_hand: Stock on hand. Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all locations, or per location.
-  dimensions: sellable, office, all_locations, by_location (default sellable)
+- stock_on_hand: Stock on hand. Units on hand per product, as of now (no date range). Default basis: Event (sellable) stock; also office, all POS locations, per location, BoxMe online, all channels (POS + BoxMe), or BoxMe lots expiring soon.
+  dimensions: sellable, office, all_locations, by_location, online, all_channels, expiring_online (default sellable)
   measure units [measured]: Units on hand in the stock lots, per location, as of now
   default measure units; pet filter no, event filter no, compare no
-- stock_cover: Stock cover. How many selling days the Event (sellable) stock lasts per product, with status (out, low, healthy): the Inventory page forecast, as of now.
-  dimensions: sku (default sku)
+- stock_cover: Stock cover. How long stock lasts per product, with status (out, low, healthy), as of now: Event (sellable) stock in selling days (the Inventory forecast), or BoxMe online stock in days.
+  dimensions: sku, online (default sku)
   measure cover [derived]: Event stock divided by units sold per selling day over the last 60 days (the Inventory forecast), as of now
   default measure cover; pet filter no, event filter no, compare no
 Tool rules: every tool parameter is required. Use "none", "all" or "default" when a parameter does not apply, and "" for from and to. Pass dates only when range is "custom" (YYYY-MM-DD, Philippine time). Never pass keys that are not in the schema. Every number in an answer must come from a tool result.
