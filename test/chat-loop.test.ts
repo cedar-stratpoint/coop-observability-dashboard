@@ -606,3 +606,44 @@ describe('automatic prompt caching (ai-expert audit, 2026-10-02)', () => {
     }
   });
 });
+
+describe('runChatLoop: clarifying questions end the turn (A2, plan 2026-10-19-ask-coop-inventory-plan.md)', () => {
+  const ASK = {clarify: {question: 'Did you mean **Freeze Dried Yogurt Cubes**?', options: ['Freeze Dried Yogurt Cubes (ZMY1)']}};
+
+  it('the app writes the question with chips and stops: no second model step, no guess', async () => {
+    const client = new FakeClient(() => toolTurn(toolUse('t1', 'lookup_product', {query: 'yoghurt cubes', show: 'details'})));
+    const {events, s, opts} = setup(client, {executors: {lookup_product: async () => ASK}});
+    const sum = await runChatLoop(opts);
+    expect(client.requests).toHaveLength(1);
+    expect(sum.stopReason).toBe('clarify');
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toBe('Did you mean **Freeze Dried Yogurt Cubes**?\n\n<suggest>Freeze Dried Yogurt Cubes (ZMY1)</suggest>');
+    expect(events.at(-1)).toMatchObject({t: 'done'});
+    expect(turnLines(s)[0].stopReason).toBe('clarify');
+  });
+
+  it('text the model already streamed stays, and the question follows it after a blank line', async () => {
+    const client = new FakeClient(() => ({...toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})), text: ['Let me check.']}));
+    const {events, opts} = setup(client, {executors: {lookup_product: async () => ASK}});
+    await runChatLoop(opts);
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toMatch(/^Let me check\.\n\nDid you mean/);
+  });
+
+  it('in an Explore turn the held narration is dropped, only the question is shown', async () => {
+    const client = new FakeClient(() => ({...toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})), text: ['Fix the grouping.']}));
+    const {events, opts} = setup(client, {tools: exploreTools(), executors: {lookup_product: async () => ASK}});
+    await runChatLoop(opts);
+    const text = events.filter((e) => e.t === 'text').map((e) => (e as {d: string}).d).join('');
+    expect(text).toMatch(/^Did you mean/);
+    expect(text).not.toMatch(/grouping/);
+  });
+
+  it('a refusal ({error}) is not a question: the model gets it and carries on', async () => {
+    const client = new FakeClient((n) => (n === 1 ? toolTurn(toolUse('t1', 'lookup_product', {query: 'x', show: 'details'})) : {text: ['No such product.']}));
+    const {opts} = setup(client, {executors: {lookup_product: async () => ({error: 'No product has the SKU or name "x".'})}});
+    const sum = await runChatLoop(opts);
+    expect(client.requests).toHaveLength(2);
+    expect(sum.stopReason).toBe('end_turn');
+  });
+});

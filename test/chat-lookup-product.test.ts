@@ -39,7 +39,13 @@ const call = (input: unknown, d: MetricData = data()) => lookupProduct(input, d)
 const ok = (input: unknown, d?: MetricData) => {
   const out = call(input, d);
   if ('error' in out) throw new Error(out.error);
+  if ('clarify' in out) throw new Error(`asked: ${out.clarify.question}`);
   return out;
+};
+const asks = (input: unknown, d?: MetricData) => {
+  const out = call(input, d);
+  if (!('clarify' in out)) throw new Error('expected a clarifying question');
+  return out.clarify;
 };
 const err = (input: unknown, d?: MetricData): string => {
   const out = call(input, d);
@@ -89,31 +95,36 @@ describe('lookup_product: found', () => {
   });
 });
 
-describe('lookup_product: steering errors (Slice 5 criterion 1)', () => {
-  it('a missing SKU lists close matches and the exact-SKU next step', () => {
-    const e = err({query: 'P7', show: 'details'});
-    expect(e).toMatch(/No product has the SKU or name "P7"/);
-    expect(e).toMatch(/Close matches: .*P\d \(/); // one-character slip: the nearest SKUs are suggested
-    expect(e).toMatch(/exact SKU|one of these SKUs/);
-    expect(e).toMatch(/top_products/);
+describe('lookup_product: confirms instead of guessing (owner rule 2026-10-19)', () => {
+  it('a near-miss SKU offers the nearest SKUs as choices', () => {
+    const q = asks({query: 'P7', show: 'details'});
+    expect(q.question).toMatch(/Which product did you mean by "P7"/);
+    expect(q.options).toContain('Chicken Jerky (P1)');
   });
 
-  it('a near-miss name suggests the product', () => {
-    expect(err({query: 'chiken jerky', show: 'details'})).toMatch(/Close matches: P1 \(Chicken Jerky\)/);
-    expect(err({query: 'salmon treat', show: 'details'})).toMatch(/Close matches: P2 \(Salmon Bites\)/);
+  it('a misspelled name asks "Did you mean" with the product as the one choice', () => {
+    expect(asks({query: 'chiken jerky', show: 'details'})).toEqual({question: 'Did you mean **Chicken Jerky**?', options: ['Chicken Jerky (P1)']});
   });
 
-  it('a name that matches nothing at all points to top_products', () => {
+  it('a name with one unknown word offers the products that share a word', () => {
+    expect(asks({query: 'salmon treat', show: 'details'}).options).toContain('Salmon Bites (P2)');
+  });
+
+  it('a name that matches nothing at all is a steering error pointing to top_products', () => {
     const e = err({query: 'zebra saddle', show: 'details'});
     expect(e).toMatch(/No product has the SKU or name "zebra saddle"/);
     expect(e).toMatch(/top_products/);
-    expect(e).not.toMatch(/Close matches/);
   });
 
-  it('an ambiguous name lists the matches and asks for the exact SKU', () => {
-    const e = err({query: 'chicken', show: 'details'});
-    expect(e).toMatch(/More than one product matches "chicken": P1 \(Chicken Jerky\), P5 \(Chicken Breast Strips\)/);
-    expect(e).toMatch(/exact SKU/);
+  it('an ambiguous name offers every match', () => {
+    const q = asks({query: 'chicken', show: 'details'});
+    expect(q.question).toMatch(/Which product did you mean by "chicken"/);
+    expect(q.options).toEqual(['Chicken Jerky (P1)', 'Chicken Breast Strips (P5)']);
+  });
+
+  it('knows products from the POS catalog that never sold', () => {
+    const d = data({stock: {byLocation: [], names: {P9: 'Duck Necks'}, sales: [], config: {} as never, asOf: NOW.toISOString()}});
+    expect(ok({query: 'duck necks', show: 'details'}, d).rows[0]).toMatchObject({sku: 'P9', name: 'Duck Necks', units_direct: 0, orders: 0});
   });
 
   it('names the allowed values for a bad show, and refuses an empty or oversized query', () => {
@@ -134,7 +145,7 @@ describe('lookup_product through the executor and dispatch', () => {
 
   it('a missing SKU comes back is_error with the steering text (criterion 1), a hit does not', async () => {
     const ex = createExecutors(ctx());
-    const miss = await dispatchToolCall({name: 'lookup_product', input: {query: 'NOPE-1', show: 'details'}}, ex);
+    const miss = await dispatchToolCall({name: 'lookup_product', input: {query: 'zebra saddle', show: 'details'}}, ex);
     expect(miss.is_error).toBe(true);
     expect((miss.content as {error: string}).error).toMatch(/top_products/);
     const hit = await dispatchToolCall({name: 'lookup_product', input: {query: 'P2', show: 'details'}}, ex);

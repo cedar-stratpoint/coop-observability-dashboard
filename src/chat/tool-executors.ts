@@ -1,5 +1,6 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {askOwner, isClarify} from './clarify';
 import {describeData} from './coverage';
 import {createCrmExecutors} from './crm/executors';
 import {digestsFor, readReportInput, shapeChannelReport} from './channel-report';
@@ -106,9 +107,11 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       session.store.set(id, {...result, id});
       return compact(result, id);
     },
+    ask_owner: async (input) => askOwner(input), // a question: the loop writes it and ends the turn
     lookup_product: async (input) => {
       const result = lookupProduct(input, await data());
       if ('error' in result) return {error: result.error};
+      if (isClarify(result)) return result; // the loop asks the owner and ends the turn
       counter += 1;
       const id = `r${counter}`;
       session.store.set(id, {...result, id});
@@ -153,6 +156,7 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';
   if (name === 'lookup_product') return 'Looking up a product';
+  if (name === 'ask_owner') return 'Checking what you mean';
   if (name === 'render_kpi') return 'Adding a tile';
   if (name === 'render_chart') return 'Drawing a chart';
   if (name === 'render_table') return 'Building a table';
