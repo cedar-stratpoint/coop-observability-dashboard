@@ -299,11 +299,12 @@ export const GOLDEN_CASES: GoldenCase[] = [
     // B1 (2026-10-19): one product's stock is one lookup_product call, no dates asked (was "stock not available").
     id: 'product_stock', category: 'lookup', prompt: 'How much stock do we have of Duck Strips?',
     expectTools: [{tool: 'lookup_product', input: {show: 'stock'}}], forbidTools: ['run_query', 'ask_owner'], textMatches: [/\b12\b/],
+    blocks: {kpi: 3}, // Event, Office, Total tiles, drawn by the app's backstop when the model does not call render_kpi (B1)
     rubric: ['The answer gives the stock per location and the total, as of now.', 'The answer does not ask for dates.'],
     steps: ['THINK-01', 'THINK-03'],
     script: [
       {calls: [call('lookup_product', {query: 'Duck Strips', show: 'stock'})]},
-      {text: (s) => `Duck Strips has ${rows(s).at(-1)?.stock_units} units right now: ${rows(s)[0].stock_units} at the event and ${rows(s)[1].stock_units} in the office.`},
+      {text: (s) => `Duck Strips has ${rows(s)[0].stock_units} units right now: ${rows(s)[0].event_units} at the event and ${rows(s)[0].office_units} in the office.`},
     ],
   },
   {

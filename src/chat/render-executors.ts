@@ -134,7 +134,10 @@ export function createRenderExecutors(ctx: ChatToolContext, session: ReportSessi
 
   const autoRender = async (): Promise<string[]> => {
     const explore = [...session.store.entries()].filter(([id, r]) => /^x[1-9][0-9]*$/.test(id) && r.metric === 'explore' && r.rows.length > 0 && !bound.has(id));
-    const registry = [...session.store.entries()].filter(([id, r]) => /^r[1-9][0-9]*$/.test(id) && (session.requestOf(id) !== undefined || r.metric === 'channel_report') && r.rows.length >= 2 && !bound.has(id));
+    const registry = [...session.store.entries()].filter(([id, r]) => /^r[1-9][0-9]*$/.test(id) && !bound.has(id) && (
+      ((session.requestOf(id) !== undefined || r.metric === 'channel_report') && r.rows.length >= 2) ||
+      (r.metric === 'product_lookup' && r.dimension === 'stock') // B1: one product's stock draws as tiles (one row)
+    ));
     const draw = [...explore.slice(0, AUTO_RENDER_MAX), ...registry.slice(0, AUTO_REGISTRY_MAX)];
     const dropped = explore.length - Math.min(explore.length, AUTO_RENDER_MAX);
     const ids: string[] = [];
