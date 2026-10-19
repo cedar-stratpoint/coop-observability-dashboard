@@ -12,6 +12,8 @@ import {isRealDay, rangeLabel} from './range';
 import type {DigestRow} from './read/digest';
 import type {ClarifyResult} from './clarify';
 import {resolveProduct, type CatalogProduct} from './product-resolve';
+import {onlineStock, phtStamp} from './boxme-metrics';
+import {cleanName} from '../boxme-inventory-compute';
 import type {Check, MeasureDecl, MetricData, MetricError, MetricResult, MetricRow, ResultColumn} from './result-types';
 
 // ---- shared ---------------------------------------------------------------------------------------------------------
@@ -275,7 +277,7 @@ export function shapeDigest(input: unknown, src: DigestSource | null, now: Date)
 
 // ---- lookup_product -------------------------------------------------------------------------------------------------
 
-export const PRODUCT_SHOWS = ['details', 'price_history'] as const;
+export const PRODUCT_SHOWS = ['details', 'price_history', 'stock'] as const;
 export const MAX_QUERY = 80;
 
 const DETAIL_COLUMNS: ResultColumn[] = [
@@ -303,10 +305,65 @@ const LOOKUP_MEASURE: MeasureDecl = {
   method: 'Counted from completed (not voided) POS orders. Revenue is direct sales only: units picked inside a bundle carry no revenue of their own (see query_metric bundle_picks for allocated revenue).',
 };
 
-/** Every product the chat knows: the POS catalog (stock names, so unsold products resolve too), then sold-line names. */
+const LOCATION_LABEL: Record<string, string> = {event: 'Event (sellable)', office: 'Office (back)'};
+const STOCK_MEASURE: MeasureDecl = {key: 'stock', label: 'Stock on hand', kind: 'measured', unit: 'units', method: 'Units on hand in the POS stock lots per location, as of now'};
+/**
+ * B1 + B3: one product's stock now, as ONE row: a column per POS location, BoxMe (online) available, and the total, so it draws as
+ * stat tiles (one row, up to four numbers). No date range. BoxMe's reserved, incoming, damaged, next expiry and sync time are said in
+ * the caveats; a stale or failed sync is said first.
+ */
+function productStock(p: CatalogProduct, data: MetricData, now: Date): MetricResult | MetricError {
+  const s = data.stock;
+  if (!s) return fail('Stock data is not available right now. Say so, and point to the Inventory page.');
+  const at = s.byLocation.filter((r) => r.product_id === p.sku).sort((a, b) => a.location.localeCompare(b.location));
+  const columns: ResultColumn[] = [col('product', 'Product', 'text', 'category'), ...at.map((r) => col(`${r.location}_units`, LOCATION_LABEL[r.location] ?? r.location, 'units', 'measure'))];
+  const row: MetricRow = {product: `${p.name} (${p.sku})`, ...Object.fromEntries(at.map((r) => [`${r.location}_units`, r.stock]))};
+  let total = at.reduce((n, r) => n + r.stock, 0);
+  const today = new Date(Date.parse(s.asOf) + 8 * 3_600_000).toISOString().slice(0, 10);
+  const caveats = [`${p.name} (${p.sku}): offline (POS) stock as of now (${phtStamp(s.asOf)}); stock has no date range.`];
+  if (data.boxme !== undefined) {
+    const online = onlineStock(data, now);
+    if ('error' in online) caveats.unshift(`${online.error} This is offline stock only.`);
+    else {
+      const b = online.result.rows.find((r) => r.sku === p.sku);
+      caveats.unshift(...online.warnings);
+      caveats.push(online.basis);
+      if (!b) caveats.push('BoxMe does not stock this product (online stock 0).');
+      else {
+        columns.push(col('online_units', 'BoxMe available (online)', 'units', 'measure'));
+        row.online_units = b.available;
+        total += b.available;
+        const extra = [b.reserved && `${b.reserved} reserved for orders`, b.incoming && `${b.incoming} incoming`, b.damaged && `${b.damaged} damaged`].filter(Boolean);
+        if (extra.length) caveats.push(`BoxMe also has ${extra.join(', ')} (not in the available figure).`);
+        if (b.byWarehouse.length > 1) caveats.push(`BoxMe available per warehouse: ${b.byWarehouse.map((w) => `${w.label} ${w.available}`).join(', ')}.`);
+        if (b.nextExpiry) caveats.push(`Next BoxMe expiry: ${b.nextExpiry.quantity} units on ${b.nextExpiry.date} (${b.nextExpiry.daysLeft} days).`);
+      }
+    }
+  }
+  columns.push(col('stock_units', 'Total', 'units', 'measure'));
+  row.stock_units = total;
+  const rows = [row];
+  if (total === 0 && at.length === 0) caveats.push('No stock is recorded for this product at any location, so the total is 0.');
+  if (data.source === 'mock') caveats.push('This is sample data, not real stock.');
+  return {
+    id: '',
+    metric: 'product_lookup',
+    dimension: 'stock',
+    columns,
+    rows,
+    meta: {
+      source: data.source, range: {from: today, to: today, label: 'as of now'}, dataFrom: null, dataTo: null, rowCount: rows.length,
+      coverage: 'full', coveredFrom: today, coveredTo: today, caveats, share_basis: null,
+      measure: STOCK_MEASURE.key, measures: [STOCK_MEASURE], insights: [], checks: [], reliable: true,
+    },
+  };
+}
+
+/** Every product the chat knows: the POS catalog (stock names, so unsold products resolve too), BoxMe-only products, then sold-line names. */
 function catalogOf(data: MetricData): CatalogProduct[] {
   const seen = new Map<string, CatalogProduct>();
   for (const [sku, name] of Object.entries(data.stock?.names ?? {})) seen.set(sku, {sku, name: name || sku});
+  for (const p of data.boxme?.products ?? []) if (p.active && !seen.has(p.seller_sku)) seen.set(p.seller_sku, {sku: p.seller_sku, name: cleanName(p.name)});
   for (const order of data.orders) {
     for (const line of order.items) {
       if (line.product_id && !seen.has(line.product_id)) seen.set(line.product_id, {sku: line.product_id, name: line.name || line.product_id});
@@ -317,7 +374,7 @@ function catalogOf(data: MetricData): CatalogProduct[] {
 
 const label = (p: CatalogProduct): string => (p.name === p.sku ? p.sku : `${p.name} (${p.sku})`);
 
-export function lookupProduct(input: unknown, data: MetricData): MetricResult | MetricError | ClarifyResult {
+export function lookupProduct(input: unknown, data: MetricData, now: Date = new Date()): MetricResult | MetricError | ClarifyResult {
   const o = isRec(input) ? input : {};
   if (typeof o.show !== 'string' || !(PRODUCT_SHOWS as readonly string[]).includes(o.show)) return fail(`show ${JSON.stringify(o.show ?? null)} is not allowed. Allowed values for show: ${list(PRODUCT_SHOWS)}.`);
   const query = typeof o.query === 'string' ? o.query.trim() : '';
@@ -337,6 +394,7 @@ export function lookupProduct(input: unknown, data: MetricData): MetricResult | 
     return {clarify: {question: `I couldn't find a product called "${query}". Did you mean one of these?`, options: r.nearest.map(label)}};
   }
   const found = r.product;
+  if (o.show === 'stock') return productStock(found, data, now);
 
   const completed = data.orders.filter((o2) => isCompletedOrder(o2) && !Number.isNaN(Date.parse(o2.created_at)));
   let dataFrom: string | null = null;

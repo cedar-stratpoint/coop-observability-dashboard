@@ -7,9 +7,12 @@ import {CHAT_RELATIONS, DIGEST_RELATIONS} from '../read/relations';
 import {isClosedRelation, isSecretName} from './secret-names';
 import {EXPLORE_VIEW_NAMES} from './views';
 
-/** The views the login may read: the ten registry views, the Train 1 explore aliases, the two zoomy-pos read views and pos_orders_completed. = view_allowlist(). */
+/**
+ * The views the login may read: the ten registry views, the Train 1 explore aliases, the two zoomy-pos read views and pos_orders_completed. = view_allowlist().
+ * The coop_chat_boxme_* views are the registry's only (B2): Explore reads the raw boxme_* tables, which its catalog notes describe.
+ */
 export const EXPLORE_VIEW_ALLOWLIST: readonly string[] = Object.freeze([
-  ...Object.values(CHAT_RELATIONS.ro_role.tables), DIGEST_RELATIONS.ro_role, // coop_chat_* (supabase/coop_chat_readonly.sql + coop_chat_digest.sql)
+  ...Object.values(CHAT_RELATIONS.ro_role.tables).filter((v) => !v.startsWith('coop_chat_boxme_')), DIGEST_RELATIONS.ro_role, // coop_chat_* (supabase/coop_chat_readonly.sql + coop_chat_digest.sql)
   ...EXPLORE_VIEW_NAMES, // coop_explore_* (supabase/coop_chat_explore.sql)
   'pos_inventory', 'pos_inventory_by_location', // zoomy-pos read views
   'pos_orders_completed', // the Ask Coop default view (supabase/coop_chat_default_views.sql)
