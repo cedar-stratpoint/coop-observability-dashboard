@@ -150,3 +150,29 @@ describe('filterContacts', () => {
     expect(filterContacts(merged, EMPTY_CONTACT_FILTER, 'nobody')).toHaveLength(0);
   });
 });
+
+describe('pets and campaigns of a merged person (additive, for Ask Coop)', () => {
+  it('collects the distinct pet names and booth campaigns from every record of the person', () => {
+    const [p] = mergeContacts(
+      [crm({petName: 'Mochi'})],
+      [lead({pet: 'Mochi / Puspin'}), lead({pet: 'Bruno / Aspin', campaign: 'pet-expo-oct2026'})],
+      [laz()],
+    );
+    expect(p.pets).toEqual(['Mochi', 'Mochi / Puspin', 'Bruno / Aspin']);
+    expect(p.campaigns).toEqual(['modern-market-sept2026', 'pet-expo-oct2026']);
+  });
+  it('is empty lists, never null, for a person with none', () => {
+    const [p] = mergeContacts([crm()], [], []);
+    expect(p.pets).toEqual([]);
+    expect(p.campaigns).toEqual([]);
+  });
+});
+
+describe('every identity of a merged person (additive, so a person can be found by any of them)', () => {
+  it('keeps each distinct name, email and mobile of the group', () => {
+    const [p] = mergeContacts([crm({phone: null})], [lead({mobile: '09171234567'}), lead({email: 'other@x.com', mobile: '09171234567'})], [laz({name: 'Ana C'})]);
+    expect(p.emails).toEqual(['buyer@x.com', 'other@x.com']);
+    expect(p.mobiles).toEqual(['09171234567', '+639171234567']);
+    expect(p.names).toEqual(['Ana Cruz', 'Ana C']);
+  });
+});

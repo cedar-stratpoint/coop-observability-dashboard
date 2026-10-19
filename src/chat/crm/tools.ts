@@ -316,14 +316,19 @@ const CUSTOMER_GROUP_MEASURES: MeasureDecl[] = [
 ];
 const money = (n: number): number => Math.round(n * 100) / 100;
 
-export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date): Promise<MetricResult> {
+/** Website customers with their order stats, from the CRM's captured customers and orders (shared by list_crm_customers and the contacts tool). `membership` is null when its settings could not be read. */
+export async function crmEnrichedCustomers(get: CrmGet, now: Date) {
   const [customers, orders, membership] = await Promise.all([
     list(get, 'customers', 'customers'),
     readOrders(get),
     get('membership').then((r) => projectMembership(r.body)).catch(() => null),
   ]);
   const windowStart = membershipWindowStart(now, (membership ?? MEMBERSHIP_FALLBACK).programStart);
-  const enriched = enrichCustomers(customers.map(projectCustomer), orders, windowStart);
+  return {enriched: enrichCustomers(customers.map(projectCustomer), orders, windowStart), windowStart, membership};
+}
+
+export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date): Promise<MetricResult> {
+  const {enriched, windowStart, membership} = await crmEnrichedCustomers(get, now);
   const matched = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers}, '').filter((c) => req.joined === null || inDays(c.createdAt, req.joined));
   const sorted = [...matched].sort(
     req.sort === 'spend_desc' ? (a, b) => b.spent - a.spent : req.sort === 'orders_desc' ? (a, b) => b.orderCount - a.orderCount : (a, b) => instant(b.createdAt) - instant(a.createdAt),
