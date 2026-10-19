@@ -8,6 +8,7 @@ export interface SpinLead {
   prize: string;
   campaign: string | null; // the storefront admin's event slug, e.g. "modern-market-sept2026"
   collectedAt: string; // ISO instant
+  consentAt?: string | null; // when the FIRST sign-up of this contact gave consent (Shopify); never updated, so it says nothing about a later unsubscribe
 }
 
 /** Leads collected on any of an event's days (Manila). */
