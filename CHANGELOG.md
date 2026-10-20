@@ -10,6 +10,20 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-20 — Sales range: sales over any dates, or all time (new page `/sales-range`)
+- **New page, sidebar "Sales range".** Pick any dates across weeks, or "All time", and see revenue, orders, units, AOV, ad spend, ROAS and top products for that span. The weekly Sales page (`/?channel=all`) is unchanged.
+  - *Why:* the weekly page clamps custom dates inside the selected week, so a month or the whole history could not be viewed. The owner chose a separate page over changing the existing one.
+- **Sales, orders, units and AOV are exact for the days picked.** They reuse the rollup Ask Coop already uses (`src/period-rollup.ts`): Shopee and Lazada from the digests' per-day sales, Website from live CRM orders, Offline from completed POS orders. AOV is total revenue / total orders, never an average.
+- **Ad spend, ROAS and top products use whole windows only.** Those figures exist once per export window, not per day, so a window counts only when it sits entirely inside the dates. ROAS is total ad revenue / total spend (`roas x spend` per window). Overlapping windows are never summed: the newest wins and the rest are named. Every ad number carries a tag ("4 full windows"), and a span with no full window says "No data" instead of 0.
+  - *Decision (found on staging, 2026-10-20):* a digest's Shopee ad figure belongs to the ads export's own dates, not the digest week. Three July digests carried ads windows of 31, 32 and 14 days that overlap, so weekly-digest summing would have double counted. Windows are therefore placed by `digest.shopee.ads.window` (Lazada: its facet window, else the digest window).
+  - *Inside means every day it touches:* a window that starts at 08:00 PH on a Monday is not inside a span that starts Tuesday. A Shopee figure with no export dates of its own is never placed by the digest week; it is skipped and named. Lazada's facets share the digest's query window, so it falls back to that.
+  - Shopee/Lazada top products are tagged "Approximate" when several windows are merged: the backend keeps only each digest's top 5. Website top products are exact, from live orders.
+- **"Snap to whole weeks"** (never automatic) moves dates that cut a Monday to Sunday week out to whole weeks; the end stops at the last finished Sunday. **No dates in the link** shows the last 4 finished weeks. Dates are clamped to the first stored digest and today (PH time); reversed dates are swapped.
+- **Coverage is shown, not hidden.** An amber banner lists real gaps (partial, not combinable, not connected); where the numbers came from sits in a quiet list below.
+- **Shared pieces touched:** `Calendar` gets an optional `weekStartsOn` (default Sunday, so every other caller is unchanged); the shell gets the "Sales range" nav item (desktop rail and mobile More) and hides the weekly period switcher on this page.
+- **Data catalog:** `/sales-range` added to `knowledge/data-catalog/pages.md`; `catalog.json` regenerated.
+- Tests: `test/span-windows.test.ts` (19) and `test/sales-range.test.ts` (22), including the real staging windows.
+
 ## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
 - Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
 - Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".

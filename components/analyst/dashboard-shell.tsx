@@ -4,7 +4,7 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useSearchParams} from 'next/navigation';
 import {signOut} from 'next-auth/react';
-import {Activity, BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Contact, FileBarChart, Gauge, HeartPulse, Home, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
+import {Activity, BarChart3, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Contact, FileBarChart, Gauge, HeartPulse, Home, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
 import type {DigestArchiveRow} from '../../src/types';
 import {cn} from '@/lib/utils';
 import {fmtRange, hasNoSalesData, periodKind} from '../../src/week';
@@ -28,6 +28,7 @@ const OVERVIEW: NavItem = {href: '/', label: 'Overview', icon: Home};
 const OVERVIEW_CHILDREN: NavItem[] = [
   {href: '/health', label: 'Business Health', icon: Gauge},
   {href: '/?channel=all', label: 'Sales', icon: BarChart3},
+  {href: '/sales-range', label: 'Sales range', icon: CalendarRange},
   {href: '/offline-sales', label: 'Offline Sales', icon: Receipt},
   {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
   {href: '/offline-sales/events', label: 'Events', icon: CalendarDays},
@@ -145,6 +146,8 @@ export function DashboardShell({
     !isHome &&
     !pathname.startsWith('/settings') &&
     !pathname.startsWith('/health') &&
+    // Sales range picks its own dates (any span), not a digest week.
+    !pathname.startsWith('/sales-range') &&
     !pathname.startsWith('/repricer') &&
     // Saved reports carry their own dates (live range or pinned), not a digest week.
     !pathname.startsWith('/reports') &&
@@ -252,6 +255,7 @@ export function DashboardShell({
   const moreItems: NavItem[] = isZoomy
     ? [
         {href: '/health', label: 'Business Health', icon: Gauge},
+        {href: '/sales-range', label: 'Sales range', icon: CalendarRange},
         {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
         {href: '/offline-sales/events', label: 'Events', icon: CalendarDays},
         {href: '/customers', label: 'Customers', icon: Users},
