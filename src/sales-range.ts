@@ -27,8 +27,7 @@ function lastFinishedSunday(todayDay: string): string {
 /** The dates in the URL, made safe: swapped if reversed, clamped to the data and today, or the last 4 finished weeks. */
 export function resolveSpan(req: SpanRequest, {firstDay, todayDay}: SpanBounds): ResolvedSpan {
   if (req.span === 'all') return {fromDay: firstDay, toDay: todayDay, all: true, note: null};
-  const ok = (d?: string): d is string => Boolean(d && DAY_RE.test(d) && isRealDay(d));
-  if (ok(req.from) && ok(req.to)) {
+  if (validDay(req.from) && validDay(req.to)) {
     const [a, b] = req.from <= req.to ? [req.from, req.to] : [req.to, req.from];
     const fromDay = a < firstDay ? firstDay : a;
     const toDay = b > todayDay ? todayDay : b;
@@ -41,6 +40,28 @@ export function resolveSpan(req: SpanRequest, {firstDay, todayDay}: SpanBounds):
   const start = addDaysKey(toDay, -(DEFAULT_WEEKS * 7 - 1));
   const fromDay = start < firstDay ? firstDay : start;
   return fromDay <= toDay ? {fromDay, toDay, all: false, note: null} : {fromDay: firstDay, toDay: todayDay, all: false, note: null};
+}
+
+const validDay = (d?: string): d is string => Boolean(d && DAY_RE.test(d) && isRealDay(d));
+
+/** True when the link asks for a range: `span=all`, or two real dates. Anything else is the weekly view. */
+export function isRangeRequest(req: SpanRequest): boolean {
+  return req.span === 'all' || (validDay(req.from) && validDay(req.to));
+}
+
+/** The newest weekly digest windows, as links back to a single week (Recommended actions are written per week). */
+export function recentWeeks(digests: readonly {window_from: string; window_to: string; created_at: string}[], limit = 3): {from: string; label: string}[] {
+  const seen = new Set<string>();
+  const out: {from: string; label: string}[] = [];
+  for (const d of [...digests].sort((a, b) => Date.parse(b.window_to) - Date.parse(a.window_to) || Date.parse(b.created_at) - Date.parse(a.created_at))) {
+    const days = fullDays(windowOf(d));
+    if (!days || seen.has(d.window_from)) continue;
+    if (Date.parse(d.window_to) - Date.parse(d.window_from) > 8 * DAY_MS) continue; // weekly windows only
+    seen.add(d.window_from);
+    out.push({from: d.window_from, label: rangeLabel(days.min, days.max)});
+    if (out.length === limit) break;
+  }
+  return out;
 }
 
 /** The dates moved out to whole Monday to Sunday weeks (end stops at the last finished Sunday), or null when nothing would change. */

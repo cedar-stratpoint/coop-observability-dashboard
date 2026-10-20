@@ -1,7 +1,7 @@
 'use client';
 
-// Sales over any dates (the new /sales-range page). Same look as the weekly Sales overview: back link, serif title, channel
-// chips, totals, Compare channels, Top products. Every figure is built in code (src/sales-range.ts); this file only displays it.
+// The Sales page when dates are picked (any dates, or all time). Same look as the weekly view: back link, serif title, channel
+// chips, totals, Compare channels, Top products. The dates are chosen with the top bar's "Custom dates" button. Every figure is built in code (src/sales-range.ts); this file only displays it.
 import {useMemo, useState} from 'react';
 import Link from 'next/link';
 import {ArrowLeft, Check, Globe, Store} from 'lucide-react';
@@ -10,7 +10,6 @@ import {Card, CardContent} from '@/components/ui/card';
 import {ShopeeIcon, LazadaIcon} from './brand-icons';
 import {InfoTip} from './info-tip';
 import {SegmentedControl} from './segmented-control';
-import {SalesRangePicker} from './sales-range-picker';
 import {adsTotals, sumTotals, type ProductRow, type SalesRangeView as View} from '../../src/sales-range';
 
 type Channel = 'shopee' | 'lazada' | 'website' | 'offline';
@@ -69,8 +68,8 @@ function Kpi({label, value, tag, hint}: {label: string; value: string; tag?: Rea
   );
 }
 
-export function SalesRangeView({view}: {view: View}) {
-  const [selected, setSelected] = useState<Channel[]>(['shopee', 'lazada', 'website', 'offline']);
+export function SalesRangeView({view, initialChannels = ['shopee', 'lazada', 'website', 'offline'], weeks}: {view: View; initialChannels?: Channel[]; weeks: {from: string; label: string}[]}) {
+  const [selected, setSelected] = useState<Channel[]>(initialChannels);
   const [metric, setMetric] = useState<Metric>('revenue');
   const [productTab, setProductTab] = useState<'website' | 'shopee' | 'lazada'>('website');
 
@@ -107,8 +106,8 @@ export function SalesRangeView({view}: {view: View}) {
     <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-6 pb-14 pt-8 md:px-10">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <Link
-          href="/?channel=all"
-          aria-label="Back to the weekly Sales page"
+          href="/"
+          aria-label="Back to Today"
           className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.97]"
         >
           <ArrowLeft className="size-5" />
@@ -165,9 +164,25 @@ export function SalesRangeView({view}: {view: View}) {
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
         <Card>
-          <CardContent className="p-5">
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-foreground/80">Date range</div>
-            <SalesRangePicker key={`${view.fromDay}:${view.toDay}:${view.all}`} view={view} />
+          <CardContent className="flex flex-col gap-3 p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-foreground/80">Recommended actions</div>
+            <h2 className="font-serif text-xl font-normal">Written per week</h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Recommended actions come from one weekly digest, so they do not apply to a span of dates. Pick a week to see them.
+            </p>
+            {weeks.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {weeks.map((w) => (
+                  <Link
+                    key={w.from}
+                    href={`/?channel=all&week=${encodeURIComponent(w.from)}`}
+                    className="rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-foreground transition-colors duration-150 ease-out hover:bg-muted active:scale-[0.97]"
+                  >
+                    {w.label}
+                  </Link>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
