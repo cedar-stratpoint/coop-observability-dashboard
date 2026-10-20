@@ -500,11 +500,11 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     expect(h.exploreRuns).toEqual([]);
   });
 
-  it('on for an allowed user: run_query, list_tables and describe_table are sent (15 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
+  it('on for an allowed user: run_query, list_tables and describe_table are sent with contacts (16 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
     ON();
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toEqual(expect.arrayContaining(['run_query', 'list_tables', 'describe_table']));
-    expect(toolNames(lastRequest())).toHaveLength(15);
+    expect(toolNames(lastRequest())).toEqual(expect.arrayContaining(['run_query', 'list_tables', 'describe_table', 'contacts']));
+    expect(toolNames(lastRequest())).toHaveLength(16);
     expect(systemOf(lastRequest())[0].text).toBe(buildStaticSystem({tools: true, explore: true}));
     expect(systemOf(lastRequest())[1].text).toBe(buildLiveContextBlock({explore: true}));
     expect(h.exploreRuns).toHaveLength(1); // the fixed coverage statement, wrapped in the cursor, through the injected driver

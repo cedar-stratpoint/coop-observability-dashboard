@@ -43,6 +43,14 @@ export type UnifiedContact = {
   campaign: string | null;
   /** Most recent evidence of them anywhere: an order, or a booth signup. */
   lastSeen: string | null;
+  /** Every distinct pet text on record: the website's pet name, and each booth lead's "Name / Breed". */
+  pets: string[];
+  /** Every distinct booth campaign (event slug) they signed up at. */
+  campaigns: string[];
+  /** Every distinct name, email and mobile as written in the records (the fields above show one of each), so a person can be found by any. */
+  names: string[];
+  emails: string[];
+  mobiles: string[];
 };
 
 /**
@@ -79,10 +87,14 @@ type Incoming = {
   tier?: string | null;
   prize?: string | null;
   campaign?: string | null;
+  pet?: string | null;
   lastSeen?: string | null;
 };
 
 const SOURCE_ORDER: ContactSource[] = ['website', 'booth', 'lazada'];
+
+/** The non-empty values once each, in the order first seen. */
+const distinct = (values: (string | null | undefined)[]): string[] => [...new Set(values.filter((v): v is string => !!v && v.trim() !== ''))];
 
 /** Most recent of two ISO instants, either of which may be missing. */
 function later(a: string | null, b: string | null | undefined): string | null {
@@ -112,6 +124,7 @@ export function mergeContacts(
       orders: c.orderCount,
       spend: c.spent,
       tier: c.membershipTier,
+      pet: c.petName,
       // An account with no orders still counts as a contact; its last activity
       // is when the record itself last changed.
       lastSeen: c.updatedAt ?? c.createdAt ?? null,
@@ -126,6 +139,7 @@ export function mergeContacts(
       mobile: l.mobile,
       prize: l.prize,
       campaign: l.campaign,
+      pet: l.pet,
       lastSeen: l.collectedAt,
     })),
     ...lazada.map((c) => ({
@@ -212,6 +226,11 @@ export function mergeContacts(
       prize: (pick('prize', ['booth']) as string | null) ?? null,
       campaign: (pick('campaign', ['booth']) as string | null) ?? null,
       lastSeen: records.reduce<string | null>((acc, r) => later(acc, r.lastSeen), null),
+      pets: distinct(records.map((r) => r.pet)),
+      campaigns: distinct(records.map((r) => r.campaign)),
+      names: distinct(records.map((r) => r.name)),
+      emails: distinct(records.map((r) => r.email)),
+      mobiles: distinct(records.map((r) => r.mobile)),
     });
   }
 
