@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {adsTotals, buildSalesRange, offlineInput, resolveSpan, snapToWeeks, sumTotals} from '../src/sales-range';
+import {adsTotals, buildSalesRange, isRangeRequest, offlineInput, recentWeeks, resolveSpan, snapToWeeks, sumTotals} from '../src/sales-range';
 import {spanAds} from '../src/span-windows';
 import {cmp, digestRow, phMidnight, series} from './support/channel-report-fixture';
 import {addDaysKey} from '../src/chat/range';
@@ -138,5 +138,34 @@ describe('selection helpers the page uses on the client', () => {
     expect(offlineInput([o('2026-10-06T02:00:00.000Z'), o('2026-10-04T17:00:00.000Z')])).toMatchObject({dataFrom: '2026-10-05', dataTo: '2026-10-06'});
     expect(offlineInput([])).toMatchObject({dataFrom: null});
     expect(offlineInput(null)).toBeNull();
+  });
+});
+
+describe('the Sales page picks the range view only when the link asks for it', () => {
+  it('two real dates, or span=all', () => {
+    expect(isRangeRequest({from: '2026-10-05', to: '2026-10-18'})).toBe(true);
+    expect(isRangeRequest({span: 'all'})).toBe(true);
+  });
+  it('anything else is the weekly view', () => {
+    expect(isRangeRequest({})).toBe(false);
+    expect(isRangeRequest({from: '2026-10-05'})).toBe(false);
+    expect(isRangeRequest({from: 'nope', to: '2026-10-18'})).toBe(false);
+    expect(isRangeRequest({from: '2026-02-30', to: '2026-03-02'})).toBe(false);
+    expect(isRangeRequest({span: 'week'})).toBe(false);
+  });
+});
+
+describe('recentWeeks', () => {
+  const row = (from: string, to: string, created = '2026-10-19T01:00:00.000Z') => ({window_from: phMidnight(from), window_to: phMidnight(to), created_at: created});
+  it('lists the newest weekly windows first, whatever order they come in', () => {
+    const rows = [row('2026-09-28', '2026-10-05'), row('2026-10-12', '2026-10-19'), row('2026-10-05', '2026-10-12')];
+    expect(recentWeeks(rows, 2)).toEqual([{from: phMidnight('2026-10-12'), label: 'Oct 12 to Oct 18, 2026'}, {from: phMidnight('2026-10-05'), label: 'Oct 5 to Oct 11, 2026'}]);
+  });
+  it('skips monthly windows and repeated runs of one window', () => {
+    const rows = [row('2026-09-01', '2026-10-01'), row('2026-10-05', '2026-10-12'), row('2026-10-05', '2026-10-12', '2026-10-13T00:00:00.000Z')];
+    expect(recentWeeks(rows).map((w) => w.label)).toEqual(['Oct 5 to Oct 11, 2026']);
+  });
+  it('is empty for an empty archive', () => {
+    expect(recentWeeks([])).toEqual([]);
   });
 });
