@@ -59,3 +59,26 @@ describe('query allow-list', () => {
     expect(dashboardLinks('https://coop.example.com/' + 'a'.repeat(250), 'coop.example.com')).toEqual([]);
   });
 });
+
+describe('pageContextLine on the Sales page with dates picked', () => {
+  it('says the page shows that span, not a week', () => {
+    const line = pageContextLine({path: '/', query: 'channel=all&week=2026-10-04T16:00:00.000Z&from=2026-10-05&to=2026-10-18'}, []);
+    expect(line).toContain('showing the span 2026-10-05 to 2026-10-18');
+    expect(line).toContain('not one week');
+  });
+  it('puts reversed dates in order, as the page does', () => {
+    expect(pageContextLine({path: '/', query: 'channel=all&from=2026-10-18&to=2026-10-05'}, [])).toContain('the span 2026-10-05 to 2026-10-18');
+  });
+  it('says all time for span=all', () => {
+    expect(pageContextLine({path: '/', query: 'channel=all&span=all'}, [])).toContain('ALL TIME');
+  });
+  it('adds nothing when the page is not in range mode', () => {
+    const none = (path: string, query: string) => expect(pageContextLine({path, query}, [])).not.toMatch(/showing the span|ALL TIME/);
+    none('/', 'channel=all&week=x'); // a plain week
+    none('/', 'from=2026-10-05&to=2026-10-18'); // no channel: the home screen
+    none('/', 'span=all'); // no channel
+    none('/inventory', 'from=2026-10-05&to=2026-10-18'); // another page
+    none('/', 'channel=all&from=nope&to=2026-10-18'); // junk date
+    none('/', 'channel=all&from=2026-02-31&to=2026-03-05'); // a date that does not exist
+  });
+});

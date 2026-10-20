@@ -1,6 +1,7 @@
 // Which data each dashboard page shows, for the per-turn context (spec F.2). Pure; reads the generated catalog.
 // Source: knowledge/data-catalog/pages.md through catalog.json (spec 3.1). Fenced pages resolve but say they cannot be read.
 import {CATALOG_DATA} from './catalog';
+import {isRealDay} from './range';
 export type PageInfo = {route: string; title: string; shows: string; data: string};
 
 // Train 4: an API Ask Coop reads with its own tools (apis.md "Ask Coop" = "tools: ...") names those tools on every page that reads it.
@@ -70,13 +71,25 @@ export function dashboardLinks(text: string, host: string): string[] {
   return out;
 }
 
+/** On the Sales page with dates picked, say plainly that it shows a span, so "these dates" means it and not a week also in the link. Only for a link the page really treats as a range (a channel, real dates). */
+function rangeNote(path: string, query: string): string {
+  if (path !== '/') return '';
+  const q = new URLSearchParams(query);
+  if (!q.get('channel')) return ''; // without a channel the page is the home screen, not the range view
+  if (q.get('span') === 'all') return ' The Sales page is showing ALL TIME (every stored day), not one week; "this span" and "these dates" mean all of it.';
+  const [from, to] = [q.get('from') ?? '', q.get('to') ?? ''];
+  if (!isRealDay(from) || !isRealDay(to)) return '';
+  const [a, b] = from <= to ? [from, to] : [to, from];
+  return ` The Sales page is showing the span ${a} to ${b} (days outside the stored data are left out), not one week; "this span" and "these dates" mean those days, even if a week is also in the link.`;
+}
+
 const describe = (p: PageInfo): string => `${p.title}: shows ${p.shows}; data: ${p.data}`;
 
 /** One per-turn line, or null when no known page is in play. Never goes in the cached system prompt. */
 export function pageContextLine(current: {path: string; query: string} | null, pasted: string[]): string | null {
   const parts: string[] = [];
   const cur = current ? resolvePage(current.path) : null;
-  if (current && cur) parts.push(`The owner is on ${current.path}${current.query ? `?${current.query}` : ''} (${describe(cur)}).`);
+  if (current && cur) parts.push(`The owner is on ${current.path}${current.query ? `?${current.query}` : ''} (${describe(cur)}).${rangeNote(current.path, current.query)}`);
   for (const link of pasted) {
     const p = resolvePage(link);
     if (p) parts.push(`They pasted a link to ${link} (${describe(p)}).`);
