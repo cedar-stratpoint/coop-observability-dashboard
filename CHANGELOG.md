@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Sales range: change versus the span before, an Over time view, and a quick chat
+All of this appears only when custom dates or "All time" are picked; the weekly Sales view is unchanged (its server-rendered page matches `develop` line for line).
+- **Change versus the span before.** Each total shows its change against the span of the same length directly before it, with those dates named ("vs Sep 21 to Oct 4, 2026"). A change is shown only when the two spans can be compared fairly: the same channels have complete figures in both, and ad figures fully cover both. Otherwise there is no number and a plain reason says why. Ad spend change is grey (spending more is not good or bad by itself). This brings back the change-versus-before that the weekly view already shows and a custom span lacked. A toggle turns it off; it follows the channel chips.
+- **Over time, inside Compare channels.** A "By channel / Over time" switch plots revenue, orders or AOV per week or month. Bars for a week or month your dates cut short, or where a channel has no complete figures, are hatched and marked "partial". Ad figures are not plotted over time: they come per export window, not per week. More than 27 weeks falls back to months.
+- **Quick chat.** A question box and four chips (the Ask Coop panel beside the graph) open the existing Ask Coop drawer with the question. No new AI endpoint and nothing runs until someone asks; answers, number check and rate limit are Ask Coop's own.
+- **Fix: the chat drawer named the wrong period.** While dates were picked it said "Answering about" the selected week. It now names the span (or all time), and the chat's page context says plainly that the Sales page is showing that span, not one week.
+- **Layout:** the five totals spread across the full width; Top products sits under the bar graph; the Ask Coop panel sits to the right. The "recommended actions are written per week" note is gone (there are no actions for a span).
+- **Decision (owner):** no "What stood out" commentary and no AI summary for a span. If a line is not surely accurate it is a risk, so it stays off the page. The AI summary design is parked in `knowledge/best-practices/ai-summary-on-demand.md`.
+- Tests: `test/sales-range-compare.test.ts` (14), more cases in `test/sales-range.test.ts` and `test/chat-pages.test.ts`.
+
 ## 2026-10-20 — One Sales page: any dates or all time, no separate Sales range page
 - **The Sales page now takes any dates.** The top bar's "Custom dates" button is no longer limited to the selected week: pick any days with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, exactly as before (checked: the server-rendered page differs from before only by the removed nav item).
   - *Why:* the owner tried the separate `/sales-range` page (previous entry) and decided one Sales page is clearer than two. The calculation, tags and tests from that page are unchanged; only where they live moved.

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {adsTotals, buildSalesRange, isRangeRequest, offlineInput, recentWeeks, resolveSpan, snapToWeeks, sumTotals} from '../src/sales-range';
+import {adsTotals, buildSalesRange, isRangeRequest, offlineInput, resolveSpan, spanScopeLabel, snapToWeeks, sumTotals} from '../src/sales-range';
 import {spanAds} from '../src/span-windows';
 import {cmp, digestRow, phMidnight, series} from './support/channel-report-fixture';
 import {addDaysKey} from '../src/chat/range';
@@ -155,17 +155,17 @@ describe('the Sales page picks the range view only when the link asks for it', (
   });
 });
 
-describe('recentWeeks', () => {
-  const row = (from: string, to: string, created = '2026-10-19T01:00:00.000Z') => ({window_from: phMidnight(from), window_to: phMidnight(to), created_at: created});
-  it('lists the newest weekly windows first, whatever order they come in', () => {
-    const rows = [row('2026-09-28', '2026-10-05'), row('2026-10-12', '2026-10-19'), row('2026-10-05', '2026-10-12')];
-    expect(recentWeeks(rows, 2)).toEqual([{from: phMidnight('2026-10-12'), label: 'Oct 12 to Oct 18, 2026'}, {from: phMidnight('2026-10-05'), label: 'Oct 5 to Oct 11, 2026'}]);
+describe('spanScopeLabel: what the chat drawer says it is answering about', () => {
+  it('names the span, or all time with its dates', () => {
+    expect(spanScopeLabel({from: '2026-10-05', to: '2026-10-18'}, bounds)).toBe('Oct 5 to Oct 18, 2026');
+    expect(spanScopeLabel({span: 'all'}, bounds)).toBe('Sep 1 to Oct 20, 2026 (all time)');
   });
-  it('skips monthly windows and repeated runs of one window', () => {
-    const rows = [row('2026-09-01', '2026-10-01'), row('2026-10-05', '2026-10-12'), row('2026-10-05', '2026-10-12', '2026-10-13T00:00:00.000Z')];
-    expect(recentWeeks(rows).map((w) => w.label)).toEqual(['Oct 5 to Oct 11, 2026']);
+  it('uses the dates as they are resolved (swapped, clamped)', () => {
+    expect(spanScopeLabel({from: '2026-10-18', to: '2026-10-05'}, bounds)).toBe('Oct 5 to Oct 18, 2026');
+    expect(spanScopeLabel({from: '2025-01-01', to: '2026-10-05'}, bounds)).toBe('Sep 1 to Oct 5, 2026');
   });
-  it('is empty for an empty archive', () => {
-    expect(recentWeeks([])).toEqual([]);
+  it('is null when no dates are picked, so the weekly label stays', () => {
+    expect(spanScopeLabel({}, bounds)).toBeNull();
+    expect(spanScopeLabel({from: 'nope', to: '2026-10-05'}, bounds)).toBeNull();
   });
 });

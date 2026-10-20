@@ -6,6 +6,7 @@ import {fullDays, windowOf} from './digest-windows';
 import {manilaDayKey} from './pos-sales-compute';
 import {rollupChannels, ROLLUP_CHANNELS, type ChannelPeriod, type RollupDigest} from './period-rollup';
 import type {PosOrder} from './pos-sales-types';
+import {buildSeries, type Series} from './sales-range-series';
 import {spanAds, spanTopProducts, type ChannelAds, type ChannelProducts, type UsedWindow, type WindowDigest} from './span-windows';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -49,19 +50,11 @@ export function isRangeRequest(req: SpanRequest): boolean {
   return req.span === 'all' || (validDay(req.from) && validDay(req.to));
 }
 
-/** The newest weekly digest windows, as links back to a single week (Recommended actions are written per week). */
-export function recentWeeks(digests: readonly {window_from: string; window_to: string; created_at: string}[], limit = 3): {from: string; label: string}[] {
-  const seen = new Set<string>();
-  const out: {from: string; label: string}[] = [];
-  for (const d of [...digests].sort((a, b) => Date.parse(b.window_to) - Date.parse(a.window_to) || Date.parse(b.created_at) - Date.parse(a.created_at))) {
-    const days = fullDays(windowOf(d));
-    if (!days || seen.has(d.window_from)) continue;
-    if (Date.parse(d.window_to) - Date.parse(d.window_from) > 8 * DAY_MS) continue; // weekly windows only
-    seen.add(d.window_from);
-    out.push({from: d.window_from, label: rangeLabel(days.min, days.max)});
-    if (out.length === limit) break;
-  }
-  return out;
+/** What the Ask Coop drawer should say it is answering about while dates are picked (the span, not the selected week). Null when no dates are picked. */
+export function spanScopeLabel(req: SpanRequest, bounds: SpanBounds): string | null {
+  if (!isRangeRequest(req)) return null;
+  const r = resolveSpan(req, bounds);
+  return r.all ? `${rangeLabel(r.fromDay, r.toDay)} (all time)` : rangeLabel(r.fromDay, r.toDay);
 }
 
 /** The dates moved out to whole Monday to Sunday weeks (end stops at the last finished Sunday), or null when nothing would change. */
@@ -73,6 +66,22 @@ export function snapToWeeks(fromDay: string, toDay: string, {firstDay, todayDay}
   const end = sunday > last ? last : sunday;
   if (start > end || (start === fromDay && end === toDay)) return null;
   return {fromDay: start, toDay: end};
+}
+
+/** The span of the same length directly before this one, or null when it would start before the first day with data. */
+export function previousSpan(fromDay: string, toDay: string, firstDay: string): {fromDay: string; toDay: string} | null {
+  const n = dayKeysBetween(fromDay, toDay).length;
+  const prevFrom = addDaysKey(fromDay, -n);
+  return prevFrom >= firstDay ? {fromDay: prevFrom, toDay: addDaysKey(fromDay, -1)} : null;
+}
+
+/** What the page needs from the span before to show a fair change: per-channel figures with their status, and the ad windows. */
+export interface PreviousView {
+  fromDay: string;
+  toDay: string;
+  label: string;
+  channels: ChannelPeriod[];
+  ads: {shopee: ChannelAds; lazada: ChannelAds};
 }
 
 /** The first PH day any stored digest touches (the archive's start), or null when there are none. */
@@ -98,6 +107,10 @@ export interface SalesRangeView {
   totals: {revenue: number | null; orders: number | null; aov: number | null; units: number | null};
   ads: {shopee: ChannelAds; lazada: ChannelAds; total: {spend: number | null; roas: number | null; tag: {kind: 'ex' | 'wk' | 'none'; text: string}}};
   products: {website: ProductRow[]; shopee: ChannelProducts; lazada: ChannelProducts};
+  /** The span of the same length directly before, for "compare with the span before"; null when there is none in the archive. */
+  previous: PreviousView | null;
+  /** Weekly and monthly buckets for the "Over time" view. */
+  series: Series;
   /** Gaps and anything left out. Shown in an amber banner. */
   notes: string[];
   /** Where the figures came from. Shown quietly. */
@@ -170,6 +183,16 @@ export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
   const website: ProductRow[] = input.website ? websiteRangeMetrics([...input.website.orders], range, 5).topProducts.map((p: {title: string; units: number; revenue: number}): ProductRow => ({title: p.title, revenue: p.revenue, units: p.units})) : [];
 
   const snap = snapToWeeks(fromDay, toDay, {firstDay, todayDay});
+  const prevSpan = previousSpan(fromDay, toDay, firstDay);
+  const previous: PreviousView | null = prevSpan
+    ? {
+        ...prevSpan,
+        label: rangeLabel(prevSpan.fromDay, prevSpan.toDay),
+        channels: rollupChannels({fromDay: prevSpan.fromDay, toDay: prevSpan.toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: input.digests, website: input.website, offline: input.offline})[0].channels,
+        ads: {shopee: spanAds('shopee', prevSpan.fromDay, prevSpan.toDay, input.digests), lazada: spanAds('lazada', prevSpan.fromDay, prevSpan.toDay, input.digests)},
+      }
+    : null;
+  const series = buildSeries({fromDay, toDay, digests: input.digests, website: input.website, offline: input.offline});
   const uniq = (xs: (string | null)[]): string[] => [...new Set(xs.filter((n): n is string => Boolean(n)))];
   const gaps = channels.filter((c) => c.status !== 'ok');
   const notes = uniq([span.note, ...gaps.flatMap((c) => c.notes), ...ads.shopee.warnings, ...ads.lazada.warnings, ...shopee.warnings, ...lazada.warnings]);
@@ -186,6 +209,8 @@ export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
     totals,
     ads,
     products: {website, shopee, lazada},
+    previous,
+    series,
     notes,
     sources,
   };
