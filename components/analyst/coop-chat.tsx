@@ -66,7 +66,7 @@ function loadMessages(raw: string): Msg[] {
   return out;
 }
 
-const APP_PATHS = new Set(['/', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
+const APP_PATHS = new Set(['/', '/sales-range', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
 
 /** Split a raw assistant message into visible text + follow-up suggestions + nav
  *  actions, tolerating partially-streamed hidden tags. */
