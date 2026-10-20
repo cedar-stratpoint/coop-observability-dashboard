@@ -42,15 +42,20 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const fail = (error: string): MetricError => ({error});
 export const isMetricError = (v: unknown): v is MetricError => v !== null && typeof v === 'object' && !Array.isArray(v) && typeof (v as {error?: unknown}).error === 'string';
 
-/** Exactly these keys, all present (strict mode sends all; anything else, a url or a method included, is refused before any read). */
-function closed(input: unknown, keys: readonly string[]): Record<string, unknown> | MetricError {
+/**
+ * Only these keys; anything else (a url or a method included) is refused before any read. A key the model left out takes its default;
+ * a key with no default (the dates) must be present. The three list tools are not strict (the grammar cap), so the model may omit keys.
+ */
+function closed(input: unknown, keys: readonly string[], defaults: Record<string, unknown> = {}): Record<string, unknown> | MetricError {
   const list = keys.length ? keys.join(', ') : 'none';
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) return fail(`Use exactly these parameters: ${list}.`);
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return fail(`Use only these parameters: ${list}. Dates have no default.`);
   const o = input as Record<string, unknown>;
   const own = Object.keys(o);
-  if (own.some((k) => !keys.includes(k)) || keys.some((k) => !own.includes(k))) return fail(`Use exactly these parameters: ${list}.`);
-  return o;
+  if (own.some((k) => !keys.includes(k)) || keys.some((k) => !own.includes(k) && !(k in defaults))) return fail(`Use only these parameters: ${list}. Dates have no default.`);
+  return {...defaults, ...o};
 }
+
+const PAGE_DEFAULTS = {limit: 25, offset: 0};
 
 function oneOf<T extends string>(o: Record<string, unknown>, key: string, allowed: readonly T[]): T | MetricError {
   const v = o[key];
@@ -81,7 +86,7 @@ const dayLimit = (group: string, r: Range): MetricError | null =>
   group === 'day' && dayKeysBetween(r.from, r.to).length > MAX_DAY_GROUPS ? fail(`group_by "day" covers at most ${MAX_DAY_GROUPS} days. Use "week" or "month" for this range.`) : null;
 
 export function readOrdersInput(input: unknown): CrmOrdersRequest | MetricError {
-  const o = closed(input, ['from', 'to', 'financial_status', 'group_by', 'limit', 'offset']);
+  const o = closed(input, ['from', 'to', 'financial_status', 'group_by', 'limit', 'offset'], {financial_status: 'all', group_by: 'none', ...PAGE_DEFAULTS});
   if (isMetricError(o)) return o;
   const range = readDates(o, 'from', 'to', false);
   if (isMetricError(range)) return range;
@@ -98,7 +103,7 @@ export function readOrdersInput(input: unknown): CrmOrdersRequest | MetricError 
 }
 
 export function readCustomersInput(input: unknown): CrmCustomersRequest | MetricError {
-  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'limit', 'offset']);
+  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'limit', 'offset'], {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', ...PAGE_DEFAULTS});
   if (isMetricError(o)) return o;
   const joined = readDates(o, 'joined_from', 'joined_to', true);
   if (isMetricError(joined)) return joined;
@@ -116,7 +121,7 @@ export function readCustomersInput(input: unknown): CrmCustomersRequest | Metric
 }
 
 export function readCheckoutsInput(input: unknown): CrmCheckoutsRequest | MetricError {
-  const o = closed(input, ['from', 'to', 'stage', 'status', 'group_by', 'limit', 'offset']);
+  const o = closed(input, ['from', 'to', 'stage', 'status', 'group_by', 'limit', 'offset'], {stage: 'all', status: 'all', group_by: 'none', ...PAGE_DEFAULTS});
   if (isMetricError(o)) return o;
   const range = readDates(o, 'from', 'to', false);
   if (isMetricError(range)) return range;
@@ -311,14 +316,19 @@ const CUSTOMER_GROUP_MEASURES: MeasureDecl[] = [
 ];
 const money = (n: number): number => Math.round(n * 100) / 100;
 
-export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date): Promise<MetricResult> {
+/** Website customers with their order stats, from the CRM's captured customers and orders (shared by list_crm_customers and the contacts tool). `membership` is null when its settings could not be read. */
+export async function crmEnrichedCustomers(get: CrmGet, now: Date) {
   const [customers, orders, membership] = await Promise.all([
     list(get, 'customers', 'customers'),
     readOrders(get),
     get('membership').then((r) => projectMembership(r.body)).catch(() => null),
   ]);
   const windowStart = membershipWindowStart(now, (membership ?? MEMBERSHIP_FALLBACK).programStart);
-  const enriched = enrichCustomers(customers.map(projectCustomer), orders, windowStart);
+  return {enriched: enrichCustomers(customers.map(projectCustomer), orders, windowStart), windowStart, membership};
+}
+
+export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date): Promise<MetricResult> {
+  const {enriched, windowStart, membership} = await crmEnrichedCustomers(get, now);
   const matched = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers}, '').filter((c) => req.joined === null || inDays(c.createdAt, req.joined));
   const sorted = [...matched].sort(
     req.sort === 'spend_desc' ? (a, b) => b.spent - a.spent : req.sort === 'orders_desc' ? (a, b) => b.orderCount - a.orderCount : (a, b) => instant(b.createdAt) - instant(a.createdAt),

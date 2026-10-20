@@ -1,5 +1,14 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {draftLeads} from './contacts/draft';
+import {matchPeople} from './contacts/match';
+import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
+import {tracked} from './crm/executors';
+import {crmEnrichedCustomers} from './crm/tools';
+import {listEventLeads, readContactsInput} from './contacts/leads';
+import {logPiiRead} from './audit';
+import {askOwner, isClarify, type ClarifyResult} from './clarify';
+import {rangeLabel} from './range';
 import {describeData} from './coverage';
 import {createCrmExecutors} from './crm/executors';
 import {digestsFor, readReportInput, shapeChannelReport} from './channel-report';
@@ -16,6 +25,8 @@ import type {ToolExecutors} from './tools';
 import type {ChatToolContext} from './stream-types';
 
 export const MAX_PAYLOAD_ROWS = 100;
+/** A6: a day series longer than this is unreadable as a chart; the chat shows weeks instead and says so. */
+export const MAX_DAY_POINTS = 92;
 
 /** The tool executors plus the app-side Explore backstop (never reachable by the model: it is not a tool). */
 export type ChatExecutors = ToolExecutors & Pick<RenderExecutors, 'autoRender'>;
@@ -24,6 +35,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
   let loaded: ReturnType<ChatToolContext['data']> | null = null;
   const data = () => (loaded ??= ctx.data());
   let counter = 0;
+  let contactBlocks = 0;
   // The open report (F8) owns the result store: results are reachable by result id and by block id. Empty when none is open.
   const session = ctx.report ?? createReportSession();
   // Train 4: CRM results go into the same store as every other tool (charts and the number check work on them).
@@ -34,6 +46,14 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     return compact(r, id);
   };
 
+  // The website side of find/overlap goes through the chat's own GET-only CRM client (one chat_crm_call line per read); never src/crm-data.ts.
+  const peopleSource = async (s: import('./contacts/leads').LeadsSource): Promise<PeopleSource> => {
+    const base = {leads: s.leads, lazada: s.lazada ?? null, events: s.events};
+    if (!ctx.crm) return {...base, website: null, websiteNote: 'the website CRM is not connected for this chat'};
+    const out = await tracked({client: ctx.crm, user: ctx.user, sink: ctx.sink}, 'contacts', {endpoint: 'customers'}, (get) => crmEnrichedCustomers(get, ctx.now), (r) => r.enriched.length);
+    return 'error' in out ? {...base, website: null, websiteNote: out.error.split('. ')[0].toLowerCase()} : {...base, website: out.enriched};
+  };
+
   return {
     ...createRenderExecutors(ctx, session),
     ...createReportExecutors(ctx, session, data),
@@ -42,8 +62,20 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep}) : {}),
     describe_data: async (input) => describeData(input as {metric: string}, await data(), ctx.now, !!ctx.explore, !!ctx.crm, !!ctx.crmOrders || !!ctx.crm),
     query_metric: async (input) => {
-      const result = runMetric(input, await data(), ctx.now);
+      let result = runMetric(input, await data(), ctx.now);
       if ('error' in result) return {error: result.error};
+      if (result.dimension === 'day' && result.rows.length > MAX_DAY_POINTS) {
+        // A6: too many days to read. Weeks instead, said first; the owner can ask for a shorter range to see days.
+        const days = result.rows.length;
+        input = {...(input as object), dimension: 'week'};
+        const weekly = runMetric(input, await data(), ctx.now);
+        if (!('error' in weekly)) {
+          weekly.meta.caveats.unshift(`Shown by week: by day would be ${days} points, too many to read. Ask for a range of ${MAX_DAY_POINTS} days or less to see days.`);
+          result = weekly;
+        }
+      }
+      const outside = noDataAsk(result);
+      if (outside) return outside; // the loop asks the owner and ends the turn
       counter += 1;
       const id = `r${counter}`;
       session.remember(id, input as MetricRequest, {...result, id}); // runMetric accepted the input, so it IS a MetricRequest
@@ -106,15 +138,48 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       session.store.set(id, {...result, id});
       return compact(result, id);
     },
+    ...(ctx.leads ? {contacts: async (input: unknown) => {
+      const req = readContactsInput(input);
+      if ('error' in req) return {error: req.error};
+      const source = await ctx.leads!();
+      let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
+      if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
+        const people = await peopleSource(source);
+        out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
+      } else {
+        out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
+      }
+      if ('table' in out) {
+        contactBlocks += 1;
+        ctx.emitBlock?.({kind: 'table', id: `c${contactBlocks}`, source: `contacts:${out.audit.eventId}`, ...out.table});
+        logPiiRead({tool: 'contacts', mode: req.mode, ok: true, code: null, eventId: out.audit.eventId, rows: out.audit.rows, columns: out.audit.columns, user: ctx.user}, ctx.sink);
+        return {ok: true, shown: true, block: `c${contactBlocks}`, ...out.model};
+      }
+      logPiiRead({tool: 'contacts', mode: req.mode, ok: false, code: isClarify(out) ? 'clarify' : 'no_result', eventId: null, rows: null, columns: [], user: ctx.user}, ctx.sink);
+      return out;
+    }} : {}),
+    ask_owner: async (input) => askOwner(input), // a question: the loop writes it and ends the turn
     lookup_product: async (input) => {
-      const result = lookupProduct(input, await data());
+      const result = lookupProduct(input, await data(), ctx.now);
       if ('error' in result) return {error: result.error};
+      if (isClarify(result)) return result; // the loop asks the owner and ends the turn
       counter += 1;
       const id = `r${counter}`;
       session.store.set(id, {...result, id});
       return compact(result, id);
     },
   };
+}
+
+/**
+ * A4: dates the POS data does not reach at all would read as "₱0". The chat asks instead (saved-report re-runs keep the plain result).
+ * Stock is "as of now" and never outside the data.
+ */
+export function noDataAsk(r: MetricResult): ClarifyResult | null {
+  const {coverage, dataFrom, dataTo, range} = r.meta;
+  if (coverage !== 'none' || !dataFrom || !dataTo) return null;
+  const covered = rangeLabel(dataFrom, dataTo);
+  return {clarify: {question: `The offline (POS) sales data covers ${covered}, so there is nothing for ${range.label}. Use the dates the data covers?`, options: [`Use ${covered}`]}};
 }
 
 function compact(r: MetricResult, id: string) {
@@ -153,6 +218,8 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';
   if (name === 'lookup_product') return 'Looking up a product';
+  if (name === 'contacts') return 'Looking up contacts';
+  if (name === 'ask_owner') return 'Checking what you mean';
   if (name === 'render_kpi') return 'Adding a tile';
   if (name === 'render_chart') return 'Drawing a chart';
   if (name === 'render_table') return 'Building a table';

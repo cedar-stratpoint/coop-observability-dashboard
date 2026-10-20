@@ -1,25 +1,31 @@
 import {describe, it, expect} from 'vitest';
-import {CHAT_TOOLS, exploreTools} from '../src/chat/tool-defs';
+import {CHAT_TOOLS, chatTools, exploreTools} from '../src/chat/tool-defs';
 import {METRIC_IDS, METRICS} from '../src/chat/metrics-registry';
 import {assertRequestShape} from '../src/chat/request-shape';
 
 type Prop = {type?: unknown; enum?: unknown[]; description?: string; [k: string]: unknown};
-const [describe_data, query_metric, get_digest, get_channel_report, lookup_product, render_kpi, render_chart, render_table, set_report_filters, remove_block, set_report_title] = CHAT_TOOLS;
+const [describe_data, query_metric, get_digest, get_channel_report, lookup_product, ask_owner, render_kpi, render_chart, render_table, set_report_filters, remove_block, set_report_title] = CHAT_TOOLS;
 const props = (t: (typeof CHAT_TOOLS)[number]) => t.input_schema.properties as Record<string, Prop>;
 const sortedUnion = (pick: (id: (typeof METRIC_IDS)[number]) => string[]) => [...new Set(METRIC_IDS.flatMap(pick))].sort();
 
 const SINK = {info: () => undefined, error: () => undefined};
 
 describe('CHAT_TOOLS', () => {
-  it('has exactly the eleven tools in order', () => {
-    expect(CHAT_TOOLS.map((t) => t.name)).toEqual(['describe_data', 'query_metric', 'get_digest', 'get_channel_report', 'lookup_product', 'render_kpi', 'render_chart', 'render_table', 'set_report_filters', 'remove_block', 'set_report_title']);
+  it('has exactly the twelve tools in order', () => {
+    expect(CHAT_TOOLS.map((t) => t.name)).toEqual(['describe_data', 'query_metric', 'get_digest', 'get_channel_report', 'lookup_product', 'ask_owner', 'render_kpi', 'render_chart', 'render_table', 'set_report_filters', 'remove_block', 'set_report_title']);
+  });
+
+  it('with Explore and the CRM on, only the three list_crm_* tools and ask_owner are not strict (the API grammar cap), and no more than 20 are strict', () => {
+    const all = chatTools({explore: true, crm: true});
+    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders']);
+    expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20);
   });
 
   it('meets the strict-mode limits', () => {
     expect(CHAT_TOOLS.length).toBeLessThanOrEqual(20);
     let total = 0;
     for (const t of CHAT_TOOLS) {
-      expect(t.strict).toBe(true);
+      expect(t.strict).toBe(t.name !== 'ask_owner'); // ask_owner: not strict for the grammar cap, validated in clarify.ts
       expect(t.input_schema.type).toBe('object');
       expect(t.input_schema.additionalProperties).toBe(false);
       const keys = Object.keys(t.input_schema.properties);
@@ -61,7 +67,7 @@ describe('CHAT_TOOLS', () => {
   });
 
   it('puts the cache breakpoint on the last tool only', () => {
-    for (const t of [describe_data, query_metric, get_digest, get_channel_report, lookup_product, render_kpi, render_chart, render_table, set_report_filters, remove_block]) expect(t.cache_control).toBeUndefined();
+    for (const t of [describe_data, query_metric, get_digest, get_channel_report, lookup_product, ask_owner, render_kpi, render_chart, render_table, set_report_filters, remove_block]) expect(t.cache_control).toBeUndefined();
     expect(set_report_title.cache_control).toEqual({type: 'ephemeral'});
   });
 
@@ -82,9 +88,9 @@ describe('CHAT_TOOLS', () => {
     expect(render_kpi.description).toMatch(/one-row/);
   });
 
-  it('F8 criterion 11 and F10: eleven strict tools, 0 optionals, 0 unions, and the report tools take enums, a block id and a title only', () => {
-    expect(CHAT_TOOLS).toHaveLength(11);
-    expect(CHAT_TOOLS.every((t) => t.strict === true)).toBe(true);
+  it('F8 criterion 11 and F10: twelve strict tools, 0 optionals, 0 unions, and the report tools take enums, a block id and a title only', () => {
+    expect(CHAT_TOOLS).toHaveLength(12);
+    expect(CHAT_TOOLS.filter((t) => t.strict !== true).map((t) => t.name)).toEqual(['ask_owner']); // grammar cap: validated in clarify.ts
     for (const t of CHAT_TOOLS) {
       expect(t.input_schema.required.length).toBe(Object.keys(t.input_schema.properties).length); // 0 optional
       for (const p of Object.values(props(t))) {
@@ -141,12 +147,20 @@ describe('CHAT_TOOLS', () => {
     expect(get_digest.description).not.toMatch(/WEEKLY DIGEST|published once a week/);
     expect(props(get_digest).section.enum).toEqual(['comparison', 'figures', 'sales', 'customers', 'shopee', 'lazada', 'products']);
     expect(Object.keys(props(lookup_product))).toEqual(['query', 'show']);
-    expect(props(lookup_product).show.enum).toEqual(['details', 'price_history']);
+    expect(props(lookup_product).show.enum).toEqual(['details', 'price_history', 'stock']);
     expect(props(lookup_product).query.enum).toBeUndefined();
     expect(get_digest.description).toMatch(/Shopee and Lazada figures, and the website's figures as published/);
     expect(get_digest.description).toMatch(/query_metric/);
     expect(lookup_product.description).toMatch(/names a specific product or SKU/);
     expect(lookup_product.description).toMatch(/top_products/);
+    expect(lookup_product.description).toMatch(/typos included/);
+  });
+
+  it('A3: ask_owner takes only the topic; the question and its choices are the app\'s', () => {
+    expect(Object.keys(props(ask_owner))).toEqual(['about']);
+    expect(props(ask_owner).about.enum).toEqual(['period', 'channel', 'comparison']);
+    expect(ask_owner.description).toMatch(/end your turn/);
+    expect(ask_owner.description).toMatch(/never ask about stock/);
     // The digest tool cannot name a column, a table or a bundle: its whole input is two enums.
     expect(JSON.stringify(get_digest.input_schema)).not.toMatch(/bundle|select|column|sql/i);
   });
@@ -180,14 +194,14 @@ describe('exploreTools (spec 3.1)', () => {
     }
     expect(exploreTools().find((x) => x.name === 'run_query')!.description).not.toMatch(/coop_explore_\* views listed/);
   });
-  it('is CHAT_TOOLS with run_query (then list_tables, describe_table) after query_metric: 14 tools, set_report_title still last with the cache breakpoint', () => {
+  it('is CHAT_TOOLS with run_query (then list_tables, describe_table) after query_metric: 15 tools, set_report_title still last with the cache breakpoint', () => {
     const t = exploreTools();
-    expect(t).toHaveLength(14);
+    expect(t).toHaveLength(15);
     expect(t.map((x) => x.name).filter((n) => !['run_query', 'list_tables', 'describe_table'].includes(n))).toEqual(CHAT_TOOLS.map((x) => x.name));
     expect(t.map((x) => x.name).indexOf('run_query')).toBe(t.map((x) => x.name).indexOf('query_metric') + 1);
     expect(t[t.length - 1].name).toBe('set_report_title');
     expect(t[t.length - 1].cache_control).toEqual({type: 'ephemeral'});
-    expect(CHAT_TOOLS).toHaveLength(11);
+    expect(CHAT_TOOLS).toHaveLength(12);
   });
   it('run_query is strict with three required params, step enum and no banned keywords; the strict limits hold', () => {
     const q = exploreTools().find((x) => x.name === 'run_query')!;

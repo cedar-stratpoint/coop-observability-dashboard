@@ -6,7 +6,7 @@ import {Sparkles, X, ArrowUp, Plus, Copy, Check, Square, RotateCcw, ArrowRight, 
 import {cn} from '@/lib/utils';
 import {createLineDecoder} from '@/src/chat/stream-protocol';
 import {ChatBlocks} from './chat-blocks';
-import {interleave, sanitizeBlocks, type PlacedBlock} from './chat-blocks-format';
+import {interleave, redactForStorage, sanitizeBlocks, type PlacedBlock} from './chat-blocks-format';
 import {ChatMarkdown} from './chat-markdown';
 import {applyStreamEvents, closeStream, startStream, StreamSlot} from './chat-stream-state';
 import {describeFilters, reportBody, sanitizeReport} from './report-state';
@@ -72,7 +72,7 @@ const APP_PATHS = new Set(['/', '/sales-range', '/traffic', '/health', '/reprice
  *  actions, tolerating partially-streamed hidden tags. */
 function parseAssistant(raw: string): {text: string; suggestions: string[]; actions: NavAction[]} {
   const sm = raw.match(/<suggest>([\s\S]*?)<\/suggest>/);
-  const suggestions = sm ? sm[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 3) : [];
+  const suggestions = sm ? sm[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 5) : []; // 5: a clarifying question offers up to 5 choices (src/chat/clarify.ts)
 
   const gm = raw.match(/<go>([\s\S]*?)<\/go>/);
   const actions: NavAction[] = gm
@@ -169,7 +169,7 @@ export function CoopChatProvider({children, scopeLabel}: {children: React.ReactN
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(messages));
+      localStorage.setItem(STORE_KEY, JSON.stringify(redactForStorage(messages))); // contact tables are never saved
     } catch {
       /* ignore */
     }

@@ -71,7 +71,7 @@ describe('relations (extended)', () => {
   it('both modes declare events, prices and priceChanges with explicit columns', () => {
     for (const mode of CHAT_READ_MODES) {
       const r = relationsForMode(mode);
-      expect(r.allowed).toHaveLength(10); // seven order relations + the three stock relations (Task 8)
+      expect(r.allowed).toHaveLength(16); // seven order relations + the three stock relations (Task 8) + six BoxMe relations (B2)
       for (const k of ['events', 'prices', 'priceChanges'] as const) {
         expect(r.tables[k]).toBeTruthy();
         expect(r.columns[k]).not.toContain('*');
@@ -110,7 +110,8 @@ describe('loadMetricData', () => {
         for (const c of calls) {
           expect(c.columns).not.toContain('*');
           for (const col of FORBIDDEN_COLUMNS) expect(c.columns.split(','), `${c.relation}.${col}`).not.toContain(col);
-          if (c.relation === rel.tables.stockConfig) continue; // one row by key (limit 1), not paged
+          if (c.relation === rel.tables.boxmeRuns) expect(c.columns).not.toMatch(/error|key_expires_at/); // the chat never reads them
+          if (c.relation === rel.tables.stockConfig || c.relation === rel.tables.boxmeRuns) continue; // one row by key / the newest 20 runs (limit), not paged
           expect(c.orders.length, c.relation).toBeGreaterThan(0);
           expect(c.ranges.length, c.relation).toBeGreaterThan(0);
         }

@@ -10,7 +10,8 @@ import {ORDER_NUDGE_TEXT} from '../../src/chat/loop';
 import {METRICS} from '../../src/chat/metrics-registry';
 import type {DigestSource} from '../../src/chat/digest-lookup';
 import type {ReportBlockSpec, ReportFilters, ReportSpec} from '../../src/chat/report-types';
-import type {MetricData, MetricId} from '../../src/chat/result-types';
+import type {MetricData, MetricId, StockData} from '../../src/chat/result-types';
+import {parseStockConfig} from '../../src/pos-stock-config';
 import type {PosEvent} from '../../src/pos-sales-types';
 import {formatPeso} from '../../src/pos-format';
 import type {ChatBlock} from '../../src/chat/block-types';
@@ -22,10 +23,19 @@ import {standardData} from './skill-eval-fixtures';
 
 const EVENT: PosEvent = {event_id: 'EV1', name: 'Pet Fair', venue: null, city: null, organizer: null, starts_on: '2026-09-07', ends_on: '2026-09-13', opening_cash: null, cash_note: null, closing_cash: null, status: 'closed', created_by: null, created_at: null, updated_at: null};
 
-/** The normal dataset (Sep 7 to 27, 2026) plus one event. Totals are known by construction in bundle-fixture.ts. */
+/** POS stock for Duck Strips (q4) only, known by construction: 8 at the event, 4 in the office, 12 in total. No BoxMe here. */
+const GOLDEN_STOCK: StockData = {
+  byLocation: [{product_id: 'q4', location: 'event', stock: 8}, {product_id: 'q4', location: 'office', stock: 4}],
+  names: {q4: 'Duck Strips'},
+  sales: [],
+  config: parseStockConfig(undefined),
+  asOf: '2026-09-28T04:00:00.000Z',
+};
+
+/** The normal dataset (Sep 7 to 27, 2026) plus one event and Duck Strips' stock. Totals are known by construction in bundle-fixture.ts. */
 export function goldenData(): MetricData {
   const base = standardData();
-  return {...base, orders: base.orders.map((o, i) => (i < 6 ? {...o, event_id: 'EV1'} : o)), events: [EVENT]};
+  return {...base, orders: base.orders.map((o, i) => (i < 6 ? {...o, event_id: 'EV1'} : o)), events: [EVENT], stock: GOLDEN_STOCK};
 }
 
 const digestDoc = (over: Partial<DigestDocument> = {}): DigestDocument => ({
@@ -286,11 +296,16 @@ export const GOLDEN_CASES: GoldenCase[] = [
 
   // ---- lookup (F10) ----------------------------------------------------------------------------------------------------------
   {
+    // B1 (2026-10-19): one product's stock is one lookup_product call, no dates asked (was "stock not available").
     id: 'product_stock', category: 'lookup', prompt: 'How much stock do we have of Duck Strips?',
-    expectTools: [{tool: 'lookup_product'}], textMatches: [/stock/i],
-    rubric: ['The answer says stock levels are not available and offers the product facts it does have (price, sales).'],
-    steps: ['THINK-02'],
-    script: [{calls: [call('lookup_product', {query: 'Duck Strips', show: 'details'})]}, {text: 'I cannot see stock levels. I can tell you what Duck Strips has sold; ask me for its sales.'}],
+    expectTools: [{tool: 'lookup_product', input: {show: 'stock'}}], forbidTools: ['run_query', 'ask_owner'], textMatches: [/\b12\b/],
+    blocks: {kpi: 3}, // Event, Office, Total tiles, drawn by the app's backstop when the model does not call render_kpi (B1)
+    rubric: ['The answer gives the stock per location and the total, as of now.', 'The answer does not ask for dates.'],
+    steps: ['THINK-01', 'THINK-03'],
+    script: [
+      {calls: [call('lookup_product', {query: 'Duck Strips', show: 'stock'})]},
+      {text: (s) => `Duck Strips has ${rows(s)[0].stock_units} units right now: ${rows(s)[0].event_units} at the event and ${rows(s)[0].office_units} in the office.`},
+    ],
   },
   {
     id: 'shopee_vs_lazada', category: 'lookup', prompt: 'Shopee vs Lazada for the week of Sep 21 to 27, 2026',

@@ -4,6 +4,7 @@ import type {ReadClient} from '../../pos-orders-read';
 import type {MetricData} from '../result-types';
 import {readChatOrders} from './pos-orders';
 import {loadStockData, type StockReadClient} from './stock-data';
+import {loadBoxmeData} from './boxme-data';
 import {relationsForMode, type ChatReadMode} from './relations';
 
 // Loads everything the pure metric executor needs, through the guarded chat read client:
@@ -16,7 +17,7 @@ const text = (v: unknown): string | null => (v == null ? null : String(v));
 
 export async function loadMetricData(client: ReadClient, mode: ChatReadMode): Promise<MetricData> {
   const {tables, columns} = relationsForMode(mode);
-  const [orders, events, prices, changes, stock] = await Promise.all([
+  const [orders, events, prices, changes, stock, boxme] = await Promise.all([
     readChatOrders(client, mode),
     fetchAllRows(tables.events, (from, to) =>
       client.from(tables.events).select(columns.events).order('event_id', {ascending: true}).range(from, to)),
@@ -26,6 +27,7 @@ export async function loadMetricData(client: ReadClient, mode: ChatReadMode): Pr
       client.from(tables.priceChanges).select(columns.priceChanges).order('id', {ascending: true}).range(from, to)),
     // in parallel with the sales reads, so it does not add to the turn's 50 s budget; never rejects (a failed read is null)
     loadStockData(client as unknown as StockReadClient, mode, new Date()),
+    loadBoxmeData(client as unknown as StockReadClient, mode, new Date()), // same: in parallel, never rejects
   ]);
 
   return {
@@ -55,6 +57,7 @@ export async function loadMetricData(client: ReadClient, mode: ChatReadMode): Pr
       changed_at: String(c.changed_at),
     })),
     stock,
+    boxme,
     // Orders and lines are read together by readChatOrders: their counts are the orders and the attached lines.
     bulkReads: [
       {relation: tables.orders, rows: orders.length},

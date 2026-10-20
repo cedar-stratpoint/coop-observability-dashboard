@@ -5,6 +5,8 @@ import {isAllowedTool} from './tools';
 
 const TOP_KEYS = new Set(['model', 'max_tokens', 'thinking', 'system', 'messages', 'tools', 'tool_choice', 'cache_control', 'output_config']);
 const EFFORTS = new Set(['low', 'medium', 'high']);
+// The only tools sent with strict: false (grammar cap, see tool-defs.ts); their input is validated in crm/tools.ts and clarify.ts askOwner.
+const NON_STRICT_OK = new Set(['list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'ask_owner', 'contacts']);
 const TOOL_KEYS = new Set(['name', 'description', 'input_schema', 'strict', 'cache_control', 'type']);
 
 function fail(rule: string, detail: unknown, sink?: AuditSink): never {
@@ -39,7 +41,7 @@ export function assertRequestShape(params: unknown, sink?: AuditSink): void {
       const tool = t as Record<string, unknown>;
       if (!isAllowedTool(tool.name)) fail('tool name not in allowlist', tool.name, sink);
       if (tool.type !== undefined && tool.type !== 'custom') fail('only custom tools are allowed', tool.type, sink);
-      if (tool.strict !== true) fail('every tool must be strict: true', tool.name, sink);
+      if (tool.strict !== true && !(tool.strict === false && NON_STRICT_OK.has(String(tool.name)))) fail('every tool must be strict: true', tool.name, sink);
       for (const k of Object.keys(tool)) if (!TOOL_KEYS.has(k)) fail('unexpected tool key', k, sink);
     }
   }
