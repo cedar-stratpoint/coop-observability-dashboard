@@ -10,6 +10,7 @@ export interface DateRange {
 }
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+export type WeekStart = 0 | 1; // 0 = Sunday first (default), 1 = Monday first
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -22,8 +23,8 @@ function todayYmd(): string {
 }
 
 /** Days in a month and the weekday its 1st falls on (0=Sun), computed in UTC. */
-function monthGrid(year: number, month: number): {leading: number; days: number} {
-  const leading = new Date(Date.UTC(year, month, 1)).getUTCDay();
+function monthGrid(year: number, month: number, weekStartsOn: WeekStart): {leading: number; days: number} {
+  const leading = (new Date(Date.UTC(year, month, 1)).getUTCDay() - weekStartsOn + 7) % 7;
   const days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   return {leading, days};
 }
@@ -35,13 +36,14 @@ function monthGrid(year: number, month: number): {leading: number; days: number}
  * outside the optional `min`/`max` (YYYY-MM-DD, inclusive). Fully themed from
  * the design tokens and keyboard-operable.
  */
-export function Calendar({value, onChange, min, max, allowFuture = false}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string; allowFuture?: boolean}) {
+export function Calendar({value, onChange, min, max, allowFuture = false, weekStartsOn = 0}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string; allowFuture?: boolean; weekStartsOn?: WeekStart}) {
   const today = todayYmd();
   const anchor = value.end ?? value.start ?? min ?? today;
   const [ay, am] = anchor.split('-').map(Number);
   const [view, setView] = useState<{y: number; m: number}>({y: ay, m: am - 1});
 
-  const {leading, days} = monthGrid(view.y, view.m);
+  const {leading, days} = monthGrid(view.y, view.m, weekStartsOn);
+  const weekdays = [...WEEKDAYS.slice(weekStartsOn), ...WEEKDAYS.slice(0, weekStartsOn)];
   const cells: (string | null)[] = [
     ...Array.from({length: leading}, () => null),
     ...Array.from({length: days}, (_, i) => ymd(view.y, view.m, i + 1)),
@@ -87,7 +89,7 @@ export function Calendar({value, onChange, min, max, allowFuture = false}: {valu
       </div>
 
       <div className="grid grid-cols-7 gap-y-1">
-        {WEEKDAYS.map((w) => (
+        {weekdays.map((w) => (
           <div key={w} className="grid h-7 place-items-center text-[11px] font-medium text-muted-foreground">
             {w}
           </div>

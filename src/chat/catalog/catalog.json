@@ -724,6 +724,20 @@
    "redirectTo": null
   },
   {
+   "route": "/sales-range",
+   "title": "Sales range",
+   "shows": "Sales over any dates across weeks, or all time: totals per channel, ad spend and ROAS, top products. Separate from the weekly Sales page",
+   "data": "digest_archive, bundle, pos_orders, website CRM (API)",
+   "domains": [
+    "digest",
+    "pos-sales",
+    "crm-api"
+   ],
+   "fenced": false,
+   "access": "full: digests via get_digest and get_channel_report, POS via query_metric, CRM via the CRM tools",
+   "redirectTo": null
+  },
+  {
    "route": "/overview",
    "title": "Goldline overview",
    "shows": "Goldline sales overview for the active non-Zoomy company",

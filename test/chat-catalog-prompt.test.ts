@@ -90,7 +90,7 @@ describe('3.1 and 3.2 pages and go-links come from the catalog', () => {
     expect(resolvePage('/crm')?.shows).toBe('redirects to /customers/website-crm');
   });
   it('go-links are the catalog pages Ask Coop can read plus the channel links, and the client list is the same', () => {
-    expect(GO_PATHS).toEqual(['/', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
+    expect(GO_PATHS).toEqual(['/', '/sales-range', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
     const client = readFileSync('components/analyst/coop-chat.tsx', 'utf8');
     const m = /const APP_PATHS = new Set\(\[([^\]]*)\]\)/.exec(client);
     expect(m && [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1])).toEqual([...GO_PATHS]);
