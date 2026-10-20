@@ -19,7 +19,7 @@ import {shouldRedirectFromZoomy} from '@/src/company-nav';
 import {PlaybookProvider} from './playbook';
 import {CoopChatProvider, AskCoopPill} from './coop-chat';
 import {CustomRangePicker} from './custom-range-picker';
-import {firstDigestDay} from '../../src/sales-range';
+import {firstDigestDay, spanScopeLabel} from '../../src/sales-range';
 import {phDay} from '../../src/custom-range';
 
 // The left rail. Overview is a group (accordion in the expanded rail) whose
@@ -138,6 +138,9 @@ export function DashboardShell({
   // Dates picked on the Sales page (any span, or all time): the switcher says so instead of naming one week.
   const rangeMode = pathname === '/' && Boolean(searchParams.get('channel')) && (searchParams.get('span') === 'all' || Boolean(searchParams.get('from') && searchParams.get('to')));
   const periodLabel = rangeMode ? (searchParams.get('span') === 'all' ? 'All time' : 'Custom span') : currentRange;
+  // What the chat says it is answering about: the picked span (not the selected week) while dates are picked.
+  const spanBounds = {firstDay: firstDigestDay(digests) ?? phDay(Date.now()), todayDay: phDay(Date.now())};
+  const scopeLabel = rangeMode ? spanScopeLabel({from: searchParams.get('from') ?? undefined, to: searchParams.get('to') ?? undefined, span: searchParams.get('span') ?? undefined}, spanBounds) ?? currentRange : currentRange;
 
   // The reporting-period picker only makes sense in period-scoped analytics views —
   // hide it on the home brief ("/" with no channel), Settings, Business Health
@@ -277,7 +280,7 @@ export function DashboardShell({
     {/* Upload queue lives in the shell so uploads keep running across in-app navigation. */}
     <UploadQueueProvider company={nav?.companyId ?? null}>
     <UploadQueueIndicator />
-    <CoopChatProvider scopeLabel={currentRange || undefined}>
+    <CoopChatProvider scopeLabel={scopeLabel || undefined}>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       {/* Sticky (not relative) so it stays pinned on scroll, flush above the
@@ -437,7 +440,7 @@ export function DashboardShell({
 
         {/* Custom dates: any span or all time, on the Sales page */}
         {showPeriod && current && pathname === '/' && channel && (
-          <CustomRangePicker min={firstDigestDay(digests) ?? phDay(Date.now())} max={phDay(Date.now())} />
+          <CustomRangePicker min={spanBounds.firstDay} max={spanBounds.todayDay} />
         )}
 
         {/* Right cluster: Ask Coop · theme · avatar */}
