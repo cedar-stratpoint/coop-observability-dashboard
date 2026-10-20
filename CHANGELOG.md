@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-20 — v1.10.0: Sales page takes any dates, or all time (prod release)
+Minor bump (SemVer): new, backward-compatible feature. Selective release by cherry-pick from `develop`, on top of v1.9.0: only the Sales change ships; the other commits on `staging` are not part of it. `main` already had everything the change builds on (`period-rollup`, `digest-windows`, `chat/range`, `DigestDocument.daily`).
+
+- **Any dates on the Sales page:** the top bar's "Custom dates" takes any day with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows totals, Ad spend, ROAS and top products for that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, unchanged.
+- **Honest ad figures:** ad spend, ROAS and top products exist once per export window, so a window counts only when every day it touches is inside your dates; each ad number says which windows it uses ("4 full windows"), and no full window shows "No data", not 0. Shopee's ad export has its own dates (often not the digest's), so figures are placed by those, never by the digest week.
+- **`/sales-range` redirects** to the Sales page and keeps its dates; there is no separate page.
+- *No database or env step.* Nothing to run by hand.
+- *Verified:* on this branch (based on `main`): typecheck, 3233 unit tests, build; the weekly Sales page's server-rendered output is identical to an untouched `main` server (0 differing lines); range mode and the redirect respond. *Not verified:* real weekly digests on PROD (staging holds only three July digests), and the Sales page on the staging deploy by a person.
+- *Catalog:* only the Sales entries of `src/chat/catalog/catalog.json` were updated here. The knowledge base is ahead of `main` (BoxMe tables, other pages), so `check.mjs` still reports the file as stale, as it did before this release.
+- Per-change detail is in the entries below.
+
 ## 2026-10-20 — One Sales page: any dates or all time, no separate Sales range page
 - **The Sales page now takes any dates.** The top bar's "Custom dates" button is no longer limited to the selected week: pick any days with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, exactly as before (checked: the server-rendered page differs from before only by the removed nav item).
   - *Why:* the owner tried the separate `/sales-range` page (previous entry) and decided one Sales page is clearer than two. The calculation, tags and tests from that page are unchanged; only where they live moved.
