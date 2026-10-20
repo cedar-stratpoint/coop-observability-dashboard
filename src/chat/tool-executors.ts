@@ -1,6 +1,7 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
 import {draftLeads} from './contacts/draft';
+import {matchPeople} from './contacts/match';
 import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
 import {tracked} from './crm/executors';
 import {crmEnrichedCustomers} from './crm/tools';
@@ -47,7 +48,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
 
   // The website side of find/overlap goes through the chat's own GET-only CRM client (one chat_crm_call line per read); never src/crm-data.ts.
   const peopleSource = async (s: import('./contacts/leads').LeadsSource): Promise<PeopleSource> => {
-    const base = {leads: s.leads, lazada: s.lazada ?? null};
+    const base = {leads: s.leads, lazada: s.lazada ?? null, events: s.events};
     if (!ctx.crm) return {...base, website: null, websiteNote: 'the website CRM is not connected for this chat'};
     const out = await tracked({client: ctx.crm, user: ctx.user, sink: ctx.sink}, 'contacts', {endpoint: 'customers'}, (get) => crmEnrichedCustomers(get, ctx.now), (r) => r.enriched.length);
     return 'error' in out ? {...base, website: null, websiteNote: out.error.split('. ')[0].toLowerCase()} : {...base, website: out.enriched};
@@ -142,9 +143,9 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       if ('error' in req) return {error: req.error};
       const source = await ctx.leads!();
       let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
-      if (req.mode === 'find' || req.mode === 'overlap') {
+      if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
         const people = await peopleSource(source);
-        out = req.mode === 'find' ? findPeople(req, people) : overlapPeople(req, people);
+        out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
       } else {
         out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
       }

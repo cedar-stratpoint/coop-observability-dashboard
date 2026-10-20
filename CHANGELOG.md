@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-20 — Ask Coop: confidence matches, "might these be the same person?" (P4 of 4)
+- **Asked:** same customer across platforms by same phone, email, pet name, with a confidence.
+- **What changed:** `contacts` gets mode `matches` (scope: one person by query, an event's leads, or two sources; `min_tier` narrows). Every link has a score, a tier (confirmed 100, likely 60 to 99, possible 30 to 59, weak below 30), the reasons and a signals key, best first, top 50. Points (owner-agreed starting weights, in `WEIGHTS` in `src/chat/contacts/match.ts`): email 100, mobile 100, Instagram handle 60, same name 40, similar name 20, same pet name 20, capped at 100.
+- **Decisions:** (1) a mobile under 3 or more different names is a shared line and scores 20, not 100; (2) pairs are independent, no grouping, so one wrong link cannot chain; (3) candidate pairs come from shared blocking keys, and a key shared by too many records (40 for names and pets, 100 for exact keys) is skipped and said, so a very common pet name cannot blow up the work; (4) the "booth-to-order 30" signal from the plan is dropped: a till order carries no identity that could link to the website or Lazada, so it could never add evidence across platforms; (5) only "confirmed" may be called the same person.
+- **Not yet done:** tuning. The owner labels about 20 pairs (signals pattern and verdict) and the weights and cut-offs are re-set; target at "likely and up": 9 of 10 right.
+- **Tests:** tiers, each signal, shared phone, common-name cap, no chaining, the three anchors, output and notes, executor and audit. Live model check and staging test are for a person.
+
 ## 2026-10-19 — Ask Coop: find one customer across the website, booth and Lazada (P3 of 4)
 - **Asked:** "find Anna Reyes (or a phone or email)" with every source, orders and spend, and "which website customers also bought on Lazada?".
 - **What changed:** `contacts` gets modes `find` (a name, email, mobile or pet name; up to 10 people, row-numbered) and `overlap` (people in two sources). They use the Customers hub's own merge (`mergeContacts`: same normalised email OR same last-10-digit mobile), so the groups equal `/customers/all`. The website side is read through the chat's existing GET-only CRM client (one `chat_crm_call` line per read, never `crm-data`); Lazada comes through the seam; booth leads as before. One `chat_pii_read` line per call, never the query.

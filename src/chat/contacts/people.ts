@@ -21,6 +21,8 @@ export interface PeopleSource {
   /** null: the website CRM could not be read (or is not connected); `websiteNote` says why. */
   website?: EnrichedCustomer[] | null;
   websiteNote?: string | null;
+  /** The events, for the event anchor of matches. */
+  events?: import('./leads').LeadsEvent[];
 }
 export type { FindInput, OverlapInput };
 export interface PeopleOutcome {
@@ -65,8 +67,8 @@ const toRow = (p: UnifiedContact, n: number): MetricRow => ({
 
 const SOURCE_LABEL: Record<ContactSource, string> = {website: 'website CRM', booth: 'booth leads', lazada: 'Lazada'};
 
-/** The loaded sources, the notes about the ones that are not, and the hub's merge of what is there. */
-function load(src: PeopleSource): {people: UnifiedContact[]; missing: ContactSource[]; notes: string[]} {
+/** Which sources could not be loaded, and the note to give about each. */
+export function sourceNotes(src: PeopleSource): {missing: ContactSource[]; notes: string[]} {
   const missing: ContactSource[] = [];
   const notes: string[] = [];
   if (!src.website) {
@@ -77,7 +79,12 @@ function load(src: PeopleSource): {people: UnifiedContact[]; missing: ContactSou
     missing.push('lazada');
     notes.push('Lazada buyers could not be read, so they are not included. Say so; do not present these as everyone.');
   }
-  return {people: mergeContacts(src.website ?? [], src.leads, src.lazada ?? []), missing, notes};
+  return {missing, notes};
+}
+
+/** The loaded sources, the notes about the ones that are not, and the hub's merge of what is there. */
+function load(src: PeopleSource): {people: UnifiedContact[]; missing: ContactSource[]; notes: string[]} {
+  return {...sourceNotes(src), people: mergeContacts(src.website ?? [], src.leads, src.lazada ?? [])};
 }
 
 const BASIS = [

@@ -92,4 +92,21 @@ describe('contacts tool', () => {
     const out = (await ex.contacts?.({mode: 'overlap', a: 'website', b: 'booth'})) as {error: string};
     expect(out.error).toMatch(/website CRM/i);
   });
+
+  it('matches scores links across sources, draws the table, and audits without values', async () => {
+    const blocks: ChatBlock[] = [];
+    const info = vi.fn();
+    const {client} = fakeCrmClient();
+    const ex = createExecutors({data: async () => data, now: NOW, user: 'boss@x.com', leads: async () => SOURCE, crm: client, emitBlock: (b) => blocks.push(b), sink: {info, error: vi.fn()}});
+    const out = (await ex.contacts?.({mode: 'matches', scope: 'person', query: 'ana@example.com', min_tier: 'possible', limit: 50})) as {shown: boolean; counts: {total: number}};
+    expect(out.shown).toBe(true);
+    expect(blocks[0]).toMatchObject({kind: 'table', pii: true});
+    const lines = info.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(lines).toContain('chat_pii_read');
+    expect(lines).not.toMatch(/ana@example|0917/);
+  });
+  it('matches with a bad scope is refused before anything is read', async () => {
+    const ex = createExecutors({data: async () => data, now: NOW, user: null, leads: async () => SOURCE, emitBlock: () => undefined, sink: {info: vi.fn(), error: vi.fn()}});
+    expect(((await ex.contacts?.({mode: 'matches', scope: 'everyone'})) as {error: string}).error).toMatch(/scope/);
+  });
 });
