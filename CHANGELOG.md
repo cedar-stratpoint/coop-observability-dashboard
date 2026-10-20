@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-19 — Ask Coop: find one customer across the website, booth and Lazada (P3 of 4)
+- **Asked:** "find Anna Reyes (or a phone or email)" with every source, orders and spend, and "which website customers also bought on Lazada?".
+- **What changed:** `contacts` gets modes `find` (a name, email, mobile or pet name; up to 10 people, row-numbered) and `overlap` (people in two sources). They use the Customers hub's own merge (`mergeContacts`: same normalised email OR same last-10-digit mobile), so the groups equal `/customers/all`. The website side is read through the chat's existing GET-only CRM client (one `chat_crm_call` line per read, never `crm-data`); Lazada comes through the seam; booth leads as before. One `chat_pii_read` line per call, never the query.
+- **Honest degradation:** a source that could not be read is named in the answer, and an overlap involving it is refused instead of reported as empty. A misspelt name is not guessed. A Lazada buyer with a masked or missing phone is not linked (only a mobile links them).
+- **Also:** `mergeContacts` gains additive fields (`pets`, `campaigns`, `names`, `emails`, `mobiles`) so a person is found by any of their identities and shows every pet and booth event; the Customers page is unchanged. The CRM customer enrichment is extracted once (`crmEnrichedCustomers`) and shared with `list_crm_customers`.
+- **Decision:** no scores or "probably the same person" yet: that is P4. Exact keys only keeps the answer identical to the Customers page and nothing to tune.
+- **Tests:** merge additions, find/overlap module (key spellings, caps, masked phone, source down, parity with the hub), executor with the fake CRM client and audit. Live model check and staging test are for a person.
+
 ## 2026-10-19 — Ask Coop: draft messages for an event's leads (P2 of 4)
 - **Asked:** "write a thank-you with the promo for those leads", and a personal one for a few.
 - **What changed:** `contacts` gets mode `draft` (same allowlist, seam and audit line as P1). Big list: the model writes ONE template and the app fills `{{pet}}`, `{{prize}}`, `{{event}}`, `{{treats}}`, `{{collected_date}}` for each lead in a single pass; unknown placeholders are refused. Small batch (up to 25): the model writes each message itself, addressed by the row numbers of the list. Channel is email, SMS text or Instagram DM text; a lead without that contact is skipped and counted. The owner gets a Drafts table with Copy all messages and Download CSV. The model only sees counts and 5 sample drafts, never the full list. **Nothing is sent.**
