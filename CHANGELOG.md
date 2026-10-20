@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-20 — One Sales page: any dates or all time, no separate Sales range page
+- **The Sales page now takes any dates.** The top bar's "Custom dates" button is no longer limited to the selected week: pick any days with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, exactly as before (checked: the server-rendered page differs from before only by the removed nav item).
+  - *Why:* the owner tried the separate `/sales-range` page (previous entry) and decided one Sales page is clearer than two. The calculation, tags and tests from that page are unchanged; only where they live moved.
+- **Range view on the Sales page:** totals per channel, plus Ad spend and ROAS beside them, Compare channels, Top products, an amber banner for real gaps and a quiet "where these numbers come from" list.
+- **Recommended actions** are written per week, so in range mode that column says so and links to the latest weeks.
+- **Period switcher** reads "Custom span" or "All time" while dates are picked; choosing a week clears them. The clear (x) on the date button returns to the selected week.
+- **`/sales-range` is now a redirect** to the Sales page and keeps its dates, so shared links still work. The "Sales range" sidebar item is gone.
+- **Replaced:** the old clamped custom-dates path on the Sales page (`resolveCustomRange` there, the per-channel `custom` props) is no longer reached. The leftover props in `channel-compare.tsx` are harmless and are left for a separate cleanup so this diff stays reviewable.
+- **Data catalog:** `/` row updated (new params and sources), `/sales-range` listed as a redirect; `catalog.json` regenerated.
+- Tests: `test/sales-range.test.ts` gains the link-detection and recent-weeks cases (27 in total).
+
 ## 2026-10-20 — Sales range: sales over any dates, or all time (new page `/sales-range`)
 - **New page, sidebar "Sales range".** Pick any dates across weeks, or "All time", and see revenue, orders, units, AOV, ad spend, ROAS and top products for that span. The weekly Sales page (`/?channel=all`) is unchanged.
   - *Why:* the weekly page clamps custom dates inside the selected week, so a month or the whole history could not be viewed. The owner chose a separate page over changing the existing one.
