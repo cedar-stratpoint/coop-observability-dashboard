@@ -82,6 +82,7 @@
    "id": "repricer",
    "title": "Repricer audit",
    "tables": [
+    "marketplace_daily_sales",
     "marketplace_price_changes"
    ]
   },
@@ -359,6 +360,14 @@
    "domain": "business-health",
    "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
    "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_daily_sales": {
+   "name": "marketplace_daily_sales",
+   "domain": "repricer",
+   "about": "Per-PH-day Shopee and Lazada sales, written by every digest run so a custom date range can be summed from rows instead of cut from whole digest windows. Built 2026-10-21 on the backend branch feat/marketplace-daily-sales (PR #47 on coop-pipeline, stacked on #42 feat/digest-aug13-sep13); applied only to the local Docker stack so far.",
+   "columns": "day (date, PH), channel ('shopee' | 'lazada'), revenue (PHP), orders, units, window_from, window_to (the digest run that wrote the row), captured_at. Shopee figures are the Sales Overview export's confirmed orders and units; Lazada from the API's orders.",
    "prefer": null,
    "testOrders": null
   },
@@ -712,7 +721,7 @@
    "route": "/",
    "title": "Sales overview",
    "shows": "Home (\"What should we do today?\") and, with channel, the multi-channel Sales overview (Shopee, Lazada, Website, Offline) with period and, when dates are picked (any span or all time), the range view: totals, ad spend and ROAS, top products across weeks",
-   "data": "digest_archive, bundle, pos_orders, pos_settings, daily_revenue_target, website CRM (API)",
+   "data": "digest_archive, bundle, marketplace_daily_sales, pos_orders, pos_settings, daily_revenue_target, website CRM (API)",
    "domains": [
     "digest",
     "pos-sales",

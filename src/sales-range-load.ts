@@ -3,6 +3,8 @@ import {getDigests} from './data';
 import {getPosOrders} from './pos-sales';
 import {crmConfigured, getCrmOrders} from './crm-data';
 import {phDay} from './custom-range';
+import {dailyRowsToDigests} from './daily-sales-digests';
+import {getMarketplaceDaily} from './marketplace-daily-data';
 import {buildSalesRange, firstDigestDay, offlineInput, type SalesRangeView, type SpanRequest} from './sales-range';
 import type {DigestArchiveRow} from './types';
 
@@ -22,13 +24,16 @@ async function soft<T>(read: () => Promise<T>): Promise<T | null> {
 export async function loadSalesRange(span: SpanRequest, digests?: DigestArchiveRow[]): Promise<SalesRangeView> {
   const rows = digests ?? (await getDigests());
   const todayDay = phDay(Date.now());
-  const [pos, crm] = await Promise.all([soft(getPosOrders), crmConfigured() ? soft(getCrmOrders) : Promise.resolve(null)]);
+  const [pos, crm, daily] = await Promise.all([soft(getPosOrders), crmConfigured() ? soft(getCrmOrders) : Promise.resolve(null), soft(getMarketplaceDaily)]);
+  const dailyDigests = dailyRowsToDigests(daily ?? []);
+  const first = [firstDigestDay(rows), firstDigestDay(dailyDigests)].filter((d): d is string => d !== null).sort()[0] ?? todayDay;
   return buildSalesRange({
     span,
     digests: rows,
+    dailyDigests,
     website: crm ? {orders: crm, asOf: new Date().toISOString()} : null,
     offline: offlineInput(pos),
-    firstDay: firstDigestDay(rows) ?? todayDay,
+    firstDay: first,
     todayDay,
   });
 }

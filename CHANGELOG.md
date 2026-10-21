@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Sales range: totals can come from the backend's per-day rows
+`src/marketplace-daily-data.ts` reads `marketplace_daily_sales` (one row per PH day per Shopee or Lazada channel, written by every digest run; backend PR #47) and `src/daily-sales-digests.ts` shapes the rows, grouped by the run window that wrote them, as digests carrying `daily`. The Sales range view's rollup merges them with the stored digests unchanged (newest run wins per day, a day inside a run's window with no row is a zero), so a custom span is summed from rows where they exist. Ad spend, ROAS and top products still read whole digest windows. Soft by design: mock mode, a missing table or a failed read gives no rows and the page behaves exactly as before. Decision: Ask Coop does not read the table yet; its read guard only allows registry views, so that needs a `coop_chat_*` view and a hand-applied grant (parked). Verified against the local Docker Postgres, not a hosted project.
+
 ## 2026-10-21 — Ask Coop: one product on Shopee or Lazada across all stored digests
 `get_digest` takes `window: "all"` plus a `product`. Ask Coop now answers "how many X did we sell on Shopee, all time" in one turn instead of offering to look at older windows. Each stored digest keeps only its own top 5 products per channel, so the answer is a labelled lower bound ("at least", span and windows named), never a total. Decision: the full per-day, per-SKU history needs data the digests do not hold (July to Sep 27 digests have no `daily` and no Shopee block in `bundle`); backfill is parked. No new tool (20-tool limit unchanged); the lookup reuses `spanTopProducts`.
 
