@@ -168,8 +168,8 @@ const listCrmOrders: ToolDefinition = {
   name: 'list_crm_orders',
   description:
     'Website (Shopify) orders from the live website CRM for the owner\'s dates, in Philippine time. group_by "none" lists orders newest first (order number, PH day, email, total, units, payment and fulfillment status), paged with limit and offset; ' +
-    '"day", "week" (Monday to Sunday) or "month" gives orders, revenue, AOV and units per period with empty periods as zero; "financial_status" or "fulfillment_status" gives the split. The totals are in meta.checks: quote them, never add rows yourself. ' +
-    'Revenue counts every order in the payment status you pass ("all" is the same basis as get_channel_report\'s Website row). Call it for "website orders this week", "website sales by day in September" or "unpaid website orders". ' + UNTRUSTED,
+    '"day", "week" (Monday to Sunday) or "month" gives orders, revenue, AOV and units per period with empty periods as zero; "financial_status" or "fulfillment_status" gives the split; "product" ranks the products sold in those dates (orders, units, product revenue). The totals are in meta.checks: quote them, never add rows yourself. ' +
+    'Revenue counts every order in the payment status you pass ("all" is the same basis as get_channel_report\'s Website row). Call it for "website orders this week", "website sales by day in September", "unpaid website orders" or "which products sold on the website in October". ' + UNTRUSTED,
   strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
     type: 'object',
