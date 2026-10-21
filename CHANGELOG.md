@@ -21,7 +21,7 @@ Minor bump (SemVer): new, backward-compatible feature. Selective release by cher
 - **Quick chat:** a question box and four chips beside the graph open the existing Ask Coop drawer. No new AI endpoint.
 - **Fix: the Ask Coop drawer named the selected week while dates were picked.** It now names the picked span, and the chat's page context says the Sales page is showing that span.
 - *No database or env step.* Nothing to run by hand.
-- *Verified:* on this branch (based on `main`): typecheck, 3233 unit tests, build; the weekly Sales page's server-rendered output is identical to an untouched `main` server (0 differing lines); range mode and the redirect respond. *Not verified:* real weekly digests on PROD (staging holds only three July digests), and the Sales page on the staging deploy by a person.
+- *Verified:* on this branch (based on `main`): typecheck, 3256 unit tests, build; the weekly Sales page's server-rendered output is identical to an untouched `main` server (0 differing lines); range mode and the redirect respond. *Not verified:* real weekly digests on PROD (staging holds only three July digests), and the Sales page on the staging deploy by a person.
 - *Catalog:* only the Sales entries of `src/chat/catalog/catalog.json` were updated here. The knowledge base is ahead of `main` (BoxMe tables, other pages), so `check.mjs` still reports the file as stale, as it did before this release.
 - Per-change detail is in the entries below.
 ## 2026-10-21 — Sales range: change versus the span before, an Over time view, and a quick chat
