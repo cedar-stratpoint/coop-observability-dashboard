@@ -12,7 +12,7 @@ import {CRM_LIMITS, CrmError, type CrmEndpointId, type CrmRead} from './client';
 export type CrmGet = (endpoint: CrmEndpointId) => Promise<CrmRead>;
 
 export const ORDER_STATUSES = ['all', 'paid', 'pending', 'authorized', 'partially_paid', 'partially_refunded', 'refunded', 'voided', 'expired'] as const;
-export const ORDER_GROUPS = ['none', 'day', 'week', 'month', 'financial_status', 'fulfillment_status'] as const;
+export const ORDER_GROUPS = ['none', 'day', 'week', 'month', 'financial_status', 'fulfillment_status', 'product'] as const;
 export const CUSTOMER_TIERS = ['all', 'platinum', 'gold', 'guest'] as const;
 export const CUSTOMER_BUYERS = ['all', 'buyers', 'non_buyers'] as const;
 export const CUSTOMER_GROUPS = ['none', 'tier', 'joined_month', 'email_marketing'] as const;
@@ -261,6 +261,36 @@ const ORDER_GROUP_MEASURES: MeasureDecl[] = [
   {key: 'units', label: 'Units', kind: 'measured', unit: 'units', method: 'Sum of line-item quantities; empty when no order in the group has readable line items.'},
 ];
 
+const PRODUCT_MEASURES: MeasureDecl[] = [
+  {key: 'revenue', label: 'Product revenue', kind: 'measured', unit: 'PHP', method: 'Sum of quantity x unit price minus the line discount, per product (not the order total, which also holds shipping and order-level discounts).'},
+  {key: 'units', label: 'Units', kind: 'measured', unit: 'units', method: 'Sum of line-item quantities of the product.'},
+  {key: 'orders', label: 'Orders', kind: 'measured', unit: 'count', method: 'Distinct website orders that contain the product.'},
+];
+
+/** group_by "product": the products of the matching orders ranked by net line revenue. Orders with no readable line items are counted and named, never guessed. */
+function productRanking(orders: readonly CrmOrderChat[], req: CrmOrdersRequest, range: Range, total: Check, days: (string | null)[]): ReturnType<typeof finish> {
+  const acc = new Map<string, {orders: number; units: number; c: number}>();
+  let withoutItems = 0;
+  for (const o of orders) {
+    if (o.lineItems.length === 0) withoutItems += 1;
+    const seen = new Set<string>();
+    for (const li of o.lineItems) {
+      const a = acc.get(li.title) ?? {orders: 0, units: 0, c: 0};
+      if (!seen.has(li.title)) a.orders += 1;
+      seen.add(li.title);
+      a.units += li.quantity;
+      a.c += Math.round(li.quantity * li.price * 100) - cents(li.discount);
+      acc.set(li.title, a);
+    }
+  }
+  const ranked = [...acc.entries()].sort((x, y) => y[1].c - x[1].c || x[0].localeCompare(y[0]));
+  const {rows, note} = pageOf(ranked, req);
+  const columns = [col('product', 'Product', 'text', 'category'), col('orders', 'Orders', 'count', 'measure'), col('units', 'Units', 'units', 'measure'), col('revenue', 'Product revenue', 'PHP', 'measure')];
+  const out: MetricRow[] = rows.map(([title, a]) => ({product: safeText(title), orders: a.orders, units: a.units, revenue: pesos(a.c)}));
+  const notes = [total, ...(note ? [note] : []), ...(withoutItems ? [info(`${withoutItems} of these orders have no readable line items, so their products are not in this list.`)] : [])];
+  return finish('crm_orders', 'product', columns, out, {range, measure: 'revenue', measures: PRODUCT_MEASURES, notes, days});
+}
+
 export async function crmOrdersResult(req: CrmOrdersRequest, get: CrmGet): Promise<MetricResult> {
   const range = {from: req.from, to: req.to};
   const orders = (await readOrders(get))
@@ -277,6 +307,8 @@ export async function crmOrdersResult(req: CrmOrdersRequest, get: CrmGet): Promi
     const out: MetricRow[] = rows.map((o) => ({order: safeText(o.orderNumber) ?? safeText(o.shopifyOrderId), placed: dayOf(o.createdAt), email: safeText(o.email), total: pesos(cents(o.totalPrice)), units: unitsOf(o.lineItems), payment: safeText(o.financialStatus), fulfillment: safeText(fulfillmentOf(o))}));
     return finish('crm_orders', 'none', columns, out, {range, measure: 'total', measures: ORDER_LIST_MEASURES, notes: note ? [total, note] : [total], days});
   }
+
+  if (req.group_by === 'product') return productRanking(orders, req, range, total, days);
 
   const g = req.group_by;
   const keyOf = (o: CrmOrderChat): string =>
