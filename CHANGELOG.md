@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Ask Coop: an API spend cap says "account needs attention", not "try again"
+When the provider refuses with a usage-limit 400 ("You have reached your specified API usage limits"), Ask Coop now shows the same account message as a low credit balance instead of the generic "Coop hit a problem answering that. Please try again." Found when two identical questions failed with the generic text and the cause could not be told apart from a code fault. No provider text is shown to the user.
+
 ## 2026-10-21 — Ask Coop: get_channel_report reads the saved per-day Shopee and Lazada sales
 Ask Coop's channel report now merges the backend's `marketplace_daily_sales` rows with the stored digests' per-day figures, the same way the Sales range view does, so both give the same totals for the same dates. The read follows the digest pattern: its own one-relation guarded client (`chatDailyClient`, `src/chat/read/daily.ts`), the view `coop_chat_marketplace_daily` (`supabase/coop_chat_marketplace_daily.sql`, applied by hand, `coop_chat_ro` select only) in `ro_role` mode, the table with an explicit column list in `guarded_service` mode. Soft: a missing table or a failed read gives no rows and the report uses the digests alone. Decision: the table is never granted to the read role; only the view. Verified on the local Docker stack in both read modes.
 
