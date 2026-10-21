@@ -119,6 +119,8 @@ export interface SalesRangeView {
 export interface SalesRangeInput extends SpanBounds {
   span: SpanRequest;
   digests: readonly (RollupDigest & WindowDigest)[];
+  /** Per-day rows saved by the backend (marketplace_daily_sales) as digests carrying `daily`; used for the totals only. */
+  dailyDigests?: readonly RollupDigest[];
   website: {orders: readonly RangeOrder[]; asOf: string} | null;
   offline: {orders: readonly PosOrder[]; dataFrom: string | null; dataTo: string | null} | null;
 }
@@ -167,11 +169,13 @@ export function offlineInput(orders: readonly PosOrder[] | null): SalesRangeInpu
 
 export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
   const {firstDay, todayDay} = input;
+  // Per-day figures saved by the backend join the stored digests for the totals only; ad spend and top products still read whole digest windows.
+  const rollupDigests = [...input.digests, ...(input.dailyDigests ?? [])];
   const span = resolveSpan(input.span, {firstDay, todayDay});
   const {fromDay, toDay} = span;
   const [min, max] = [firstDay, todayDay];
 
-  const channels = rollupChannels({fromDay, toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: input.digests, website: input.website, offline: input.offline})[0].channels;
+  const channels = rollupChannels({fromDay, toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: rollupDigests, website: input.website, offline: input.offline})[0].channels;
   const totals = sumTotals(channels);
 
   const shopeeAds = spanAds('shopee', fromDay, toDay, input.digests);
@@ -188,11 +192,11 @@ export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
     ? {
         ...prevSpan,
         label: rangeLabel(prevSpan.fromDay, prevSpan.toDay),
-        channels: rollupChannels({fromDay: prevSpan.fromDay, toDay: prevSpan.toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: input.digests, website: input.website, offline: input.offline})[0].channels,
+        channels: rollupChannels({fromDay: prevSpan.fromDay, toDay: prevSpan.toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: rollupDigests, website: input.website, offline: input.offline})[0].channels,
         ads: {shopee: spanAds('shopee', prevSpan.fromDay, prevSpan.toDay, input.digests), lazada: spanAds('lazada', prevSpan.fromDay, prevSpan.toDay, input.digests)},
       }
     : null;
-  const series = buildSeries({fromDay, toDay, digests: input.digests, website: input.website, offline: input.offline});
+  const series = buildSeries({fromDay, toDay, digests: rollupDigests, website: input.website, offline: input.offline});
   const uniq = (xs: (string | null)[]): string[] => [...new Set(xs.filter((n): n is string => Boolean(n)))];
   const gaps = channels.filter((c) => c.status !== 'ok');
   const notes = uniq([span.note, ...gaps.flatMap((c) => c.notes), ...ads.shopee.warnings, ...ads.lazada.warnings, ...shopee.warnings, ...lazada.warnings]);

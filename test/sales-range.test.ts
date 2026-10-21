@@ -3,6 +3,7 @@ import {adsTotals, buildSalesRange, isRangeRequest, offlineInput, resolveSpan, s
 import {spanAds} from '../src/span-windows';
 import {cmp, digestRow, phMidnight, series} from './support/channel-report-fixture';
 import {addDaysKey} from '../src/chat/range';
+import {dailyRowsToDigests} from '../src/daily-sales-digests';
 
 // Tue 20 Oct 2026 (PH). The last finished Sunday is 18 Oct. Data starts 1 Sep.
 const bounds = {firstDay: '2026-09-01', todayDay: '2026-10-20'};
@@ -167,5 +168,26 @@ describe('spanScopeLabel: what the chat drawer says it is answering about', () =
   it('is null when no dates are picked, so the weekly label stays', () => {
     expect(spanScopeLabel({}, bounds)).toBeNull();
     expect(spanScopeLabel({from: 'nope', to: '2026-10-05'}, bounds)).toBeNull();
+  });
+});
+
+describe('buildSalesRange with per-day rows saved by the backend', () => {
+  // The July digests only have whole-window totals (misaligned, overlapping): their custom span is "not combinable".
+  const july = [digestRow('2026-07-05T07:01:00.000Z', '2026-08-04T07:01:00.000Z', '2026-08-04T08:00:00Z', {comparison: {shopee: cmp(28000, 56, 84), lazada: cmp(39500, 79, 105)}})];
+  const input = {span: {from: '2026-07-06', to: '2026-08-04'}, digests: july, website: null, offline: null, firstDay: '2026-07-05', todayDay: '2026-10-20'};
+
+  it('without rows the span has no Shopee or Lazada figures', () => {
+    const v = buildSalesRange(input);
+    expect(v.channels.find((c) => c.channel === 'shopee')?.status).not.toBe('ok');
+  });
+
+  it('with rows covering the span the totals sum exactly from the rows', () => {
+    const rows = [
+      ...series('2026-07-06', '2026-08-04', 100, 2, 3).map((d) => ({...d, channel: 'shopee' as const, window_from: phMidnight('2026-07-06'), window_to: phMidnight('2026-08-05'), captured_at: '2026-10-21T01:00:00Z'})),
+    ];
+    const dailyDigests = dailyRowsToDigests(rows);
+    const v = buildSalesRange({...input, dailyDigests});
+    const shopee = v.channels.find((c) => c.channel === 'shopee');
+    expect(shopee).toMatchObject({status: 'ok', revenue: 3000, orders: 60});
   });
 });
