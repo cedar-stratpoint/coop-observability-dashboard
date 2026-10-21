@@ -69,12 +69,12 @@ export function readReportInput(input: unknown): ChannelReportRequest | MetricEr
 }
 
 /** The loaded digests plus any stored window touching from..to that is not loaded yet (an older one), so coverage is never understated. */
-export async function digestsFor(src: DigestSource, from: string, to: string): Promise<DigestRow[]> {
+export async function digestsFor(src: DigestSource, from: string, to: string, cap = MAX_EXTRA_ROWS): Promise<DigestRow[]> {
   const lo = phDayStart(from);
   const hi = phDayStart(to) + 86_400_000;
   const missing = (src.index ?? [])
     .filter((w) => Date.parse(w.from) < hi && Date.parse(w.to) > lo && !src.rows.some((r) => sameWindow(windowOf(r), w)))
-    .slice(0, MAX_EXTRA_ROWS);
+    .slice(0, cap);
   const rowAt = src.rowAt;
   if (!rowAt || missing.length === 0) return src.rows;
   const extra = await Promise.all(missing.map((w) => rowAt(w).catch(() => null)));
