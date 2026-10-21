@@ -138,15 +138,17 @@ const lookupProduct: ToolDefinition = {
     'Look up ONE product by SKU or name in the offline POS data: its current price, units and revenue sold, first and last sale, its price changes, or its stock now per location ("stock"). ' +
     'Call it when the owner names a specific product or SKU. To rank or list products use query_metric (top_products) instead. ' +
     'Pass the name exactly as the owner typed it, typos included: never correct or guess it yourself. If it is not an exact match, the app asks the owner to confirm and ends your turn; ' +
-    'when the owner then picks "Name (SKU)", call it again with that SKU. For "how many X do we have" use show "stock": one call, no dates.',
+    'when the owner then picks "Name (SKU)", call it again with that SKU. For "how many X do we have" use show "stock": one call, no dates. For "how many X did we sell" or "X revenue" in a period (bundles included) use show "sales" with the owner\'s dates; never run free SQL for it.',
   strict: true,
   input_schema: {
     type: 'object',
     properties: {
       query: {type: 'string', description: 'The SKU (for example "P1") or the product name as the owner said it.'},
-      show: {type: 'string', enum: [...PRODUCT_SHOWS], description: '"details" for price and sales, "price_history" for its recorded price changes, "stock" for units on hand now per location and in total.'},
+      show: {type: 'string', enum: [...PRODUCT_SHOWS], description: '"sales" for how much of ONE product sold in the owner\'s dates: direct sales, units inside bundles with the bundle price shared out, and the combined total, in one answer; "details" for price and all-time sales, "price_history" for its recorded price changes, "stock" for units on hand now per location and in total.'},
+      from: {type: 'string', description: 'First day, YYYY-MM-DD in Philippine time, ONLY for show "sales" ("" for all available data). Otherwise "".'},
+      to: {type: 'string', description: 'Last day, YYYY-MM-DD, ONLY for show "sales" ("" for all available data). Otherwise "".'},
     },
-    required: ['query', 'show'],
+    required: ['query', 'show', 'from', 'to'],
     additionalProperties: false,
   },
 };
