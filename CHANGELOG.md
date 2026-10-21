@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Ask Coop: website products for any dates
+`list_crm_orders` takes `group_by: "product"`: the products sold on the website in the owner's dates, ranked by net line revenue (quantity x price minus the line discount), with distinct orders and units. Orders with no readable line items are counted and named, never guessed. The live system prompt now says to answer a sales question by calling the tool that holds the figure (offline `query_metric`, website `list_crm_orders`, Shopee and Lazada all-time `get_digest` window `all`) instead of offering to look. No new tool (20-tool limit unchanged), no database or env step.
+
 ## 2026-10-21 — Ask Coop: one product on Shopee or Lazada across all stored digests
 `get_digest` takes `window: "all"` plus a `product`. Ask Coop now answers "how many X did we sell on Shopee, all time" in one turn instead of offering to look at older windows. Each stored digest keeps only its own top 5 products per channel, so the answer is a labelled lower bound ("at least", span and windows named), never a total. Decision: the full per-day, per-SKU history needs data the digests do not hold (July to Sep 27 digests have no `daily` and no Shopee block in `bundle`); backfill is parked. No new tool (20-tool limit unchanged); the lookup reuses `spanTopProducts`.
 
