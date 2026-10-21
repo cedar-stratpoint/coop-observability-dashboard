@@ -15,9 +15,9 @@ describe('CHAT_TOOLS', () => {
     expect(CHAT_TOOLS.map((t) => t.name)).toEqual(['describe_data', 'query_metric', 'get_digest', 'get_channel_report', 'lookup_product', 'ask_owner', 'render_kpi', 'render_chart', 'render_table', 'set_report_filters', 'remove_block', 'set_report_title']);
   });
 
-  it('with Explore and the CRM on, only the three list_crm_* tools and ask_owner are not strict (the API grammar cap), and no more than 20 are strict', () => {
+  it('with Explore and the CRM on, only the three list_crm_* tools, ask_owner, get_digest and lookup_product are not strict (the API grammar cap), and no more than 20 are strict', () => {
     const all = chatTools({explore: true, crm: true});
-    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders']);
+    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'get_digest', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'lookup_product']);
     expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20);
   });
 
@@ -25,7 +25,7 @@ describe('CHAT_TOOLS', () => {
     expect(CHAT_TOOLS.length).toBeLessThanOrEqual(20);
     let total = 0;
     for (const t of CHAT_TOOLS) {
-      expect(t.strict).toBe(t.name !== 'ask_owner'); // ask_owner: not strict for the grammar cap, validated in clarify.ts
+      expect(t.strict).toBe(!['ask_owner', 'get_digest', 'lookup_product'].includes(t.name)); // not strict for the grammar cap; validated in clarify.ts, shapeDigest and lookupProduct
       expect(t.input_schema.type).toBe('object');
       expect(t.input_schema.additionalProperties).toBe(false);
       const keys = Object.keys(t.input_schema.properties);
@@ -88,9 +88,9 @@ describe('CHAT_TOOLS', () => {
     expect(render_kpi.description).toMatch(/one-row/);
   });
 
-  it('F8 criterion 11 and F10: twelve strict tools, 0 optionals, 0 unions, and the report tools take enums, a block id and a title only', () => {
+  it('F8 criterion 11 and F10: twelve tools (nine strict), 0 optionals, 0 unions, and the report tools take enums, a block id and a title only', () => {
     expect(CHAT_TOOLS).toHaveLength(12);
-    expect(CHAT_TOOLS.filter((t) => t.strict !== true).map((t) => t.name)).toEqual(['ask_owner']); // grammar cap: validated in clarify.ts
+    expect(CHAT_TOOLS.filter((t) => t.strict !== true).map((t) => t.name).sort()).toEqual(['ask_owner', 'get_digest', 'lookup_product']); // grammar cap: validated in clarify.ts, shapeDigest and lookupProduct
     for (const t of CHAT_TOOLS) {
       expect(t.input_schema.required.length).toBe(Object.keys(t.input_schema.properties).length); // 0 optional
       for (const p of Object.values(props(t))) {
