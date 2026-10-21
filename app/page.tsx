@@ -12,7 +12,7 @@ import {progress as computeProgress, todaysRevenue} from '@/src/pos-target-compu
 import type {SalesKpis} from '@/src/pos-sales-types';
 import type {DailyProgress} from '@/src/pos-target-types';
 import {inRange} from '@/src/custom-range';
-import {isRangeRequest, recentWeeks} from '@/src/sales-range';
+import {isRangeRequest} from '@/src/sales-range';
 import {loadSalesRange} from '@/src/sales-range-load';
 import {SalesRangeView} from '@/components/analyst/sales-range-view';
 
@@ -93,7 +93,7 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
   // dates, built from every stored digest (src/sales-range.ts). With no dates the weekly view below is unchanged.
   const span = {from: searchParams.from, to: searchParams.to, span: searchParams.span};
   if (isRangeRequest(span)) {
-    return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} weeks={recentWeeks(digests)} />;
+    return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} />;
   }
   const offline = await offlineCompare({from: row.window_from, to: row.window_to});
   return <ChannelOverview brief={getBrief()} row={row} priorRow={priorRow} initialChannels={initial} offline={offline} />;
