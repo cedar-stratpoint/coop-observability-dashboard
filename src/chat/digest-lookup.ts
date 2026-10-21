@@ -11,6 +11,7 @@ import {phtDate} from './coverage';
 import {isRealDay, rangeLabel} from './range';
 import type {DigestRow} from './read/digest';
 import type {ClarifyResult} from './clarify';
+import {productSales} from './product-sales';
 import {resolveProduct, type CatalogProduct} from './product-resolve';
 import {onlineStock, phtStamp} from './boxme-metrics';
 import {cleanName} from '../boxme-inventory-compute';
@@ -277,7 +278,7 @@ export function shapeDigest(input: unknown, src: DigestSource | null, now: Date)
 
 // ---- lookup_product -------------------------------------------------------------------------------------------------
 
-export const PRODUCT_SHOWS = ['details', 'price_history', 'stock'] as const;
+export const PRODUCT_SHOWS = ['details', 'price_history', 'stock', 'sales'] as const;
 export const MAX_QUERY = 80;
 
 const DETAIL_COLUMNS: ResultColumn[] = [
@@ -395,6 +396,16 @@ export function lookupProduct(input: unknown, data: MetricData, now: Date = new 
   }
   const found = r.product;
   if (o.show === 'stock') return productStock(found, data, now);
+  if (o.show === 'sales') {
+    const from = typeof o.from === 'string' ? o.from : '';
+    const to = typeof o.to === 'string' ? o.to : '';
+    const all = from === '' && to === '';
+    for (const d of all ? [] : [from, to]) if (!ISO_DAY.test(d) || !isRealDay(d)) return fail('show "sales" needs from and to as real dates (YYYY-MM-DD, Philippine time), or "" and "" for all available data. Ask the owner for the dates if they gave none and the question is about a period.');
+    if (!all && from > to) return fail('from is after to. Ask the owner for the dates again.');
+    const days = data.orders.filter((x) => isCompletedOrder(x) && !Number.isNaN(Date.parse(x.created_at))).map((x) => manilaDayKey(x.created_at)).sort();
+    if (days.length === 0) return fail('No completed offline orders are loaded, so there are no sales to show.');
+    return productSales(found.sku, found.name, data, all ? days[0] : from, all ? days[days.length - 1] : to);
+  }
 
   const completed = data.orders.filter((o2) => isCompletedOrder(o2) && !Number.isNaN(Date.parse(o2.created_at)));
   let dataFrom: string | null = null;
