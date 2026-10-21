@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — v1.11.0: Ask Coop answers one product across all stored digests (prod release)
+Minor bump (SemVer): new, backward-compatible feature. Selective release by cherry-pick from `develop`, on top of v1.10.0: only the Ask Coop product lookup (#229) ships. `get_digest` takes `window: "all"` plus a `product`, so Ask Coop answers "how many X did we sell on Shopee or Lazada, all time" in one turn, as an "at least" figure with the span and the number of windows named. No database or env step. Verified here on the branch: typecheck, unit tests; not yet seen live in Ask Coop. Per-change detail is in the entry below.
+
+## 2026-10-21 — Ask Coop: one product on Shopee or Lazada across all stored digests
+`get_digest` takes `window: "all"` plus a `product`. Ask Coop now answers "how many X did we sell on Shopee, all time" in one turn instead of offering to look at older windows. Each stored digest keeps only its own top 5 products per channel, so the answer is a labelled lower bound ("at least", span and windows named), never a total. Decision: the full per-day, per-SKU history needs data the digests do not hold (July to Sep 27 digests have no `daily` and no Shopee block in `bundle`); backfill is parked. No new tool (20-tool limit unchanged); the lookup reuses `spanTopProducts`.
+
 ## 2026-10-21 — v1.10.0: Sales page takes any dates, or all time, with change versus before, an Over time view and a quick chat (prod release)
 Minor bump (SemVer): new, backward-compatible feature. Selective release by cherry-pick from `develop`, on top of v1.9.0: only the Sales work ships (the one-page Sales view, then the change versus the span before, Over time and quick chat); the other commits on `staging` are not part of it. `main` already had everything the change builds on (`period-rollup`, `digest-windows`, `chat/range`, `DigestDocument.daily`).
 

@@ -97,12 +97,13 @@ const getDigest: ToolDefinition = {
   input_schema: {
     type: 'object',
     properties: {
-      window: {type: 'string', enum: [...DIGEST_WINDOWS], description: '"covering" reads the stored digest that covers the owner\'s date or range (pass from and to); "latest" the newest stored digest; "previous" the one before it;'},
+      window: {type: 'string', enum: [...DIGEST_WINDOWS, 'all'], description: '"all" with section "products" and product: that product on Shopee and Lazada across EVERY stored digest (all time), returned as an "at least" lower bound; call it directly, never ask the owner first. "covering" reads the stored digest that covers the owner\'s date or range (pass from and to); "latest" the newest stored digest; "previous" the one before it;'},
       from: {type: 'string', description: 'First date as YYYY-MM-DD, ONLY for window "covering" (the owner\'s own date; ask them if they gave none). Otherwise "".'},
       to: {type: 'string', description: 'Last date as YYYY-MM-DD for a range ("" for one day with "covering"), ONLY for window "covering". Otherwise "".'},
+      product: {type: 'string', description: 'ONLY for window "all": the product name as the owner typed it. Otherwise "".'},
       section: {type: 'string', enum: [...DIGEST_SECTIONS], description: '"comparison" is one row per channel; "figures", "sales" and "customers" are the digest\'s own figure lists; "shopee" and "lazada" their marketplace figures; "products" the top products per channel.'},
     },
-    required: ['window', 'section', 'from', 'to'],
+    required: ['window', 'section', 'from', 'to', 'product'],
     additionalProperties: false,
   },
 };
