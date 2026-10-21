@@ -10,6 +10,19 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — v1.12.1: hotfix, Ask Coop answers again (prod release)
+Patch bump (SemVer): bug fix only. v1.12.0 made every Ask Coop question fail on PROD with the provider's 400 "The compiled grammar is too large": the fields added to the strict tools `get_digest` and `lookup_product` pushed the strict set over the API's compiled-grammar cap. Both tools are now non-strict (like `list_crm_*` and `ask_owner`); their executors already validate every field (`shapeDigest`, `lookupProduct`), and `request-shape.ts` allows them. Strict schema bytes: v1.11.0 9,887 (worked), v1.12.0 10,375 (broke), this fix 8,099. No behaviour change otherwise. Lesson: `knowledge/lessons/strict-tool-grammar-cap.md`.
+
+## 2026-10-21 — v1.12.0: Ask Coop answers a product's offline sales with bundles, ranks website products, and Shopee and Lazada can be summed from per-day rows (prod release)
+Minor bump (SemVer): new, backward-compatible features. Selective release by cherry-pick from `develop`, on top of v1.11.0: PRs #232, #233 and #234 ship.
+
+- **Offline product in one answer:** `lookup_product` `show: "sales"` gives direct orders, units and revenue, the units picked inside bundles with the bundle's price shared out (equal share per unit, the list-price share beside it) and the combined total, for the owner's dates.
+- **Website products for any dates:** `list_crm_orders` `group_by: "product"` ranks the products sold on the website; the live prompt tells Ask Coop to call the tool that holds the figure instead of offering to look.
+- **Per-day Shopee and Lazada rows:** the Sales range view and Ask Coop's `get_channel_report` also sum from the backend's `marketplace_daily_sales` table (the view `coop_chat_marketplace_daily` for Ask Coop). Both are soft: with no table or no rows they behave exactly as in v1.11.0.
+- *Manual SQL (optional, not needed to release):* the table (`supabase/marketplace_daily_sales.sql` in `zoomy-observability`, PR #47, needs #42) and then `supabase/coop_chat_marketplace_daily.sql` here. Nothing fills the table until the backend writer is deployed.
+- *Catalog:* only the `marketplace_daily_sales` entry was added to `src/chat/catalog/catalog.json` (digest domain); the knowledge base is ahead of `main`, so a full regeneration would describe things `main` does not have.
+- Per-change detail is in the entries below.
+
 ## 2026-10-21 — Ask Coop: get_channel_report reads the saved per-day Shopee and Lazada sales
 Ask Coop's channel report now merges the backend's `marketplace_daily_sales` rows with the stored digests' per-day figures, the same way the Sales range view does, so both give the same totals for the same dates. The read follows the digest pattern: its own one-relation guarded client (`chatDailyClient`, `src/chat/read/daily.ts`), the view `coop_chat_marketplace_daily` (`supabase/coop_chat_marketplace_daily.sql`, applied by hand, `coop_chat_ro` select only) in `ro_role` mode, the table with an explicit column list in `guarded_service` mode. Soft: a missing table or a failed read gives no rows and the report uses the digests alone. Decision: the table is never granted to the read role; only the view. Verified on the local Docker stack in both read modes.
 
