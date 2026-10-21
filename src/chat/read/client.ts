@@ -2,7 +2,7 @@ import 'server-only';
 import {createClient} from '@supabase/supabase-js';
 import {buildChatReadConfig} from './config';
 import {createGuardedFetch, type GuardedFetchOptions, type GuardStats} from './guarded-fetch';
-import {digestRelationForMode, relationsForMode, type ChatDigestRelation, type ChatReadMode, type ChatRelation} from './relations';
+import {dailyRelationForMode, digestRelationForMode, relationsForMode, type ChatDailyRelation, type ChatDigestRelation, type ChatReadMode, type ChatRelation} from './relations';
 import type {ReadBuilder} from '../../pos-orders-read';
 
 // The ONLY file under src/chat that imports @supabase/supabase-js (layer 2).
@@ -27,6 +27,11 @@ export interface ChatReadClient {
 /** The digest client: one relation (the digest view or table), select only. */
 export interface ChatDigestClient {
   from(relation: ChatDigestRelation): {select(columns: string): ChatReadBuilder};
+}
+
+/** The per-day marketplace sales client: one relation (the daily view or table), select only. */
+export interface ChatDailyClient {
+  from(relation: ChatDailyRelation): {select(columns: string): ChatReadBuilder};
 }
 
 export interface ChatReadClientOptions {
@@ -65,4 +70,10 @@ export function chatReadClient(opts: ChatReadClientOptions): {client: ChatReadCl
 export function chatDigestClient(opts: ChatReadClientOptions): {client: ChatDigestClient; stats: GuardStats; mode: ChatReadMode} {
   const {supabase, stats, mode} = build(opts, (m) => [digestRelationForMode(m)]);
   return {client: supabase as unknown as ChatDigestClient, stats, mode};
+}
+
+/** Same layers, but the guard allows ONLY the per-day marketplace sales relation for the mode. */
+export function chatDailyClient(opts: ChatReadClientOptions): {client: ChatDailyClient; stats: GuardStats; mode: ChatReadMode} {
+  const {supabase, stats, mode} = build(opts, (m) => [dailyRelationForMode(m)]);
+  return {client: supabase as unknown as ChatDailyClient, stats, mode};
 }

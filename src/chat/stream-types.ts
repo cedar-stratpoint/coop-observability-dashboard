@@ -40,6 +40,8 @@ export interface ChatToolContext {
   data: () => Promise<import('./result-types').MetricData>;
   /** F10: the stored digests, loaded lazily through the digest adapter. Absent means get_digest says it is unavailable. */
   digest?: () => Promise<import('./digest-lookup').DigestSource>;
+  /** The saved per-day Shopee and Lazada sales (marketplace_daily_sales) as digests carrying `daily`, merged into get_channel_report's rollup. Absent or empty: the stored digests alone. */
+  daily?: () => Promise<import('../period-rollup').RollupDigest[]>;
   /** F.6: live CRM orders for get_channel_report's Website row, read lazily. Absent means the CRM is not connected. */
   crmOrders?: () => Promise<{orders: import('../custom-range').RangeOrder[]; asOf: string}>;
   now: Date;

@@ -2,7 +2,7 @@
 // model); the result is a MetricResult the render tools can draw. Pure: digests, CRM orders and POS data are injected.
 import {phDayStart} from '../custom-range';
 import {sameWindow, windowOf} from '../digest-windows';
-import {buckets, CHANNEL_LABEL, GRANULARITIES, ROLLUP_CHANNELS, rollupChannels, type Granularity, type RollupChannel, type RollupInput} from '../period-rollup';
+import {buckets, CHANNEL_LABEL, type RollupDigest, GRANULARITIES, ROLLUP_CHANNELS, rollupChannels, type Granularity, type RollupChannel, type RollupInput} from '../period-rollup';
 import {buildCoverage} from './coverage';
 import type {DigestSource} from './digest-lookup';
 import {dayKeysBetween, isRealDay, rangeLabel} from './range';
@@ -18,7 +18,7 @@ export interface ChannelReportRequest {
 }
 export interface ReportSources {
   /** Stored digests (rows), or null when they could not be read. */
-  digests: readonly DigestRow[] | null;
+  digests: readonly RollupDigest[] | null;
   mock: boolean;
   website: RollupInput['website'];
   data: MetricData | null;

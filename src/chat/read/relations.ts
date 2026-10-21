@@ -158,3 +158,19 @@ export type ChatDigestRelation = (typeof DIGEST_RELATIONS)[ChatReadMode];
 export function digestRelationForMode(mode: ChatReadMode): ChatDigestRelation {
   return DIGEST_RELATIONS[mode];
 }
+
+// The per-day marketplace sales (backend table marketplace_daily_sales), read for get_channel_report. Like the digest: a separate
+// single-relation allowlist (the daily client may read this and nothing else, and only these columns). ro_role reads a dashboard-owned
+// definer view (supabase/coop_chat_marketplace_daily.sql); guarded_service reads the table with the same explicit column list.
+export const DAILY_COLUMNS = 'day,channel,revenue,orders,units,window_from,window_to,captured_at';
+
+export const DAILY_RELATIONS = Object.freeze({
+  ro_role: 'coop_chat_marketplace_daily',
+  guarded_service: 'marketplace_daily_sales',
+} as const);
+
+export type ChatDailyRelation = (typeof DAILY_RELATIONS)[ChatReadMode];
+
+export function dailyRelationForMode(mode: ChatReadMode): ChatDailyRelation {
+  return DAILY_RELATIONS[mode];
+}
