@@ -140,7 +140,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
         }
       }
       const result = shapeChannelReport(req, {
-        digests: digest ? await digestsFor(digest, req.from, req.to) : null,
+        digests: digest ? [...(await digestsFor(digest, req.from, req.to)), ...(await (ctx.daily?.() ?? Promise.resolve([])).catch(() => []))] : null,
         mock: digest?.source === 'mock',
         website,
         websiteFailed,
