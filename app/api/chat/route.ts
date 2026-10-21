@@ -13,7 +13,7 @@ import {resolveCrmAccess} from '@/src/chat/crm/config';
 import {createCrmClient, type CrmClient} from '@/src/chat/crm/client';
 import {setupExplore} from '@/src/chat/explore-setup';
 import {createExecutors} from '@/src/chat/tool-executors';
-import {getChatDigest, getChatDigestIndex, getChatMetricDataOrDegrade} from '@/src/chat/server';
+import {getChatDailyDigests, getChatDigest, getChatDigestIndex, getChatMetricDataOrDegrade} from '@/src/chat/server';
 import type {ChatStreamEvent} from '@/src/chat/stream-types';
 import {auth} from '@/auth';
 import {websiteOrdersForReport} from '@/src/chat/crm/executors';
@@ -117,7 +117,7 @@ export async function POST(req: Request) {
       preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, crm: crmTools && crm ? crm : undefined})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, crm: crmTools && crm ? crm : undefined})
           : {},
       emit,
       user,
