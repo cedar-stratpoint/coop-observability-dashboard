@@ -11,6 +11,8 @@ import {askOwner, isClarify, type ClarifyResult} from './clarify';
 import {rangeLabel} from './range';
 import {describeData} from './coverage';
 import {createCrmExecutors} from './crm/executors';
+import {shapeProductHistory} from './product-history';
+import {phtDate} from './coverage';
 import {digestsFor, readReportInput, shapeChannelReport} from './channel-report';
 import type {RangeOrder} from '../custom-range';
 import {coveringWindow, lookupProduct, shapeDigest, type DigestSource} from './digest-lookup';
@@ -30,6 +32,8 @@ export const MAX_DAY_POINTS = 92;
 
 /** The tool executors plus the app-side Explore backstop (never reachable by the model: it is not a tool). */
 export type ChatExecutors = ToolExecutors & Pick<RenderExecutors, 'autoRender'>;
+
+const MAX_ALL_ROWS = 60; // every stored window, one cached read each; a long archive is cut here
 
 export function createExecutors(ctx: ChatToolContext): ChatExecutors {
   let loaded: ReturnType<ChatToolContext['data']> | null = null;
@@ -89,6 +93,15 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
         source = ctx.digest ? await ctx.digest() : null;
       } catch {
         source = null; // an unreadable digest is "not available", never a crash
+      }
+      if ((input as {window?: unknown})?.window === 'all') {
+        const all = source ? await digestsFor(source, '2000-01-01', '2999-12-31', MAX_ALL_ROWS) : [];
+        const hist = shapeProductHistory(input, all, phtDate(ctx.now), source?.source === 'mock');
+        if ('error' in hist) return {error: hist.error};
+        counter += 1;
+        const id = `r${counter}`;
+        session.store.set(id, {...hist.result, id});
+        return compact(hist.result, id);
       }
       // "covering" may pick a digest older than the loaded ones: load that one row first (a narrow, cached read).
       const want = source ? coveringWindow(input, source) : null;
