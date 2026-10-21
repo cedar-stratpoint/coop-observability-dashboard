@@ -19,6 +19,8 @@ import {shouldRedirectFromZoomy} from '@/src/company-nav';
 import {PlaybookProvider} from './playbook';
 import {CoopChatProvider, AskCoopPill} from './coop-chat';
 import {CustomRangePicker} from './custom-range-picker';
+import {firstDigestDay, spanScopeLabel} from '../../src/sales-range';
+import {phDay} from '../../src/custom-range';
 
 // The left rail. Overview is a group (accordion in the expanded rail) whose
 // children are the sub-views that live under it; the rest are flat tabs.
@@ -133,6 +135,12 @@ export function DashboardShell({
 
   const current = digests.find((d) => d.window_from === currentWeek) ?? digests[0];
   const currentRange = current ? fmtRange(current.window_from, current.window_to, current.digest.window.label) : '';
+  // Dates picked on the Sales page (any span, or all time): the switcher says so instead of naming one week.
+  const rangeMode = pathname === '/' && Boolean(searchParams.get('channel')) && (searchParams.get('span') === 'all' || Boolean(searchParams.get('from') && searchParams.get('to')));
+  const periodLabel = rangeMode ? (searchParams.get('span') === 'all' ? 'All time' : 'Custom span') : currentRange;
+  // What the chat says it is answering about: the picked span (not the selected week) while dates are picked.
+  const spanBounds = {firstDay: firstDigestDay(digests) ?? phDay(Date.now()), todayDay: phDay(Date.now())};
+  const scopeLabel = rangeMode ? spanScopeLabel({from: searchParams.get('from') ?? undefined, to: searchParams.get('to') ?? undefined, span: searchParams.get('span') ?? undefined}, spanBounds) ?? currentRange : currentRange;
 
   // The reporting-period picker only makes sense in period-scoped analytics views —
   // hide it on the home brief ("/" with no channel), Settings, Business Health
@@ -272,7 +280,7 @@ export function DashboardShell({
     {/* Upload queue lives in the shell so uploads keep running across in-app navigation. */}
     <UploadQueueProvider company={nav?.companyId ?? null}>
     <UploadQueueIndicator />
-    <CoopChatProvider scopeLabel={currentRange || undefined}>
+    <CoopChatProvider scopeLabel={scopeLabel || undefined}>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       {/* Sticky (not relative) so it stays pinned on scroll, flush above the
@@ -370,7 +378,7 @@ export function DashboardShell({
               aria-expanded={periodOpen}
               className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-muted"
             >
-              <span className="font-mono text-xs tabular-nums">{currentRange}</span>
+              <span className="font-mono text-xs tabular-nums">{periodLabel}</span>
               <ChevronDown className={cn('size-3.5 text-muted-foreground transition-transform', periodOpen && 'rotate-180')} />
             </button>
             {periodOpen && (
@@ -387,14 +395,15 @@ export function DashboardShell({
                             {kind === 'weekly' ? 'Weekly' : 'Monthly'}
                           </div>
                     {group.map((d) => {
-                      const active = d.window_from === currentWeek;
+                      const active = !rangeMode && d.window_from === currentWeek;
                       // Preserve the current view's params (e.g. ?channel=) — only swap the week,
                       // so changing period reloads the same view instead of bouncing home.
                       const params = new URLSearchParams(searchParams.toString());
                       params.set('week', d.window_from);
-                      // A custom range belongs to its period — drop it on switch.
+                      // Picking a week leaves any custom dates / all time behind.
                       params.delete('from');
                       params.delete('to');
+                      params.delete('span');
                       return (
                         <Link
                           key={d.window_from}
@@ -429,13 +438,9 @@ export function DashboardShell({
           </div>
         )}
 
-        {/* Custom dates within the period — only the Sales overview recomputes for it */}
+        {/* Custom dates: any span or all time, on the Sales page */}
         {showPeriod && current && pathname === '/' && channel && (
-          <CustomRangePicker
-            windowFrom={current.window_from}
-            windowTo={current.window_to}
-            fullPeriodOnly={(['shopee', 'lazada'] as const).filter((c) => !current.digest.daily?.[c]?.length).map((c) => (c === 'shopee' ? 'Shopee' : 'Lazada'))}
-          />
+          <CustomRangePicker min={spanBounds.firstDay} max={spanBounds.todayDay} />
         )}
 
         {/* Right cluster: Ask Coop · theme · avatar */}

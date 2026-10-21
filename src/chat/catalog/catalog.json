@@ -711,7 +711,7 @@
   {
    "route": "/",
    "title": "Sales overview",
-   "shows": "Home (\"What should we do today?\") and, with channel, the multi-channel Sales overview (Shopee, Lazada, Website, Offline) with period and custom date range",
+   "shows": "Home (\"What should we do today?\") and, with channel, the multi-channel Sales overview (Shopee, Lazada, Website, Offline) with period and, when dates are picked (any span or all time), the range view: totals, ad spend and ROAS, top products across weeks",
    "data": "digest_archive, bundle, pos_orders, pos_settings, daily_revenue_target, website CRM (API)",
    "domains": [
     "digest",
@@ -722,6 +722,18 @@
    "fenced": false,
    "access": "partial: database yes; website CRM no (API)",
    "redirectTo": null
+  },
+  {
+   "route": "/sales-range",
+   "title": "Sales range",
+   "shows": "Redirect (redirect) to /?channel=all, keeping from, to and span. The range view now lives on the Sales page",
+   "data": "",
+   "domains": [
+    "n/a"
+   ],
+   "fenced": false,
+   "access": "n/a (redirect)",
+   "redirectTo": "/?channel=all (keeps from, to, span)"
   },
   {
    "route": "/overview",

@@ -10,6 +10,61 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — v1.10.0: Sales page takes any dates, or all time, with change versus before, an Over time view and a quick chat (prod release)
+Minor bump (SemVer): new, backward-compatible feature. Selective release by cherry-pick from `develop`, on top of v1.9.0: only the Sales work ships (the one-page Sales view, then the change versus the span before, Over time and quick chat); the other commits on `staging` are not part of it. `main` already had everything the change builds on (`period-rollup`, `digest-windows`, `chat/range`, `DigestDocument.daily`).
+
+- **Any dates on the Sales page:** the top bar's "Custom dates" takes any day with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows totals, Ad spend, ROAS and top products for that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, unchanged.
+- **Honest ad figures:** ad spend, ROAS and top products exist once per export window, so a window counts only when every day it touches is inside your dates; each ad number says which windows it uses ("4 full windows"), and no full window shows "No data", not 0. Shopee's ad export has its own dates (often not the digest's), so figures are placed by those, never by the digest week.
+- **`/sales-range` redirects** to the Sales page and keeps its dates; there is no separate page.
+- **Change versus the span before (range mode):** each total shows its change against the span of the same length directly before it, dates named, only when the two spans are fairly comparable (same channels with complete figures, ad figures fully covering both, same channels with ROAS, span not reaching today); otherwise a plain reason. Ad spend change is grey.
+- **Over time, inside Compare channels:** revenue, orders or AOV per week or month; bars the dates cut short, that reach today or lack a channel's complete figures are hatched, marked partial and explained on hover.
+- **Quick chat:** a question box and four chips beside the graph open the existing Ask Coop drawer. No new AI endpoint.
+- **Fix: the Ask Coop drawer named the selected week while dates were picked.** It now names the picked span, and the chat's page context says the Sales page is showing that span.
+- *No database or env step.* Nothing to run by hand.
+- *Verified:* on this branch (based on `main`): typecheck, 3256 unit tests, build; the weekly Sales page's server-rendered output is identical to an untouched `main` server (0 differing lines); range mode and the redirect respond. *Not verified:* real weekly digests on PROD (staging holds only three July digests), and the Sales page on the staging deploy by a person.
+- *Catalog:* only the Sales entries of `src/chat/catalog/catalog.json` were updated here. The knowledge base is ahead of `main` (BoxMe tables, other pages), so `check.mjs` still reports the file as stale, as it did before this release.
+- Per-change detail is in the entries below.
+## 2026-10-21 — Sales range: change versus the span before, an Over time view, and a quick chat
+All of this appears only when custom dates or "All time" are picked; the weekly Sales view is unchanged (its server-rendered page matches `develop` line for line).
+- **Change versus the span before.** Each total shows its change against the span of the same length directly before it, with those dates named ("vs Sep 21 to Oct 4, 2026"). A change is shown only when the two spans can be compared fairly: the same channels have complete figures in both, and ad figures fully cover both. Otherwise there is no number and a plain reason says why. Ad spend change is grey (spending more is not good or bad by itself). This brings back the change-versus-before that the weekly view already shows and a custom span lacked. A toggle turns it off; it follows the channel chips.
+- **Over time, inside Compare channels.** A "By channel / Over time" switch plots revenue, orders or AOV per week or month. Bars for a week or month your dates cut short, or where a channel has no complete figures, are hatched and marked "partial". Ad figures are not plotted over time: they come per export window, not per week. More than 27 weeks falls back to months.
+- **Quick chat.** A question box and four chips (the Ask Coop panel beside the graph) open the existing Ask Coop drawer with the question. No new AI endpoint and nothing runs until someone asks; answers, number check and rate limit are Ask Coop's own.
+- **Fix: the chat drawer named the wrong period.** While dates were picked it said "Answering about" the selected week. It now names the span (or all time), and the chat's page context says plainly that the Sales page is showing that span, not one week.
+- **Layout:** the five totals spread across the full width; Top products sits under the bar graph; the Ask Coop panel sits to the right. The "recommended actions are written per week" note is gone (there are no actions for a span).
+- **Decision (owner):** no "What stood out" commentary and no AI summary for a span. If a line is not surely accurate it is a risk, so it stays off the page. The AI summary design is parked in `knowledge/best-practices/ai-summary-on-demand.md`.
+- Tests: `test/sales-range-compare.test.ts` (14), more cases in `test/sales-range.test.ts` and `test/chat-pages.test.ts`.
+
+## 2026-10-20 — One Sales page: any dates or all time, no separate Sales range page
+- **The Sales page now takes any dates.** The top bar's "Custom dates" button is no longer limited to the selected week: pick any days with data up to today, or "All time", and the same page (`/?channel=all&from=…&to=…` or `&span=all`) shows that span. "Snap to whole weeks" appears when your dates cut a Monday to Sunday week and only moves them on a click. With no dates picked the page is the selected week, exactly as before (checked: the server-rendered page differs from before only by the removed nav item).
+  - *Why:* the owner tried the separate `/sales-range` page (previous entry) and decided one Sales page is clearer than two. The calculation, tags and tests from that page are unchanged; only where they live moved.
+- **Range view on the Sales page:** totals per channel, plus Ad spend and ROAS beside them, Compare channels, Top products, an amber banner for real gaps and a quiet "where these numbers come from" list.
+- **Recommended actions** are written per week, so in range mode that column says so and links to the latest weeks.
+- **Period switcher** reads "Custom span" or "All time" while dates are picked; choosing a week clears them. The clear (x) on the date button returns to the selected week.
+- **`/sales-range` is now a redirect** to the Sales page and keeps its dates, so shared links still work. The "Sales range" sidebar item is gone.
+- **Replaced:** the old clamped custom-dates path on the Sales page (`resolveCustomRange` there, the per-channel `custom` props) is no longer reached. The leftover props in `channel-compare.tsx` are harmless and are left for a separate cleanup so this diff stays reviewable.
+- **Data catalog:** `/` row updated (new params and sources), `/sales-range` listed as a redirect; `catalog.json` regenerated.
+- Tests: `test/sales-range.test.ts` gains the link-detection and recent-weeks cases (27 in total).
+
+## 2026-10-20 — Sales range: sales over any dates, or all time (new page `/sales-range`)
+- **New page, sidebar "Sales range".** Pick any dates across weeks, or "All time", and see revenue, orders, units, AOV, ad spend, ROAS and top products for that span. The weekly Sales page (`/?channel=all`) is unchanged.
+  - *Why:* the weekly page clamps custom dates inside the selected week, so a month or the whole history could not be viewed. The owner chose a separate page over changing the existing one.
+- **Sales, orders, units and AOV are exact for the days picked.** They reuse the rollup Ask Coop already uses (`src/period-rollup.ts`): Shopee and Lazada from the digests' per-day sales, Website from live CRM orders, Offline from completed POS orders. AOV is total revenue / total orders, never an average.
+- **Ad spend, ROAS and top products use whole windows only.** Those figures exist once per export window, not per day, so a window counts only when it sits entirely inside the dates. ROAS is total ad revenue / total spend (`roas x spend` per window). Overlapping windows are never summed: the newest wins and the rest are named. Every ad number carries a tag ("4 full windows"), and a span with no full window says "No data" instead of 0.
+  - *Decision (found on staging, 2026-10-20):* a digest's Shopee ad figure belongs to the ads export's own dates, not the digest week. Three July digests carried ads windows of 31, 32 and 14 days that overlap, so weekly-digest summing would have double counted. Windows are therefore placed by `digest.shopee.ads.window` (Lazada: its facet window, else the digest window).
+  - *Inside means every day it touches:* a window that starts at 08:00 PH on a Monday is not inside a span that starts Tuesday. A Shopee figure with no export dates of its own is never placed by the digest week; it is skipped and named. Lazada's facets share the digest's query window, so it falls back to that.
+  - Shopee/Lazada top products are tagged "Approximate" when several windows are merged: the backend keeps only each digest's top 5. Website top products are exact, from live orders.
+- **"Snap to whole weeks"** (never automatic) moves dates that cut a Monday to Sunday week out to whole weeks; the end stops at the last finished Sunday. **No dates in the link** shows the last 4 finished weeks. Dates are clamped to the first stored digest and today (PH time); reversed dates are swapped.
+- **Coverage is shown, not hidden.** An amber banner lists real gaps (partial, not combinable, not connected); where the numbers came from sits in a quiet list below.
+- **Shared pieces touched:** `Calendar` gets an optional `weekStartsOn` (default Sunday, so every other caller is unchanged); the shell gets the "Sales range" nav item (desktop rail and mobile More) and hides the weekly period switcher on this page.
+- **Data catalog:** `/sales-range` added to `knowledge/data-catalog/pages.md`; `catalog.json` regenerated.
+- Tests: `test/span-windows.test.ts` (19) and `test/sales-range.test.ts` (22), including the real staging windows.
+
+## 2026-10-14 — Top products / Top bundles: labelled shares replace the relative bars
+- Removed the thin bars under each ranked row. They showed each item relative to #1, which wasn't explained anywhere and read as confusing "progress bars".
+- Each row now shows a plain share under its value: "11% of revenue" (Revenue), "18% of units" (Units), and for bundles "13% of revenue" or "82% of bundle orders". Revenue shares use the Revenue KPI (bundles included), so they line up with the top of the page; slivers read "<1%".
+## 2026-10-14 — Free items won: show which event each prize was given at
+- Each prize card on `/offline-sales` now names its **event**, linking to that event's page; prizes with no event read "No event".
+  - *How:* the prize's order event tag (`pos_orders.event_id`), else the event covering the order's date, the same read-time fill the Events page uses (`resolveOrderEvents`). Read-only, no schema change.
 ## 2026-10-19 — v1.9.0: Ask Coop asks before it guesses, and answers "how many do we have" in one call (prod release)
 Minor bump (SemVer): new, backward-compatible Ask Coop features. Selective release by cherry-pick from `staging`, on top of v1.8.0 (the BoxMe release): v1.8.0 left the one-product stock lookup out because it needed this work, and it ships here. Verified on staging 2026-10-19 (see below).
 

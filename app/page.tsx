@@ -11,9 +11,10 @@ import {getDailyTarget} from '@/src/pos-target';
 import {progress as computeProgress, todaysRevenue} from '@/src/pos-target-compute';
 import type {SalesKpis} from '@/src/pos-sales-types';
 import type {DailyProgress} from '@/src/pos-target-types';
-import {getCrmOrders} from '@/src/crm-data';
-import {resolveCustomRange, websiteRangeMetrics, inRange, dailyRangeMetrics} from '@/src/custom-range';
-import {fmtRange} from '@/src/week';
+import {inRange} from '@/src/custom-range';
+import {isRangeRequest} from '@/src/sales-range';
+import {loadSalesRange} from '@/src/sales-range-load';
+import {SalesRangeView} from '@/components/analyst/sales-range-view';
 
 export const dynamic = 'force-dynamic'; // reflect the latest archive when live
 
@@ -36,7 +37,7 @@ async function offlineKpis(): Promise<SalesKpis | null> {
   }
 }
 
-// Offline metrics for the period's (or custom range's) window, for the Compare
+// Offline metrics for the period's window, for the Compare
 // Channels chart. Same fail-soft contract: null on any error so the chart just omits offline.
 async function offlineCompare(range: {from: string; to: string}): Promise<ReturnType<typeof offlineCompareMetrics>> {
   try {
@@ -59,7 +60,7 @@ async function offlineDailyProgress(): Promise<DailyProgress | null> {
   }
 }
 
-export default async function Page(props: {searchParams: Promise<{week?: string; channel?: string; from?: string; to?: string}>}) {
+export default async function Page(props: {searchParams: Promise<{week?: string; channel?: string; from?: string; to?: string; span?: string}>}) {
   await requireZoomyData(); // Zoomy-only overview — bounce a non-Zoomy viewer to /uploads
   const searchParams = await props.searchParams;
   // Customer PII is masked inside getDigests() (server-only) rather than here, so
@@ -88,18 +89,12 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
     );
   }
   const initial = ALL_CHANNELS.includes(ch as Channel) ? [ch as Channel] : DEFAULT_CHANNELS;
-  // ?from&to (PH days) narrow the overview inside the period: Website from live CRM
-  // orders, Offline from POS orders, Shopee/Lazada from the digest's per-day series
-  // (when the row has one — older rows stay full-period only).
-  const range = resolveCustomRange(row.window_from, row.window_to, searchParams.from, searchParams.to);
-  const offline = await offlineCompare(range ?? {from: row.window_from, to: row.window_to});
-  const custom = range
-    ? {
-        label: fmtRange(range.fromDay, range.toDay),
-        ...websiteRangeMetrics(await getCrmOrders(), range),
-        shopee: dailyRangeMetrics(row.digest.daily?.shopee, range),
-        lazada: dailyRangeMetrics(row.digest.daily?.lazada, range),
-      }
-    : null;
-  return <ChannelOverview brief={getBrief()} row={row} priorRow={priorRow} initialChannels={initial} offline={offline} custom={custom} />;
+  // ?from&to (PH days) or ?span=all widen this same page past the selected week: totals, ad spend, ROAS and top products for any
+  // dates, built from every stored digest (src/sales-range.ts). With no dates the weekly view below is unchanged.
+  const span = {from: searchParams.from, to: searchParams.to, span: searchParams.span};
+  if (isRangeRequest(span)) {
+    return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} />;
+  }
+  const offline = await offlineCompare({from: row.window_from, to: row.window_to});
+  return <ChannelOverview brief={getBrief()} row={row} priorRow={priorRow} initialChannels={initial} offline={offline} />;
 }
