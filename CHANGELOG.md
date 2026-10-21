@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Ask Coop: one product on Shopee or Lazada across all stored digests
+`get_digest` takes `window: "all"` plus a `product`. Ask Coop now answers "how many X did we sell on Shopee, all time" in one turn instead of offering to look at older windows. Each stored digest keeps only its own top 5 products per channel, so the answer is a labelled lower bound ("at least", span and windows named), never a total. Decision: the full per-day, per-SKU history needs data the digests do not hold (July to Sep 27 digests have no `daily` and no Shopee block in `bundle`); backfill is parked. No new tool (20-tool limit unchanged); the lookup reuses `spanTopProducts`.
+
 ## 2026-10-21 — Sales range: change versus the span before, an Over time view, and a quick chat
 All of this appears only when custom dates or "All time" are picked; the weekly Sales view is unchanged (its server-rendered page matches `develop` line for line).
 - **Change versus the span before.** Each total shows its change against the span of the same length directly before it, with those dates named ("vs Sep 21 to Oct 4, 2026"). A change is shown only when the two spans can be compared fairly: the same channels have complete figures in both, and ad figures fully cover both. Otherwise there is no number and a plain reason says why. Ad spend change is grey (spending more is not good or bad by itself). This brings back the change-versus-before that the weekly view already shows and a custom span lacked. A toggle turns it off; it follows the channel chips.
