@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — Ask Coop: an API spend cap says "account needs attention", not "try again"
+When the provider refuses with a usage-limit 400 ("You have reached your specified API usage limits"), Ask Coop now shows the same account message as a low credit balance instead of the generic "Coop hit a problem answering that. Please try again." Found when two identical questions failed with the generic text and the cause could not be told apart from a code fault. No provider text is shown to the user.
+
 ## 2026-10-21 — v1.12.1: hotfix, Ask Coop answers again (prod release)
 Patch bump (SemVer): bug fix only. v1.12.0 made every Ask Coop question fail on PROD with the provider's 400 "The compiled grammar is too large": the fields added to the strict tools `get_digest` and `lookup_product` pushed the strict set over the API's compiled-grammar cap. Both tools are now non-strict (like `list_crm_*` and `ask_owner`); their executors already validate every field (`shapeDigest`, `lookupProduct`), and `request-shape.ts` allows them. Strict schema bytes: v1.11.0 9,887 (worked), v1.12.0 10,375 (broke), this fix 8,099. No behaviour change otherwise. Lesson: `knowledge/lessons/strict-tool-grammar-cap.md`.
 
