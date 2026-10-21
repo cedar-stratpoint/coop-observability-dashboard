@@ -54,6 +54,27 @@ const err = (input: unknown, d?: MetricData): string => {
   return out.error;
 };
 
+describe('lookup_product: sales in dates (direct, bundle share, combined)', () => {
+  it('gives direct, bundle (equal share per unit and by list price) and the combined total in one row; voided excluded', () => {
+    const r = ok({query: 'P1', show: 'sales', from: '2026-09-01', to: '2026-09-30'});
+    expect(r.rows).toEqual([{
+      name: 'Chicken Jerky', direct_orders: 2, direct_units: 3, direct_revenue: 750,
+      bundle_orders: 1, bundle_units: 3, bundle_revenue: 539.4, bundle_revenue_by_list_price: 899,
+      total_units: 6, total_revenue: 1289.4,
+    }]);
+    expect(r.meta.range.label).toMatch(/Sep/);
+    expect(r.meta.caveats.join(' ')).toMatch(/equal share per unit/);
+  });
+  it('limits to the dates, and "" and "" means all available data', () => {
+    expect(ok({query: 'P1', show: 'sales', from: '2026-09-06', to: '2026-09-30'}).rows[0]).toMatchObject({direct_units: 0, bundle_units: 3});
+    expect(ok({query: 'P1', show: 'sales', from: '', to: ''}).rows[0]).toMatchObject({direct_units: 3, total_units: 6});
+  });
+  it('refuses a bad or reversed date', () => {
+    expect(err({query: 'P1', show: 'sales', from: '2026-13-01', to: '2026-09-30'})).toMatch(/real dates/);
+    expect(err({query: 'P1', show: 'sales', from: '2026-09-30', to: '2026-09-01'})).toMatch(/from is after to/);
+  });
+});
+
 describe('lookup_product: found', () => {
   it('counts a SKU from completed orders: direct and in-bundle units apart, direct revenue only, voided excluded', () => {
     const r = ok({query: 'P1', show: 'details'});
@@ -130,7 +151,7 @@ describe('lookup_product: confirms instead of guessing (owner rule 2026-10-19)',
 
   it('names the allowed values for a bad show, and refuses an empty or oversized query', () => {
     expect(err({query: 'P1', show: 'inventory'})).toMatch(/Allowed values for show: details, price_history, stock/);
-    expect(PRODUCT_SHOWS).toEqual(['details', 'price_history', 'stock']);
+    expect(PRODUCT_SHOWS).toEqual(['details', 'price_history', 'stock', 'sales']);
     expect(err({query: '   ', show: 'details'})).toMatch(/top_products/);
     expect(err({query: 'x'.repeat(81), show: 'details'})).toMatch(/too long/);
     expect(err(null)).toMatch(/show/);
