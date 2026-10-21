@@ -93,7 +93,7 @@ const getDigest: ToolDefinition = {
     'It returns a result id you can pass to render_table or render_chart; the figures are as published, every row says its time basis (never present an all-time figure as this week), and you must name the window it used. ' +
     'For offline POS sales use query_metric instead. Use "comparison" for Lazada vs Shopee vs Website. ' +
     'For a total over any dates (a month, a custom range) or a trend by week or month, use get_channel_report instead.',
-  strict: true,
+  strict: false, // not strict: v1.12.0 added fields to this tool and the strict set went over the API's compiled-grammar cap (400 on every request); shapeDigest validates window, section, from, to and product
   input_schema: {
     type: 'object',
     properties: {
@@ -136,7 +136,7 @@ const lookupProduct: ToolDefinition = {
     'Call it when the owner names a specific product or SKU. To rank or list products use query_metric (top_products) instead. ' +
     'Pass the name exactly as the owner typed it, typos included: never correct or guess it yourself. If it is not an exact match, the app asks the owner to confirm and ends your turn; ' +
     'when the owner then picks "Name (SKU)", call it again with that SKU. For "how many X do we have" use show "stock": one call, no dates. For "how many X did we sell" or "X revenue" in a period (bundles included) use show "sales" with the owner\'s dates; never run free SQL for it.',
-  strict: true,
+  strict: false, // not strict: v1.12.0 added from, to and show "sales" and the strict set went over the API's compiled-grammar cap (400 on every request); lookupProduct validates show, query, from and to
   input_schema: {
     type: 'object',
     properties: {

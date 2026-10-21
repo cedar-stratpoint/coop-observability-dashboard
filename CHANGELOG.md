@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-21 — v1.12.1: hotfix, Ask Coop answers again (prod release)
+Patch bump (SemVer): bug fix only. v1.12.0 made every Ask Coop question fail on PROD with the provider's 400 "The compiled grammar is too large": the fields added to the strict tools `get_digest` and `lookup_product` pushed the strict set over the API's compiled-grammar cap. Both tools are now non-strict (like `list_crm_*` and `ask_owner`); their executors already validate every field (`shapeDigest`, `lookupProduct`), and `request-shape.ts` allows them. Strict schema bytes: v1.11.0 9,887 (worked), v1.12.0 10,375 (broke), this fix 8,099. No behaviour change otherwise. Lesson: `knowledge/lessons/strict-tool-grammar-cap.md`.
+
 ## 2026-10-21 — v1.12.0: Ask Coop answers a product's offline sales with bundles, ranks website products, and Shopee and Lazada can be summed from per-day rows (prod release)
 Minor bump (SemVer): new, backward-compatible features. Selective release by cherry-pick from `develop`, on top of v1.11.0: PRs #232, #233 and #234 ship.
 
