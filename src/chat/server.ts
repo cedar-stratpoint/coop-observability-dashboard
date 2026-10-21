@@ -6,7 +6,9 @@ import {maskRows} from '../pii';
 import {MOCK_POS_EVENTS, MOCK_POS_ORDERS} from '../pos-sales-mock';
 import {logGuardTrip} from './audit';
 import type {DigestSource} from './digest-lookup';
-import {chatDigestClient, chatReadClient} from './read/client';
+import {chatDailyClient, chatDigestClient, chatReadClient} from './read/client';
+import {readDailyDigests} from './read/daily';
+import type {RollupDigest} from '../period-rollup';
 import {readDigestIndex, readDigestRowAt, readDigestRows, DIGEST_ROW_LIMIT, type DigestRow} from './read/digest';
 import {loadMetricData} from './read/metric-data';
 import {assertChatReadable} from './read/mode';
@@ -135,6 +137,29 @@ const loadDigestRowCached = unstable_cache(
   ['chat-digest-row'],
   {revalidate: 300, tags: ['digest-archive']},
 );
+
+// The per-day marketplace sales for get_channel_report: their own guarded client (one relation). Soft: a missing table (the SQL not applied
+// yet), no connection or a failed read gives no rows and the channel report uses the digests alone. Same tag, so the batch refreshes it too.
+const loadDailyCached = unstable_cache(
+  async (mode: ChatReadMode, _project: string): Promise<RollupDigest[]> => {
+    try {
+      const {client} = chatDailyClient({mode, onTrip: (b) => logGuardTrip({layer: 'http_guard', detail: b})});
+      return await readDailyDigests(client, mode);
+    } catch {
+      return [];
+    }
+  },
+  ['chat-marketplace-daily'],
+  {revalidate: 300, tags: ['digest-archive']},
+);
+
+/** Saved per-day Shopee and Lazada sales as digests carrying `daily`; empty in mock mode or when unreadable. */
+export async function getChatDailyDigests(): Promise<RollupDigest[]> {
+  if (!process.env.SUPABASE_URL_ARCHIVE) return [];
+  const readable = assertChatReadable(process.env);
+  if (!readable.ok) return [];
+  return loadDailyCached(readable.mode, projectOf());
+}
 
 const mockRows = (): DigestRow[] => maskRows([...MOCK_DIGESTS].sort((a, b) => b.window_to.localeCompare(a.window_to)));
 const byWindow = (ws: DigestWindow[]): DigestWindow[] => dedupeReruns(ws, (w) => w);

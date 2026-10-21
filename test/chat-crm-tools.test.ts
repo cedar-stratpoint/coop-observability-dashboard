@@ -46,6 +46,18 @@ describe('list_crm_orders', () => {
     ]);
   });
 
+  it('group_by product ranks products by net revenue with distinct orders and units, and says what a product with no line items leaves out', async () => {
+    const r = await crmOrdersResult(req(readOrdersInput({...ORD, group_by: 'product'})), get());
+    expect(r.columns.map((c) => c.key)).toEqual(['product', 'orders', 'units', 'revenue']);
+    expect(r.rows).toEqual([
+      {product: 'Chicken Jerky', orders: 1, units: 2, revenue: 1000},
+      {product: 'Duck Bites', orders: 1, units: 1, revenue: 300},
+    ]);
+    expect(r.meta.measure).toBe('revenue');
+    const wide = await crmOrdersResult(req(readOrdersInput({...ORD, to: '2026-10-01', group_by: 'product'})), get());
+    expect(checks(wide)).toMatch(/1 of these orders have no readable line items/);
+  });
+
   it('pages a list and says how to get the next page (Review Focus 4)', async () => {
     const r = await crmOrdersResult(req(readOrdersInput({...ORD, from: '2026-09-01', to: '2026-10-31', limit: 10, offset: 1})), get());
     expect(r.rows.map((x) => x.order)).toEqual(['#1001', '#1003']);

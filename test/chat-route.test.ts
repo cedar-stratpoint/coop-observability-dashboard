@@ -55,6 +55,7 @@ vi.mock('@/src/chat/server', () => ({
   },
   getChatDigest: async () => ({source: 'live', rows: []}),
   getChatDigestIndex: async () => h.digestIndex,
+  getChatDailyDigests: async () => [],
 }));
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class FakeAnthropic {
