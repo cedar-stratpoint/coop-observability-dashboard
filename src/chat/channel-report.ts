@@ -67,12 +67,16 @@ export function totalOf(label: string, periods: readonly ChannelPeriod[]): Chann
   const excluded = left.map((p) => ({channel: CHANNEL_LABEL[p.channel], reason: WHY[p.status] || 'has no complete figures'}));
   const complete = used.length > 0 && left.length === 0;
   const why = excluded.map((e) => `${e.channel} ${e.reason}`).join('; ');
+  // `ok` is all-or-nothing for a marketplace: marketplace() in period-rollup.ts gives `ok` only when per-day rows or whole published windows
+  // (tile(), which returns null unless it covers every missing day exactly once) cover the dates, and `partial` otherwise. So `ok` is safe to trust here.
+  // The channels do not share a source though: Website is live CRM orders as of now, Shopee and Lazada are saved daily rows and published digests.
+  const basis = used.some((p) => p.channel === 'website') && used.length > 1 ? ' Website figures are live CRM orders while Shopee and Lazada come from saved daily rows and published digests, so say the total is not like for like.' : '';
   const note =
     used.length === 0
       ? `No total: no requested channel has complete figures for these dates (${why}).`
       : complete
-        ? `${label}: ${names(included)}, calculated in code.${unitsKnown ? '' : ' Units are left out because a channel has no unit count.'}`
-        : `Partial total of ${names(included)} only. Left out: ${why}. Say it is partial and name what is missing.`;
+        ? `${label}: ${names(included)}, calculated in code.${unitsKnown ? '' : ' Units are left out because a channel has no unit count.'}${basis}`
+        : `Partial total of ${names(included)} only. Left out: ${why}. Say it is partial and name what is missing.${basis}`;
   return {
     label,
     channels_included: included,

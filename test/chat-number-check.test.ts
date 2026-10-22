@@ -319,9 +319,10 @@ describe('checkNumbers: derived figures (the model calculates and shows the work
     const res = [{rows: vals.map((v) => ({v}))}];
     const show = (v: number) => `₱${v.toLocaleString('en-US')}`;
     const list = vals.map(show).join(', ');
-    const f12and13 = `${list}; the last two add to ${show(vals[11] + vals[12])}.`;
+    // The working must be in the same sentence as its operands, so the list and the result share one sentence here.
+    const f12and13 = `${list}, the last two add to ${show(vals[11] + vals[12])}, calculated.`;
     expect(values(f12and13, res)).toEqual([show(vals[11] + vals[12])]); // the 13th figure is past the cap
-    const f1and2 = `${list}; the first two add to ${show(vals[0] + vals[1])}.`;
+    const f1and2 = `${list}, the first two add to ${show(vals[0] + vals[1])}, calculated.`;
     expect(values(f1and2, res)).toEqual([]);
   });
 
@@ -329,3 +330,104 @@ describe('checkNumbers: derived figures (the model calculates and shows the work
     expect(check('Dog bundles brought in ₱88,000 last week.')).toEqual({checked: 1, violations: [{value: '₱88,000', context: 'Dog bundles brought in ₱88,000 last week.'}]});
   });
 });
+
+// Review finding B1 (2026-10-22): a wrong figure must not be blessed because it happens to equal some subset sum or ratio of the other figures
+// in the answer. A derivation counts only when its working (result, operands and an operator or "calculated") is in ONE sentence.
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe('checkNumbers: coincidences are not derivations (the working must be in the answer)', () => {
+  it('a wrong seventh order count is never blessed when no working is shown (deterministic replay of the reviewer measurement)', () => {
+    const rand = mulberry32(20261022);
+    let blessed = 0;
+    let trials = 0;
+    for (let n = 0; n < 400; n += 1) {
+      const counts = new Set<number>();
+      while (counts.size < 6) counts.add(20 + Math.floor(rand() * 80)); // six order counts of 20 to 99, all in the tool result
+      const wrong = 20 + Math.floor(rand() * 400);
+      if (counts.has(wrong)) continue;
+      trials += 1;
+      const text = `${[...counts].map((c) => `${c} orders`).join(', ')} and ${wrong} orders in total.`;
+      const out = checkNumbers(text, [{rows: [...counts].map((c) => ({orders: c}))}]);
+      if (!out.violations.some((v) => v.value === String(wrong))) blessed += 1;
+    }
+    expect(trials).toBeGreaterThan(300);
+    expect(blessed).toBe(0);
+  });
+
+  it('a wrong "up N%" is never blessed beside peso figures when no working is shown', () => {
+    const rand = mulberry32(7);
+    let blessed = 0;
+    let trials = 0;
+    for (let n = 0; n < 300; n += 1) {
+      const pesos = [0, 1, 2, 3].map(() => 10000 + Math.floor(rand() * 90000));
+      const wrong = 5 + Math.floor(rand() * 200);
+      trials += 1;
+      const text = `${pesos.map((p) => `₱${p.toLocaleString('en-US')}`).join(', ')} and sales were up ${wrong}%.`;
+      const out = checkNumbers(text, [{rows: pesos.map((p) => ({revenue: p}))}]);
+      if (!out.violations.some((v) => v.value === `${wrong}%`)) blessed += 1;
+    }
+    expect(trials).toBe(300);
+    expect(blessed).toBe(0);
+  });
+
+  it('the same counts WITH their working in one sentence still verify', () => {
+    const out = checkNumbers('Orders: 72 + 31 = 103 orders, calculated.', [{rows: [{orders: 72}, {orders: 31}]}]);
+    expect(out.violations).toEqual([]);
+    expect(out.derived?.[0]).toMatchObject({value: '103', op: 'sum', operands: ['72', '31']});
+  });
+
+  it('a correct percent change with its working verifies; the bare percent in another sentence does not', () => {
+    const res = [{rows: [{revenue: 51989}, {revenue: 59228}]}];
+    expect(checkNumbers('₱59,228 against ₱51,989 is up 13.9%, calculated.', res).violations).toEqual([]);
+    expect(checkNumbers('Sales were ₱59,228 and ₱51,989. They are up 13.9%.', res).violations.map((v) => v.value)).toEqual(['13.9%']);
+  });
+
+  it('the operands and the result in different sentences are not a working, even with the word calculated elsewhere', () => {
+    const res = [{rows: [{revenue: 59228}, {revenue: 11222}]}];
+    expect(checkNumbers('Shopee ₱59,228 and Lazada ₱11,222. The total is ₱70,450, calculated.', res).violations.map((v) => v.value)).toEqual(['₱70,450']);
+  });
+
+  it('a count or percent sum needs an explicit operator or "calculated"; a peso sum may say "total of"', () => {
+    const counts = [{rows: [{orders: 72}, {orders: 31}]}];
+    expect(checkNumbers('The total of 72 and 31 is 103 orders.', counts).violations.map((v) => v.value)).toEqual(['103']);
+    const pesos = [{rows: [{revenue: 59228}, {revenue: 11222}]}];
+    expect(checkNumbers('The total of ₱59,228 and ₱11,222 is ₱70,450.', pesos).violations).toEqual([]);
+  });
+
+  it('a ratio figure such as 3.9x is not itself an operator', () => {
+    expect(checkNumbers('Dog ₱71,050 and cat ₱18,051 are 3.9x.', [{rows: [{v: 71050}, {v: 18051}]}]).violations.map((v) => v.value)).toEqual(['3.9x']);
+  });
+
+  it('an average of percents is not blessed, and neither is a share or change of two percents (quote the tool row for AOV, ROAS, ACOS)', () => {
+    // A peso average of two AOVs cannot be told from any peso average here: the prompt rule ("never add or average AOV, ROAS, ACOS or percentages") is that guard.
+    const pct = [{rows: [{share: 40}, {share: 60}]}];
+    expect(checkNumbers('Shares 40% and 60% average 50%, calculated.', pct).violations.map((v) => v.value)).toEqual(['50%']);
+    expect(checkNumbers('Shares 40% and 60% give 66.7%, calculated.', pct).violations.map((v) => v.value)).toEqual(['66.7%']);
+  });
+
+  it('a figure repeated in the answer is one operand: 100 + 100 is not derived from a repeated mention', () => {
+    const res = [{rows: [{revenue: 100}]}];
+    expect(checkNumbers('Shopee ₱100 and again ₱100 give ₱200, calculated.', res).violations.map((v) => v.value)).toEqual(['₱200']);
+  });
+
+  it('a later mention of an already derived figure is derived too', () => {
+    const res = [{rows: [{revenue: 59228}, {revenue: 11222}]}];
+    const out = checkNumbers('₱59,228 + ₱11,222 = ₱70,450, calculated. So the online total is ₱70,450.', res);
+    expect(out.violations).toEqual([]);
+    expect(out.derived?.map((d) => d.value)).toEqual(['₱70,450']);
+  });
+
+  it('a wrong sum with its working in the sentence stays unmatched', () => {
+    const res = [{rows: [{revenue: 59228}, {revenue: 11222}]}];
+    expect(checkNumbers('₱59,228 + ₱11,222 = ₱70,451, calculated.', res).violations.map((v) => v.value)).toEqual(['₱70,451']);
+  });
+});
+
