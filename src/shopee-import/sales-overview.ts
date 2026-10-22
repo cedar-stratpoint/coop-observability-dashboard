@@ -2,30 +2,10 @@
 // and then one row per PH day. Values are text with thousands separators and dates are DD/MM/YYYY. Columns are found by header
 // name, never by position. Pure apart from reading the workbook bytes.
 import ExcelJS from 'exceljs';
+import {cellText as cell, headerKey as key, toIsoDay, toNumber as num} from './cells';
 import type {DayFigures, ParsedSalesOverview} from './types';
 
-const key = (h: unknown): string => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const cell = (v: ExcelJS.CellValue): string => {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'object') return 'richText' in v ? v.richText.map((t) => t.text).join('') : 'result' in v ? String(v.result ?? '') : v instanceof Date ? v.toISOString() : String(v);
-  return String(v);
-};
-const num = (s: string): number | null => {
-  const t = s.replace(/[,\s₱%]/g, '');
-  if (t === '' || t === '-') return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-};
-
-/** DD/MM/YYYY (or an ISO date) to YYYY-MM-DD, or null when it is not a real calendar day. */
-export function toIsoDay(raw: string): string | null {
-  const t = raw.trim();
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
-  const iso = m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
-  if (!iso) return null;
-  const d = new Date(`${iso}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso ? null : iso;
-}
+export {toIsoDay};
 
 const COLUMNS = {
   visitors: 'visitorsvisit',

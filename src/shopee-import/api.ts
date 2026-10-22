@@ -2,7 +2,7 @@
 // app/api/shopee/import/ are thin wrappers. Auth is one bearer token (SHOPEE_IMPORT_TOKEN); with no token configured every call is refused.
 // Nothing here reads or echoes file contents, and every plan, apply and undo goes through the same ledger as the command.
 import {createHash, timingSafeEqual} from 'node:crypto';
-import {weeksCoverage} from './coverage';
+import {reportsByWeek, weeksCoverage} from './coverage';
 import {classifyFile} from './files';
 import {applyRun, planFile, undoRun, type ImportStore} from './pipeline';
 
@@ -59,6 +59,8 @@ export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
     const o = await planFile({store: d.store, bytes: new Uint8Array(await f.arrayBuffer()), filename: f.name.split(/[\\/]/).pop() ?? f.name, today: phToday(d.now()), importedBy: 'api', onlyNew: only === 'true' || only === '1', restate: typeof restate === 'string' && restate.trim() ? restate.trim() : null});
     if (o.status === 'staged') {
       results.push({status: o.status, filename: o.filename, importId: o.importId, periodFrom: o.periodFrom, periodTo: o.periodTo, newDays: o.plan.newDays.length, unchanged: o.plan.unchanged.length, changed: o.plan.changed, keptCurrent: o.plan.keptCurrent.length, frozenBlocked: o.plan.frozenBlocked, flags: o.plan.flags, openSkipped: o.openSkipped});
+    } else if (o.status === 'staged_report') {
+      results.push({status: o.status, filename: o.filename, importId: o.importId, reportType: o.reportType, periodFrom: o.periodFrom, periodTo: o.periodTo, rows: o.rows, summary: o.summary, coveragePct: o.coveragePct, openSkipped: o.openSkipped, rawStored: o.rawStored});
     } else if (o.status === 'rejected') results.push({status: o.status, filename: o.filename, importId: o.importId, failures: o.failures});
     else if (o.status === 'nothing_to_do') results.push({status: o.status, filename: o.filename, openSkipped: o.openSkipped});
     else if (o.status === 'already_loaded') results.push({status: o.status, filename: o.filename, importId: o.importId});
@@ -96,5 +98,7 @@ export async function handleCoverage(req: Request, d: ApiDeps): Promise<Response
   const denied = gate(req, d);
   if (denied) return denied;
   const yesterday = new Date(Date.parse(`${phToday(d.now())}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-  return reply({through: yesterday, weeks: weeksCoverage(await d.store.loadLoadedDays(), yesterday)});
+  const weeks = weeksCoverage(await d.store.loadLoadedDays(), yesterday);
+  const reports = reportsByWeek(await d.store.loadReportPeriods(), weeks.map((w) => w.weekStart));
+  return reply({through: yesterday, weeks: weeks.map((w) => ({...w, reports: reports[w.weekStart]}))});
 }
