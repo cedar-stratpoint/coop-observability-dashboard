@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-22 — Import API health check and a clearer 503
+`GET /api/shopee/import/health` (signed in, like `/api/chat/health`) reports whether `SHOPEE_IMPORT_TOKEN` is set, whether the archive database is configured, and counts of accepted imports and loaded days; booleans and counts only. The import routes' 503 used to say "import API is not configured" for two different causes (no token, or mock mode with no archive database), which sent the first staging check down the wrong path. The route 503 now says the archive database is not configured; the missing-token 503 keeps its own message.
+
 ## 2026-10-22 — Weekly Sales page uses the imported Shopee facts (digest rewiring R2)
 The weekly channel view (`/?channel=...`) now takes Shopee revenue, orders, units and AOV from the imported daily facts when every day of the selected period has one, so it agrees with the date-range view. A period with any missing day keeps the digest's own figures, so a partial week never under-reports. Ads spend and ROAS stay as published (no daily source). When the two totals differ, one line under the header shows both. Decision: the stored digest is not rewritten; only the view overlays it (`src/shopee-facts-overlay.ts`). Backend digest reading the facts (R3) is a separate step.
 
