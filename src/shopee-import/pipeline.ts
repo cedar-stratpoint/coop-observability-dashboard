@@ -6,6 +6,7 @@ import {classifyFile} from './files';
 import {runGates} from './gates';
 import {buildPlan, FREEZE_DAYS, type Plan} from './plan';
 import {parseSalesOverview} from './sales-overview';
+import {isSnapshotType, readSnapshot, TABLE, type SnapshotType} from './snapshot';
 import type {DayFigures, GateFailure, ReportType} from './types';
 
 export interface NewRun {
@@ -22,6 +23,8 @@ export interface NewRun {
   note?: string | null;
   restated?: boolean;
   importedBy: string | null;
+  /** When Shopee produced the file, when the file says so (the ads report does). */
+  exportedAt?: string | null;
 }
 export interface Run {
   importId: string;
@@ -34,6 +37,8 @@ export interface Run {
   rowCount: number;
   plan: PlanRecord | null;
   restated: boolean;
+  /** The gate results and, for the four snapshot reports, the figures that identify the file. */
+  checks: Record<string, unknown>;
 }
 export interface PlanRecord {
   newDays: string[];
@@ -61,6 +66,17 @@ export interface ImportStore {
   /** Flip a run's status only if it is currently `from`. Returns whether it flipped. */
   transition(importId: string, from: Run['status'], to: Run['status'], patch?: {note?: string}): Promise<boolean>;
   listRuns(status: Run['status']): Promise<Run[]>;
+  /** Rows of one of the four snapshot reports (ads, SKU, traffic, funnel) for a run; `records` carry no import_id. */
+  addSnapshotRows(table: string, importId: string, records: readonly Record<string, unknown>[]): Promise<void>;
+  /** Keep the original file in the private bucket and note where. False when it could not be stored (the import goes on without it). */
+  saveRaw(importId: string, path: string, bytes: Uint8Array, contentType: string): Promise<boolean>;
+  /** Period of every ACCEPTED run of the four snapshot reports, for the coverage view. */
+  loadReportPeriods(): Promise<ReportPeriod[]>;
+}
+export interface ReportPeriod {
+  reportType: SnapshotType;
+  periodFrom: string;
+  periodTo: string;
 }
 
 export const sha256Of = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -69,11 +85,12 @@ const figKey = (d: DayFigures | undefined): string | null =>
 const basisOf = (days: readonly string[], current: ReadonlyMap<string, DayFigures>): [string, string | null][] => days.map((d) => [d, figKey(current.get(d))]);
 
 export type PlanOutcome =
+  | {status: 'staged_report'; filename: string; importId: string; reportType: SnapshotType; periodFrom: string; periodTo: string; rows: number; summary: Record<string, number>; coveragePct: number | null; openSkipped: string[]; rawStored: boolean}
   | {status: 'unsupported'; filename: string; message: string}
   | {status: 'already_loaded'; filename: string; importId: string}
   | {status: 'rejected'; filename: string; importId: string; failures: GateFailure[]}
   | {status: 'nothing_to_do'; filename: string; plan: Plan; openSkipped: string[]}
-  | {status: 'staged'; filename: string; importId: string; plan: Plan; openSkipped: string[]; periodFrom: string; periodTo: string};
+  | {status: 'staged'; filename: string; importId: string; plan: Plan; openSkipped: string[]; periodFrom: string; periodTo: string; rawStored: boolean};
 
 export interface PlanInput {
   store: ImportStore;
@@ -88,9 +105,8 @@ export interface PlanInput {
 
 export async function planFile(i: PlanInput): Promise<PlanOutcome> {
   const cls = classifyFile(i.filename);
-  if (cls.type !== 'sales_overview') {
-    return {status: 'unsupported', filename: i.filename, message: cls.type ? `${cls.type} files are not imported yet.` : 'This file name is not a known Shopee export.'};
-  }
+  if (isSnapshotType(cls.type)) return planSnapshot(i, cls.type, cls.period);
+  if (cls.type !== 'sales_overview') return {status: 'unsupported', filename: i.filename, message: 'This file name is not a known Shopee export.'};
   const sha = sha256Of(i.bytes);
   const already = await i.store.findAcceptedBySha('sales_overview', sha);
   if (already) return {status: 'already_loaded', filename: i.filename, importId: already.importId};
@@ -132,11 +148,63 @@ export async function planFile(i: PlanInput): Promise<PlanOutcome> {
     checks: {passed: true, filePeriod: [parsed.periodFrom, parsed.periodTo], fileSummary: parsed.summary}, plan: record_, note: i.restate ?? null, restated: Boolean(i.restate), importedBy: i.importedBy ?? null,
   });
   await i.store.addObservations(importId, plan.rows);
-  return {status: 'staged', filename: i.filename, importId, plan, openSkipped: gates.openSkipped, periodFrom: from, periodTo: to};
+  const rawStored = await keepRaw(i.store, importId, 'sales_overview', sha, i.filename, i.bytes);
+  return {status: 'staged', filename: i.filename, importId, plan, openSkipped: gates.openSkipped, periodFrom: from, periodTo: to, rawStored};
+}
+
+const CONTENT_TYPE: Record<string, string> = {xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv'};
+/** The original aggregate file (shop totals only, no customer data) goes to the private bucket under its own hash, so it can be re-read if a parser changes. */
+async function keepRaw(store: ImportStore, importId: string, type: ReportType, sha: string, filename: string, bytes: Uint8Array): Promise<boolean> {
+  const ext = /\.([a-z0-9]+)$/i.exec(filename)?.[1]?.toLowerCase() ?? 'bin';
+  try {
+    return await store.saveRaw(importId, `${type}/${sha}.${ext}`, bytes, CONTENT_TYPE[ext] ?? 'application/octet-stream');
+  } catch {
+    return false;
+  }
+}
+
+/** Ads, SKU, traffic and product funnel: one file is one snapshot, staged whole and accepted by one status flip (see snapshot.ts). */
+async function planSnapshot(i: PlanInput, type: SnapshotType, filenamePeriod: {from: string; to: string} | null): Promise<PlanOutcome> {
+  const sha = sha256Of(i.bytes);
+  const already = await i.store.findAcceptedBySha(type, sha);
+  if (already) return {status: 'already_loaded', filename: i.filename, importId: already.importId};
+  const read = await readSnapshot(type, i.bytes, filenamePeriod, i.today);
+  if (!read.ok) {
+    const importId = await i.store.createRun({
+      reportType: type, channel: 'shopee', periodFrom: filenamePeriod?.from ?? '1970-01-01', periodTo: filenamePeriod?.to ?? '1970-01-01', sourceFilename: i.filename, sha256: sha, rowCount: 0,
+      status: 'rejected', checks: {failures: read.failures}, plan: null, importedBy: i.importedBy ?? null,
+    });
+    return {status: 'rejected', filename: i.filename, importId, failures: read.failures};
+  }
+  const snap = read.snapshot;
+  let coveragePct: number | null = null;
+  if (type === 'sku_detail' && snap.skuConfirmed !== undefined) {
+    // How much of the shop's confirmed sales the product list accounts for; known only when every day of the week is loaded.
+    const current = await i.store.loadCurrent(snap.periodFrom, snap.periodTo);
+    const shop = [...current.values()].reduce((s, d) => s + d.salesConfirmed, 0);
+    const wholeWeek = current.size === Math.round((Date.parse(`${snap.periodTo}T00:00:00Z`) - Date.parse(`${snap.periodFrom}T00:00:00Z`)) / 86_400_000) + 1;
+    coveragePct = wholeWeek && shop > 0 ? Math.round((snap.skuConfirmed / shop) * 1000) / 10 : null;
+  }
+  await i.store.supersedeStagedBySha(type, sha);
+  const importId = await i.store.createRun({
+    reportType: type, channel: 'shopee', periodFrom: snap.periodFrom, periodTo: snap.periodTo, sourceFilename: i.filename, sha256: sha, rowCount: snap.records.length, status: 'staged',
+    checks: {passed: true, summary: snap.summary, coveragePct, openSkipped: snap.openSkipped}, plan: null, importedBy: i.importedBy ?? null, exportedAt: snap.exportedAt,
+  });
+  try {
+    await i.store.addSnapshotRows(TABLE[type], importId, snap.records);
+  } catch (e) {
+    await i.store.transition(importId, 'staged', 'rejected', {note: 'saving the rows failed part way'}); // never leave a run that looks whole but is not
+    throw e;
+  }
+  const rawStored = await keepRaw(i.store, importId, type, sha, i.filename, i.bytes);
+  return {status: 'staged_report', filename: i.filename, importId, reportType: type, periodFrom: snap.periodFrom, periodTo: snap.periodTo, rows: snap.records.length, summary: snap.summary, coveragePct, openSkipped: snap.openSkipped, rawStored};
 }
 
 export interface Receipt {
   importId: string;
+  reportType: ReportType;
+  /** The four snapshot reports: the figures that identify the file (spend, product sales, page views...). */
+  summary?: Record<string, number>;
   periodFrom: string;
   periodTo: string;
   newDays: number;
@@ -151,7 +219,14 @@ export type ApplyOutcome = {ok: true; receipt: Receipt} | {ok: false; code: 'NOT
 export async function applyRun(store: ImportStore, importId: string): Promise<ApplyOutcome> {
   const run = await store.getRun(importId);
   if (!run) return {ok: false, code: 'NOT_FOUND', message: `No import ${importId}.`};
-  if (run.status !== 'staged' || !run.plan) return {ok: false, code: 'NOT_STAGED', message: `Import ${importId} is ${run.status}, not staged.`};
+  if (run.status !== 'staged') return {ok: false, code: 'NOT_STAGED', message: `Import ${importId} is ${run.status}, not staged.`};
+  if (run.reportType !== 'sales_overview') {
+    // A snapshot has no day-by-day plan to go stale: the app reads the newest accepted import per period, so accepting is one flip.
+    if (!(await store.transition(importId, 'staged', 'accepted'))) return {ok: false, code: 'LOST_RACE', message: 'Another process changed this import first.'};
+    const summary = (run.checks.summary ?? {}) as Record<string, number>;
+    return {ok: true, receipt: {importId, reportType: run.reportType, summary, periodFrom: run.periodFrom, periodTo: run.periodTo, newDays: 0, changedDays: 0, loadedConfirmed: 0, reconciled: true, matchesFileTotal: null}};
+  }
+  if (!run.plan) return {ok: false, code: 'NOT_STAGED', message: `Import ${importId} has no plan.`};
   const current = await store.loadCurrent(run.periodFrom, run.periodTo);
   const moved = run.plan.basis.filter(([day, key]) => figKey(current.get(day)) !== key).map(([day]) => day);
   if (moved.length) return {ok: false, code: 'STALE_PLAN', message: `The loaded figures for ${moved.slice(0, 5).join(', ')}${moved.length > 5 ? ' and more' : ''} changed since this plan was made. Plan the file again.`};
@@ -161,7 +236,7 @@ export async function applyRun(store: ImportStore, importId: string): Promise<Ap
   return {
     ok: true,
     receipt: {
-      importId, periodFrom: run.periodFrom, periodTo: run.periodTo, newDays: run.plan.newDays.length, changedDays: run.plan.changed.length, loadedConfirmed: total,
+      importId, reportType: run.reportType, periodFrom: run.periodFrom, periodTo: run.periodTo, newDays: run.plan.newDays.length, changedDays: run.plan.changed.length, loadedConfirmed: total,
       reconciled: Math.abs(total - run.plan.loadedConfirmed) < 0.01,
       matchesFileTotal: run.plan.fileConfirmedTotal === null ? null : Math.abs(total - run.plan.fileConfirmedTotal) < 0.5,
     },

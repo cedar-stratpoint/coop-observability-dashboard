@@ -3,7 +3,8 @@
 // marketplace_daily_observations, and never updates or deletes an observation.
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {fetchAllRows} from '../pos-fetch-paginate';
-import type {ImportStore, NewRun, PlanRecord, Run} from './pipeline';
+import type {ImportStore, NewRun, PlanRecord, ReportPeriod, Run} from './pipeline';
+import {SNAPSHOT_TYPES} from './snapshot';
 import type {DayFigures, ReportType} from './types';
 
 const CHUNK = 500;
@@ -12,10 +13,11 @@ const orNull = (v: unknown): number | null => (v === null || v === undefined ? n
 
 type RunRow = {
   import_id: string; report_type: ReportType; period_from: string; period_to: string; source_filename: string; sha256: string;
-  status: Run['status']; row_count: number; plan: PlanRecord | null; restated: boolean;
+  status: Run['status']; row_count: number; plan: PlanRecord | null; restated: boolean; checks: Record<string, unknown> | null;
 };
-const toRun = (r: RunRow): Run => ({importId: r.import_id, reportType: r.report_type, periodFrom: r.period_from, periodTo: r.period_to, sourceFilename: r.source_filename, sha256: r.sha256, status: r.status, rowCount: r.row_count, plan: r.plan, restated: r.restated});
-const RUN_COLS = 'import_id,report_type,period_from,period_to,source_filename,sha256,status,row_count,plan,restated';
+const BUCKET = 'shopee-imports';
+const toRun = (r: RunRow): Run => ({importId: r.import_id, reportType: r.report_type, periodFrom: r.period_from, periodTo: r.period_to, sourceFilename: r.source_filename, sha256: r.sha256, status: r.status, rowCount: r.row_count, plan: r.plan, restated: r.restated, checks: r.checks ?? {}});
+const RUN_COLS = 'import_id,report_type,period_from,period_to,source_filename,sha256,status,row_count,plan,restated,checks';
 
 function fail(what: string, error: {message: string} | null): void {
   if (error) throw new Error(`${what}: ${error.message}`);
@@ -47,7 +49,7 @@ export function supabaseImportStore(sb: SupabaseClient): ImportStore {
     async createRun(n: NewRun) {
       const {data, error} = await sb.from('import_runs').insert({
         report_type: n.reportType, channel: n.channel, period_from: n.periodFrom, period_to: n.periodTo, source_filename: n.sourceFilename, sha256: n.sha256, row_count: n.rowCount,
-        status: n.status, checks: n.checks, plan: n.plan, note: n.note ?? null, restated: n.restated ?? false, imported_by: n.importedBy,
+        status: n.status, checks: n.checks, plan: n.plan, note: n.note ?? null, restated: n.restated ?? false, imported_by: n.importedBy, exported_at: n.exportedAt ?? null,
       }).select('import_id').single();
       fail('recording the import', error);
       return String(data?.import_id);
@@ -72,8 +74,26 @@ export function supabaseImportStore(sb: SupabaseClient): ImportStore {
       if (to === 'accepted') change.accepted_at = new Date().toISOString();
       if (patch?.note) change.note = patch.note;
       const {data, error} = await sb.from('import_runs').update(change).eq('import_id', importId).eq('status', from).select('import_id'); // pagination-ok: one primary key
+      if (error?.code === '23505') return false; // the same file was accepted by another process first (unique index on accepted files)
       fail('changing the import', error);
       return (data ?? []).length === 1;
+    },
+    async addSnapshotRows(table, importId, records) {
+      const rows = records.map((r) => ({import_id: importId, ...r}));
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const {error} = await sb.from(table).insert(rows.slice(i, i + CHUNK));
+        fail('saving the figures', error);
+      }
+    },
+    async saveRaw(importId, path, bytes, contentType) {
+      const up = await sb.storage.from(BUCKET).upload(path, bytes, {contentType, upsert: true});
+      if (up.error) return false;
+      const {error} = await sb.from('import_runs').update({raw_path: `${BUCKET}/${path}`}).eq('import_id', importId); // pagination-ok: one primary key
+      return !error;
+    },
+    async loadReportPeriods() {
+      const data = await fetchAllRows('report periods', (a, b) => sb.from('import_runs').select('report_type,period_from,period_to').in('report_type', [...SNAPSHOT_TYPES]).eq('status', 'accepted').order('period_from').order('import_id').range(a, b));
+      return data.map((r): ReportPeriod => ({reportType: r.report_type as ReportPeriod['reportType'], periodFrom: String(r.period_from), periodTo: String(r.period_to)}));
     },
     async listRuns(status) {
       const data = await fetchAllRows('import runs', (a, b) => sb.from('import_runs').select(RUN_COLS).eq('status', status).order('period_from').order('import_id').range(a, b));
