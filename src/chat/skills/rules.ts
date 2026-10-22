@@ -8,7 +8,7 @@ export type RuleEnforcement = 'code' | 'guide';
 export const RULES: readonly {id: string; enforcedBy: RuleEnforcement; where: string}[] = [
   {id: 'THINK-01', enforcedBy: 'guide', where: 'guide'},
   {id: 'THINK-02', enforcedBy: 'guide', where: 'guide'},
-  {id: 'THINK-03', enforcedBy: 'guide', where: 'guide'},
+  {id: 'THINK-03', enforcedBy: 'guide', where: 'guide; calculated figures are checked after the fact by src/chat/number-check.ts (log only)'},
   {id: 'THINK-04', enforcedBy: 'guide', where: 'guide'},
   {id: 'THINK-05', enforcedBy: 'guide', where: 'guide'},
   {id: 'THINK-06', enforcedBy: 'guide', where: 'guide'},

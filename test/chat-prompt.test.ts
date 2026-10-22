@@ -45,7 +45,10 @@ describe('static system block (cached)', () => {
   it('tells the model where numbers may come from', () => {
     const a = buildStaticSystem();
     expect(a).toMatch(/TOOL RESULT/);
-    expect(a).toMatch(/Never calculate, estimate or round/);
+    expect(a).toMatch(/show the working in one line and say "calculated"/);
+    expect(a).toMatch(/partial total/);
+    expect(a).toMatch(/Never estimate, forecast or prorate/);
+    expect(a).not.toMatch(/Never calculate, estimate or round/);
     expect(a).toMatch(/meta\.checks/);
     expect(a).toMatch(/denominator/);
   });
@@ -98,7 +101,8 @@ describe('analyst skill replaces the F5 stopgap guardrails', () => {
   it('the guardrails no longer repeat those two lines', () => {
     expect(COOP_CHAT.guardrails).not.toMatch(/Showing the first N of M/);
     expect(COOP_CHAT.guardrails).not.toMatch(/about half/);
-    expect(COOP_CHAT.guardrails).toMatch(/Never calculate, estimate or round/);
+    expect(COOP_CHAT.guardrails).toMatch(/say "calculated"/);
+    expect(COOP_CHAT.guardrails).toMatch(/Never estimate, forecast or prorate/);
   });
   it('the skill sits after the read-only statement and before the output format', () => {
     const text = buildStaticSystem();

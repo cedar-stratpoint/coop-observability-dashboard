@@ -29,6 +29,17 @@
 //   The source numbers are every number in the results, numbers inside strings included (check and insight texts quote
 //   pesos, shares and ratios), with thousands separators removed.
 //
+// DERIVED FIGURES (the model may calculate, see the guardrail "calculated, with the working shown"): an unmatched figure is not a violation
+//   when it is `derived_verified`: it equals, at the precision it shows, a sum, a difference, an average, a ratio (a / b), a share
+//   (a / b as a percent) or a percent change ((b - a) / a) of OPERANDS THAT THE ANSWER ITSELF SHOWS and that are themselves grounded
+//   (found in a tool result or in `context`, or already derived_verified). Operands must be figures of the answer, not any numbers
+//   of the results: a check over every tool-result number accepts coincidences (1,352 + 1 = 1,353 from an id "r1"), the answer's own
+//   working line is the thing being checked. Sums, differences and averages need operands of the same kind (peso with peso, count with
+//   count, percent with percent); a ratio, share or percent change needs two operands of one kind. The sign is ignored, like the match
+//   above. CAPS (the search is bounded): at most DERIVE_MAX_OPERANDS (12) operands are tried, subsets of 2 to DERIVE_MAX_SUBSET (6)
+//   figures, two rounds so a derived total can feed a derived share. It never blocks: a figure that is not derivable stays a violation
+//   and is logged exactly as before.
+//
 // KNOWN LIMITS: a figure the model derived that happens to equal an unrelated source number passes; "2020 orders" written
 // plain reads as a year and is skipped; number words are never checked. Good enough for a log-only net; the real guard is
 // that figures come from tool calls (the golden set and live eval read the wording).
@@ -40,11 +51,22 @@ export interface NumberViolation {
   context: string;
 }
 
+/** A displayed figure that is not in any tool result but is the verified result of arithmetic over figures the answer shows. */
+export interface DerivedFigure {
+  /** The figure exactly as the answer displayed it. */
+  value: string;
+  op: 'sum' | 'difference' | 'average' | 'ratio' | 'share' | 'percent_change';
+  /** The operands as the answer displayed them, in the order used (a, b for difference, ratio, share and percent change). */
+  operands: string[];
+}
+
 export interface NumberCheckResult {
   /** How many displayed figures were checked (after the ignore rules). */
   checked: number;
-  /** Each figure with no equivalent in the tool results; the same display string is listed once. */
+  /** Each figure with no equivalent in the tool results and no verified derivation; the same display string is listed once. */
   violations: NumberViolation[];
+  /** Figures that are not in a tool result but equal verified arithmetic over grounded figures of the answer (not violations). Absent when none. */
+  derived?: DerivedFigure[];
 }
 
 export interface NumberCheckOptions {
@@ -152,19 +174,92 @@ function shows(n: number, f: Figure): boolean {
   return Math.round(scaled) === want || Math.trunc(scaled + 1e-9) === want;
 }
 
+/** Caps of the derived-figure search (see DERIVED FIGURES above). */
+export const DERIVE_MAX_OPERANDS = 12;
+export const DERIVE_MAX_SUBSET = 6;
+
+function subsets<T>(items: readonly T[], min: number, max: number, visit: (picked: T[]) => boolean): boolean {
+  const pick: T[] = [];
+  const go = (from: number): boolean => {
+    if (pick.length >= min && visit(pick)) return true;
+    if (pick.length === max) return false;
+    for (let i = from; i < items.length; i += 1) {
+      pick.push(items[i]);
+      if (go(i + 1)) return true;
+      pick.pop();
+    }
+    return false;
+  };
+  return go(0);
+}
+
+/** Does `f` equal arithmetic over `pool` (figures of the same answer)? Returns the derivation, or null. */
+function derive(f: Figure, pool: readonly Figure[]): DerivedFigure | null {
+  const same = pool.filter((o) => o !== f && o.raw !== f.raw && o.kind === f.kind).slice(0, DERIVE_MAX_OPERANDS);
+  const done = (op: DerivedFigure['op'], operands: Figure[]): DerivedFigure => ({value: f.raw, op, operands: operands.map((o) => o.raw)});
+  // sum and average of 2 to 6 operands of the same kind; a difference of two
+  let found: DerivedFigure | null = null;
+  subsets(same, 2, DERIVE_MAX_SUBSET, (pick) => {
+    const total = pick.reduce((t, o) => t + o.value, 0);
+    if (shows(total, f)) {
+      found = done('sum', pick);
+      return true;
+    }
+    if (shows(total / pick.length, f)) {
+      found = done('average', pick);
+      return true;
+    }
+    return false;
+  });
+  if (found) return found;
+  for (const a of same) {
+    for (const b of same) {
+      if (a === b) continue;
+      if (shows(Math.abs(a.value - b.value), f)) return done('difference', [a, b]);
+    }
+  }
+  // ratio, share and percent change need two operands of one kind (any kind except the figure's own for a ratio or share)
+  const kinds = pool.filter((o) => o !== f && o.raw !== f.raw).slice(0, DERIVE_MAX_OPERANDS);
+  for (const a of kinds) {
+    for (const b of kinds) {
+      if (a === b || a.kind !== b.kind || b.value === 0) continue;
+      if (f.kind === 'ratio' && shows(a.value / b.value, f)) return done('ratio', [a, b]);
+      if (f.kind === 'percent' && shows((a.value / b.value) * 100, f)) return done('share', [a, b]);
+      if (f.kind === 'percent' && a.value !== 0 && shows((Math.abs(b.value - a.value) / a.value) * 100, f)) return done('percent_change', [a, b]);
+    }
+  }
+  return null;
+}
+
 export function checkNumbers(answerText: string, toolResults: unknown[], opts: NumberCheckOptions = {}): NumberCheckResult {
   const figures = figuresIn(answerText, opts.countNouns);
   if (figures.length === 0) return {checked: 0, violations: []};
   const source = sourceNumbers(toolResults);
   const given = (opts.context ?? '').match(NUMBER_IN_TEXT)?.map((s) => Number(s.replace(/,/g, ''))) ?? [];
+  const ok = (f: Figure, pool: number[]): boolean => pool.some((n) => shows(n, f) || (f.kind === 'percent' && shows(n * 100, f)));
+  const grounded: Figure[] = [];
+  const open: Figure[] = [];
+  for (const f of figures) (ok(f, source) || ok(f, given) ? grounded : open).push(f);
+  // Derived figures: two rounds, so a verified total can be an operand of a verified share.
+  const derived: DerivedFigure[] = [];
+  const verified = new Set<Figure>();
+  for (let round = 0; round < 2 && open.length > verified.size; round += 1) {
+    for (const f of open) {
+      if (verified.has(f)) continue;
+      const d = derive(f, grounded);
+      if (!d) continue;
+      verified.add(f);
+      grounded.push(f);
+      if (!derived.some((x) => x.value === d.value)) derived.push(d);
+    }
+  }
   const seen = new Set<string>();
   const violations: NumberViolation[] = [];
-  for (const f of figures) {
-    const ok = (pool: number[]): boolean => pool.some((n) => shows(n, f) || (f.kind === 'percent' && shows(n * 100, f)));
-    if (ok(source) || ok(given) || seen.has(f.raw)) continue;
+  for (const f of open) {
+    if (verified.has(f) || seen.has(f.raw)) continue;
     seen.add(f.raw);
     const from = Math.max(0, f.index - 30);
     violations.push({value: f.raw, context: answerText.slice(from, f.index + f.raw.length + 30).replace(/\s+/g, ' ').trim()});
   }
-  return {checked: figures.length, violations};
+  return derived.length > 0 ? {checked: figures.length, violations, derived} : {checked: figures.length, violations};
 }
