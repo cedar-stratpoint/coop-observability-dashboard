@@ -9,6 +9,7 @@ import {readDailyDigests, readDailyRows} from '../src/chat/read/daily';
 import {rollupChannels} from '../src/period-rollup';
 import type {ChatReadMode} from '../src/chat/read/relations';
 import {assertLocalSupabase} from './support/local-only';
+import {loadFictionalSpan} from './support/shopee-local';
 
 // LOCAL INTEGRATION (skipped unless pointed at the throwaway local stack from scripts/local-supabase/up.sh), with the backend's
 // supabase/marketplace_daily_sales.sql and supabase/coop_chat_marketplace_daily.sql applied to it:
@@ -28,21 +29,20 @@ function serviceJwt(secret: string): string {
 const env = () => ({SUPABASE_URL_ARCHIVE: URL_, SUPABASE_SERVICE_ROLE_KEY_ARCHIVE: SECRET ? serviceJwt(SECRET) : undefined, CHAT_RO_JWT_SECRET: SECRET});
 
 describe.skipIf(!local)('the daily sales read on the local stack', () => {
-  it.each<ChatReadMode>(['guarded_service', 'ro_role'])('%s: reads the saved days and a custom span sums exactly', async (mode) => {
+  it.each<ChatReadMode>(['guarded_service', 'ro_role'])('%s: reads days loaded through the import pipeline and a custom span sums exactly', async (mode) => {
     const sb = createClient(`${URL_}`, serviceJwt(SECRET as string), {auth: {persistSession: false}});
-    const mine = [6, 7, 8].map((d) => ({day: `2026-07-0${d}`, channel: 'shopee', revenue: 100 * d, orders: d, units: 2 * d, window_from: '2026-07-05T16:00:00Z', window_to: '2026-07-08T16:00:00Z'}));
+    const {cleanup} = await loadFictionalSpan(sb, '2025-04-07', [600, 700, 800]);
     try {
-      expect((await sb.from('marketplace_daily_sales').upsert(mine, {onConflict: 'day,channel'})).error).toBeNull();
       const {client, stats} = chatDailyClient({mode, env: env()});
-      const rows = (await readDailyRows(client, mode)).filter((r) => r.day >= '2026-07-06' && r.day <= '2026-07-08');
+      const rows = (await readDailyRows(client, mode)).filter((r) => r.day >= '2025-04-07' && r.day <= '2025-04-09');
       expect(rows).toHaveLength(3);
       expect(Object.keys(rows[0]).sort()).toEqual(['captured_at', 'channel', 'day', 'orders', 'revenue', 'units', 'window_from', 'window_to']);
       const digests = await readDailyDigests(client, mode);
-      const [b] = rollupChannels({fromDay: '2026-07-06', toDay: '2026-07-08', channels: ['shopee'], granularity: 'total', digests, website: null, offline: null});
-      expect(b.channels[0]).toMatchObject({status: 'ok', revenue: 2100, orders: 21, units: 42});
+      const [b] = rollupChannels({fromDay: '2025-04-07', toDay: '2025-04-09', channels: ['shopee'], granularity: 'total', digests, website: null, offline: null});
+      expect(b.channels[0]).toMatchObject({status: 'ok', revenue: 2100, orders: 9, units: 15});
       expect(stats.attemptedNonRead).toBe(0);
     } finally {
-      await sb.from('marketplace_daily_sales').delete().gte('day', '2026-07-06').lte('day', '2026-07-08');
+      await cleanup();
     }
   });
 });
