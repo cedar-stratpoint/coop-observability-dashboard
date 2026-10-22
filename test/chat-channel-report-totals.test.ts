@@ -89,3 +89,26 @@ describe('totals ride in meta, the rows stay one per channel', () => {
     expect(ask('week').meta.totals).toBeUndefined();
   });
 });
+
+describe('the basis of the channels is named in the total (review S3)', () => {
+  it('a total that includes Website says its figures are live CRM orders, not like for like with the digests', () => {
+    const t = totalOf('Online total', [p('shopee', 100, 2, 3), p('website', 50, 1, 1)]);
+    expect(t.status).toBe('complete');
+    expect(t.note).toMatch(/Website figures are live CRM orders/);
+    expect(t.note).toMatch(/not like for like/);
+  });
+  it('the note is also on a partial total, and absent when Website is not part of the total', () => {
+    const partial = totalOf('All channels', [p('shopee', 100, 2, 3), p('website', 50, 1, 1), p('lazada', null, null, null, 'partial')]);
+    expect(partial.status).toBe('partial');
+    expect(partial.note).toMatch(/live CRM orders/);
+    expect(totalOf('Online total', [p('shopee', 100, 2, 3), p('lazada', 50, 1, 1)]).note).not.toMatch(/CRM/);
+    expect(totalOf('Online total', [p('website', 50, 1, 1)]).note).not.toMatch(/CRM/); // one channel alone is not a mix
+  });
+  it('a marketplace that is only partly covered is never counted: status partial is left out, not trusted as ok', () => {
+    const t = totalOf('Online total', [p('shopee', 100, 2, 3), p('lazada', 40, 1, 1, 'partial')]);
+    expect(t.channels_included).toEqual(['Shopee']);
+    expect(t.channels_excluded[0]).toMatchObject({channel: 'Lazada', reason: 'only part of these dates is covered'});
+    expect(t.status).toBe('partial');
+  });
+});
+
