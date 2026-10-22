@@ -1,27 +1,22 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
 
-// Server-only writes/reads for the Goldline gl_* tables. Same seam as src/data.ts:
-// the archive Supabase project, service-role key, never exposed to the browser.
+// Server-only writes/reads for the Goldline gl_* tables, in Goldline's own Nichido
+// project (src/nichido-client.ts): service-role key, never exposed to the browser.
 // Every row is stamped with company_id; callers pass the ACTIVE company from the
 // scoping layer (src/active-context.ts) so one tenant can never write another's data.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 export const GOLDLINE_BUCKET = 'goldline-uploads';
 
-/** True when the archive env is absent — callers should refuse writes, not no-op silently. */
+/** False when the Nichido env is absent — callers should refuse writes, not no-op silently. */
 export function goldlineConfigured(): boolean {
-  return Boolean(url && key);
+  return nichidoConfigured();
 }
 
-function db(): SupabaseClient {
-  if (!goldlineConfigured()) throw new Error('Goldline storage is not configured (SUPABASE_URL_ARCHIVE).');
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 /**
  * Reduce an uploaded file name to a single safe Storage path segment: basename

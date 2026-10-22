@@ -1,6 +1,6 @@
 import 'server-only';
 import {unstable_cache} from 'next/cache';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 
 // Cached Goldline reference data — the small, rarely-changing tables nearly every
@@ -12,15 +12,9 @@ import {fetchAllRows} from './pos-fetch-paginate';
 // Never cached here: counts, sales, uploads, shipments — they change with every
 // upload / action and are big; they're read fresh.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const REVALIDATE_SECONDS = 600;
 
-let client: SupabaseClient | null = null;
-function db(): SupabaseClient {
-  client ??= createClient(url as string, key as string, {auth: {persistSession: false}});
-  return client;
-}
+const db = nichidoDb;
 
 export const glTags = {
   catalog: (companyId: string) => `gl-catalog:${companyId}`,
@@ -45,7 +39,7 @@ export type GlSupplyRef = {
   warehouse: Array<{item_code: string; on_hand: number; is_sample: boolean}>;
 };
 
-const configured = () => Boolean(url && key);
+const configured = nichidoConfigured;
 
 export function getGlCatalog(companyId: string): Promise<GlProduct[]> {
   if (!configured()) return Promise.resolve([]);

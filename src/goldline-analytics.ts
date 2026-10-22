@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {buildOverview, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
@@ -11,15 +11,8 @@ import {buildOverview, type GoldlineOverview, type OverviewSaleRow} from './gold
 // the aggregation in JS — fine at the ~150k-rows/cycle scale; an RPC/view is the
 // later optimization (same path the pos_* reads will take).
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-
-function configured(): boolean {
-  return Boolean(url && key);
-}
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const configured = nichidoConfigured;
+const db = nichidoDb;
 
 const num = (v: unknown): number => {
   const n = typeof v === 'number' ? v : Number(v);
@@ -69,7 +62,6 @@ const EMPTY: GoldlineAnalytics = {
   bySku: [],
   summary: {gross: 0, units: 0, net: 0, storeCount: 0, skuCount: 0, periodStart: null, periodEnd: null},
 };
-
 
 /** One company's store + SKU sales rollups and headline summary. */
 export async function getGoldlineAnalytics(companyId: string): Promise<GoldlineAnalytics> {

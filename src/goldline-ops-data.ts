@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import type {InventoryRowIn} from './goldline-inventory';
@@ -14,17 +14,13 @@ import {addDays, formTimeliness, isCurrentCount, pickCurrentPeriod, storeHealth,
 // full 300-store ramp this is a few hundred thousand rows per load; that's the point
 // to move the rollup into a SQL function / materialized view.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const HISTORY_DAYS = 70;
 const SNAPSHOT_WINDOW_DAYS = 180; // pickers / current period only need recent periods
 // Typical gap between today and the latest count (forms are semi-monthly, committed
 // within days). A store counted longer ago than this is re-read with its own window.
 const EARLY_LAG_DAYS = 25;
 
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type StoreOps = {
   storeCode: string;
@@ -44,7 +40,7 @@ export type OpsData = {
 
 export async function getOpsData(companyId: string, storeScope?: string[] | null): Promise<OpsData> {
   const empty: OpsData = {currentPeriod: null, stores: [], catalog: {}, pendingReview: 0};
-  if (!url || !key) return empty;
+  if (!nichidoConfigured()) return empty;
   const supa = db();
   const scope = storeScope ? new Set(storeScope) : null;
   const sinceSnapshots = addDays(new Date().toISOString().slice(0, 10), -SNAPSHOT_WINDOW_DAYS);

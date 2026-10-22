@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {addDays} from './goldline-movement';
@@ -13,18 +13,14 @@ export type {ProductInfo};
 // scoped on every query (the service-role key bypasses RLS; company_id is the fence),
 // and narrowed to a store-scoped role's stores.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const HISTORY_DAYS = 470; // 3 real + 3 forecast months, plus the same months a year back
 
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type ProductData = {item: ProductInfo; stores: StoreInput[]};
 
 export async function getProductData(companyId: string, itemCode: string, storeScope?: string[] | null, today = new Date()): Promise<ProductData | null> {
-  if (!url || !key) return null;
+  if (!nichidoConfigured()) return null;
   const supa = db();
   const since = addDays(today.toISOString().slice(0, 10), -HISTORY_DAYS);
   const scope = storeScope ? new Set(storeScope) : null;

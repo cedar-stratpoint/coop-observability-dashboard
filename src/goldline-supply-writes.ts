@@ -1,17 +1,12 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 
 // Server-only writes for the Goldline supply side (warehouse stock, lead times,
 // shipments, price, hidden). Callers (app/stock/actions.ts) have already authorized
 // the company, role and store scope; every statement here is still company-fenced.
 // Anything edited by a person stops being sample data (is_sample = false).
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export class SupplyError extends Error {
   constructor(public code: 'not_enough_stock' | 'not_in_transit' | 'already_arrived' | 'item_not_found', public detail?: number) {

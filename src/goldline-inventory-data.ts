@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {pageCoverage} from './goldline-inventory';
 
@@ -9,12 +9,7 @@ import {pageCoverage} from './goldline-inventory';
 // nothing here scans the whole inventory history; the pickers come from the
 // gl_inventory_snapshots view.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type InventorySource = {
   uploadId: string;
@@ -39,7 +34,7 @@ export type CountSources = {
  */
 export async function getCountSources(companyId: string, store: string | null, storeScope?: string[] | null): Promise<CountSources> {
   const empty: CountSources = {latest: null, sources: [], missingPages: [], pendingReview: 0};
-  if (!url || !key) return empty;
+  if (!nichidoConfigured()) return empty;
   if (store && storeScope && !storeScope.includes(store)) store = null;
   const supa = db();
   if (!store) {
@@ -70,7 +65,7 @@ export async function committedSnapshotFor(
   companyId: string,
   uploadId: string,
 ): Promise<{store_code: string; period_start: string; period_end: string} | null> {
-  if (!url || !key) return null;
+  if (!nichidoConfigured()) return null;
   // pagination-ok: single row.
   const res = await db()
     .from('gl_inventory')

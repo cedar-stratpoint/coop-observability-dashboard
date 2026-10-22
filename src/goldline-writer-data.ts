@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {GOLDLINE_BUCKET} from './goldline-data';
 import {
@@ -20,10 +20,7 @@ import {
 // labelled example with no extra writes. Any failure here returns an empty profile:
 // the reader then works exactly as before, it never blocks an upload.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-let client: SupabaseClient | null = null;
-const db = () => (client ??= createClient(url as string, key as string, {auth: {persistSession: false}}));
+const db = nichidoDb;
 
 /** How many recent reviewed pages the profile looks at. */
 const RECENT_PAGES = 40;
@@ -144,7 +141,7 @@ function summarize(rows: Reviewed[]): Summary {
  * nothing has been reviewed yet, on any error, or after PROFILE_TIMEOUT_MS.
  */
 export async function getWriterProfile(companyId: string, page: number, storeCode: string | null, storeScope?: string[] | null): Promise<WriterProfile> {
-  if (!url || !key || process.env.GL_WRITER_PROFILE === 'off') return EMPTY;
+  if (!nichidoConfigured() || process.env.GL_WRITER_PROFILE === 'off') return EMPTY;
   try {
     return await withTimeout(buildProfile(companyId, page, storeCode, storeScope), PROFILE_TIMEOUT_MS, 'writer profile');
   } catch (e) {
@@ -182,7 +179,7 @@ export type ReaderAccuracy = ReaderStats & {before: ReaderStats; after: ReaderSt
  *  the writer profile was used (for the Uploads page). Null when nothing is reviewed
  *  yet, on error, or if it's slow (the page never waits on it). */
 export async function getReaderAccuracy(companyId: string, storeScope?: string[] | null): Promise<ReaderAccuracy | null> {
-  if (!url || !key) return null;
+  if (!nichidoConfigured()) return null;
   try {
     const rows = (await withTimeout(recentReviewed(companyId), PROFILE_TIMEOUT_MS, 'reader stats')).filter((r) => inScope(r, storeScope));
     const s = summarize(rows);
