@@ -264,3 +264,68 @@ describe('checkNumbers countNouns (Explore enforce mode): a single digit before 
     expect(checkNumbers('3 orders', rows, {countNouns: true, context: 'show me the top 3 orders'}).violations).toEqual([]);
   });
 });
+
+// The calculation guardrail (2026-10-22): the model may add, compare and average figures from this turn's tool results, showing the working.
+// A figure that is in no tool result is `derived` (not a violation) only when it equals arithmetic over OTHER figures of the same answer
+// that are themselves grounded. Operands must be shown in the answer: a check over every tool-result number would accept coincidences.
+describe('checkNumbers: derived figures (the model calculates and shows the working)', () => {
+  const SALES = [{rows: [{channel: 'shopee', revenue: 59228}, {channel: 'lazada', revenue: 11222}, {channel: 'website', revenue: 51989}, {pet: 'dog', value: 71050}, {pet: 'cat', value: 18050.5}]}];
+  const check = (text: string, results: unknown[] = SALES) => checkNumbers(text, results);
+
+  it('a true sum of two grounded figures shown in the answer is derived, not a violation', () => {
+    const out = check('Online total: ₱59,228 + ₱11,222 = ₱70,450, calculated.');
+    expect(out.violations).toEqual([]);
+    expect(out.derived).toEqual([{value: '₱70,450', op: 'sum', operands: ['₱59,228', '₱11,222']}]);
+  });
+
+  it('a wrong sum stays a violation', () => {
+    expect(values('Online total: ₱59,228 + ₱11,222 = ₱70,451, calculated.', SALES)).toEqual(['₱70,451']);
+    expect(check('Online total: ₱59,228 + ₱11,222 = ₱70,451.').derived).toBeUndefined();
+  });
+
+  it('a total without its working is a violation (the operands must be shown in the answer)', () => {
+    expect(values('The online total is ₱70,450.', SALES)).toEqual(['₱70,450']);
+  });
+
+  it('a difference, an average and a three-way sum verify', () => {
+    expect(check('Shopee ₱59,228 vs website ₱51,989: ₱7,239 more, calculated.').violations).toEqual([]);
+    expect(check('Shopee ₱59,228 and lazada ₱11,222 average ₱35,225, calculated.').derived?.[0]?.op).toBe('average');
+    expect(check('₱59,228 + ₱11,222 + ₱51,989 = ₱122,439, calculated.').derived?.[0]).toMatchObject({op: 'sum', operands: ['₱59,228', '₱11,222', '₱51,989']});
+  });
+
+  it('a percent change, a ratio and a share verify', () => {
+    expect(check('Shopee ₱59,228 against ₱51,989 is up 13.9%, calculated.').derived?.[0]).toMatchObject({value: '13.9%', op: 'percent_change'});
+    expect(check('Dog ₱71,050 is 3.9× cat ₱18,051, calculated.').derived?.[0]).toMatchObject({value: '3.9×', op: 'ratio'});
+    const withTotal = [{rows: [{channel: 'shopee', revenue: 59228}, {channel: 'online_total', revenue: 70450}]}];
+    expect(check('Shopee ₱59,228 of ₱70,450 is 84.1%, calculated.', withTotal).derived?.[0]).toMatchObject({value: '84.1%', op: 'share'});
+  });
+
+  it('a derived total can feed a derived share (two rounds)', () => {
+    const out = check('₱59,228 + ₱11,222 = ₱70,450, so Shopee is 84.1% of it, calculated.');
+    expect(out.violations).toEqual([]);
+    expect(out.derived?.map((d) => d.value)).toEqual(['₱70,450', '84.1%']);
+  });
+
+  it('operands of a different kind do not make a sum (pesos are not counts)', () => {
+    expect(values('₱59,228 and ₱11,222 give 70,450 orders.', SALES)).toEqual(['70,450']);
+  });
+
+  it('a figure that cannot be derived stays a violation, as before', () => {
+    expect(values('Shopee ₱59,228 and lazada ₱11,222 give ₱88,000.', SALES)).toEqual(['₱88,000']);
+  });
+
+  it('the search is capped: only the first 12 same-kind figures are operands', () => {
+    const vals = Array.from({length: 13}, (_, i) => 10 * 2 ** (i + 1)); // 20, 40, ... : every subset sum differs
+    const res = [{rows: vals.map((v) => ({v}))}];
+    const show = (v: number) => `₱${v.toLocaleString('en-US')}`;
+    const list = vals.map(show).join(', ');
+    const f12and13 = `${list}; the last two add to ${show(vals[11] + vals[12])}.`;
+    expect(values(f12and13, res)).toEqual([show(vals[11] + vals[12])]); // the 13th figure is past the cap
+    const f1and2 = `${list}; the first two add to ${show(vals[0] + vals[1])}.`;
+    expect(values(f1and2, res)).toEqual([]);
+  });
+
+  it('the result keeps its old shape when nothing is derived (no derived key)', () => {
+    expect(check('Dog bundles brought in ₱88,000 last week.')).toEqual({checked: 1, violations: [{value: '₱88,000', context: 'Dog bundles brought in ₱88,000 last week.'}]});
+  });
+});
