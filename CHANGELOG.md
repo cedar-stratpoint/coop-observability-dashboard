@@ -17,6 +17,7 @@ New pipeline in this repo (`src/shopee-import/`, `scripts/shopee-import.ts`, `su
 - **Replaces** the never-filled table `marketplace_daily_sales` with a view of the same name and columns, so the Sales page and Ask Coop readers shipped in v1.12.0 work unchanged. The SQL refuses to drop that table if it has rows. The backend's table writer (coop-pipeline #47) is no longer needed.
 - **Real-data test (local database, 15 weeks, 105 days):** the loaded sums equal the digests exactly (Aug 1 to 31 ₱86,324; Sep 1 to 30 ₱59,228; Sep 1 to 27 ₱51,989; Oct 1 to 4 ₱5,469); Jul 6 to Aug 4 is ₱123,768 (the old July digest said ₱117,564 for a window that also includes Jul 5).
 - **A rule I got wrong and the real files caught:** confirmed sales can exceed placed sales on a day (13 Aug, 18 Aug), so that is not a check. Lesson `knowledge/lessons/check-the-assumption-on-every-row.md`.
+- `reconcile` (digest rewiring step R1, plan section "Digest rewiring"): lists each stored digest's Shopee revenue against the sum of the imported daily confirmed sales for the same days (placed by Shopee's own export dates when the digest has them), with the gap. It reads `digest_archive.digest` only (never `bundle`) and changes nothing; run it on staging after the backfill to measure how far old digests are off.
 - Not yet: product (SKU), ads, traffic and product-overview importers; API endpoints; raw file storage; the coverage banner. `tsx` added as a dev dependency to run the command.
 
 ## 2026-10-21 — Ask Coop: an API spend cap says "account needs attention", not "try again"

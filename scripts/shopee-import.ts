@@ -4,6 +4,7 @@
 //   npm run shopee:import -- apply <importId>... | --all-staged  [--confirm-host <host>]
 //   npm run shopee:import -- undo <importId> --reason "..."        [--confirm-host <host>]
 //   npm run shopee:import -- coverage
+//   npm run shopee:import -- reconcile        (each stored digest's Shopee revenue against the imported daily sales; changes nothing)
 //
 // `plan` is a dry run: it writes only inert staged rows that the app never reads. Nothing changes what the app shows until `apply`.
 // Needs SUPABASE_URL_ARCHIVE and SUPABASE_SERVICE_ROLE_KEY_ARCHIVE in the environment (this script does not read .env files).
@@ -14,7 +15,8 @@ import {createClient} from '@supabase/supabase-js';
 import {weeksCoverage} from '../src/shopee-import/coverage';
 import {classifyFile, isIgnored} from '../src/shopee-import/files';
 import {applyRun, planFile, undoRun} from '../src/shopee-import/pipeline';
-import {supabaseImportStore} from '../src/shopee-import/store-supabase';
+import {reconcileDigests} from '../src/shopee-import/reconcile';
+import {loadConfirmedByDay, loadDigestsForReconcile, supabaseImportStore} from '../src/shopee-import/store-supabase';
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -127,7 +129,20 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('Commands: plan <paths...> | apply <importId...> | undo <importId> --reason "..." | coverage');
+  if (cmd === 'reconcile') {
+    const sb = createClient(url, key, {auth: {persistSession: false}});
+    const lines = reconcileDigests(await loadDigestsForReconcile(sb), await loadConfirmedByDay(sb));
+    if (lines.length === 0) console.log('No stored digests.');
+    const pad = (x: string, n: number): string => x.padEnd(n);
+    for (const l of lines) {
+      const gap = l.gap === null ? '' : `  gap ${l.gap >= 0 ? '+' : '-'}${money(Math.abs(l.gap))} (${l.gapPct}%)`;
+      const miss = l.daysMissing && l.status !== 'no_facts' ? `  ${l.daysMissing} days not imported` : '';
+      console.log(`${l.from} to ${l.to}  ${pad(l.status, 17)} digest ${l.digestRevenue === null ? '-' : money(l.digestRevenue)}  imported ${l.factsRevenue === null ? '-' : money(l.factsRevenue)}${gap}${miss}  [by ${l.basis}]`);
+    }
+    return;
+  }
+
+  console.log('Commands: plan <paths...> | apply <importId...> | undo <importId> --reason "..." | coverage | reconcile');
   process.exitCode = 1;
 }
 
