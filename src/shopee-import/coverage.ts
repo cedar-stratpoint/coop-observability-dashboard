@@ -28,3 +28,26 @@ export function weeksCoverage(loadedDays: readonly string[], through?: string): 
   }
   return out;
 }
+
+// ── the four snapshot reports, per week ───────────────────────────────────────────────────────────────────────────────────────
+export type ReportWeekStatus = 'full' | 'partial' | 'missing';
+const REPORTS = ['ads', 'sku_detail', 'traffic', 'product_overview'] as const;
+export type ReportKind = (typeof REPORTS)[number];
+
+/**
+ * For each week, whether an accepted import of each snapshot report covers it: `full` when the imports' periods together cover all 7 days,
+ * `partial` when some days, `missing` when none. Pure: give it the accepted periods.
+ */
+export function reportsByWeek(periods: readonly {reportType: ReportKind; periodFrom: string; periodTo: string}[], weekStarts: readonly string[]): Record<string, Record<ReportKind, ReportWeekStatus>> {
+  const out: Record<string, Record<ReportKind, ReportWeekStatus>> = {};
+  for (const weekStart of weekStarts) {
+    const days = Array.from({length: 7}, (_, i) => iso(ms(weekStart) + i * DAY));
+    out[weekStart] = Object.fromEntries(
+      REPORTS.map((type) => {
+        const covered = days.filter((d) => periods.some((p) => p.reportType === type && p.periodFrom <= d && p.periodTo >= d)).length;
+        return [type, covered === 7 ? 'full' : covered === 0 ? 'missing' : 'partial'];
+      }),
+    ) as Record<ReportKind, ReportWeekStatus>;
+  }
+  return out;
+}
