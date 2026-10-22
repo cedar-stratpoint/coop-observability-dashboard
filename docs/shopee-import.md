@@ -44,6 +44,15 @@ Every file that stages is also stored, as received, in the private bucket `shope
 3. `apply --all-staged`. 
 4. `coverage` to see the week is complete. A file that was rejected names the reason; fix the export and plan again.
 
+## Weekly routine for an LLM agent
+The Monday routine is also written as an instruction an agent (Claude Code) can follow: `.claude/skills/shopee-weekly-import/SKILL.md`. Ask it "import this week's Shopee files" and give it the folder, the target (staging or PROD) and the route (the API with the bearer token, or the developer command). The rules it keeps, which apply to anyone running the routine:
+- Shop-total exports only. A per-order export (`Order.all.*`, buyer names, phones, addresses) is never opened, uploaded or imported.
+- The token and database keys are never printed, pasted into chat, logged or committed; one environment per run, named before applying; PROD only with the co-worker's OK.
+- Plan, read it file by file, then apply. A rejected file is never forced and never retried unchanged.
+- A flagged or changed day, or a day older than 28 days that differs, stops the run and goes to the owner; `restate` needs the owner's written reason.
+- Never edit or delete rows by SQL: `undo <importId> --reason "..."` is the way back.
+- It ends with a plain table per file (period, result, key figure), a coverage line and what needs a decision.
+
 ## API (same code as the command)
 `Authorization: Bearer $SHOPEE_IMPORT_TOKEN` on every call (set the token in the deployment's env, `openssl rand -hex 32`; unset means every call answers 503). Outside the page sign-in on purpose.
 ```bash
