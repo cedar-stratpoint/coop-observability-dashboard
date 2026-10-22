@@ -12,6 +12,7 @@ set -a; source <env with SUPABASE_URL_ARCHIVE and SUPABASE_SERVICE_ROLE_KEY_ARCH
 npm run shopee:import -- plan ~/Zoomy/Shopee        # dry run: shows new, unchanged, changed, flags
 npm run shopee:import -- apply --all-staged --confirm-host <your supabase host>
 npm run shopee:import -- coverage                   # which weeks are loaded and which are missing
+npm run shopee:import -- reconcile                  # each stored digest's Shopee revenue against the imported daily sales (changes nothing)
 npm run shopee:import -- undo <importId> --reason "wrong export" --confirm-host <host>
 ```
 - Catch-up: export the last four weeks each Monday and plan the folder. Overlapping days are refreshed (cancellations settle); days older than 28 days never change unless you pass `--restate "reason"`.

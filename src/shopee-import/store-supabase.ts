@@ -81,3 +81,15 @@ export function supabaseImportStore(sb: SupabaseClient): ImportStore {
     },
   };
 }
+
+/** Confirmed sales per loaded day, for the digest reconciliation. */
+export async function loadConfirmedByDay(sb: SupabaseClient): Promise<Map<string, number>> {
+  const data = await fetchAllRows('shopee loaded days', (a, b) => sb.from('marketplace_daily_sales').select('day,revenue').eq('channel', 'shopee').order('day').range(a, b));
+  return new Map(data.map((r): [string, number] => [String(r.day), num(r.revenue)]));
+}
+
+/** The stored digests as the dashboard reads them: window and rendered digest only. `bundle` (verbatim customer quotes) is never selected. */
+export async function loadDigestsForReconcile(sb: SupabaseClient): Promise<import('./reconcile').DigestForReconcile[]> {
+  const data = await fetchAllRows('digests', (a, b) => sb.from('digest_archive').select('window_from,window_to,created_at,digest').order('window_to', {ascending: false}).order('created_at', {ascending: false}).range(a, b));
+  return data as unknown as import('./reconcile').DigestForReconcile[];
+}
