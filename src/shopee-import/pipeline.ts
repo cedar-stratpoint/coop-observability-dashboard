@@ -190,7 +190,12 @@ async function planSnapshot(i: PlanInput, type: SnapshotType, filenamePeriod: {f
     reportType: type, channel: 'shopee', periodFrom: snap.periodFrom, periodTo: snap.periodTo, sourceFilename: i.filename, sha256: sha, rowCount: snap.records.length, status: 'staged',
     checks: {passed: true, summary: snap.summary, coveragePct, openSkipped: snap.openSkipped}, plan: null, importedBy: i.importedBy ?? null, exportedAt: snap.exportedAt,
   });
-  await i.store.addSnapshotRows(TABLE[type], importId, snap.records);
+  try {
+    await i.store.addSnapshotRows(TABLE[type], importId, snap.records);
+  } catch (e) {
+    await i.store.transition(importId, 'staged', 'rejected', {note: 'saving the rows failed part way'}); // never leave a run that looks whole but is not
+    throw e;
+  }
   const rawStored = await keepRaw(i.store, importId, type, sha, i.filename, i.bytes);
   return {status: 'staged_report', filename: i.filename, importId, reportType: type, periodFrom: snap.periodFrom, periodTo: snap.periodTo, rows: snap.records.length, summary: snap.summary, coveragePct, openSkipped: snap.openSkipped, rawStored};
 }

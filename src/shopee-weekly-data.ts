@@ -13,7 +13,7 @@ const readAds = unstable_cache(
   async (): Promise<AdsWeekRow[]> => {
     try {
       const sb = posClient();
-      const rows = await fetchAllRows('marketplace_ads_weekly', (a, b) => sb.from('marketplace_ads_weekly').select('period_from,period_to,captured_at,seq,gmv,expense').order('period_from').order('seq').range(a, b));
+      const rows = await fetchAllRows('marketplace_ads_weekly', (a, b) => sb.from('marketplace_ads_weekly').select('period_from,period_to,captured_at,seq,gmv,expense').order('period_from').order('period_to').order('seq').range(a, b));
       return rows.map((r) => ({period_from: String(r.period_from), period_to: String(r.period_to), captured_at: String(r.captured_at), gmv: Number(r.gmv), expense: Number(r.expense)}));
     } catch (error) {
       console.warn(`marketplace_ads_weekly read failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -28,7 +28,7 @@ const readSku = unstable_cache(
   async (): Promise<SkuWeekRow[]> => {
     try {
       const sb = posClient();
-      const rows = await fetchAllRows('marketplace_sku_weekly', (a, b) => sb.from('marketplace_sku_weekly').select('period_from,period_to,captured_at,seq,product,variation_id,sales_confirmed,units_confirmed').order('period_from').order('seq').range(a, b));
+      const rows = await fetchAllRows('marketplace_sku_weekly', (a, b) => sb.from('marketplace_sku_weekly').select('period_from,period_to,captured_at,seq,product,variation_id,sales_confirmed,units_confirmed').order('period_from').order('period_to').order('seq').range(a, b));
       return rows.map((r) => ({period_from: String(r.period_from), period_to: String(r.period_to), captured_at: String(r.captured_at), product: String(r.product), variation_id: r.variation_id === null ? null : String(r.variation_id), sales_confirmed: Number(r.sales_confirmed), units_confirmed: Number(r.units_confirmed)}));
     } catch (error) {
       console.warn(`marketplace_sku_weekly read failed: ${error instanceof Error ? error.message : String(error)}`);

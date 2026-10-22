@@ -8,6 +8,8 @@ export class FakeStore implements ImportStore {
   snapshotRows = new Map<string, {table: string; records: Record<string, unknown>[]}>();
   raw = new Map<string, {path: string; bytes: Uint8Array}>();
   rawWorks = true;
+  /** Make addSnapshotRows throw, as a database failing part way through a large file would. */
+  failSnapshotRows = false;
   private seq = 0;
 
   async loadCurrent(from: string, to: string): Promise<Map<string, DayFigures>> {
@@ -34,6 +36,7 @@ export class FakeStore implements ImportStore {
     this.obs.set(importId, [...rows]);
   }
   async addSnapshotRows(table: string, importId: string, records: readonly Record<string, unknown>[]): Promise<void> {
+    if (this.failSnapshotRows) throw new Error('saving the figures: connection lost');
     this.snapshotRows.set(importId, {table, records: [...records]});
   }
   async saveRaw(importId: string, path: string, bytes: Uint8Array): Promise<boolean> {
