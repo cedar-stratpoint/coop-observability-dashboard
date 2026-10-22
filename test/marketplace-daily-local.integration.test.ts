@@ -10,6 +10,7 @@ import {dailyRowsToDigests} from '../src/daily-sales-digests';
 import {readDailyRows} from '../src/marketplace-daily-data';
 import {rollupChannels} from '../src/period-rollup';
 import {assertLocalSupabase} from './support/local-only';
+import {loadFictionalSpan} from './support/shopee-local';
 
 // LOCAL INTEGRATION (skipped unless pointed at the throwaway local stack from scripts/local-supabase/up.sh), with the backend's
 // supabase/marketplace_daily_sales.sql applied to it:
@@ -28,19 +29,17 @@ function serviceJwt(secret: string): string {
 }
 
 describe.skipIf(!local)('marketplace_daily_sales reader on the local stack', () => {
-  it('reads saved rows and a custom span sums exactly from them', async () => {
+  it('reads days loaded through the import pipeline and a custom span sums exactly from them', async () => {
     const sb = createClient(`${URL_}`, serviceJwt(SECRET as string), {auth: {persistSession: false}});
-    const mine = [6, 7, 8].map((d) => ({day: `2026-07-0${d}`, channel: 'shopee', revenue: 100 * d, orders: d, units: 2 * d, window_from: '2026-07-05T16:00:00Z', window_to: '2026-07-08T16:00:00Z'}));
+    const {cleanup} = await loadFictionalSpan(sb, '2025-03-03', [600, 700, 800]);
     try {
-      const up = await sb.from('marketplace_daily_sales').upsert(mine, {onConflict: 'day,channel'});
-      expect(up.error).toBeNull();
-      const rows = (await readDailyRows(sb)).filter((r) => r.day >= '2026-07-06' && r.day <= '2026-07-08');
+      const rows = (await readDailyRows(sb)).filter((r) => r.day >= '2025-03-03' && r.day <= '2025-03-05');
       expect(rows).toHaveLength(3);
-      expect(rows[0]).toMatchObject({day: '2026-07-06', channel: 'shopee', revenue: 600, orders: 6, units: 12});
-      const [b] = rollupChannels({fromDay: '2026-07-06', toDay: '2026-07-08', channels: ['shopee'], granularity: 'total', digests: dailyRowsToDigests(rows), website: null, offline: null});
-      expect(b.channels[0]).toMatchObject({status: 'ok', revenue: 2100, orders: 21, units: 42});
+      expect(rows[0]).toMatchObject({day: '2025-03-03', channel: 'shopee', revenue: 600, orders: 3, units: 5});
+      const [b] = rollupChannels({fromDay: '2025-03-03', toDay: '2025-03-05', channels: ['shopee'], granularity: 'total', digests: dailyRowsToDigests(rows), website: null, offline: null});
+      expect(b.channels[0]).toMatchObject({status: 'ok', revenue: 2100, orders: 9, units: 15});
     } finally {
-      await sb.from('marketplace_daily_sales').delete().gte('day', '2026-07-06').lte('day', '2026-07-08');
+      await cleanup();
     }
   });
 });

@@ -41,7 +41,7 @@ describe('2b.2 data index in the cached prompt', () => {
     expect(text).toMatch(/- sales: default completed orders \(pos_orders_completed\)/);
   });
   it('stays small (most-used tables only, never the whole catalog)', () => {
-    expect(estimateTokens(text)).toBeLessThan(1600); // measured about 1,500 on 2026-10-07 (Train 3 Task 8)
+    expect(estimateTokens(text)).toBeLessThan(1650); // measured about 1,500 on 2026-10-07 (Train 3 Task 8); 1,612 on 2026-10-22 after the Shopee import tables (import_runs, marketplace_daily_observations) joined the digest domain line
     expect(estimateTokens(text)).toBeLessThan(estimateTokens(JSON.stringify(CATALOG_DATA)) / 3);
   });
   it('the Explore system prompt uses it instead of the coop_explore_ views list', () => {

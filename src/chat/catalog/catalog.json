@@ -69,6 +69,8 @@
    "title": "Stored digests",
    "tables": [
     "digest_archive",
+    "import_runs",
+    "marketplace_daily_observations",
     "marketplace_daily_sales"
    ]
   },
@@ -355,11 +357,27 @@
    "prefer": null,
    "testOrders": null
   },
+  "import_runs": {
+   "name": "import_runs",
+   "domain": "digest",
+   "about": "Ledger of the Shopee weekly-export import (append-only model; plan knowledge/tasks/2026-10-22-shopee-import-data-engineering-plan.md). One row per file plan.",
+   "columns": "import_id, report_type (only sales_overview is imported so far), channel, period_from, period_to, source_filename, sha256, exported_at, row_count, status (staged, accepted, rejected, superseded), checks, plan (the preview and the figures it was made against), note, restated, imported_by, imported_at, accepted_at, raw_path.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_daily_observations": {
+   "name": "marketplace_daily_observations",
+   "domain": "digest",
+   "about": "The daily Shopee figures each import brought; insert only, never updated or deleted by the pipeline.",
+   "columns": "import_id, day (PH), channel, sales_placed, sales_confirmed, orders_placed, orders_confirmed, units_placed, units_confirmed, buyers_placed, buyers_confirmed, visitors. Confirmed can exceed placed on a day (it counts orders confirmed that day).",
+   "prefer": null,
+   "testOrders": null
+  },
   "marketplace_daily_sales": {
    "name": "marketplace_daily_sales",
    "domain": "digest",
-   "about": "Per-PH-day Shopee and Lazada sales, written by every digest run so a custom date range can be summed from rows instead of cut from whole digest windows. Built 2026-10-21 on the backend branch feat/marketplace-daily-sales (PR #47 on coop-pipeline, stacked on #42 feat/digest-aug13-sep13); applied only to the local Docker stack so far.",
-   "columns": "day (date, PH), channel ('shopee' | 'lazada'), revenue (PHP), orders, units, window_from, window_to (the digest run that wrote the row), captured_at. Shopee figures are the Sales Overview export's confirmed orders and units; Lazada from the API's orders.",
+   "about": "A VIEW (it replaced an earlier plain table that was never filled): per day and channel, the newest accepted import's figures. This is what the Sales page (src/marketplace-daily-data.ts) and Ask Coop (coop_chat_marketplace_daily) read.",
+   "columns": "",
    "prefer": null,
    "testOrders": null
   },
