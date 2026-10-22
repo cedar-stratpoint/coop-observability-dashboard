@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-22 — Weekly Sales page uses the imported Shopee facts (digest rewiring R2)
+The weekly channel view (`/?channel=...`) now takes Shopee revenue, orders, units and AOV from the imported daily facts when every day of the selected period has one, so it agrees with the date-range view. A period with any missing day keeps the digest's own figures, so a partial week never under-reports. Ads spend and ROAS stay as published (no daily source). When the two totals differ, one line under the header shows both. Decision: the stored digest is not rewritten; only the view overlays it (`src/shopee-facts-overlay.ts`). Backend digest reading the facts (R3) is a separate step.
+
 ## 2026-10-22 — Shopee import API (stacked on the import command)
 `POST /api/shopee/import/plan` (multipart files), `POST .../apply` (`importIds`), `POST .../undo` (`importId`, `reason`) and `GET .../coverage`, over the same pipeline as `npm run shopee:import`; handlers in `src/shopee-import/api.ts`, thin route files in `app/api/shopee/import/`. Decision (owner): bearer token only (`SHOPEE_IMPORT_TOKEN`); with no token every call answers 503, a wrong or missing one 401. Outside the page sign-in on purpose (like the chat route, the handler authorizes itself). Limits: 30 files of 5 MB per request, only known Shopee file names are read, files are never echoed back. This is the door for the Mac's weekly run (digest rewiring step R3) and a later upload page. Verified over real HTTP on the local stack with real weekly files (plan, apply, coverage, same file again = "already loaded").
 
