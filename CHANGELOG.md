@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-22 — Shopee weekly import: exact daily sales, safe to repeat (`npm run shopee:import`)
+New pipeline in this repo (`src/shopee-import/`, `scripts/shopee-import.ts`, `supabase/shopee_import.sql`, runbook `docs/shopee-import.md`). It loads the Sales Overview export into append-only tables (`import_runs`, `marketplace_daily_observations`); what the app reads is the view `marketplace_daily_sales`, the newest accepted import per day. Decisions (owner, 2026-10-22): the pipeline lives here, not in the backend; the API will use a bearer token only; days freeze after 28 days; confirmed sales are the basis; raw files go to a private bucket (later step).
+- **Safe by construction:** `plan` is a dry run that writes only inert staged rows; `apply` is one status flip; `undo` flips it back and the view falls back by itself; nothing is ever updated or deleted by an import. A file that fails a check (dates, one row per day, daily sums equal the file's totals) is rejected whole and recorded. The same file twice does nothing. Today and later are never loaded. A plan is refused at apply if the figures it was made against moved.
+- **The weekly run is unchanged:** the Mac's digest run, its folder and its five files are not touched; the importer is one more reader of the same files (flat folder or per-week sub-folders), and `digest.daily` inside the digests stays.
+- **Replaces** the never-filled table `marketplace_daily_sales` with a view of the same name and columns, so the Sales page and Ask Coop readers shipped in v1.12.0 work unchanged. The SQL refuses to drop that table if it has rows. The backend's table writer (coop-pipeline #47) is no longer needed.
+- **Real-data test (local database, 15 weeks, 105 days):** the loaded sums equal the digests exactly (Aug 1 to 31 ₱86,324; Sep 1 to 30 ₱59,228; Sep 1 to 27 ₱51,989; Oct 1 to 4 ₱5,469); Jul 6 to Aug 4 is ₱123,768 (the old July digest said ₱117,564 for a window that also includes Jul 5).
+- **A rule I got wrong and the real files caught:** confirmed sales can exceed placed sales on a day (13 Aug, 18 Aug), so that is not a check. Lesson `knowledge/lessons/check-the-assumption-on-every-row.md`.
+- Not yet: product (SKU), ads, traffic and product-overview importers; API endpoints; raw file storage; the coverage banner. `tsx` added as a dev dependency to run the command.
+
 ## 2026-10-21 — Ask Coop: an API spend cap says "account needs attention", not "try again"
 When the provider refuses with a usage-limit 400 ("You have reached your specified API usage limits"), Ask Coop now shows the same account message as a low credit balance instead of the generic "Coop hit a problem answering that. Please try again." Found when two identical questions failed with the generic text and the cause could not be told apart from a code fault. No provider text is shown to the user.
 
