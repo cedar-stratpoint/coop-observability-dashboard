@@ -123,6 +123,10 @@ export interface SalesRangeInput extends SpanBounds {
   dailyDigests?: readonly RollupDigest[];
   website: {orders: readonly RangeOrder[]; asOf: string} | null;
   offline: {orders: readonly PosOrder[]; dataFrom: string | null; dataTo: string | null} | null;
+  /** Imported weekly Shopee ads and SKU reports as digests (src/shopee-weekly-digests.ts). Used ONLY for ad spend and top products, never for totals (they carry no revenue). */
+  weeklyDigests?: readonly WindowDigest[];
+  /** Plain-language notes the caller worked out about the weekly data, added to the page's notes. */
+  weeklyNotes?: readonly string[];
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -178,11 +182,13 @@ export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
   const channels = rollupChannels({fromDay, toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: rollupDigests, website: input.website, offline: input.offline})[0].channels;
   const totals = sumTotals(channels);
 
-  const shopeeAds = spanAds('shopee', fromDay, toDay, input.digests);
-  const lazadaAds = spanAds('lazada', fromDay, toDay, input.digests);
+  // Ad spend and top products read whole windows, so the imported weeks join the stored digests here (and only here: they carry no revenue).
+  const windowDigests = [...input.digests, ...(input.weeklyDigests ?? [])];
+  const shopeeAds = spanAds('shopee', fromDay, toDay, windowDigests);
+  const lazadaAds = spanAds('lazada', fromDay, toDay, windowDigests);
   const ads = {shopee: shopeeAds, lazada: lazadaAds, total: adsTotals([shopeeAds, lazadaAds], fromDay, toDay)};
-  const shopee = spanTopProducts('shopee', fromDay, toDay, input.digests);
-  const lazada = spanTopProducts('lazada', fromDay, toDay, input.digests);
+  const shopee = spanTopProducts('shopee', fromDay, toDay, windowDigests);
+  const lazada = spanTopProducts('lazada', fromDay, toDay, windowDigests);
   const range = {from: new Date(phDayStart(fromDay)).toISOString(), to: new Date(phDayStart(toDay) + DAY_MS).toISOString()};
   const website: ProductRow[] = input.website ? websiteRangeMetrics([...input.website.orders], range, 5).topProducts.map((p: {title: string; units: number; revenue: number}): ProductRow => ({title: p.title, revenue: p.revenue, units: p.units})) : [];
 
@@ -193,13 +199,13 @@ export function buildSalesRange(input: SalesRangeInput): SalesRangeView {
         ...prevSpan,
         label: rangeLabel(prevSpan.fromDay, prevSpan.toDay),
         channels: rollupChannels({fromDay: prevSpan.fromDay, toDay: prevSpan.toDay, channels: ROLLUP_CHANNELS, granularity: 'total', digests: rollupDigests, website: input.website, offline: input.offline})[0].channels,
-        ads: {shopee: spanAds('shopee', prevSpan.fromDay, prevSpan.toDay, input.digests), lazada: spanAds('lazada', prevSpan.fromDay, prevSpan.toDay, input.digests)},
+        ads: {shopee: spanAds('shopee', prevSpan.fromDay, prevSpan.toDay, windowDigests), lazada: spanAds('lazada', prevSpan.fromDay, prevSpan.toDay, windowDigests)},
       }
     : null;
   const series = buildSeries({fromDay, toDay, digests: rollupDigests, website: input.website, offline: input.offline});
   const uniq = (xs: (string | null)[]): string[] => [...new Set(xs.filter((n): n is string => Boolean(n)))];
   const gaps = channels.filter((c) => c.status !== 'ok');
-  const notes = uniq([span.note, ...gaps.flatMap((c) => c.notes), ...ads.shopee.warnings, ...ads.lazada.warnings, ...shopee.warnings, ...lazada.warnings]);
+  const notes = uniq([span.note, ...gaps.flatMap((c) => c.notes), ...ads.shopee.warnings, ...ads.lazada.warnings, ...shopee.warnings, ...lazada.warnings, ...(input.weeklyNotes ?? [])]);
   const sources = uniq([...channels.filter((c) => c.status === 'ok').flatMap((c) => c.notes), ...[ads.shopee, ads.lazada, shopee, lazada].flatMap((x) => x.notes.filter((n) => !x.warnings.includes(n)))]);
   return {
     fromDay,

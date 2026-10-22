@@ -71,7 +71,15 @@
     "digest_archive",
     "import_runs",
     "marketplace_daily_observations",
-    "marketplace_daily_sales"
+    "marketplace_daily_sales",
+    "marketplace_ads_week_observations",
+    "marketplace_sku_week_observations",
+    "marketplace_traffic_day_observations",
+    "marketplace_funnel_day_observations",
+    "marketplace_ads_weekly",
+    "marketplace_sku_weekly",
+    "marketplace_traffic_daily",
+    "marketplace_funnel_daily"
    ]
   },
   {
@@ -361,7 +369,7 @@
    "name": "import_runs",
    "domain": "digest",
    "about": "Ledger of the Shopee weekly-export import (append-only model; plan knowledge/tasks/2026-10-22-shopee-import-data-engineering-plan.md). One row per file plan.",
-   "columns": "import_id, report_type (only sales_overview is imported so far), channel, period_from, period_to, source_filename, sha256, exported_at, row_count, status (staged, accepted, rejected, superseded), checks, plan (the preview and the figures it was made against), note, restated, imported_by, imported_at, accepted_at, raw_path.",
+   "columns": "import_id, report_type (all five Shopee reports are imported: sales_overview, ads, sku_detail, traffic, product_overview), channel, period_from, period_to, source_filename, sha256, exported_at, row_count, status (staged, accepted, rejected, superseded), checks, plan (the preview and the figures it was made against), note, restated, imported_by, imported_at, accepted_at, raw_path (the original file in the private storage bucket shopee-imports, as <report_type>/<sha256>.<ext>; null when it could not be stored, and the import carries on without it). exported_at is set when the file says it (the ads report does); the readers use it to pick between two imports of the same period. For the four snapshot reports plan is null and checks.summary holds the figures that identify the file (ad spend, product sales, page views).",
    "prefer": null,
    "testOrders": null
   },
@@ -377,6 +385,70 @@
    "name": "marketplace_daily_sales",
    "domain": "digest",
    "about": "A VIEW (it replaced an earlier plain table that was never filled): per day and channel, the newest accepted import's figures. This is what the Sales page (src/marketplace-daily-data.ts) and Ask Coop (coop_chat_marketplace_daily) read.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_ads_week_observations": {
+   "name": "marketplace_ads_week_observations",
+   "domain": "digest",
+   "about": "The campaign rows of one weekly Shopee ads (CPC overall) report, as one import brought them; insert only, never updated or deleted by the pipeline. One file is the whole week (a snapshot), so there is no day-by-day merge.",
+   "columns": "import_id, seq (row order in the file), ad_name (for example Shop GMV Max, or a product ad), ads_type, status, impressions, clicks, conversions, direct_conversions, items_sold, gmv (sales credited to the ads, what ROAS is made from), direct_gmv, expense (ad spend, pesos). ROAS = sum of gmv / sum of expense over the campaigns, never an average of per-campaign ratios.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_sku_week_observations": {
+   "name": "marketplace_sku_week_observations",
+   "domain": "digest",
+   "about": "The product and variation rows of one weekly Shopee parent SKU detail report (its Top Performing Products sheet only); insert only.",
+   "columns": "import_id, seq, item_id, product, variation_id, variation_name, sku, parent_sku, sales_placed, sales_confirmed, units_placed, units_confirmed, orders_placed, orders_confirmed, buyers_placed, buyers_confirmed, impressions, clicks, visitors, page_views. A row with variation_id null is the product's own row; the variation rows under it break the same sales down, so never add a product row and its variation rows together.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_traffic_day_observations": {
+   "name": "marketplace_traffic_day_observations",
+   "domain": "digest",
+   "about": "The daily shop traffic of one Shopee Traffic Overview report, for all traffic and for PC and APP separately; insert only.",
+   "columns": "import_id, day (PH), platform (all, pc, app), page_views, avg_page_views, avg_time_seconds, bounce_rate (a percent: 19.44 means 19.44%), visitors, new_visitors, existing_visitors, new_followers. Page views add across days (the import checks them against the file's own total); visitors do not add across days (they are unique per span), and all is not the sum of pc and app.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_funnel_day_observations": {
+   "name": "marketplace_funnel_day_observations",
+   "domain": "digest",
+   "about": "The daily shop-level product funnel of one Shopee Product Overview report (visit, add to cart, placed, confirmed); insert only.",
+   "columns": "import_id, day (PH), visitors, page_views, items_visited, bounce_visitors, bounce_rate (percent), search_clicks, likes, add_to_cart_visitors, add_to_cart_units, buyers_placed, units_placed, sales_placed, buyers_confirmed, units_confirmed, sales_confirmed. Placed sales equal the Sales Overview figure for the same day.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_ads_weekly": {
+   "name": "marketplace_ads_weekly",
+   "domain": "digest",
+   "about": "A VIEW: for each week (period_from, period_to), the campaign rows of the newest accepted ads import of that week (ordered by exported_at, then accepted_at). Undoing an import makes the view fall back to the previous one by itself.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_sku_weekly": {
+   "name": "marketplace_sku_weekly",
+   "domain": "digest",
+   "about": "A VIEW: for each week, the product and variation rows of the newest accepted SKU import of that week.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_traffic_daily": {
+   "name": "marketplace_traffic_daily",
+   "domain": "digest",
+   "about": "A VIEW: per PH day and platform, the figures of the newest accepted traffic import.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_funnel_daily": {
+   "name": "marketplace_funnel_daily",
+   "domain": "digest",
+   "about": "A VIEW: per PH day, the figures of the newest accepted product funnel import.",
    "columns": "",
    "prefer": null,
    "testOrders": null

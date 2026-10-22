@@ -1,10 +1,13 @@
 // An in-memory ImportStore with the same reading rule as the SQL view: per day, the newest ACCEPTED import wins.
-import type {ImportStore, NewRun, Run} from '../../src/shopee-import/pipeline';
+import type {ImportStore, NewRun, ReportPeriod, Run} from '../../src/shopee-import/pipeline';
 import type {DayFigures} from '../../src/shopee-import/types';
 
 export class FakeStore implements ImportStore {
   runs: (Run & {acceptedSeq: number; note?: string | null})[] = [];
   obs = new Map<string, DayFigures[]>();
+  snapshotRows = new Map<string, {table: string; records: Record<string, unknown>[]}>();
+  raw = new Map<string, {path: string; bytes: Uint8Array}>();
+  rawWorks = true;
   private seq = 0;
 
   async loadCurrent(from: string, to: string): Promise<Map<string, DayFigures>> {
@@ -24,11 +27,22 @@ export class FakeStore implements ImportStore {
   }
   async createRun(n: NewRun): Promise<string> {
     const importId = `run-${this.runs.length + 1}`;
-    this.runs.push({importId, reportType: n.reportType, periodFrom: n.periodFrom, periodTo: n.periodTo, sourceFilename: n.sourceFilename, sha256: n.sha256, status: n.status, rowCount: n.rowCount, plan: n.plan, restated: Boolean(n.restated), acceptedSeq: 0});
+    this.runs.push({importId, reportType: n.reportType, periodFrom: n.periodFrom, periodTo: n.periodTo, sourceFilename: n.sourceFilename, sha256: n.sha256, status: n.status, rowCount: n.rowCount, plan: n.plan, restated: Boolean(n.restated), checks: n.checks, acceptedSeq: 0});
     return importId;
   }
   async addObservations(importId: string, rows: readonly DayFigures[]): Promise<void> {
     this.obs.set(importId, [...rows]);
+  }
+  async addSnapshotRows(table: string, importId: string, records: readonly Record<string, unknown>[]): Promise<void> {
+    this.snapshotRows.set(importId, {table, records: [...records]});
+  }
+  async saveRaw(importId: string, path: string, bytes: Uint8Array): Promise<boolean> {
+    if (!this.rawWorks) return false;
+    this.raw.set(importId, {path, bytes});
+    return true;
+  }
+  async loadReportPeriods(): Promise<ReportPeriod[]> {
+    return this.runs.filter((r) => r.status === 'accepted' && r.reportType !== 'sales_overview').map((r) => ({reportType: r.reportType as ReportPeriod['reportType'], periodFrom: r.periodFrom, periodTo: r.periodTo}));
   }
   async getRun(importId: string): Promise<Run | null> {
     return this.runs.find((r) => r.importId === importId) ?? null;

@@ -12,7 +12,7 @@
 import {readdirSync, readFileSync, statSync} from 'node:fs';
 import path from 'node:path';
 import {createClient} from '@supabase/supabase-js';
-import {weeksCoverage} from '../src/shopee-import/coverage';
+import {reportsByWeek, weeksCoverage} from '../src/shopee-import/coverage';
 import {classifyFile, isIgnored} from '../src/shopee-import/files';
 import {applyRun, planFile, undoRun} from '../src/shopee-import/pipeline';
 import {reconcileDigests} from '../src/shopee-import/reconcile';
@@ -80,6 +80,10 @@ async function main(): Promise<void> {
         console.log(`  new ${o.plan.newDays.length}, unchanged ${o.plan.unchanged.length}, changed ${o.plan.changed.length}${o.plan.keptCurrent.length ? `, kept as loaded ${o.plan.keptCurrent.length}` : ''}${o.plan.frozenBlocked.length ? `, frozen ${o.plan.frozenBlocked.length}` : ''}${o.openSkipped.length ? `, open days left out ${o.openSkipped.join(', ')}` : ''}`);
         for (const c of o.plan.changed) console.log(`  changed ${c.day}: ${money(c.before)} to ${money(c.after)} (${c.pct}%)`);
         for (const fl of o.plan.flags) console.log(`  FLAG ${fl.code}: ${fl.message}`);
+      } else if (o.status === 'staged_report') {
+        ids.push(o.importId);
+        console.log(`\n${o.filename}: ${o.reportType} ${o.periodFrom} to ${o.periodTo}  [${o.importId}]`);
+        console.log(`  ${o.rows} rows  ${Object.entries(o.summary).map(([k, v]) => `${k} ${v.toLocaleString('en-US')}`).join(', ')}${o.coveragePct === null ? '' : `, covers ${o.coveragePct}% of the shop's confirmed sales`}${o.openSkipped.length ? `, open days left out ${o.openSkipped.join(', ')}` : ''}${o.rawStored ? '' : '  (original file NOT kept)'}`);
       } else if (o.status === 'rejected') {
         console.log(`\n${o.filename}: REJECTED  [${o.importId}]`);
         for (const x of o.failures) console.log(`  ${x.code}: ${x.message}`);
@@ -94,7 +98,7 @@ async function main(): Promise<void> {
 
   if (cmd === 'apply') {
     needsHost();
-    const ids = flag('all-staged') ? (await store.listRuns('staged')).filter((r) => r.reportType === 'sales_overview').map((r) => r.importId) : positional();
+    const ids = flag('all-staged') ? (await store.listRuns('staged')).map((r) => r.importId) : positional();
     if (ids.length === 0) throw new Error('Nothing to apply: give import ids or --all-staged.');
     let failed = 0;
     for (const id of ids) {
@@ -105,6 +109,10 @@ async function main(): Promise<void> {
         continue;
       }
       const x = r.receipt;
+      if (x.reportType !== 'sales_overview') {
+        console.log(`${id}: ${x.reportType} ${x.periodFrom} to ${x.periodTo}: loaded  ${Object.entries(x.summary ?? {}).map(([k, v]) => `${k} ${v.toLocaleString('en-US')}`).join(', ')}`);
+        continue;
+      }
       console.log(`${id}: ${x.periodFrom} to ${x.periodTo}: ${x.newDays} new days, ${x.changedDays} changed, confirmed sales ${money(x.loadedConfirmed)}${x.matchesFileTotal === true ? ' (matches the file total)' : x.matchesFileTotal === false ? ' (DOES NOT match the file total)' : ''}${x.reconciled ? '' : ' (a newer import overlaps this span)'}`);
     }
     if (failed) process.exitCode = 1;
@@ -125,7 +133,13 @@ async function main(): Promise<void> {
     const days = await store.loadLoadedDays();
     const weeks = weeksCoverage(days, new Date(Date.parse(`${opt('today') ?? phToday()}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)); // up to yesterday: today is an open day
     if (weeks.length === 0) console.log('Nothing loaded yet.');
-    for (const w of weeks) console.log(`${w.weekStart} to ${w.weekEnd}  ${w.status.padEnd(8)} ${w.daysLoaded}/7${w.missing.length ? `  missing ${w.missing.join(', ')}` : ''}`);
+    const reports = reportsByWeek(await store.loadReportPeriods(), weeks.map((w) => w.weekStart));
+    const mark = (st: string): string => (st === 'full' ? 'yes' : st === 'partial' ? 'part' : '-');
+    console.log('week                      sales            ads  sku  traffic  funnel');
+    for (const w of weeks) {
+      const r = reports[w.weekStart];
+      console.log(`${w.weekStart} to ${w.weekEnd}  ${w.status.padEnd(8)} ${w.daysLoaded}/7  ${mark(r.ads).padStart(5)} ${mark(r.sku_detail).padStart(4)} ${mark(r.traffic).padStart(8)} ${mark(r.product_overview).padStart(7)}${w.missing.length ? `  sales missing ${w.missing.join(', ')}` : ''}`);
+    }
     return;
   }
 

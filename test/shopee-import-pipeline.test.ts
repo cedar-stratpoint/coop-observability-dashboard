@@ -94,7 +94,10 @@ describe('plan, apply, undo', () => {
 
   it('says what it cannot import instead of failing', async () => {
     const store = new FakeStore();
-    expect((await plan(store, 'parentskudetail.20261012_20261018.xlsx', Buffer.from('x'))).status).toBe('unsupported');
+    // A per-order export holds buyer names and addresses: never read, never stored.
     expect((await plan(store, 'Order.all.20260901_20260930.xlsx', Buffer.from('x'))).status).toBe('unsupported');
+    expect((await plan(store, 'something_else.xlsx', Buffer.from('x'))).status).toBe('unsupported');
+    // The four weekly reports are supported now: a broken one is recorded as rejected, not skipped.
+    expect((await plan(store, 'parentskudetail.20261012_20261018.xlsx', Buffer.from('x'))).status).toBe('rejected');
   });
 });
