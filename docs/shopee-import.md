@@ -22,5 +22,15 @@ npm run shopee:import -- undo <importId> --reason "wrong export" --confirm-host 
 - `plan` writes only staged rows the app never reads. `apply` is one status change; `undo` is one status change back.
 - The command does not read `.env` files. Against a database that is not on this machine, `apply` and `undo` need `--confirm-host`.
 
+## API (same code as the command)
+`Authorization: Bearer $SHOPEE_IMPORT_TOKEN` on every call (set the token in the deployment's env, `openssl rand -hex 32`; unset means every call answers 503). Outside the page sign-in on purpose.
+```bash
+curl -s -H "Authorization: Bearer $T" -F "files=@sales_overview_20261012-20261018.xlsx" -F "files=@sales_overview_20261019-20261024.xlsx" https://<host>/api/shopee/import/plan
+curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' -d '{"importIds":["<id from the plan>"]}' https://<host>/api/shopee/import/apply
+curl -s -H "Authorization: Bearer $T" https://<host>/api/shopee/import/coverage
+curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' -d '{"importId":"<id>","reason":"wrong export"}' https://<host>/api/shopee/import/undo
+```
+Plan optional fields: `only_new=true`, `restate=<reason>`. At most 30 files of 5 MB each per request. A plan stages inert rows; only `apply` changes what the app shows. Responses never contain file contents.
+
 ## Checks before anything is written
 Continuous dates with one row per day; the file's period equals its name; daily placed and confirmed sales add up to the file's own totals; no negative or non-numeric figure. Confirmed can exceed placed on a day, so that is not a check.
