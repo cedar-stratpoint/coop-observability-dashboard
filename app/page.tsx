@@ -15,6 +15,8 @@ import {inRange} from '@/src/custom-range';
 import {isRangeRequest} from '@/src/sales-range';
 import {loadSalesRange} from '@/src/sales-range-load';
 import {SalesRangeView} from '@/components/analyst/sales-range-view';
+import {getMarketplaceDaily} from '@/src/marketplace-daily-data';
+import {overlayShopeeFacts} from '@/src/shopee-facts-overlay';
 
 export const dynamic = 'force-dynamic'; // reflect the latest archive when live
 
@@ -95,6 +97,18 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
   if (isRangeRequest(span)) {
     return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} />;
   }
-  const offline = await offlineCompare({from: row.window_from, to: row.window_to});
-  return <ChannelOverview brief={getBrief()} row={row} priorRow={priorRow} initialChannels={initial} offline={offline} />;
+  const [offline, daily] = await Promise.all([offlineCompare({from: row.window_from, to: row.window_to}), getMarketplaceDaily()]);
+  // Shopee figures come from the imported daily facts when every day of the week has one, so this view agrees with the date-range view.
+  const shopee = overlayShopeeFacts(row, daily);
+  const moved = shopee.facts != null && shopee.published != null && shopee.facts !== shopee.published;
+  return (
+    <>
+      {moved && (
+        <p className="mx-auto max-w-5xl px-6 pt-4 text-xs text-muted-foreground md:px-10">
+          Shopee sales use the imported daily report (₱{shopee.facts!.toLocaleString()}). The digest published ₱{shopee.published!.toLocaleString()}.
+        </p>
+      )}
+      <ChannelOverview brief={getBrief()} row={shopee.row} priorRow={priorRow} initialChannels={initial} offline={offline} />
+    </>
+  );
 }

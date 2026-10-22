@@ -582,6 +582,10 @@ describe('provider account errors', () => {
     await runChatLoop(a.opts);
     expect(a.events.find((e) => e.t === 'error')).toEqual({t: 'error', message: ACCOUNT_ERROR_TEXT});
     expect(JSON.stringify(a.events)).not.toMatch(/credit|anthropic api/i);
+    const capped = Object.assign(new Error('400 {"error":{"message":"You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC."}}'), {status: 400});
+    const c = setup(new FakeClient(() => capped));
+    await runChatLoop(c.opts);
+    expect(c.events.find((e) => e.t === 'error')).toEqual({t: 'error', message: ACCOUNT_ERROR_TEXT}); // a spend cap reads as an account problem, not "try again"
     const other = setup(new FakeClient(() => Object.assign(new Error('boom'), {status: 500})));
     await runChatLoop(other.opts);
     expect(other.events.find((e) => e.t === 'error')).toEqual({t: 'error', message: SAFE_ERROR_TEXT});
