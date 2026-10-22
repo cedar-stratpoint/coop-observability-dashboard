@@ -20,7 +20,7 @@ export async function parseProductOverview(bytes: ArrayBuffer | Uint8Array | Buf
   for (const r of rows.slice(1)) {
     if (r.every((c) => c.trim() === '')) continue;
     const day = toIsoDay(r[idx.date] ?? '');
-    if (!day) throw new Error(`Product Overview: "${r[idx.date]}" is not a date.`);
+    if (!day) throw new Error(`Product Overview: "${(r[idx.date] ?? '').slice(0, 12)}" is not a date.`);
     const o = (k: keyof typeof COLUMNS): number | null => (idx[k] >= 0 ? toNumber(r[idx[k]] ?? '') : null);
     days.push({
       day, visitors: o('visitors') ?? 0, pageViews: o('pageViews') ?? 0, itemsVisited: o('itemsVisited'), bounceVisitors: o('bounceVisitors'), bounceRate: o('bounceRate'), searchClicks: o('searchClicks'),

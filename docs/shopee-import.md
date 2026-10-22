@@ -59,4 +59,5 @@ Send any of the five report types in the same request; each result carries its `
 - **Traffic:** one row per day for each of All, PC and APP; daily page views add up to the file's own total per sheet. Visitors are not summed (they are unique per span).
 - **Product Overview:** one row per day, no gap or duplicate, period equals the file name.
 - **Ads and SKU:** the file has rows, no negative figure, and its period equals the file name (the SKU file carries no dates inside, so its name must keep Shopee's dates).
+- **Ads and SKU, week still open:** a weekly report whose period ends today or later is refused (`PERIOD_OPEN`): export it after the week closes. A SKU file name whose dates run backwards is refused too.
 - Today and later are never loaded from a daily report.

@@ -33,7 +33,7 @@ export async function parseTraffic(bytes: ArrayBuffer | Uint8Array | Buffer): Pr
     for (const r of rows.slice(dayHead.i + 1)) {
       if (r.every((c) => c.trim() === '')) continue;
       const day = toIsoDay(r[0] ?? '');
-      if (!day) throw new Error(`Traffic Overview: "${r[0]}" is not a date in sheet "${ws.name}".`);
+      if (!day) throw new Error(`Traffic Overview: "${(r[0] ?? '').slice(0, 12)}" is not a date in sheet "${ws.name}".`);
       const o = (k: keyof typeof COLUMNS): number | null => (idx[k] >= 0 ? toNumber(r[idx[k]] ?? '') : null);
       days.push({
         day, platform, pageViews: o('pageViews') ?? 0, avgPageViews: o('avgPageViews'), avgTimeSeconds: idx.avgTime >= 0 ? toSeconds(r[idx.avgTime] ?? '') : null, bounceRate: o('bounce'),

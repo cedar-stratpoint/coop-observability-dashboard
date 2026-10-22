@@ -17,7 +17,6 @@ export const TABLE: Record<SnapshotType, string> = {
   traffic: 'marketplace_traffic_day_observations',
   product_overview: 'marketplace_funnel_day_observations',
 };
-export const LABEL: Record<SnapshotType, string> = {ads: 'ads', sku_detail: 'product (SKU)', traffic: 'traffic', product_overview: 'product funnel'};
 
 export interface Snapshot {
   periodFrom: string;
@@ -56,6 +55,9 @@ function dayChecks(days: readonly string[], from: string, to: string, what: stri
   if (outside.length) failures.push(fail('PERIOD_MISMATCH', `${what}: rows outside the period (${outside.slice(0, 3).join(', ')}).`));
   return failures;
 }
+/** A weekly report whose period reaches today or later has an unfinished day in it: wait for the week to close. */
+const openPeriod = (periodTo: string, today: string, what: string): GateFailure[] =>
+  periodTo >= today ? [fail('PERIOD_OPEN', `${what}: the period runs to ${periodTo}, which is today or later. Export it after the week ends.`)] : [];
 const nameCheck = (p: {from: string; to: string}, name: {from: string; to: string} | null): GateFailure[] =>
   name && (name.from !== p.from || name.to !== p.to) ? [fail('FILENAME_MISMATCH', `The file name says ${name.from} to ${name.to} but the file covers ${p.from} to ${p.to}.`)] : [];
 const negative = (values: readonly (number | null)[], what: string): GateFailure[] =>
@@ -69,6 +71,7 @@ export async function readSnapshot(type: SnapshotType, bytes: Uint8Array, filena
         ...(p.rows.length ? [] : [fail('EMPTY', 'The ads report has no campaign rows.')]),
         ...(p.periodFrom <= p.periodTo ? [] : [fail('PERIOD_MISMATCH', 'The date period runs backwards.')]),
         ...nameCheck({from: p.periodFrom, to: p.periodTo}, filenamePeriod),
+        ...openPeriod(p.periodTo, today, 'Ads'),
         ...negative(p.rows.flatMap((r) => [r.expense, r.gmv, r.impressions, r.clicks]), 'Ads'),
       ];
       if (failures.length) return {ok: false, failures};
@@ -86,7 +89,7 @@ export async function readSnapshot(type: SnapshotType, bytes: Uint8Array, filena
     if (type === 'sku_detail') {
       if (!filenamePeriod) return {ok: false, failures: [fail('NO_PERIOD', 'This file has no dates inside it, and its name has none either. Keep the name Shopee gave it (parentskudetail.YYYYMMDD_YYYYMMDD.xlsx).')]};
       const p = await parseSkuDetail(bytes, filenamePeriod);
-      const failures = [...(p.rows.length ? [] : [fail('EMPTY', 'The SKU report has no product rows.')]), ...negative(p.rows.flatMap((r) => [r.salesPlaced, r.salesConfirmed, r.unitsPlaced, r.unitsConfirmed]), 'SKU')];
+      const failures = [...(p.rows.length ? [] : [fail('EMPTY', 'The SKU report has no product rows.')]), ...(filenamePeriod.from <= filenamePeriod.to ? [] : [fail('PERIOD_MISMATCH', 'The dates in the file name run backwards.')]), ...openPeriod(filenamePeriod.to, today, 'SKU'), ...negative(p.rows.flatMap((r) => [r.salesPlaced, r.salesConfirmed, r.unitsPlaced, r.unitsConfirmed]), 'SKU')];
       if (failures.length) return {ok: false, failures};
       const products = p.rows.filter((r) => r.variationId === null);
       const skuConfirmed = r2(products.reduce((s, r) => s + r.salesConfirmed, 0));

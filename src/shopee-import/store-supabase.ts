@@ -74,6 +74,7 @@ export function supabaseImportStore(sb: SupabaseClient): ImportStore {
       if (to === 'accepted') change.accepted_at = new Date().toISOString();
       if (patch?.note) change.note = patch.note;
       const {data, error} = await sb.from('import_runs').update(change).eq('import_id', importId).eq('status', from).select('import_id'); // pagination-ok: one primary key
+      if (error?.code === '23505') return false; // the same file was accepted by another process first (unique index on accepted files)
       fail('changing the import', error);
       return (data ?? []).length === 1;
     },
