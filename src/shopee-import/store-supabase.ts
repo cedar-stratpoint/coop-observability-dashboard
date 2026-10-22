@@ -90,6 +90,6 @@ export async function loadConfirmedByDay(sb: SupabaseClient): Promise<Map<string
 
 /** The stored digests as the dashboard reads them: window and rendered digest only. `bundle` (verbatim customer quotes) is never selected. */
 export async function loadDigestsForReconcile(sb: SupabaseClient): Promise<import('./reconcile').DigestForReconcile[]> {
-  const data = await fetchAllRows('digests', (a, b) => sb.from('digest_archive').select('window_from,window_to,created_at,digest').order('window_to', {ascending: false}).order('created_at', {ascending: false}).range(a, b));
+  const data = await fetchAllRows('digest_archive', (a, b) => sb.from('digest_archive').select('window_from,window_to,created_at,digest').order('window_to', {ascending: false}).order('created_at', {ascending: false}).range(a, b));
   return data as unknown as import('./reconcile').DigestForReconcile[];
 }
