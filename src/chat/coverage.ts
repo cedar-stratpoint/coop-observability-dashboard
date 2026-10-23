@@ -44,7 +44,7 @@ export function buildCoverage(data: MetricData): CoverageSummary {
 export const UNAVAILABLE: readonly {what: string; why: string}[] = Object.freeze([
   {what: 'Traffic', why: 'The Traffic page shows sample data, not real figures.'},
   {what: 'Meta ads', why: 'Not connected.'},
-  {what: 'Shopee, Lazada and Website sales', why: 'Only in the stored digests; not queryable yet.'},
+  {what: 'Shopee, Lazada and Website sales', why: 'Shopee and Lazada: get_digest (one published window) or get_channel_report (any dates). Website: stored digests only.'},
   {what: 'Customer-level data', why: 'Not exposed; only totals are available.'},
   {what: 'Anything before the first order date', why: 'There is no data before the first order.'},
 ]);
@@ -53,8 +53,8 @@ export const UNAVAILABLE: readonly {what: string; why: string}[] = Object.freeze
 const unavailableFor = (explore: boolean, crm = false, website = false): {what: string; why: string}[] =>
   UNAVAILABLE.filter((u) => !(explore && u.what === 'Customer-level data')).map((u) => {
     if (u.what.startsWith('Shopee')) {
-      if (crm || website) return {what: 'Shopee and Lazada sales', why: `Only in the stored digests (get_digest). Website totals for any dates come from get_channel_report${crm ? ', and website orders and customers from the CRM tools' : ''}.`};
-      return {...u, why: explore ? 'Only in the stored digests (get_digest).' : u.why};
+      if (crm || website) return {what: 'Shopee and Lazada sales', why: `Through get_digest (one published window) or get_channel_report (any dates). Website totals for any dates come from get_channel_report${crm ? ', and website orders and customers from the CRM tools' : ''}.`};
+      return {...u, why: explore ? 'Through get_digest (one published window) or get_channel_report (any dates).' : u.why};
     }
     if (crm && u.what === 'Customer-level data') return {what: 'POS customer-level data', why: 'Not exposed; only totals are available. Website customers come from list_crm_customers.'};
     return {...u};
