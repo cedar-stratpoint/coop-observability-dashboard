@@ -23,6 +23,8 @@ export const CHANNEL_LABEL: Record<RollupChannel, string> = {shopee: 'Shopee', l
 
 /** The slice of a stored digest the rollup reads (a DigestRow fits). */
 export interface RollupDigest {
+  /** 'daily_rows': synthetic, built from the saved per-day sales rows (imported exports, the Lazada API), not a published digest. */
+  source?: 'daily_rows';
   window_from: string;
   window_to: string;
   created_at: string;
@@ -164,7 +166,11 @@ function marketplace(channel: 'shopee' | 'lazada', fromDay: string, toDay: strin
   if (covered.length > 0) {
     // Always name where the per-day figures came from, so a fully covered channel is never reported as "not checked".
     const used = dedupeReruns([...new Set(covered.map((day) => supplied.get(day) as RollupDigest))], windowOf).sort((a, b) => Date.parse(a.window_from) - Date.parse(b.window_from));
-    notes.push(`${name}: per-day sales from digests ${labels(used)}${missing.length === 0 ? ' (every day covered)' : ''}.`);
+    const rows = used.filter((d) => d.source === 'daily_rows');
+    const digs = used.filter((d) => d.source !== 'daily_rows');
+    const done = missing.length === 0 ? ' (every day covered)' : '';
+    if (rows.length) notes.push(`${name}: per-day sales from saved daily rows (imported from ${channel === 'shopee' ? 'the Shopee exports' : 'the Lazada API'}) ${labels(rows)}${digs.length ? '' : done}.`);
+    if (digs.length) notes.push(`${name}: per-day sales from digests ${labels(digs)}${done}.`);
   }
   if (tiled) {
     for (const d of tiled) {

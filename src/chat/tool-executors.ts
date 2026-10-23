@@ -21,6 +21,7 @@ import {METRICS} from './metrics-registry';
 import {createRenderExecutors, type RenderExecutors} from './render-executors';
 import {createReportSession} from './report-session';
 import {createReportExecutors} from './report-tools';
+import {crmReason} from './crm/health';
 import {runMetric} from './query-metric';
 import type {MetricId, MetricRequest, MetricResult} from './result-types';
 import type {ToolExecutors} from './tools';
@@ -132,11 +133,13 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       }
       let website: {orders: RangeOrder[]; asOf: string} | null = null;
       let websiteFailed = false;
+      let websiteReason: string | undefined;
       if (wants('website') && ctx.crmOrders) {
         try {
           website = await ctx.crmOrders();
-        } catch {
+        } catch (e) {
           websiteFailed = true; // read failed: say so, never "live orders as of ..." with zero sales
+          websiteReason = crmReason(e);
         }
       }
       const result = shapeChannelReport(req, {
@@ -144,6 +147,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
         mock: digest?.source === 'mock',
         website,
         websiteFailed,
+        websiteReason,
         data: wants('offline') ? await data() : null,
       });
       counter += 1;
