@@ -1,5 +1,6 @@
 import {auth} from '@/auth';
 import {describeChatEnv} from '@/src/chat/health';
+import {crmHealth} from '@/src/chat/crm/health';
 import {exploreHealth} from '@/src/chat/explore-setup';
 import {safeReason} from '@/src/chat/server';
 import {chatReadClient} from '@/src/chat/read/client';
@@ -32,5 +33,6 @@ export async function GET() {
     }
   }
   const explore = await exploreHealth(process.env, session.user.email ?? null);
-  return Response.json({live: load.ok, load, env, explore}, {headers: {'cache-control': 'no-store'}});
+  const crm = await crmHealth(process.env);
+  return Response.json({live: load.ok, load, env, explore, crm}, {headers: {'cache-control': 'no-store'}});
 }
