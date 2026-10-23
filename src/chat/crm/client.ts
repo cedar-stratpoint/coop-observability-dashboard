@@ -34,10 +34,13 @@ export type CrmErrorCode = 'refused' | 'call_cap' | 'timeout' | 'unreachable' | 
 /** A failed CRM read. The message is the code only: never a URL, a token or upstream text. */
 export class CrmError extends Error {
   readonly code: CrmErrorCode;
-  constructor(code: CrmErrorCode) {
+  /** The HTTP status of an `upstream_error` (a number, safe to show: it says 401 versus 404 versus 500 without any upstream text). */
+  readonly status?: number;
+  constructor(code: CrmErrorCode, status?: number) {
     super(`crm ${code}`);
     this.name = 'CrmError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -131,7 +134,7 @@ export function createCrmClient(cfg: CrmClientConfig): CrmClient {
       });
       if (!res.ok) {
         await res.body?.cancel().catch(() => undefined);
-        throw new CrmError('upstream_error');
+        throw new CrmError('upstream_error', res.status);
       }
       const {text, bytes} = await readCapped(res, limits.maxResponseBytes);
       let body: unknown;
@@ -142,7 +145,7 @@ export function createCrmClient(cfg: CrmClientConfig): CrmClient {
       }
       return {endpoint: id, body, bytes, ms: clock() - t0};
     } catch (e) {
-      throw new CrmError(failureCode(e)); // a fresh error: never the original message, which may hold the URL
+      throw new CrmError(failureCode(e), e instanceof CrmError ? e.status : undefined); // a fresh error: never the original message, which may hold the URL; the status is a number and safe
     }
   }
 

@@ -21,8 +21,9 @@ import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, 
  * not /admin — where a POST starts a real customer email batch.
  */
 
-const base = process.env.CRM_API_URL?.replace(/\/$/, '');
-const token = process.env.CRM_API_READ_TOKEN;
+// Trimmed like the chat's resolveCrmAccess: a pasted trailing space or newline in the env value must not break the pages.
+const base = process.env.CRM_API_URL?.trim().replace(/\/+$/, '');
+const token = process.env.CRM_API_READ_TOKEN?.trim();
 
 /** True when the CRM env is absent — pages render the empty state, not an error. */
 export function crmConfigured(): boolean {

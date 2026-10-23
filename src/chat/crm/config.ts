@@ -27,7 +27,7 @@ export function resolveCrmAccess(env: CrmEnv): CrmAccess {
 }
 
 const shape = (raw: string | undefined) =>
-  raw === undefined || raw.trim() === '' ? {set: false as const} : {set: true as const, length: raw.length, hasQuotes: /^["'].*["']$/s.test(raw), hasEdgeWhitespace: raw !== raw.trim()};
+  raw === undefined || raw.trim() === '' ? {set: false as const} : {set: true as const, length: raw.length, hasQuotes: /^["'].*["']$/s.test(raw), hasEdgeWhitespace: raw !== raw.trim(), /** the code trims before use, so a paste mistake does not break the chat, but fix the env anyway */ trimmedByCode: raw !== raw.trim()};
 
 /** What this deployment sees of the CRM env, for /api/chat/health: set flags, lengths, paste mistakes and the HOST only. Never a value. */
 export function describeCrmEnv(env: CrmEnv) {
