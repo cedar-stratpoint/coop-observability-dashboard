@@ -95,6 +95,21 @@ export interface Insight {
 
 export type Coverage = 'full' | 'partial' | 'none';
 
+/** A cross-channel total built in code by get_channel_report. The model quotes it and never recomputes it. */
+export interface ChannelTotal {
+  label: string;
+  channels_included: string[];
+  channels_excluded: {channel: string; reason: string}[];
+  status: 'complete' | 'partial';
+  revenue: number | null;
+  orders: number | null;
+  units: number | null;
+  /** Revenue / orders of the totals (never an average of the channels' AOVs); null with no orders. */
+  aov: number | null;
+  note: string;
+  calculated_in_code: true;
+}
+
 export interface ResultMeta {
   source: 'live' | 'mock' | 'digest';
   range: {from: string; to: string; label: string}; // inclusive PHT dates
@@ -111,6 +126,8 @@ export interface ResultMeta {
   insights: Insight[];
   checks: Check[];
   reliable: boolean; // false when any check is 'fail'
+  /** get_channel_report at granularity 'total' only: sums across channels computed in code (whole centavos). The rows stay one per channel so charts do not double count. */
+  totals?: ChannelTotal[];
   /** Set only on an Explore (run_query) result: the label the block shows, the SQL for the disclosure (never given to the model), a code-written coverage note and lint warnings. */
   exploratory?: {label: string; sql: string; coverage_note: string; warnings: string[]};
 }
