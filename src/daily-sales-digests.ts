@@ -24,6 +24,6 @@ export function dailyRowsToDigests(rows: readonly DailySalesRow[]): RollupDigest
   return [...groups.values()].map((g) => {
     const daily: NonNullable<RollupDigest['digest']['daily']> = {};
     for (const c of ['shopee', 'lazada'] as const) if (g.daily[c].size) daily[c] = [...g.daily[c].values()].sort((a, b) => (a.day < b.day ? -1 : 1));
-    return {window_from: g.from, window_to: g.to, created_at: new Date(g.at).toISOString(), digest: {daily}};
+    return {source: 'daily_rows' as const, window_from: g.from, window_to: g.to, created_at: new Date(g.at).toISOString(), digest: {daily}};
   });
 }

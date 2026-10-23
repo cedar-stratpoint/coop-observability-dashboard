@@ -23,6 +23,8 @@ describe('code totals across channels (whole centavos)', () => {
     expect(all.channels_excluded).toEqual([]);
     expect(all.calculated_in_code).toBe(true);
     expect(all.note).toMatch(/calculated in code/);
+    expect(all.note).toContain('₱81,351 revenue from 168 orders'); // the revenue is IN the note, so the model quotes it
+    expect(online.note).toContain('₱77,350.6 revenue from 160 orders');
   });
   it('0.1 + 0.2 style values add exactly', () => {
     const t = totalOf('All channels', [p('shopee', 0.1, 1, 1), p('lazada', 0.2, 1, 1)]);
@@ -40,7 +42,8 @@ describe('code totals across channels (whole centavos)', () => {
     expect(all.channels_excluded).toEqual([{channel: 'Website', reason: 'is not connected'}]);
     expect(all.channels_included).toEqual(['Shopee', 'Lazada', 'Offline']);
     expect(all.revenue).toBe(175);
-    expect(all.note).toMatch(/Partial total of Shopee, Lazada and Offline only\. Left out: Website is not connected/);
+    expect(all.note).toMatch(/Partial total of Shopee, Lazada and Offline: ₱175 revenue from 4 orders\. Left out: Website is not connected/);
+    expect(all.note).toMatch(/quote this revenue and name what is missing/);
   });
   it('a partly covered channel is left out too, with its reason', () => {
     const t = totalOf('All channels', [p('shopee', 100, 2, 3), p('lazada', 40, 1, 1, 'partial')]);
