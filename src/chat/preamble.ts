@@ -21,11 +21,11 @@ const PET_EVENT = 'Pet type and event ARE available (pet_mix, event_rollup): run
 // "Not in the database" line then names what still is not readable, from the same flags.
 const salesSources = (flags: DataFlags): string =>
   flags.crm
-    ? 'Shopee/Lazada sales (stored digests only). Website orders, customers and abandoned checkouts ARE available live (get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts).'
+    ? 'Website orders, customers and abandoned checkouts ARE available live (get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts).'
     : flags.website
-      ? 'Shopee/Lazada sales (stored digests only). Website totals for any dates ARE available live through get_channel_report; other Website figures come from the stored digests only.'
-      : 'Shopee/Lazada/Website sales (stored digests only).';
-const notAvailableBase = (flags: DataFlags): string => `Not available: Traffic (sample data only), Meta ads (not connected), ${salesSources(flags)} ${notInDatabaseText(flags)} ${PET_EVENT}`;
+      ? 'Website totals for any dates ARE available live through get_channel_report; other Website figures come from the stored digests only.'
+      : 'Website sales come from the stored digests only.';
+const notAvailableBase = (flags: DataFlags): string => `Not available: Traffic (sample data only), Meta ads (not connected). ${salesSources(flags)} ${notInDatabaseText(flags)} ${PET_EVENT}`;
 const NOT_AVAILABLE_NO_EXPLORE = 'Contact details (email, phone, instagram) are not exposed by the metrics. Questions no metric covers cannot be answered.';
 const NOT_AVAILABLE_NO_EXPLORE_CRM = 'POS contact details are not exposed by the metrics; website customer contacts come from list_crm_customers. Other questions no tool covers cannot be answered.';
 const EXPLORE_AVAILABLE = 'For questions no metric covers (contacts, leads, stock lots and movements, saved reports, voided orders, hours), use list_tables, describe_table and run_query on the database tables.';
