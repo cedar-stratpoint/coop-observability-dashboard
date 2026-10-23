@@ -52,7 +52,7 @@ describe('describeData unavailable list', () => {
     const r = describeData({metric: 'all'}, data(), NOW, true) as {unavailable: {what: string; why: string}[]};
     const text = r.unavailable.map((u) => `${u.what} ${u.why}`).join(' ');
     expect(text).not.toMatch(/Not exposed|not queryable yet/i);
-    expect(r.unavailable.find((u) => /Shopee/.test(u.what))?.why).toBe('Only in the stored digests (get_digest).');
+    expect(r.unavailable.find((u) => /Shopee/.test(u.what))?.why).toBe('Through get_digest (one published window) or get_channel_report (any dates).');
   });
 
   it('Explore off: Customer-level data is still listed as not exposed', () => {
