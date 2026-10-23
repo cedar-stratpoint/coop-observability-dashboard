@@ -149,7 +149,7 @@ const loadDailyCached = unstable_cache(
       return [];
     }
   },
-  ['chat-marketplace-daily'],
+  ['chat-marketplace-daily-v2'], // v2: entries now carry `source`; the data cache survives a deploy, so an old-shape entry must not be served
   {revalidate: 300, tags: ['digest-archive']},
 );
 
