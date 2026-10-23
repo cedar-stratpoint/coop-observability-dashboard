@@ -15,7 +15,15 @@ const REASON: Record<CrmErrorCode, string> = {
 
 /** The safe, human reason a CRM read failed. Anything that is not a CrmError is "unknown": its text may hold a URL or a token. */
 export function crmReason(e: unknown): string {
-  return e instanceof CrmError ? REASON[e.code] : 'an unknown error';
+  if (!(e instanceof CrmError)) return 'an unknown error';
+  const s = e.status;
+  if (e.code === 'upstream_error' && typeof s === 'number') {
+    if (s === 401 || s === 403) return `the CRM refused the token (HTTP ${s}): CRM_API_READ_TOKEN does not belong to this CRM worker`;
+    if (s === 404) return 'the CRM has no such endpoint (HTTP 404): check CRM_API_URL points to the right worker';
+    if (s >= 500) return `the CRM had an error of its own (HTTP ${s})`;
+    return `the CRM answered with HTTP ${s} (check CRM_API_READ_TOKEN and that the URL is the right worker)`;
+  }
+  return REASON[e.code];
 }
 
 export interface CrmProbe {
