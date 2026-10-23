@@ -25,3 +25,18 @@ export function resolveCrmAccess(env: CrmEnv): CrmAccess {
   if (!schemeOk || u.username || u.password || u.search || u.hash || rawUrl.includes('#')) return {enabled: false, reason: 'url_invalid'};
   return {enabled: true, baseUrl: `${u.origin}${u.pathname.replace(/\/+$/, '')}`, token, tools: (env.CHAT_CRM_TOOLS ?? '').trim().toLowerCase() !== 'off'};
 }
+
+const shape = (raw: string | undefined) =>
+  raw === undefined || raw.trim() === '' ? {set: false as const} : {set: true as const, length: raw.length, hasQuotes: /^["'].*["']$/s.test(raw), hasEdgeWhitespace: raw !== raw.trim(), /** the code trims before use, so a paste mistake does not break the chat, but fix the env anyway */ trimmedByCode: raw !== raw.trim()};
+
+/** What this deployment sees of the CRM env, for /api/chat/health: set flags, lengths, paste mistakes and the HOST only. Never a value. */
+export function describeCrmEnv(env: CrmEnv) {
+  let host: string | null = null;
+  try {
+    host = new URL((env.CRM_API_URL ?? '').trim()).host;
+  } catch {
+    host = null;
+  }
+  const access = resolveCrmAccess(env);
+  return {CRM_API_URL: {...shape(env.CRM_API_URL), host}, CRM_API_READ_TOKEN: shape(env.CRM_API_READ_TOKEN), enabled: access.enabled, ...(access.enabled ? {tools: access.tools} : {reason: access.reason})};
+}

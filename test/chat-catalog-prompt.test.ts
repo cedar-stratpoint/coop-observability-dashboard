@@ -12,7 +12,7 @@ import {estimateTokens} from '../src/chat/skills/load';
 import {buildPreamble} from '../src/chat/preamble';
 import type {MetricData} from '../src/chat/result-types';
 
-const BUDGET = 14300; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%
+const BUDGET = 14400; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic)
 
 describe('2b.2 data index in the cached prompt', () => {
   const text = buildDataIndexText();

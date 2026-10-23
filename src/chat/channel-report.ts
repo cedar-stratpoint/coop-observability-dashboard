@@ -2,12 +2,13 @@
 // model); the result is a MetricResult the render tools can draw. Pure: digests, CRM orders and POS data are injected.
 import {phDayStart} from '../custom-range';
 import {sameWindow, windowOf} from '../digest-windows';
-import {buckets, CHANNEL_LABEL, type RollupDigest, GRANULARITIES, ROLLUP_CHANNELS, rollupChannels, type Granularity, type RollupChannel, type RollupInput} from '../period-rollup';
+import {buckets, CHANNEL_LABEL, type ChannelPeriod, type RollupDigest, GRANULARITIES, ROLLUP_CHANNELS, rollupChannels, type Granularity, type RollupChannel, type RollupInput} from '../period-rollup';
+import {formatPeso} from '../pos-format';
 import {buildCoverage} from './coverage';
 import type {DigestSource} from './digest-lookup';
 import {dayKeysBetween, isRealDay, rangeLabel} from './range';
 import type {DigestRow} from './read/digest';
-import type {Check, MeasureDecl, MetricData, MetricError, MetricResult, MetricRow, ResultColumn} from './result-types';
+import type {ChannelTotal, Check, MeasureDecl, MetricData, MetricError, MetricResult, MetricRow, ResultColumn} from './result-types';
 
 export const REPORT_CHANNELS = ['all', ...ROLLUP_CHANNELS] as const;
 export interface ChannelReportRequest {
@@ -24,6 +25,8 @@ export interface ReportSources {
   data: MetricData | null;
   /** The CRM is connected but the read failed: Website says so instead of "not connected". */
   websiteFailed?: boolean;
+  /** Why the CRM read failed, as a safe class (never a URL, token or upstream text). */
+  websiteReason?: string;
 }
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -34,12 +37,72 @@ const MAX_NOTES = 16;
 const fail = (error: string): MetricError => ({error});
 const col = (key: string, label: string, unit: ResultColumn['unit'], role: ResultColumn['role']): ResultColumn => ({key, label, unit, role});
 
-const SOURCES = 'Shopee and Lazada from the digests\' per-day sales (newest digest wins per day; a day inside a digest with no sales is a zero), Website from live CRM orders, Offline from completed POS orders';
+const SOURCES = 'Shopee and Lazada from saved per-day sales rows (imported from the exports and the Lazada API) and the digests\' per-day sales (newest digest wins per day; a day inside a digest with no sales is a zero), Website from live CRM orders, Offline from completed POS orders';
 const BASIS = `Built in code: ${SOURCES}. AOV is revenue / orders of the totals. Say every coverage note below before any figure, and name the dates.`;
 const REVENUE: MeasureDecl = {key: 'revenue', label: 'Revenue', kind: 'measured', unit: 'PHP', method: `Summed per channel: ${SOURCES}.`};
 const ORDERS: MeasureDecl = {key: 'orders', label: 'Orders', kind: 'measured', unit: 'count', method: 'Orders summed over the same days.'};
 const UNITS: MeasureDecl = {key: 'units', label: 'Units', kind: 'measured', unit: 'units', method: 'Units summed over the same days; null when a whole published window had no unit count.'};
 const AOV: MeasureDecl = {key: 'aov', label: 'Average order value', kind: 'derived', unit: 'PHP', method: 'Revenue / orders of the summed totals, never an average of averages.'};
+
+const ONLINE: readonly RollupChannel[] = ['shopee', 'lazada', 'website'];
+const WHY: Record<ChannelPeriod['status'], string> = {
+  ok: '',
+  partial: 'only part of these dates is covered',
+  not_combinable: 'its published windows do not line up with these dates',
+  no_data: 'has no figures for these dates',
+  not_connected: 'is not connected',
+};
+const names = (cs: readonly string[]): string => (cs.length <= 1 ? cs.join('') : `${cs.slice(0, -1).join(', ')} and ${cs[cs.length - 1]}`);
+
+/**
+ * One cross-channel total over the given channel periods, in WHOLE CENTAVOS (integer sums, no float drift). Owner defaults 2026-10-22: a total
+ * counts only channels whose figures are complete for the dates (status ok, with revenue and orders); any other requested channel is named as
+ * left out and makes the total `partial`, never silently included. AOV is revenue / orders of the totals. Units are null if any included
+ * channel has no unit count. Ad spend and ROAS are not totalled here (the report carries no ad revenue to recompute ROAS from).
+ */
+export function totalOf(label: string, periods: readonly ChannelPeriod[]): ChannelTotal {
+  const used = periods.filter((p) => p.status === 'ok' && p.revenue !== null && p.orders !== null);
+  const left = periods.filter((p) => !used.includes(p));
+  const cents = used.reduce((s, p) => s + Math.round((p.revenue as number) * 100), 0);
+  const orders = used.reduce((s, p) => s + (p.orders as number), 0);
+  const unitsKnown = used.length > 0 && used.every((p) => p.units !== null);
+  const included = used.map((p) => CHANNEL_LABEL[p.channel]);
+  const excluded = left.map((p) => ({channel: CHANNEL_LABEL[p.channel], reason: WHY[p.status] || 'has no complete figures'}));
+  const complete = used.length > 0 && left.length === 0;
+  const why = excluded.map((e) => `${e.channel} ${e.reason}`).join('; ');
+  // `ok` is all-or-nothing for a marketplace: marketplace() in period-rollup.ts gives `ok` only when per-day rows or whole published windows
+  // (tile(), which returns null unless it covers every missing day exactly once) cover the dates, and `partial` otherwise. So `ok` is safe to trust here.
+  // The channels do not share a source though: Website is live CRM orders as of now, Shopee and Lazada are saved daily rows and published digests.
+  const basis = used.some((p) => p.channel === 'website') && used.length > 1 ? ' Website figures are live CRM orders while Shopee and Lazada come from saved daily rows and published digests, so say the total is not like for like.' : '';
+  const figure = used.length ? `${formatPeso(cents / 100)} revenue from ${orders} ${orders === 1 ? 'order' : 'orders'}` : '';
+  const note =
+    used.length === 0
+      ? `No total: no requested channel has complete figures for these dates (${why}).`
+      : complete
+        ? `${label}: ${names(included)}: ${figure}, calculated in code.${unitsKnown ? '' : ' Units are left out because a channel has no unit count.'}${basis}`
+        : `Partial total of ${names(included)}: ${figure}. Left out: ${why}. Say it is partial, quote this revenue and name what is missing.${basis}`;
+  return {
+    label,
+    channels_included: included,
+    channels_excluded: excluded,
+    status: complete ? 'complete' : 'partial',
+    revenue: used.length ? cents / 100 : null,
+    orders: used.length ? orders : null,
+    units: unitsKnown ? used.reduce((s, p) => s + (p.units as number), 0) : null,
+    aov: used.length && orders > 0 ? Math.round(cents / orders) / 100 : null,
+    note,
+    calculated_in_code: true,
+  };
+}
+
+/** The totals for a granularity 'total' report: over every requested channel, and an online-only total when Offline is also requested. */
+export function reportTotals(requested: readonly RollupChannel[], periods: readonly ChannelPeriod[]): ChannelTotal[] {
+  const mine = periods.filter((p) => requested.includes(p.channel));
+  if (mine.length < 2) return [];
+  const all = totalOf(requested.length === ROLLUP_CHANNELS.length ? 'All channels' : 'Total of the requested channels', mine);
+  const online = mine.filter((p) => ONLINE.includes(p.channel));
+  return requested.includes('offline') && online.length >= 2 ? [totalOf('Online total', online), all] : [all];
+}
 
 /** The model's input as a request, or a steering error. The dates are the OWNER's: without them it asks for them. */
 export function readReportInput(input: unknown): ChannelReportRequest | MetricError {
@@ -93,9 +156,10 @@ export function shapeChannelReport(req: ChannelReportRequest, src: ReportSources
     offline: src.data ? {orders: src.data.orders, dataFrom: cover?.dataFrom ?? null, dataTo: cover?.dataTo ?? null} : null,
   });
   if (src.websiteFailed) {
-    for (const b of out) for (const p of b.channels) if (p.channel === 'website' && p.status === 'not_connected') p.notes = ['Website: the CRM could not be read right now; no website figures.'];
+    for (const b of out) for (const p of b.channels) if (p.channel === 'website' && p.status === 'not_connected') p.notes = [`Website: the CRM could not be read right now; no website figures.${src.websiteReason ? ` Reason: ${src.websiteReason}.` : ''}`];
   }
   const total = req.granularity === 'total';
+  const totals = total ? reportTotals(req.channels, out[0].channels) : []; // per-bucket totals are not built: ask granularity "total"
   const columns: ResultColumn[] = total
     ? [col('channel', 'Channel', 'text', 'category'), col('revenue', 'Revenue', 'PHP', 'measure'), col('orders', 'Orders', 'count', 'measure'), col('units', 'Units', 'units', 'measure'), col('aov', 'Average order value', 'PHP', 'measure')]
     : [col('period', req.granularity === 'week' ? 'Week starting' : 'Month starting', 'date', 'time'), ...req.channels.map((c) => col(c, CHANNEL_LABEL[c], 'PHP', 'measure'))];
@@ -134,6 +198,7 @@ export function shapeChannelReport(req: ChannelReportRequest, src: ReportSources
       dataFrom: req.from,
       dataTo: req.to,
       rowCount: rows.length,
+      ...(totals.length ? {totals} : {}),
       coverage: full ? 'full' : 'partial',
       coveredFrom: req.from,
       coveredTo: req.to,
