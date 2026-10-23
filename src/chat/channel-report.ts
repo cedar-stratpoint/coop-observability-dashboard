@@ -3,6 +3,7 @@
 import {phDayStart} from '../custom-range';
 import {sameWindow, windowOf} from '../digest-windows';
 import {buckets, CHANNEL_LABEL, type ChannelPeriod, type RollupDigest, GRANULARITIES, ROLLUP_CHANNELS, rollupChannels, type Granularity, type RollupChannel, type RollupInput} from '../period-rollup';
+import {formatPeso} from '../pos-format';
 import {buildCoverage} from './coverage';
 import type {DigestSource} from './digest-lookup';
 import {dayKeysBetween, isRealDay, rangeLabel} from './range';
@@ -24,6 +25,8 @@ export interface ReportSources {
   data: MetricData | null;
   /** The CRM is connected but the read failed: Website says so instead of "not connected". */
   websiteFailed?: boolean;
+  /** Why the CRM read failed, as a safe class (never a URL, token or upstream text). */
+  websiteReason?: string;
 }
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -34,7 +37,7 @@ const MAX_NOTES = 16;
 const fail = (error: string): MetricError => ({error});
 const col = (key: string, label: string, unit: ResultColumn['unit'], role: ResultColumn['role']): ResultColumn => ({key, label, unit, role});
 
-const SOURCES = 'Shopee and Lazada from the digests\' per-day sales (newest digest wins per day; a day inside a digest with no sales is a zero), Website from live CRM orders, Offline from completed POS orders';
+const SOURCES = 'Shopee and Lazada from saved per-day sales rows (imported from the exports and the Lazada API) and the digests\' per-day sales (newest digest wins per day; a day inside a digest with no sales is a zero), Website from live CRM orders, Offline from completed POS orders';
 const BASIS = `Built in code: ${SOURCES}. AOV is revenue / orders of the totals. Say every coverage note below before any figure, and name the dates.`;
 const REVENUE: MeasureDecl = {key: 'revenue', label: 'Revenue', kind: 'measured', unit: 'PHP', method: `Summed per channel: ${SOURCES}.`};
 const ORDERS: MeasureDecl = {key: 'orders', label: 'Orders', kind: 'measured', unit: 'count', method: 'Orders summed over the same days.'};
@@ -71,12 +74,13 @@ export function totalOf(label: string, periods: readonly ChannelPeriod[]): Chann
   // (tile(), which returns null unless it covers every missing day exactly once) cover the dates, and `partial` otherwise. So `ok` is safe to trust here.
   // The channels do not share a source though: Website is live CRM orders as of now, Shopee and Lazada are saved daily rows and published digests.
   const basis = used.some((p) => p.channel === 'website') && used.length > 1 ? ' Website figures are live CRM orders while Shopee and Lazada come from saved daily rows and published digests, so say the total is not like for like.' : '';
+  const figure = used.length ? `${formatPeso(cents / 100)} revenue from ${orders} ${orders === 1 ? 'order' : 'orders'}` : '';
   const note =
     used.length === 0
       ? `No total: no requested channel has complete figures for these dates (${why}).`
       : complete
-        ? `${label}: ${names(included)}, calculated in code.${unitsKnown ? '' : ' Units are left out because a channel has no unit count.'}${basis}`
-        : `Partial total of ${names(included)} only. Left out: ${why}. Say it is partial and name what is missing.${basis}`;
+        ? `${label}: ${names(included)}: ${figure}, calculated in code.${unitsKnown ? '' : ' Units are left out because a channel has no unit count.'}${basis}`
+        : `Partial total of ${names(included)}: ${figure}. Left out: ${why}. Say it is partial, quote this revenue and name what is missing.${basis}`;
   return {
     label,
     channels_included: included,
@@ -152,7 +156,7 @@ export function shapeChannelReport(req: ChannelReportRequest, src: ReportSources
     offline: src.data ? {orders: src.data.orders, dataFrom: cover?.dataFrom ?? null, dataTo: cover?.dataTo ?? null} : null,
   });
   if (src.websiteFailed) {
-    for (const b of out) for (const p of b.channels) if (p.channel === 'website' && p.status === 'not_connected') p.notes = ['Website: the CRM could not be read right now; no website figures.'];
+    for (const b of out) for (const p of b.channels) if (p.channel === 'website' && p.status === 'not_connected') p.notes = [`Website: the CRM could not be read right now; no website figures.${src.websiteReason ? ` Reason: ${src.websiteReason}.` : ''}`];
   }
   const total = req.granularity === 'total';
   const totals = total ? reportTotals(req.channels, out[0].channels) : []; // per-bucket totals are not built: ask granularity "total"

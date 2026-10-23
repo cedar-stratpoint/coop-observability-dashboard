@@ -51,6 +51,7 @@ describe('golden: totals come from the code, the model quotes them', () => {
     const all = total(report, 'All channels');
     expect(online).toMatchObject({status: 'complete', channels_included: ['Shopee', 'Lazada', 'Website'], calculated_in_code: true});
     expect(online.revenue).toBe(73200);
+    expect(online.note).toContain(`${peso(online.revenue!)} revenue from`); // the total's own sentence carries the revenue
     expect(all.status).toBe('partial');
     expect(all.channels_excluded.map((c) => c.channel)).toEqual(['Offline']);
     // whole centavos: the total equals the sum of the three rows to the centavo, with no float drift
@@ -71,6 +72,8 @@ describe('golden: totals come from the code, the model quotes them', () => {
     expect(online.status).toBe('partial');
     expect(online.channels_excluded).toEqual([{channel: 'Website', reason: 'is not connected'}]);
     expect(online.revenue).toBe(72200);
+    expect(online.note).toContain(`${peso(online.revenue!)} revenue from`);
+    expect(answerText).toContain(peso(online.revenue!)); // and the answer states it
     expect(online.note).toMatch(/Left out: Website is not connected/);
     expect(answerText).toMatch(/partial total/);
     expect(answerText).toMatch(/Website/);
