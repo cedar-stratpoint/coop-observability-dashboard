@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-24 — Goldline tables in Nichido drop the gl_ prefix
+In the Nichido project Goldline is the only tenant, so its tables, view and functions lose the `gl_` prefix the shared archive needed: `gl_sales` is now `sales`, `gl_inventory_snapshots` is `inventory_snapshots`, `gl_commit_batch` is `commit_batch`, and so on. The same goes for their indexes, constraints and sequences. Only database names change. TypeScript names such as `glTags` and `getGlCatalog`, the `goldline-uploads` bucket and storage paths stay as they are.
+- **Decision:** the archive's old copy keeps its `gl_*` names. It is kept indefinitely, Ask Coop's explore blocklist still fences `gl_` there, and `archive_lock_goldline.sql` still targets those names. The copy script reads archive `gl_<name>` and writes Nichido `<name>`.
+- **Schema:** `supabase/nichido/goldline_schema.sql` (source of truth) now uses the plain names. `supabase/nichido/rename_drop_gl_prefix.sql` converts a project built with the old names in one transaction. It renames constraints, indexes, sequences, the view and tables in place (keeping data, ids, RLS and grants), and drops and recreates the six functions, because their bodies name tables. Applied on Nichido Staging: no `gl_` object remains, row counts are unchanged, and the functions were re-tested in a rolled-back block.
+- **Guard test** (`test/goldline-nichido-guard.test.ts`) now lists the Nichido table and function names. It also fails if any code still queries a `gl_` name.
+- Checked locally as a Goldline admin: all six Goldline pages load, and Nichido's API logs show only the new names, all 200.
+- *Not updated:* Ask Coop's `src/chat/catalog/catalog.json` still lists `gl_*` as the Goldline pages' data. It is generated from the knowledge base (`knowledge/data-catalog/`, not in this checkout), so the change belongs there. The text only describes the data sources (Goldline pages are fenced from Ask Coop), so nothing breaks.
+
 ## 2026-10-22 — Goldline data moves to its own Nichido Supabase project
 Goldline's `gl_*` tables and the `goldline-uploads` bucket move out of the shared Coop archive into the dedicated Nichido project. Every Goldline module now goes through one client, `src/nichido-client.ts` (`NICHIDO_URL`, `NICHIDO_SERVICE_ROLE_KEY`), in place of the nine copies that each read the archive env.
 - **Decisions (owner):** sign-in, memberships and the company registry stay in the archive; Nichido only gets a one-row `companies` mirror (`goldline`) so the `gl_*` foreign keys and the overview's company name keep working. The archive's `gl_*` copy is kept indefinitely, made read-only after cutover. Staging first; prod only on an explicit go-ahead.
