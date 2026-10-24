@@ -1,5 +1,6 @@
 // Copy Goldline's data (gl_* rows + goldline-uploads files) from the Coop archive
-// project to the dedicated Nichido project. One-off per environment; safe to re-run.
+// project to the dedicated Nichido project, where the tables drop the gl_ prefix
+// (archive gl_sales → Nichido sales). One-off per environment; safe to re-run.
 //
 //   npx tsx --env-file=.env --env-file=.env.local scripts/nichido/migrate-goldline.ts            # plan only (default)
 //   npx tsx --env-file=.env --env-file=.env.local scripts/nichido/migrate-goldline.ts --apply    # copy
@@ -12,7 +13,7 @@
 //
 // Rows keep their ids and are upserted on the primary key in FK order, so a re-run
 // changes nothing or catches up rows written since the last run. Files keep their exact
-// storage paths, so gl_uploads.storage_path stays valid. Nothing is ever deleted on
+// storage paths, so uploads.storage_path stays valid. Nothing is ever deleted on
 // either side. Schema must already exist (supabase/nichido/goldline_schema.sql); after
 // --apply, run supabase/nichido/goldline_post_copy.sql to move the id sequences on.
 import {createHash} from 'node:crypto';
@@ -24,21 +25,21 @@ const COMPANY = 'goldline';
 const BUCKET = 'goldline-uploads';
 const CHUNK = 500;
 
-// FK order: parents before children.
+// FK order: parents before children. `name` is the Nichido table; the archive's is gl_<name>.
 const TABLES: Array<{name: string; pk: string[]}> = [
-  {name: 'gl_stores', pk: ['company_id', 'store_code']},
-  {name: 'gl_products', pk: ['company_id', 'item_code']},
-  {name: 'gl_upload_batches', pk: ['id']},
-  {name: 'gl_uploads', pk: ['id']},
-  {name: 'gl_extractions', pk: ['id']},
-  {name: 'gl_inventory', pk: ['id']},
-  {name: 'gl_sales', pk: ['id']},
-  {name: 'gl_supply_settings', pk: ['company_id']},
-  {name: 'gl_line_lead_times', pk: ['company_id', 'product_line']},
-  {name: 'gl_store_transit', pk: ['company_id', 'store_code']},
-  {name: 'gl_warehouse_stock', pk: ['company_id', 'item_code']},
-  {name: 'gl_shipments', pk: ['id']},
-  {name: 'gl_price_changes', pk: ['id']},
+  {name: 'stores', pk: ['company_id', 'store_code']},
+  {name: 'products', pk: ['company_id', 'item_code']},
+  {name: 'upload_batches', pk: ['id']},
+  {name: 'uploads', pk: ['id']},
+  {name: 'extractions', pk: ['id']},
+  {name: 'inventory', pk: ['id']},
+  {name: 'sales', pk: ['id']},
+  {name: 'supply_settings', pk: ['company_id']},
+  {name: 'line_lead_times', pk: ['company_id', 'product_line']},
+  {name: 'store_transit', pk: ['company_id', 'store_code']},
+  {name: 'warehouse_stock', pk: ['company_id', 'item_code']},
+  {name: 'shipments', pk: ['id']},
+  {name: 'price_changes', pk: ['id']},
 ];
 
 type Row = Record<string, unknown>;
@@ -92,7 +93,7 @@ async function listFiles(db: SupabaseClient, prefix = ''): Promise<FileEntry[]> 
 }
 
 async function copyTable(src: SupabaseClient, dst: SupabaseClient, t: {name: string; pk: string[]}) {
-  const rows = await readAll(src, t.name, t.pk);
+  const rows = await readAll(src, `gl_${t.name}`, t.pk);
   const have = new Map((await readAll(dst, t.name, t.pk)).map((r) => [keyOf(r, t.pk), canon(r)]));
   const todo = rows.filter((r) => have.get(keyOf(r, t.pk)) !== canon(r));
   if (mode === 'apply') {
@@ -122,7 +123,7 @@ async function copyFiles(src: SupabaseClient, dst: SupabaseClient) {
 async function verify(src: SupabaseClient, dst: SupabaseClient): Promise<boolean> {
   let ok = true;
   for (const t of TABLES) {
-    const [a, b] = await Promise.all([readAll(src, t.name, t.pk), readAll(dst, t.name, t.pk)]);
+    const [a, b] = await Promise.all([readAll(src, `gl_${t.name}`, t.pk), readAll(dst, t.name, t.pk)]);
     const same = a.length === b.length && hashRows(a) === hashRows(b);
     ok &&= same;
     console.log(`  ${same ? 'OK  ' : 'DIFF'} ${t.name.padEnd(20)} ${a.length} / ${b.length}  ${hashRows(a)} / ${hashRows(b)}`);

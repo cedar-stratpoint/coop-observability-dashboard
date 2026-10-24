@@ -2,13 +2,20 @@ import {readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
-// Goldline's gl_* tables and goldline-uploads bucket live in the Nichido project. Any
-// module that touches them must go through src/nichido-client.ts; one that built its
-// own client from the archive env would quietly read and write the old copy there.
+// Goldline's tables and goldline-uploads bucket live in the Nichido project (named
+// without the archive's gl_ prefix; supabase/nichido/goldline_schema.sql). Any module
+// that touches them must go through src/nichido-client.ts; one that built its own
+// client from the archive env would read and write the archive's old gl_* copy, or a
+// same-named table that is not Goldline's.
 
 const ROOT = join(__dirname, '..');
 const SCAN = ['src', 'app', 'components'];
-const GL_ACCESS = /\.from\(\s*['"`]gl_|\.rpc\(\s*['"`]gl_|GOLDLINE_BUCKET|goldline-uploads/;
+const NICHIDO_TABLES = ['stores', 'products', 'sales', 'inventory', 'inventory_snapshots', 'uploads', 'extractions', 'upload_batches',
+  'supply_settings', 'line_lead_times', 'store_transit', 'warehouse_stock', 'shipments', 'price_changes'];
+const NICHIDO_FUNCTIONS = ['commit_batch', 'sales_rollup', 'count_sources', 'record_shipment', 'cancel_shipment', 'set_price'];
+const q = (call: string, names: string[]) => `\\.${call}\\(\\s*['"\`](?:${names.join('|')})['"\`]`;
+const NICHIDO_QUERY = new RegExp(`${q('from', NICHIDO_TABLES)}|${q('rpc', NICHIDO_FUNCTIONS)}|\\.storage\\b`);
+const GL_ACCESS = new RegExp(`${NICHIDO_QUERY.source}|GOLDLINE_BUCKET|goldline-uploads`);
 
 function files(dir: string): string[] {
   return readdirSync(join(ROOT, dir), {withFileTypes: true}).flatMap((e) => {
@@ -31,9 +38,14 @@ describe('Goldline data goes through the Nichido client', () => {
     expect(bad).toEqual([]);
   });
 
-  it('every module that queries gl_* imports the Nichido client', () => {
-    const queries = goldline.filter(({src}) => /\.(from|rpc)\(\s*['"`]gl_|\.storage\b/.test(src));
+  it('every module that queries a Nichido table or function imports the Nichido client', () => {
+    const queries = goldline.filter(({src}) => NICHIDO_QUERY.test(src));
     const missing = queries.filter(({src}) => !src.includes("from './nichido-client'")).map(({f}) => f);
     expect(missing).toEqual([]);
+  });
+
+  it('nothing still queries the old gl_ names (those are the archive copy)', () => {
+    const old = all.filter(({src}) => /\.(from|rpc)\(\s*['"`]gl_/.test(src)).map(({f}) => f);
+    expect(old).toEqual([]);
   });
 });

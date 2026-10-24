@@ -7,7 +7,7 @@ import {pageCoverage} from './goldline-inventory';
 // active company_id — the service-role key bypasses RLS, so that filter is the
 // tenant fence. The page shows ONE store × form period at a time (≤ ~260 rows), so
 // nothing here scans the whole inventory history; the pickers come from the
-// gl_inventory_snapshots view.
+// inventory_snapshots view.
 
 const db = nichidoDb;
 
@@ -39,12 +39,12 @@ export async function getCountSources(companyId: string, store: string | null, s
   const supa = db();
   if (!store) {
     // pagination-ok: count-only head request, returns no rows.
-    const pending = await supa.from('gl_uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('status', 'needs_review');
+    const pending = await supa.from('uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('status', 'needs_review');
     return {...empty, pendingReview: pending.count ?? 0};
   }
-  // One round trip (gl_count_sources): latest count + its scans + the review count.
-  const {data, error} = await supa.rpc('gl_count_sources', {p_company: companyId, p_store: store});
-  if (error) throw new Error(`gl_count_sources failed: ${error.message}`);
+  // One round trip (count_sources): latest count + its scans + the review count.
+  const {data, error} = await supa.rpc('count_sources', {p_company: companyId, p_store: store});
+  if (error) throw new Error(`count_sources failed: ${error.message}`);
   const r = (data ?? {}) as {
     pending?: number;
     latest?: CountSources['latest'];
@@ -68,7 +68,7 @@ export async function committedSnapshotFor(
   if (!nichidoConfigured()) return null;
   // pagination-ok: single row.
   const res = await db()
-    .from('gl_inventory')
+    .from('inventory')
     .select('store_code,period_start,period_end')
     .eq('company_id', companyId)
     .eq('source_upload_id', uploadId)

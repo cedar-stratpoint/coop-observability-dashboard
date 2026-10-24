@@ -45,9 +45,9 @@ export function getGlCatalog(companyId: string): Promise<GlProduct[]> {
   if (!configured()) return Promise.resolve([]);
   return unstable_cache(
     async () =>
-      (await fetchAllRows('gl_products', (from, to) =>
+      (await fetchAllRows('products', (from, to) =>
         db()
-          .from('gl_products')
+          .from('products')
           .select('item_code,sku_code,product_line,variant,unit_price,is_bestseller,hidden')
           .eq('company_id', companyId)
           .order('item_code')
@@ -62,8 +62,8 @@ export function getGlStores(companyId: string): Promise<GlStoreRow[]> {
   if (!configured()) return Promise.resolve([]);
   return unstable_cache(
     async () =>
-      (await fetchAllRows('gl_stores', (from, to) =>
-        db().from('gl_stores').select('store_code,name,status,region,area').eq('company_id', companyId).order('store_code').range(from, to),
+      (await fetchAllRows('stores', (from, to) =>
+        db().from('stores').select('store_code,name,status,region,area').eq('company_id', companyId).order('store_code').range(from, to),
       )) as unknown as GlStoreRow[],
     ['gl-stores', companyId],
     {tags: [glTags.stores(companyId)], revalidate: REVALIDATE_SECONDS},
@@ -77,18 +77,18 @@ export function getGlSupplyRef(companyId: string): Promise<GlSupplyRef> {
       const supa = db();
       const [settings, lines, transit, warehouse] = await Promise.all([
         // pagination-ok: one row by primary key (company_id).
-        supa.from('gl_supply_settings').select('default_production_days,default_transit_days,is_sample').eq('company_id', companyId).maybeSingle(),
-        fetchAllRows('gl_line_lead_times', (from, to) =>
-          supa.from('gl_line_lead_times').select('product_line,production_days,is_sample').eq('company_id', companyId).order('product_line').range(from, to),
+        supa.from('supply_settings').select('default_production_days,default_transit_days,is_sample').eq('company_id', companyId).maybeSingle(),
+        fetchAllRows('line_lead_times', (from, to) =>
+          supa.from('line_lead_times').select('product_line,production_days,is_sample').eq('company_id', companyId).order('product_line').range(from, to),
         ),
-        fetchAllRows('gl_store_transit', (from, to) =>
-          supa.from('gl_store_transit').select('store_code,transit_days,is_sample').eq('company_id', companyId).order('store_code').range(from, to),
+        fetchAllRows('store_transit', (from, to) =>
+          supa.from('store_transit').select('store_code,transit_days,is_sample').eq('company_id', companyId).order('store_code').range(from, to),
         ),
-        fetchAllRows('gl_warehouse_stock', (from, to) =>
-          supa.from('gl_warehouse_stock').select('item_code,on_hand,is_sample').eq('company_id', companyId).order('item_code').range(from, to),
+        fetchAllRows('warehouse_stock', (from, to) =>
+          supa.from('warehouse_stock').select('item_code,on_hand,is_sample').eq('company_id', companyId).order('item_code').range(from, to),
         ),
       ]);
-      if (settings.error) throw new Error(`gl_supply_settings read failed: ${settings.error.message}`);
+      if (settings.error) throw new Error(`supply_settings read failed: ${settings.error.message}`);
       return {
         settings: settings.data as GlSupplyRef['settings'],
         lines: lines as unknown as GlSupplyRef['lines'],

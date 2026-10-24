@@ -16,7 +16,7 @@ import {cn} from '@/lib/utils';
 
 // The Uploads inbox for one company: add a POS .csv or a scanned inventory .pdf
 // (BatchUploader — a store's form in one go, live per-file progress), then triage the file list. CSVs commit
-// straight to gl_sales; PDFs are read by Claude Vision and land in review — selecting
+// straight to sales; PDFs are read by Claude Vision and land in review — selecting
 // one opens its review page. Search, status/type filters (status also from
 // ?status=), and pagination run client-side. Deleting goes through a confirmation
 // that spells out any committed data it takes with it, then a toast confirms it.

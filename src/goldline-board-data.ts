@@ -63,10 +63,10 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
     productsP,
     getGlSupplyRef(companyId),
     fetchAllRows(
-      'gl_inventory',
+      'inventory',
       (from, to) => {
         let q = supa
-          .from('gl_inventory') // pagination-ok: paged by fetchAllRows (.range below)
+          .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
           .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
           .eq('company_id', companyId)
           .gte('period_end', since);
@@ -76,9 +76,9 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
       undefined,
       {concurrency: 4},
     ) as unknown as Promise<Row[]>,
-    fetchAllRows('gl_shipments', (from, to) => {
+    fetchAllRows('shipments', (from, to) => {
       let q = supa
-        .from('gl_shipments') // pagination-ok: paged by fetchAllRows (.range below)
+        .from('shipments') // pagination-ok: paged by fetchAllRows (.range below)
         .select('id,store_code,item_code,qty,shipped_on,arrives_on')
         .eq('company_id', companyId)
         .eq('status', 'in_transit')
@@ -194,10 +194,10 @@ async function linkedSales(
     chunks.map(
       (chunk) =>
         fetchAllRows(
-          'gl_sales',
+          'sales',
           (from, to) => {
             let q = supa
-              .from('gl_sales') // pagination-ok: paged by fetchAllRows (.range below)
+              .from('sales') // pagination-ok: paged by fetchAllRows (.range below)
               .select('store_code,sku_code,period_end,units')
               .eq('company_id', companyId)
               .in('sku_code', chunk)

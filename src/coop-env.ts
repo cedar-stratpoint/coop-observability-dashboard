@@ -14,7 +14,7 @@ export type CoopEnvKey = 'staging' | 'production';
 export type CoopEnv = {
   key: CoopEnvKey;
   dbRef: string; // the Supabase project ref this environment's database has
-  nichidoRef: string; // the Nichido project that holds this environment's Goldline (gl_*) data
+  nichidoRef: string; // the Nichido project that holds this environment's Goldline data
   label: string;
   url: string; // canonical origin
   host: string;
@@ -71,7 +71,7 @@ export function resolveEnv(dbUrl: string | null | undefined, host: string | null
 }
 
 /**
- * Whether the Nichido project (Goldline's gl_* data) belongs with this archive. When the
+ * Whether the Nichido project (Goldline's data) belongs with this archive. When the
  * archive is a known environment, Nichido must be that environment's own project, so a
  * Staging deploy can never write Goldline data into Production (or the reverse). An
  * unknown archive (a local Docker stack) accepts any Nichido URL.

@@ -18,9 +18,9 @@ import {humanizeExtractError, INVENTORY_PAGES, MANIFESTS} from '@/src/goldline-e
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
-//   • .csv  → parse → idempotent upsert into gl_sales (needs period_start/_end)
+//   • .csv  → parse → idempotent upsert into sales (needs period_start/_end)
 //   • .pdf  → store → Claude Vision detects the page → extracts that page's items →
-//             staged in gl_extractions for review (page 6 / non-form → out of scope)
+//             staged in extractions for review (page 6 / non-form → out of scope)
 // Tenant isolation is enforced here (getDataContext + canEditData); the data-blind
 // Coop Admin and read-only analysts are refused. File-type gating is the first check.
 
@@ -243,7 +243,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       await setUploadStatus(uploadId, 'committed');
       return json({uploadId, status: 'committed', rowsCommitted: committed, warnings: errors});
     } catch (e) {
-      console.error('goldline upload: gl_sales commit failed', e);
+      console.error('goldline upload: sales commit failed', e);
       await setUploadStatus(uploadId, 'failed', {rejectReason: 'Could not save sales rows.'});
       return json({uploadId, status: 'failed', error: 'Could not save sales rows. Please try again.'}, 500);
     }
