@@ -113,12 +113,12 @@ export async function POST(req: Request) {
       maxTokens: COOP_CHAT.maxTokens,
       effort: CHAT_EFFORT,
       system,
-      tools: live.ok ? chatTools({explore: explore !== null, crm: crmTools, contacts: explore !== null}) : [],
+      tools: live.ok ? chatTools({explore: explore !== null, crm: crmTools, contacts: explore !== null, sku: true}) : [],
       messages,
       preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined, identity: explore !== null})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined, identity: explore !== null, sku: {aliases: async () => (await import('./sku-seam')).skuSource.aliases(), shopee: async (from, to) => (await import('./sku-seam')).skuSource.shopee(from, to)}})
           : {},
       emit,
       user,

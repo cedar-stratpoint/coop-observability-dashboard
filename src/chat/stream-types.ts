@@ -60,6 +60,8 @@ export interface ChatToolContext {
   crm?: import('./crm/client').CrmClient;
   /** The `contacts` tool's source: booth leads and events, read lazily by the route's server seam (app/api/chat/leads-seam.ts). Present only for an allowlisted user; absent means the tool is not registered. */
   leads?: () => Promise<import('./contacts/leads').LeadsSource>;
+  /** compare_sku: the server seam's loaders for the alias table and the Shopee weekly SKU rows (app/api/chat/sku-seam.ts). Absent means the tool is not registered. */
+  sku?: {aliases: () => Promise<import('../sku-compare').AliasRow[]>; shopee: (from: string, to: string) => Promise<import('../sku-compare-readers').ShopeeSkuRow[]>};
   /** The user may read customer identity (names, contact, pets) through crm_query: the same EXPLORE_ALLOWED_EMAILS decision that registers `contacts`. Absent means false. */
   identity?: boolean;
   /** Where audit lines go (tests pass a fake). Absent means console. */

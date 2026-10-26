@@ -150,11 +150,11 @@ export function readMetricsInput(input: unknown): CrmMetricsRequest | MetricErro
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\ufeff]/g;
 
 /** Customer-entered text, made safe to show: no control or bidi characters, whitespace collapsed, at most 120 characters. */
-export function safeText(v: unknown): string | null {
+export function safeText(v: unknown, max: number = MAX_TEXT): string | null {
   if (typeof v !== 'string') return null;
   const s = v.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
   if (s === '') return null;
-  return s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s;
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 export const col = (key: string, label: string, unit: ColumnUnit, role: ColumnRole): ResultColumn => ({key, label, unit, role});

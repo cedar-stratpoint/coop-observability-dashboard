@@ -35,6 +35,9 @@ const unb64 = (s: string): number => (s === 'start' ? 0 : (JSON.parse(Buffer.fro
 export function fakeQueryCrm(opts: FakeCrmOptions = {}): FakeCrm {
   const calls: FakeCrm['calls'] = [];
   const client: CrmClient = {
+    async postShopify() {
+      throw new CrmError('refused'); // these fakes serve GETs only; the Shopify door has its own fake (test/support/fake-shopify-door.ts)
+    },
     async get(endpoint, query, o): Promise<CrmRead> {
       const paged = o?.paged === true;
       if (endpoint === 'catalog') {

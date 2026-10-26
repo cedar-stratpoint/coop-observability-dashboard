@@ -205,7 +205,7 @@ describe('createCrmExecutors', () => {
 
   it('a non-CRM error is logged as internal and rethrown (dispatchToolCall reports a generic failure)', async () => {
     const s = sink();
-    const client = {get: async () => { throw new TypeError('bug'); }};
+    const client = {get: async () => { throw new TypeError('bug'); }, postShopify: async () => { throw new TypeError('bug'); }};
     const ex = createCrmExecutors({client, now: NOW, user: null, sink: s, keep: (r) => r});
     await expect(ex.get_crm_metrics({})).rejects.toThrow(TypeError);
     expect(lines(s)[0]).toMatchObject({ok: false, code: 'internal'});

@@ -17,6 +17,8 @@ export const TOOL_ALLOWLIST = Object.freeze([
   'get_channel_report',
   'get_crm_metrics',
   'crm_query',
+  'shopify_query',
+  'compare_sku',
   'list_crm_orders',
   'list_crm_customers',
   'list_crm_checkouts',

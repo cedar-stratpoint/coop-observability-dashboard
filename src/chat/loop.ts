@@ -16,7 +16,7 @@ import {dispatchToolCall, RUN_QUERY_TOOL, type ToolExecutors, type ToolResult} f
 
 /** Tools whose results carry text typed by customers or staff. After one succeeds, the stream says `untrusted` once, and the drawer
  *  renders every link in that answer as plain text (no exfiltration by a clicked, injected link; images are never rendered). */
-export const UNTRUSTED_TEXT_TOOLS: ReadonlySet<string> = new Set(['run_query', 'crm_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'contacts']);
+export const UNTRUSTED_TEXT_TOOLS: ReadonlySet<string> = new Set(['run_query', 'crm_query', 'shopify_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'contacts']);
 
 /** The only part of the Anthropic SDK the loop touches. The real `new Anthropic()` satisfies it. */
 export interface MessageStreamLike extends AsyncIterable<Anthropic.MessageStreamEvent> {
