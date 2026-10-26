@@ -30,6 +30,7 @@ export type GlProduct = {
   unit_price: string | number | null;
   is_bestseller: boolean | null;
   hidden: boolean | null;
+  retired_at: string | null;
 };
 export type GlStoreRow = {store_code: string; name: string; status: string; region: string | null; area: string | null};
 export type GlSupplyRef = {
@@ -48,7 +49,7 @@ export function getGlCatalog(companyId: string): Promise<GlProduct[]> {
       (await fetchAllRows('products', (from, to) =>
         db()
           .from('products')
-          .select('item_code,sku_code,product_line,variant,unit_price,is_bestseller,hidden')
+          .select('item_code,sku_code,product_line,variant,unit_price,is_bestseller,hidden,retired_at')
           .eq('company_id', companyId)
           .order('item_code')
           .range(from, to),
@@ -99,4 +100,29 @@ export function getGlSupplyRef(companyId: string): Promise<GlSupplyRef> {
     ['gl-supply', companyId],
     {tags: [glTags.supply(companyId)], revalidate: REVALIDATE_SECONDS},
   )();
+}
+
+export type StoreScope = {store_code: string; last_sale_month: string | null; sold_recently: boolean; override: boolean | null; in_scope: boolean};
+
+/**
+ * Which stores count (F2, S2): in scope when it sold anything in the latest 3 loaded
+ * months of POS Sales Data, unless an admin switched it (stores.in_scope). Cached with
+ * the store list; a Watsons upload or a scope change refreshes it.
+ */
+export function getStoreScope(companyId: string): Promise<StoreScope[]> {
+  if (!configured()) return Promise.resolve([]);
+  return unstable_cache(
+    async () => {
+      const res = await db().rpc('store_scope', {p_company: companyId}); // pagination-ok: one row per store (≈330), under the cap
+      if (res.error) throw new Error(`store_scope failed: ${res.error.message}`);
+      return (res.data ?? []) as StoreScope[];
+    },
+    ['gl-store-scope', companyId],
+    {tags: [glTags.stores(companyId)], revalidate: REVALIDATE_SECONDS},
+  )();
+}
+
+/** Store codes in scope, for the restock (P3) and anything that should skip quiet stores. */
+export async function inScopeStores(companyId: string): Promise<Set<string>> {
+  return new Set((await getStoreScope(companyId)).filter((s) => s.in_scope).map((s) => s.store_code));
 }
