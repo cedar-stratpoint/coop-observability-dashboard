@@ -79,7 +79,8 @@
     "marketplace_ads_weekly",
     "marketplace_sku_weekly",
     "marketplace_traffic_daily",
-    "marketplace_funnel_daily"
+    "marketplace_funnel_daily",
+    "product_channel_alias"
    ]
   },
   {
@@ -449,6 +450,14 @@
    "name": "marketplace_funnel_daily",
    "domain": "digest",
    "about": "A VIEW: per PH day, the figures of the newest accepted product funnel import.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "product_channel_alias": {
+   "name": "product_channel_alias",
+   "domain": "digest",
+   "about": "Maps a channel's identifier (Shopee SKU, website SKU or variant id, a title) to the canonical POS pos_products.product_id, so one product can be compared across channels (src/sku-compare.ts). Dashboard-owned, archive project, service role only (RLS on, no policies). Not yet applied anywhere: apply by hand, local first.",
    "columns": "",
    "prefer": null,
    "testOrders": null

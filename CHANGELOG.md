@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 - Cross-channel SKU comparison (alias table and pure compare module)
+One product side by side across offline (POS), Shopee and the website, over whole Monday to Sunday weeks. Built as data plus a pure function; **no Ask Coop tool is registered yet** (the wiring step calls `compareSku`, contract in `knowledge/tasks/2026-10-26-sku-compare-contract.md`).
+- **`product_channel_alias`** (`supabase/product_channel_alias.sql`, applied by hand, RLS on, no policies, nothing applied anywhere yet): channel identifier to the POS `product_id`, by value, no `pos_*` DDL. `npm run sku:aliases` has `propose` (review CSV), `apply` (auto rows and rows a person confirmed) and `coverage`.
+- **`src/sku-compare.ts`** is pure and tested: unmapped rows go to a bucket with a share, never into a SKU; a channel states its basis; a total says "mixed basis", "at least" (Shopee lists top products only) and "partial" (a missing channel or week is named); an alias conflict leaves the key unmapped and is reported; other dates give each channel alone with no total.
+- **Decision:** the website SKU is **unverified** as equal to the POS code until one stored order is read, so the website maps only through confirmed aliases and its label says so. The Shopee variant SKU equals the POS code (verified), but only counts once seeded as an auto alias. Shopee variation rows replace their product row so nothing is counted twice.
+- Data catalog updated (`product_channel_alias`, the CRM `products/sales` row) and `catalog.json` regenerated; it also names the unprefixed Nichido Goldline tables that the catalog check already flagged on `develop`.
+
 ## 2026-10-24 — Goldline tables in Nichido drop the gl_ prefix
 In the Nichido project Goldline is the only tenant, so its tables, view and functions lose the `gl_` prefix the shared archive needed: `gl_sales` is now `sales`, `gl_inventory_snapshots` is `inventory_snapshots`, `gl_commit_batch` is `commit_batch`, and so on. The same goes for their indexes, constraints and sequences. Only database names change. TypeScript names such as `glTags` and `getGlCatalog`, the `goldline-uploads` bucket and storage paths stay as they are.
 - **Decision:** the archive's old copy keeps its `gl_*` names. It is kept indefinitely, Ask Coop's explore blocklist still fences `gl_` there, and `archive_lock_goldline.sql` still targets those names. The copy script reads archive `gl_<name>` and writes Nichido `<name>`.
