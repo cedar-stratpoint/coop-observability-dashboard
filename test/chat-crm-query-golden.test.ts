@@ -6,7 +6,7 @@ import type {ChatBlock} from '../src/chat/block-types';
 import {createCrmExecutors} from '../src/chat/crm/executors';
 import {resetCatalogCache} from '../src/chat/crm/query-catalog';
 import type {MetricResult} from '../src/chat/result-types';
-import {aggBody, fakeQueryCrm, V2_CATALOG_BODY, type FakeCrmOptions} from './support/fake-crm-query';
+import {aggBody, CATALOG_BODY, fakeQueryCrm, type FakeCrmOptions} from './support/fake-crm-query';
 
 const NOW = new Date('2026-10-07T04:00:00Z');
 const SEP = [{column: 'created_at', op: 'gte', value: '2026-09-01'}, {column: 'created_at', op: 'lte', value: '2026-09-30'}];
@@ -82,37 +82,44 @@ describe('Q3: abandoned carts last month and what they are worth', () => {
   });
 });
 
-describe('Q4: refund rate per SKU, last 90 days', () => {
-  const REFUND = {table: 'order_lines', filters: [{column: 'created_at', op: 'between', value: ['2026-07-09', '2026-10-06']}], select: [{agg: 'sum', column: 'refunded_amount', as: 'refunded'}, {agg: 'sum', column: 'line_gross', as: 'gross'}], group_by: ['sku'], order_by: [{by: 'gross', dir: 'desc'}]};
-  const rows = [{sku: 'ZMYFDMEATBEFWHL01', refunded: 300, gross: 12_000}, {sku: null, refunded: 0, gross: 800}];
-  it('with a v1 CRM the parts come from aggregates and the model states the formula; a line without a SKU is its own group, not dropped', async () => {
-    const h = ask({answer: () => aggBody([{name: 'sku'}, {name: 'refunded', agg: 'sum'}, {name: 'gross', agg: 'sum'}], rows)});
-    const out = (await h.ex.crm_query(REFUND)) as {rows: {sku: string}[]};
-    expect(out.rows.map((r) => r.sku)).toEqual(['ZMYFDMEATBEFWHL01', '(no value)']);
-    expect(h.queries()[0].spec).toMatchObject({table: 'order_lines', group_by: ['sku']});
-    expect(await h.ex.crm_query({...REFUND, computed: [{as: 'rate', expr: 'refunded / gross'}]})).toMatchObject({error: expect.stringMatching(/does not offer computed/)});
+describe('Q4: refund rate, last 90 days', () => {
+  // The final CRM has no refund column on order lines: refunded_amount lives on `orders` (the plan's "per SKU" is not answerable; the answer says so).
+  const WINDOW = [{column: 'created_at', op: 'between', value: ['2026-07-09', '2026-10-06']}];
+  const spec = {table: 'orders', filters: WINDOW, select: [{agg: 'sum', column: 'refunded_amount', as: 'refunded'}, {agg: 'sum', column: 'total_price', as: 'paid'}, {expr: {op: 'round', args: [{op: '/', args: [{ref: 'refunded'}, {ref: 'paid'}]}, 4]}, as: 'rate'}], group_by: [{column: 'created_at', bucket: 'month'}]};
+  const rows = [{created_at_month: '2026-08', refunded: 300, paid: 12_000, rate: 0.025}, {created_at_month: '2026-09', refunded: 0, paid: 0, rate: null}];
+  const answer = () => aggBody([{name: 'created_at_month'}, {name: 'refunded', agg: 'sum'}, {name: 'paid', agg: 'sum'}, {name: 'rate', agg: 'computed', meaning: 'Computed: round((refunded / paid), 4). Division by zero gives null.'}], rows);
+  it('the CRM computes the rate from the real expression grammar; the definition travels, a zero divisor is null, the rate is a ratio, not pesos', async () => {
+    const h = ask({answer});
+    const out = (await h.ex.crm_query(spec)) as {rows: {rate: number | null}[]};
+    expect(out.rows.map((r) => r.rate)).toEqual([0.025, null]);
+    expect(h.queries()[0].spec?.select).toEqual(spec.select); // {expr: node, as}, exactly the CRM's key names
+    expect(h.stored[0].columns.find((c) => c.key === 'rate')?.unit).toBe('ratio');
+    expect(checks(h.stored[0])).toMatch(/rate: Computed: round\(\(refunded \/ paid\), 4\)/);
   });
-  it('with a v2 CRM the rate is computed by the CRM from a closed expression', async () => {
-    const h = ask({catalog: V2_CATALOG_BODY, answer: () => aggBody([{name: 'sku'}, {name: 'refunded', agg: 'sum'}, {name: 'gross', agg: 'sum'}, {name: 'rate', agg: 'computed', meaning: 'round(refunded / gross, 4)'}], rows.map((r) => ({...r, rate: r.gross ? Math.round((r.refunded / r.gross) * 10_000) / 10_000 : null})))});
-    const out = (await h.ex.crm_query({...REFUND, computed: [{as: 'rate', expr: 'round(refunded / gross, 4)'}]})) as {rows: {rate: number}[]};
-    expect(out.rows[0].rate).toBe(0.025);
-    expect(h.queries()[0].spec?.computed).toEqual([{as: 'rate', expr: 'round(refunded / gross, 4)'}]);
-    expect(checks(h.stored[0])).toMatch(/rate: round\(refunded \/ gross, 4\)/); // the definition travels with the answer
+  it('a line without a SKU is its own group, not dropped', async () => {
+    const h = ask({answer: () => aggBody([{name: 'sku'}, {name: 'units', agg: 'sum'}], [{sku: 'ZMYFDMEATBEFWHL01', units: 40}, {sku: null, units: 3}])});
+    const out = (await h.ex.crm_query({table: 'order_lines', filters: WINDOW, select: [{agg: 'sum', column: 'quantity', as: 'units'}], group_by: ['sku']})) as {rows: {sku: string}[]};
+    expect(out.rows.map((r) => r.sku)).toEqual(['ZMYFDMEATBEFWHL01', '(no value)']);
+  });
+  it('refunds per SKU are refused in code: order lines carry no refund column (the CRM would say the same)', async () => {
+    const h = ask();
+    expect(await h.ex.crm_query({table: 'order_lines', filters: WINDOW, select: [{agg: 'sum', column: 'refunded_amount', as: 'refunded'}], group_by: ['sku']})).toMatchObject({error: expect.stringMatching(/not a column/)});
+    expect(h.queries()).toEqual([]);
   });
 });
 
 describe('Q5: weekly units per SKU for the top 5 SKUs since 1 Aug', () => {
   it('top-N per group (v2) gives a chart-ready shape: a week axis, a SKU category and a units measure', async () => {
     const rows = ['A', 'B'].flatMap((s) => ['2026-08-03', '2026-08-10'].map((w, i) => ({sku: `SKU-${s}`, created_at_week: w, units: 10 + i})));
-    const h = ask({catalog: V2_CATALOG_BODY, answer: () => aggBody([{name: 'sku'}, {name: 'created_at_week'}, {name: 'units', agg: 'sum'}], rows)});
-    const out = (await h.ex.crm_query({table: 'order_lines', filters: [{column: 'created_at', op: 'between', value: ['2026-08-01', '2026-10-06']}], select: [{agg: 'sum', column: 'quantity', as: 'units'}], group_by: ['sku', {column: 'created_at', bucket: 'week'}], top_n: {n: 5, per: 'sku', by: 'units'}, order_by: [{by: 'created_at_week', dir: 'asc'}]})) as {rows: unknown[]};
+    const h = ask({answer: () => aggBody([{name: 'sku'}, {name: 'created_at_week'}, {name: 'units', agg: 'sum'}], rows)});
+    const out = (await h.ex.crm_query({table: 'order_lines', filters: [{column: 'created_at', op: 'between', value: ['2026-08-01', '2026-10-06']}], select: [{agg: 'sum', column: 'quantity', as: 'units'}], group_by: ['sku', {column: 'created_at', bucket: 'week', as: 'created_at_week'}], top_n: {n: 5, by: 'units', key: 'sku'}, order_by: [{by: 'created_at_week', dir: 'asc'}]})) as {rows: unknown[]};
     expect(out.rows).toHaveLength(4);
     expect(h.stored[0].columns.map((c) => c.role)).toEqual(['category', 'time', 'measure']);
-    expect(h.queries()[0].spec?.top_n).toEqual({n: 5, per: 'sku', by: 'units', dir: 'desc'});
+    expect(h.queries()[0].spec?.top_n).toEqual({n: 5, by: 'units', dir: 'desc', key: 'sku'});
   });
-  it('a v1 CRM refuses top_n in code with a way forward', async () => {
-    const h = ask();
-    expect(await h.ex.crm_query({table: 'order_lines', filters: SEP, select: [{agg: 'sum', column: 'quantity', as: 'units'}], group_by: ['sku'], top_n: {n: 5, per: 'sku', by: 'units'}})).toMatchObject({error: expect.stringMatching(/does not offer top-N/)});
+  it('a catalog without the v2 block refuses top_n in code with a way forward', async () => {
+    const h = ask({catalog: {...CATALOG_BODY, v2: undefined}});
+    expect(await h.ex.crm_query({table: 'order_lines', filters: SEP, select: [{agg: 'sum', column: 'quantity', as: 'units'}], group_by: ['sku', 'financial_status'], top_n: {n: 5, key: 'sku', by: 'units'}})).toMatchObject({error: expect.stringMatching(/does not offer top-N/)});
     expect(h.queries()).toEqual([]);
   });
 });

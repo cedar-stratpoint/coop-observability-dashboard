@@ -1,10 +1,9 @@
 import {describe, expect, it} from 'vitest';
 import {FALLBACK_CATALOG, parseCatalog, type Catalog} from '../src/chat/crm/query-catalog';
-import {checkExpr, isErr, readQueryInput, type QueryRequest} from '../src/chat/crm/query-spec';
-import {CATALOG_BODY, V2_CATALOG_BODY} from './support/fake-crm-query';
+import {isErr, readQueryInput, type QueryRequest} from '../src/chat/crm/query-spec';
+import {CATALOG_BODY} from './support/fake-crm-query';
 
 const cat = parseCatalog(CATALOG_BODY) as Catalog;
-const cat2 = parseCatalog(V2_CATALOG_BODY) as Catalog;
 const WIN = [{column: 'created_at', op: 'gte', value: '2026-09-01'}, {column: 'created_at', op: 'lte', value: '2026-09-30'}];
 const ok = (input: unknown, c: Catalog = cat, allowIdentity = false): Extract<QueryRequest, {kind: 'query'}> => {
   const r = readQueryInput(input, c, {allowIdentity});
@@ -31,7 +30,7 @@ describe('parseCatalog', () => {
     expect(parseCatalog(null)).toBeNull();
     expect(parseCatalog({tables: []})).toBeNull();
     expect(parseCatalog({catalog_version: 'x', tables: []})).toBeNull();
-    expect(FALLBACK_CATALOG.tables.map((t) => t.name)).toEqual(['orders', 'order_lines', 'checkouts', 'customers']);
+    expect(FALLBACK_CATALOG.tables.map((t) => t.name)).toEqual(['orders', 'order_lines', 'order_discount_codes', 'checkouts', 'checkout_lines', 'customers']);
   });
 });
 
@@ -74,6 +73,11 @@ describe('readQueryInput: refusals (closed shape, catalog ids, caps)', () => {
     ['half a window', {table: 'orders', filters: [WIN[0]], select: [{agg: 'count'}]}, /needs a date window/],
     ['window too long', {table: 'orders', filters: [{column: 'created_at', op: 'between', value: ['2026-01-01', '2026-09-30']}], select: [{agg: 'count'}]}, /at most 90 days/],
     ['huge limit', {table: 'orders', filters: WIN, select: ['order_number'], limit: 100000}, /limit is at most 200/],
+    ['limit over 200 without a cursor', {table: 'orders', filters: WIN, select: ['order_number'], limit: 201}, /limit is at most 200/],
+    ['limit over the paged cap', {table: 'orders', filters: WIN, select: ['order_number'], cursor: 'start', limit: 501}, /limit is at most 500/],
+    ['order_by with a cursor', {table: 'orders', filters: WIN, select: ['order_number'], cursor: 'start', order_by: [{by: 'order_number'}]}, /default order/],
+    ['a date that is not a real day', {table: 'orders', filters: [{column: 'created_at', op: 'between', value: ['2026-02-30', '2026-03-10']}], select: [{agg: 'count'}]}, /real days/],
+    ['a window over 800 days even by month', {table: 'orders', filters: [{column: 'created_at', op: 'between', value: ['2024-07-01', '2026-09-30']}], select: [{agg: 'count'}], group_by: [{column: 'created_at', bucket: 'month'}]}, /at most 800/],
     ['grouped huge limit', {table: 'orders', filters: WIN, select: [{agg: 'count'}], group_by: ['financial_status'], limit: 501}, /at most 500/],
     ['group without aggregate', {table: 'orders', filters: WIN, select: ['order_number'], group_by: ['financial_status']}, /needs at least one aggregate/],
     ['mixed columns and aggregates', {table: 'orders', filters: WIN, select: ['order_number', {agg: 'count'}]}, /only aggregates/],
@@ -96,7 +100,7 @@ describe('readQueryInput: refusals (closed shape, catalog ids, caps)', () => {
     expect(err(input)).toMatch(re);
   });
   it('refuses a spec over the character cap', () => {
-    const many = {table: 'orders', filters: [...WIN, {column: 'financial_status', op: 'in', value: Array.from({length: 50}, (_, i) => `status_${i}_${'x'.repeat(40)}`)}], select: [{agg: 'count'}]};
+    const many = {table: 'orders', filters: [...WIN, {column: 'financial_status', op: 'in', value: Array.from({length: 50}, (_, i) => `status_${i}_${'x'.repeat(90)}`)}], select: [{agg: 'count'}]};
     expect(err(many)).toMatch(/too long/);
   });
 });
@@ -111,7 +115,9 @@ describe('identity detail', () => {
     expect(r.identity).toBe(true);
     expect(r.spec.detail).toBe('identity');
     expect(err({...IDQ, limit: 51}, cat, true)).toMatch(/at most 50/);
-    expect(ok({...IDQ, limit: 500, deliver: 'all'}, cat, true).spec.limit).toBe(50);
+    expect(ok({...IDQ, order_by: undefined, limit: 500, deliver: 'all'}, cat, true).spec.limit).toBe(50);
+    expect(err({...IDQ, deliver: 'all'}, cat, true)).toMatch(/default order/);
+    expect(err({...IDQ, cursor: 'start'}, cat, true)).toMatch(/default order/);
     expect(err({...IDQ, table: 'orders'}, cat, true)).toMatch(/customers table only/);
     expect(err({...IDQ, select: ['email']}, cat, true)).toMatch(/fixed set of fields/);
     expect(err({...IDQ, group_by: ['membership_tier']}, cat, true)).toMatch(/fixed set of fields/);
@@ -123,40 +129,42 @@ describe('identity detail', () => {
   });
 });
 
-describe('v2 keys: closed, and refused unless the catalog offers them', () => {
-  const base = {table: 'order_lines', filters: WIN, select: [{agg: 'sum', column: 'quantity', as: 'units'}, {agg: 'sum', column: 'line_gross', as: 'gross'}, {agg: 'sum', column: 'refunded_amount', as: 'refunded'}], group_by: ['sku']};
-  it('v1 catalog: joins, computed, having and top_n are refused with a clear message', () => {
-    expect(err({...base, computed: [{as: 'rate', expr: 'refunded / gross'}]})).toMatch(/does not offer computed/);
-    expect(err({...base, having: [{by: 'units', op: 'gte', value: 5}]})).toMatch(/does not offer HAVING/);
-    expect(err({...base, top_n: {n: 5, per: 'sku', by: 'units'}})).toMatch(/does not offer top-N/);
-    expect(err({...base, joins: ['order_lines']})).toMatch(/does not offer joins/);
+describe('v2 keys: the CRM\'s real names, closed, and refused unless the catalog offers them', () => {
+  const base = {table: 'order_lines', filters: WIN, select: [{agg: 'sum', column: 'quantity', as: 'units'}, {agg: 'sum', column: 'line_gross', as: 'gross'}, {agg: 'sum', column: 'line_discount', as: 'disc'}], group_by: ['sku']};
+  const rate = {expr: {op: 'round', args: [{op: '/', args: [{ref: 'disc'}, {ref: 'gross'}]}, 4]}, as: 'rate'};
+  const noV2 = parseCatalog({...CATALOG_BODY, v2: undefined}) as Catalog;
+  it('a catalog without the v2 block refuses computed items, having and top_n; joins follow the table list', () => {
+    expect(err({...base, select: [...base.select, rate]}, noV2)).toMatch(/does not offer computed/);
+    expect(err({...base, having: [{by: 'units', op: 'gte', value: 5}]}, noV2)).toMatch(/does not offer HAVING/);
+    expect(err({...base, group_by: ['sku', 'financial_status'], top_n: {n: 5, key: 'sku', by: 'units'}}, noV2)).toMatch(/does not offer top-N/);
+    expect(err({table: 'checkouts', filters: WIN, select: [{agg: 'count'}], joins: ['customers']})).toMatch(/no declared joins/);
   });
-  it('v2 catalog: computed, having and top_n pass and travel in canonical form', () => {
-    const r = ok({...base, computed: [{as: 'rate', expr: 'round(refunded / gross, 4)'}], having: [{by: 'units', op: 'gte', value: 5}], top_n: {n: 5, per: 'sku', by: 'units'}, order_by: [{by: 'rate'}]}, cat2);
-    expect(r.spec.computed).toEqual([{as: 'rate', expr: 'round(refunded / gross, 4)'}]);
-    expect(r.spec.having).toEqual([{by: 'units', op: 'gte', value: 5}]);
-    expect(r.spec.top_n).toEqual({n: 5, per: 'sku', by: 'units', dir: 'desc'});
+  it('computed items, having, top_n key and per, and the customers join travel in canonical form', () => {
+    const r = ok({...base, select: [...base.select, rate], having: [{by: 'units', op: 'gte', value: 5}, {by: 'rate', op: 'between', value: [0, 1]}], group_by: ['sku', 'financial_status'], top_n: {n: 5, by: 'units', key: 'sku'}, order_by: [{by: 'rate'}]});
+    expect(r.spec.select[3]).toEqual(rate);
+    expect(r.spec.having).toEqual([{by: 'units', op: 'gte', value: 5}, {by: 'rate', op: 'between', value: [0, 1]}]);
+    expect(r.spec.top_n).toEqual({n: 5, by: 'units', dir: 'desc', key: 'sku'});
+    expect(ok({...base, group_by: ['sku', 'financial_status'], top_n: {n: 3, by: 'units', dir: 'asc', per: 'financial_status'}}).spec.top_n).toEqual({n: 3, by: 'units', dir: 'asc', per: 'financial_status'});
+    const j = ok({table: 'orders', joins: ['customers'], filters: WIN, select: [{agg: 'count', as: 'orders'}], group_by: ['customers.membership_tier']});
+    expect(j.spec.joins).toEqual(['customers']);
+    expect(j.columns).toEqual(['customers_membership_tier', 'orders']);
   });
-  it('v2 catalog still refuses bad v2 input', () => {
-    expect(err({...base, computed: [{as: 'rate', expr: 'refunded / secret'}]}, cat2)).toMatch(/not a column or a name/);
-    expect(err({...base, computed: [{as: 'rate', expr: 'refunded; drop table x'}]}, cat2)).toMatch(/unexpected/);
-    expect(err({...base, computed: [{as: 'units', expr: '1'}]}, cat2)).toMatch(/new short lowercase name/);
-    expect(err({...base, having: [{by: 'email', op: 'gte', value: 1}]}, cat2)).toMatch(/must be one of the names/);
-    expect(err({...base, top_n: {n: 500, per: 'sku', by: 'units'}}, cat2)).toMatch(/1 to 50/);
-    expect(err({...base, top_n: {n: 5, per: 'sku', by: 'units', x: 1}}, cat2)).toMatch(/unknown key/);
-    expect(err({...base, joins: ['customers']}, cat2)).toMatch(/joins item must be one of/);
-  });
-});
-
-describe('checkExpr: the tiny grammar', () => {
-  const names = new Set(['a', 'b', 'gross']);
-  it.each(['a + b', 'a / b', '(a + b) * 2', 'round(a / b, 4)', 'round((a - b) / gross, 2) * 100', '12.5'])('accepts %s', (e) => {
-    expect(checkExpr(e, names)).toBeNull();
-  });
-  it.each(['a ^ b', 'a; b', "a' or '1", 'sqrt(a)', 'a b', 'round(a)', 'round(a, 9)', '((((((((a))))))))', 'c + a', '', 'a +', '(a', 'a - - b x'])('refuses %j', (e) => {
-    expect(checkExpr(e, names)).not.toBeNull();
-  });
-  it('refuses a long expression', () => {
-    expect(checkExpr('a+'.repeat(100) + 'a', names)).toMatch(/at most/);
+  it('refuses the guessed key names and bad v2 input', () => {
+    expect(err({...base, computed: [{as: 'rate', expr: 'refunded / gross'}]})).toMatch(/unknown key/);
+    expect(err({...base, select: [...base.select, {expr: 'disc / gross', as: 'rate'}]})).toMatch(/nodes are a number/);
+    expect(err({...base, select: [...base.select, {expr: {op: '/', args: [{ref: 'quantity'}, {ref: 'gross'}]}, as: 'rate'}]})).toMatch(/not an aggregate/);
+    expect(err({...base, select: [...base.select, {expr: {op: '+', args: [1, 2]}, as: 'rate'}]})).toMatch(/at least one aggregate/);
+    expect(err({...base, select: [...base.select, {expr: {op: 'round', args: [{ref: 'gross'}, 7]}, as: 'rate'}]})).toMatch(/0 to 6/);
+    expect(err({...base, select: [...base.select, {expr: {op: '*', args: [{ref: 'gross'}, 1e12]}, as: 'rate'}]})).toMatch(/at most/);
+    expect(err({...base, select: [...base.select, {...rate, as: 'units'}]})).toMatch(/used twice/);
+    expect(err({...base, having: [{by: 'sku', op: 'gte', value: 1}]})).toMatch(/aggregate or computed name/);
+    expect(err({...base, having: Array.from({length: 7}, () => ({by: 'units', op: 'gte', value: 1}))})).toMatch(/at most 6/);
+    expect(err({...base, top_n: {n: 5, key: 'sku', by: 'units'}})).toMatch(/two group_by keys/);
+    expect(err({...base, group_by: ['sku', 'financial_status'], top_n: {n: 5, by: 'units', key: 'sku', per: 'financial_status'}})).toMatch(/exactly one of key or per/);
+    expect(err({...base, group_by: ['sku', 'financial_status'], top_n: {n: 500, by: 'units', key: 'sku'}})).toMatch(/1 to 50/);
+    expect(err({...base, group_by: ['sku', 'financial_status'], top_n: {n: 5, by: 'units', key: 'sku', x: 1}})).toMatch(/unknown key/);
+    expect(err({table: 'orders', filters: WIN, select: [{agg: 'count'}], joins: ['order_lines']})).toMatch(/can join/);
+    expect(err({table: 'orders', joins: ['customers'], filters: WIN, select: ['customers.membership_tier']})).toMatch(/not a column|cannot be returned/);
+    expect(err({table: 'orders', filters: WIN, select: [{agg: 'count'}], group_by: ['customers.membership_tier']})).toMatch(/not a groupable/);
   });
 });

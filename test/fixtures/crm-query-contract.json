@@ -1,0 +1,2684 @@
+[
+ {
+  "name": "repeat buyers in September",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "customers_with_min_orders",
+     "min": 2,
+     "as": "repeat_buyers"
+    },
+    {
+     "agg": "count_distinct",
+     "column": "email",
+     "as": "emails"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "who the repeat buyers are (identity)",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "filters": [
+    {
+     "column": "orders_count",
+     "op": "gte",
+     "value": 2
+    }
+   ],
+   "order_by": [
+    {
+     "by": "total_spent",
+     "dir": "desc"
+    }
+   ],
+   "limit": 50
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "discount codes used most",
+  "input": {
+   "table": "order_discount_codes",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "uses"
+    },
+    {
+     "agg": "sum",
+     "column": "amount",
+     "as": "given"
+    }
+   ],
+   "group_by": [
+    "code"
+   ],
+   "order_by": [
+    {
+     "by": "uses",
+     "dir": "desc"
+    }
+   ],
+   "limit": 10
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "abandoned carts and their value",
+  "input": {
+   "table": "checkouts",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    },
+    {
+     "column": "converted_at",
+     "op": "is_null"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "carts"
+    },
+    {
+     "agg": "sum",
+     "column": "total_price",
+     "as": "value"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "refund rate per SKU (computed)",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "line_gross",
+     "as": "gross"
+    },
+    {
+     "agg": "sum",
+     "column": "line_discount",
+     "as": "disc"
+    },
+    {
+     "expr": {
+      "op": "round",
+      "args": [
+       {
+        "op": "/",
+        "args": [
+         {
+          "ref": "disc"
+         },
+         {
+          "ref": "gross"
+         }
+        ]
+       },
+       4
+      ]
+     },
+     "as": "disc_rate"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "having": [
+    {
+     "by": "gross",
+     "op": "gte",
+     "value": 1000
+    }
+   ],
+   "order_by": [
+    {
+     "by": "disc_rate",
+     "dir": "desc"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "weekly units for the top 5 SKUs (top_n key)",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2026-08-01",
+      "2026-09-30"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "units"
+    }
+   ],
+   "group_by": [
+    "sku",
+    {
+     "column": "created_at",
+     "bucket": "week",
+     "as": "week"
+    }
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "units",
+    "key": "sku"
+   }
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "top 3 rows per week (top_n per)",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "units"
+    }
+   ],
+   "group_by": [
+    {
+     "column": "created_at",
+     "bucket": "week",
+     "as": "week"
+    },
+    "sku"
+   ],
+   "top_n": {
+    "n": 3,
+    "by": "units",
+    "dir": "desc",
+    "per": "week"
+   }
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "orders joined to customers by tier",
+  "input": {
+   "table": "orders",
+   "joins": [
+    "customers"
+   ],
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "orders"
+    },
+    {
+     "agg": "sum",
+     "column": "total_price",
+     "as": "revenue"
+    }
+   ],
+   "group_by": [
+    "customers.membership_tier"
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "one customer by email",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "filters": [
+    {
+     "column": "email",
+     "op": "eq",
+     "value": "Ana.Lim@example.com"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "one customer by full name",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "filters": [
+    {
+     "column": "full_name",
+     "op": "in",
+     "value": [
+      "ana lim",
+      "ben cruz"
+     ]
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "keyset first page",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number",
+    "total_price"
+   ],
+   "cursor": "start",
+   "limit": 500
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "identity first page with cursor start",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "cursor": "start",
+   "limit": 50
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "month buckets over a year",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2025-10-01",
+      "2026-09-30"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "orders"
+    }
+   ],
+   "group_by": [
+    {
+     "column": "created_at",
+     "bucket": "month"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "a group of one is fine (no small-group hiding)",
+  "input": {
+   "table": "customers",
+   "select": [
+    {
+     "agg": "count",
+     "as": "n"
+    }
+   ],
+   "group_by": [
+    "membership_tier"
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "aggregate-only table without window",
+  "input": {
+   "table": "birthday_vouchers",
+   "select": [
+    {
+     "agg": "sum",
+     "column": "amount",
+     "as": "given"
+    }
+   ],
+   "group_by": [
+    "year"
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "webhook rows need no window",
+  "input": {
+   "table": "webhook_events",
+   "select": [
+    "topic",
+    "status",
+    "received_at"
+   ],
+   "limit": 20
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "checkout lines",
+  "input": {
+   "table": "checkout_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "units"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "identity without detail: email row by row",
+  "input": {
+   "table": "customers",
+   "select": [
+    "email"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "customers is aggregate-only: ask for counts or sums (select an aggregate), not rows."
+ },
+ {
+  "name": "identity without detail: names",
+  "input": {
+   "table": "customers",
+   "select": [
+    "first_name"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"first_name\" is not a column of customers (GET /api/catalog lists them)."
+ },
+ {
+  "name": "email row by row on orders",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "email"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: email cannot be returned row by row (email never leaves the CRM)."
+ },
+ {
+  "name": "email sum",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "email"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: sum is not allowed on orders.email (email is count_distinct only)."
+ },
+ {
+  "name": "email filter",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    },
+    {
+     "column": "email",
+     "op": "eq",
+     "value": "a@example.com"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "filter: \"email\" cannot be filtered on in orders."
+ },
+ {
+  "name": "email group",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    "email"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "group_by: \"email\" is not a groupable column of orders."
+ },
+ {
+  "name": "never class: raw",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "raw"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"raw\" is not a column of orders (GET /api/catalog lists them)."
+ },
+ {
+  "name": "never class: address",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "shipping_address"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"shipping_address\" is not a column of orders (GET /api/catalog lists them)."
+ },
+ {
+  "name": "never class: token",
+  "input": {
+   "table": "checkouts",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "token"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"token\" is not a column of checkouts (GET /api/catalog lists them)."
+ },
+ {
+  "name": "never class: voucher code",
+  "input": {
+   "table": "birthday_vouchers",
+   "select": [
+    "code"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"code\" is not a column of birthday_vouchers (GET /api/catalog lists them)."
+ },
+ {
+  "name": "never class: checkout url",
+  "input": {
+   "table": "checkouts",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "abandoned_checkout_url"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"abandoned_checkout_url\" is not a column of checkouts (GET /api/catalog lists them)."
+ },
+ {
+  "name": "unknown table",
+  "input": {
+   "table": "users",
+   "select": [
+    "x"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "table must be one of: orders, order_lines, order_discount_codes, customers, checkouts, checkout_line"
+ },
+ {
+  "name": "sql in table",
+  "input": {
+   "table": "orders; drop table orders",
+   "select": [
+    "x"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "table must be one of: orders, order_lines, order_discount_codes, customers, checkouts, checkout_line"
+ },
+ {
+  "name": "sql in column",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number, email from customers --"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"order_number, email from customers --\" is not a column of orders (GET /api/catalog lists th"
+ },
+ {
+  "name": "huge limit rows",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "limit": 100000
+  },
+  "crm": "refuse",
+  "crm_says": "limit is at most 200 for this kind of query."
+ },
+ {
+  "name": "limit 201 rows without cursor",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "limit": 201
+  },
+  "crm": "refuse",
+  "crm_says": "limit is at most 200 for this kind of query."
+ },
+ {
+  "name": "limit 501 with cursor",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "cursor": "start",
+   "limit": 501
+  },
+  "crm": "refuse",
+  "crm_says": "limit is at most 500 for this kind of query."
+ },
+ {
+  "name": "grouped limit 501",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    "financial_status"
+   ],
+   "limit": 501
+  },
+  "crm": "refuse",
+  "crm_says": "limit is at most 500 for this kind of query."
+ },
+ {
+  "name": "identity limit 51",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "limit": 51
+  },
+  "crm": "refuse",
+  "crm_says": "limit is at most 50 for detail \"identity\"."
+ },
+ {
+  "name": "no date window",
+  "input": {
+   "table": "orders",
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "orders needs a date window: filter created_at with gte and lte (or between) as YYYY-MM-DD."
+ },
+ {
+  "name": "half a window",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "orders needs a date window: filter created_at with gte and lte (or between) as YYYY-MM-DD."
+ },
+ {
+  "name": "window 91 days",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2026-07-01",
+      "2026-09-30"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "The date window is at most 90 days (group by month allows up to 800); yours is 92."
+ },
+ {
+  "name": "window 90 days passes",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2026-07-03",
+      "2026-09-30"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "accept"
+ },
+ {
+  "name": "window 801 days even by month",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2024-07-01",
+      "2026-09-30"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    {
+     "column": "created_at",
+     "bucket": "month"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "The range is at most 800 days."
+ },
+ {
+  "name": "window from after to",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2026-09-30",
+      "2026-09-01"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "from must not be after to."
+ },
+ {
+  "name": "window with a fake day",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "between",
+     "value": [
+      "2026-02-30",
+      "2026-03-10"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "from must be a real date as YYYY-MM-DD."
+ },
+ {
+  "name": "duplicate output names",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "n"
+    },
+    {
+     "agg": "sum",
+     "column": "total_price",
+     "as": "n"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "Output names must be unique (use \"as\")."
+ },
+ {
+  "name": "unknown top-level key",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "sql": "select 1"
+  },
+  "crm": "refuse",
+  "crm_says": "spec: unknown key \"sql\". Allowed: table, select, filters, group_by, order_by, limit, cursor, tz, det"
+ },
+ {
+  "name": "unknown select key",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "raw": "1"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select item: unknown key \"raw\". Allowed: agg, column, as, min, expr."
+ },
+ {
+  "name": "bad op",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    },
+    {
+     "column": "financial_status",
+     "op": "like",
+     "value": "%"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "filter: like is not allowed on financial_status (allowed: eq, in, is_null)."
+ },
+ {
+  "name": "text value 101 chars",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    },
+    {
+     "column": "financial_status",
+     "op": "eq",
+     "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "filter financial_status eq: a text value of at most 100 characters is required."
+ },
+ {
+  "name": "13 selects",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number",
+    "order_number"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select must be a list of 1 to 12 columns or aggregates."
+ },
+ {
+  "name": "51 in values",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    },
+    {
+     "column": "financial_status",
+     "op": "in",
+     "value": [
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a",
+      "a"
+     ]
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "filter financial_status in: value is a list of 1 to 50."
+ },
+ {
+  "name": "bad tz",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "tz": "Mars/Base"
+  },
+  "crm": "refuse",
+  "crm_says": "tz must be one of: Asia/Manila, UTC."
+ },
+ {
+  "name": "detail other",
+  "input": {
+   "table": "customers",
+   "detail": "all"
+  },
+  "crm": "refuse",
+  "crm_says": "detail can only be \"identity\"."
+ },
+ {
+  "name": "identity on orders",
+  "input": {
+   "table": "orders",
+   "detail": "identity"
+  },
+  "crm": "refuse",
+  "crm_says": "detail \"identity\" works on the customers table only."
+ },
+ {
+  "name": "identity with select",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "select": [
+    "email"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "detail \"identity\" returns a fixed set of fields (customer_ref, full_name, email, phone, pet_name, pe"
+ },
+ {
+  "name": "identity filter phone",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "filters": [
+    {
+     "column": "phone",
+     "op": "eq",
+     "value": "0917"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "identity filter: \"phone\" is not available. Use: customer_ref, email, full_name, membership_tier, ord"
+ },
+ {
+  "name": "identity order_by email",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "order_by": [
+    {
+     "by": "email"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "identity order_by.by is one of: orders_count, total_spent, created_at."
+ },
+ {
+  "name": "cursor with order_by",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "cursor": "start",
+   "order_by": [
+    {
+     "by": "order_number"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "cursor paging uses the default order: do not pass order_by."
+ },
+ {
+  "name": "identity cursor with order_by",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "cursor": "start",
+   "order_by": [
+    {
+     "by": "total_spent"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "cursor paging uses the default order: do not pass order_by."
+ },
+ {
+  "name": "cursor on aggregate",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    "financial_status"
+   ],
+   "cursor": "start"
+  },
+  "crm": "refuse",
+  "crm_says": "cursor works on row-level queries only."
+ },
+ {
+  "name": "garbage cursor",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "cursor": "x; drop"
+  },
+  "crm": "refuse",
+  "crm_says": "cursor is not valid. Use \"start\" or the next_cursor of the previous page unchanged."
+ },
+ {
+  "name": "rows from aggregate-only table",
+  "input": {
+   "table": "customers",
+   "select": [
+    "orders_count"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "customers is aggregate-only: ask for counts or sums (select an aggregate), not rows."
+ },
+ {
+  "name": "joined column row by row",
+  "input": {
+   "table": "orders",
+   "joins": [
+    "customers"
+   ],
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "customers.membership_tier"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: customers.membership_tier cannot be returned row by row. Group by it with an aggregate inste"
+ },
+ {
+  "name": "join not declared for table",
+  "input": {
+   "table": "checkouts",
+   "joins": [
+    "customers"
+   ],
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "joins: checkouts has no declared joins."
+ },
+ {
+  "name": "two joins",
+  "input": {
+   "table": "orders",
+   "joins": [
+    "customers",
+    "customers"
+   ],
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "joins is a list of at most one declared join."
+ },
+ {
+  "name": "join to a table that is not a join",
+  "input": {
+   "table": "orders",
+   "joins": [
+    "order_lines"
+   ],
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "joins: orders can join: customers."
+ },
+ {
+  "name": "joined column without declaring the join",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    "customers.membership_tier"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "group_by: \"customers.membership_tier\" is not a groupable column of orders."
+ },
+ {
+  "name": "expr referencing a column, not an aggregate",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "/",
+      "args": [
+       {
+        "ref": "u"
+       },
+       {
+        "ref": "quantity"
+       }
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr r: \"quantity\" is not an aggregate of this select (aggregates or earlier computed items only)."
+ },
+ {
+  "name": "expr with no aggregate",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "+",
+      "args": [
+       1,
+       2
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr r must use at least one aggregate of this select."
+ },
+ {
+  "name": "expr 5 deep",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "+",
+      "args": [
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "+",
+            "args": [
+             {
+              "ref": "u"
+             },
+             1
+            ]
+           },
+           1
+          ]
+         },
+         1
+        ]
+       },
+       1
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr is nested at most 4 deep."
+ },
+ {
+  "name": "expr unknown op",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "pow",
+      "args": [
+       {
+        "ref": "u"
+       },
+       2
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr op is one of + - * / round."
+ },
+ {
+  "name": "expr huge literal",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "*",
+      "args": [
+       {
+        "ref": "u"
+       },
+       1000000000000
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr numbers are finite and at most 1000000000 in size."
+ },
+ {
+  "name": "expr as a string",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": "u * 2",
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "expr nodes are a number, { ref }, or { op, args }."
+ },
+ {
+  "name": "expr round digits 7",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "round",
+      "args": [
+       {
+        "ref": "u"
+       },
+       7
+      ]
+     },
+     "as": "r"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "round digits is a whole number from 0 to 6."
+ },
+ {
+  "name": "expr without as",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "*",
+      "args": [
+       {
+        "ref": "u"
+       },
+       2
+      ]
+     }
+    }
+   ],
+   "group_by": [
+    "sku"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: a computed item needs \"as\"."
+ },
+ {
+  "name": "computed top-level key (old guess)",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "computed": [
+    {
+     "as": "r",
+     "expr": "u*2"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "spec: unknown key \"computed\". Allowed: table, select, filters, group_by, order_by, limit, cursor, tz"
+ },
+ {
+  "name": "having on a group name",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "having": [
+    {
+     "by": "sku",
+     "op": "gte",
+     "value": 1
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "having.by must be an aggregate or computed name of this select."
+ },
+ {
+  "name": "having 7 items",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "having": [
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    },
+    {
+     "by": "u",
+     "op": "gte",
+     "value": 1
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "having is a list of at most 6."
+ },
+ {
+  "name": "having bad op",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "having": [
+    {
+     "by": "u",
+     "op": "gt",
+     "value": 1
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "having.op is eq, gte, lte or between."
+ },
+ {
+  "name": "having with repeat",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "customers_with_min_orders",
+     "min": 2,
+     "as": "r"
+    }
+   ],
+   "having": [
+    {
+     "by": "r",
+     "op": "gte",
+     "value": 1
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "having cannot be combined with customers_with_min_orders."
+ },
+ {
+  "name": "top_n with one group key",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku"
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "u",
+    "key": "sku"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n needs at least two group_by keys (for a single key use order_by and limit)."
+ },
+ {
+  "name": "top_n both key and per",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku",
+    "financial_status"
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "u",
+    "key": "sku",
+    "per": "financial_status"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n takes exactly one of key or per."
+ },
+ {
+  "name": "top_n neither key nor per",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku",
+    "financial_status"
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "u"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n takes exactly one of key or per."
+ },
+ {
+  "name": "top_n n 51",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku",
+    "financial_status"
+   ],
+   "top_n": {
+    "n": 51,
+    "by": "u",
+    "key": "sku"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n.n is a whole number from 1 to 50."
+ },
+ {
+  "name": "top_n by a computed name",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    },
+    {
+     "expr": {
+      "op": "*",
+      "args": [
+       {
+        "ref": "u"
+       },
+       2
+      ]
+     },
+     "as": "v"
+    }
+   ],
+   "group_by": [
+    "sku",
+    "financial_status"
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "v",
+    "key": "sku"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n.by must be a plain aggregate name of this select."
+ },
+ {
+  "name": "top_n old key name per-only wrong group",
+  "input": {
+   "table": "order_lines",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "sum",
+     "column": "quantity",
+     "as": "u"
+    }
+   ],
+   "group_by": [
+    "sku",
+    "financial_status"
+   ],
+   "top_n": {
+    "n": 5,
+    "by": "u",
+    "per": "nope"
+   }
+  },
+  "crm": "refuse",
+  "crm_says": "top_n.per must be one of the group_by names."
+ },
+ {
+  "name": "identity with joins",
+  "input": {
+   "table": "customers",
+   "detail": "identity",
+   "joins": [
+    "customers"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "joins: customers has no declared joins."
+ },
+ {
+  "name": "repeat twice",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "customers_with_min_orders",
+     "min": 2,
+     "as": "a"
+    },
+    {
+     "agg": "customers_with_min_orders",
+     "min": 3,
+     "as": "b"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "Use customers_with_min_orders once per query."
+ },
+ {
+  "name": "repeat min 1",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "customers_with_min_orders",
+     "min": 1
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "customers_with_min_orders: min is a whole number from 2 to 50."
+ },
+ {
+  "name": "repeat with group_by",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "customers_with_min_orders",
+     "min": 2
+    }
+   ],
+   "group_by": [
+    "financial_status"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "customers_with_min_orders cannot be combined with group_by."
+ },
+ {
+  "name": "group without aggregate",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "group_by": [
+    "financial_status"
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "group_by needs at least one aggregate in select."
+ },
+ {
+  "name": "mixed rows and aggregates",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number",
+    {
+     "agg": "count"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "With aggregates or group_by, select only aggregates: the group keys are returned automatically."
+ },
+ {
+  "name": "order by a name not returned",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "n"
+    }
+   ],
+   "order_by": [
+    {
+     "by": "email"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "order_by.by must be one of the names this query returns."
+ },
+ {
+  "name": "group_by bucket on a text column",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count"
+    }
+   ],
+   "group_by": [
+    {
+     "column": "financial_status",
+     "bucket": "day"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "group_by: bucket applies to date columns and is one of day, week, month."
+ },
+ {
+  "name": "as with sql",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    {
+     "agg": "count",
+     "as": "n); drop"
+    }
+   ]
+  },
+  "crm": "refuse",
+  "crm_says": "select: \"as\" must be a short lowercase name (a-z, 0-9, _)."
+ },
+ {
+  "name": "limit 0",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "limit": 0
+  },
+  "crm": "refuse",
+  "crm_says": "limit must be a whole number of at least 1."
+ },
+ {
+  "name": "fractional limit",
+  "input": {
+   "table": "orders",
+   "filters": [
+    {
+     "column": "created_at",
+     "op": "gte",
+     "value": "2026-09-01"
+    },
+    {
+     "column": "created_at",
+     "op": "lte",
+     "value": "2026-09-30"
+    }
+   ],
+   "select": [
+    "order_number"
+   ],
+   "limit": 2.5
+  },
+  "crm": "refuse",
+  "crm_says": "limit must be a whole number of at least 1."
+ }
+]
