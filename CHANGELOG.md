@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline SKU links screen removed from the app
+Decided Oct 27: the Watsons SKU link review lives only in the plan page's SKU link matrix (with remarks for whoever reviews it), not in Coop Nichido.
+- Removed `/stock/skus` (page, actions, `components/analyst/goldline-sku-links.tsx`, `src/goldline-sku-links-data.ts`) and the "SKU links" nav item (rail and mobile More sheet). Inventory owns all of `/stock` again.
+- Unchanged: the matcher still links high-confidence pairs on every Watsons upload, and the links already saved on Nichido Staging (`products.sku_code`, `chain_skus`) stay. Reviewed decisions from the matrix are applied as data, and carried to prod per `docs/nichido-prod-cutover.md`.
+
 ## 2026-10-26 — Goldline store scope and retiring products (F2)
 The two P1 switches that only had columns now work.
 - **Store scope** (S2, decided Oct 26): a store is in scope when it sold anything in the latest 3 loaded months of POS Sales Data; an admin can set any store Always in or Always out (`stores.in_scope`, null = automatic). `store_scope()` (`supabase/nichido/f2_store_scope.sql`, applied on Nichido Staging) works it out in one pass over sales (about 0.6 s on 392k rows), cached with the store list and refreshed by a Watsons upload or a scope change. `inScopeStores()` is ready for the restock (P3).
