@@ -4,7 +4,7 @@ import type {SpinLead} from '../src/spin-leads-types';
 import {addDays, followUpMessage, leadKey, matchLeadsToOrders, petName, treatPhrase} from '../src/lead-order-match';
 
 const lead = (over: Partial<SpinLead> = {}): SpinLead => ({
-  email: null, instagram: 'buddy.riley.bailey', pet: 'Bailey / Malshipoo', picky: null, mobile: null,
+  email: null, instagram: 'buddy.riley.bailey', pet: 'Bailey / Malshipoo', name: null, picky: null, mobile: null,
   prize: 'Zoomy! Bandana', campaign: null, collectedAt: '2026-09-24T20:45:00+08:00', ...over,
 });
 const order = (over: Partial<PosOrder> = {}): PosOrder => ({
@@ -77,7 +77,7 @@ describe('follow-up copy', () => {
 });
 
 describe('estimatedSpecies', () => {
-  const lead = (pet: string | null) => ({email: 'a@x.com', instagram: null, pet, picky: null, mobile: null, prize: 'x', campaign: null, collectedAt: '2026-09-27T02:00:00Z'});
+  const lead = (pet: string | null) => ({email: 'a@x.com', instagram: null, name: null, pet, picky: null, mobile: null, prize: 'x', campaign: null, collectedAt: '2026-09-27T02:00:00Z'});
   it('reads cat breeds as cat, other typed breeds as dog, and nothing typed as null', async () => {
     const {estimatedSpecies} = await import('../src/lead-order-match');
     expect(estimatedSpecies(lead('Mimi / Puspin'))).toBe('cat');

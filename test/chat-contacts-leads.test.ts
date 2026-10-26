@@ -3,7 +3,7 @@ import {listEventLeads, readContactsInput, type ListInput, type LeadsSource} fro
 import type {SpinLead} from '../src/spin-leads-types';
 
 // Synthetic people only. 2026-09-26 02:00Z is 10:00 in Manila.
-const lead = (o: Partial<SpinLead> & {collectedAt: string}): SpinLead => ({email: null, instagram: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, consentAt: null, ...o});
+const lead = (o: Partial<SpinLead> & {collectedAt: string}): SpinLead => ({email: null, instagram: null, name: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, consentAt: null, ...o});
 const SOURCE: LeadsSource = {
   events: [
     {event_id: 'e1', name: 'Modern Market Sept 2026', starts_on: '2026-09-26', ends_on: '2026-09-28'},
