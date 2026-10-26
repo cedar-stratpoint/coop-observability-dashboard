@@ -16,17 +16,18 @@ describe('allowedGap', () => {
 
 describe('rowMathOff', () => {
   const r = (p: Partial<CountRow>) => row({period_start: '2026-10-01', period_end: '2026-10-15', ...p});
-  it('passes a row that adds up with or without the delivery column', () => {
+  it('passes a row whose ending is stockroom + drawer + selling area (delivery left out, Q23)', () => {
     expect(rowMathOff(r({stockroom: 16, selling_area: 15, ending_on_hand: 31}))).toBeNull();
-    expect(rowMathOff(r({stockroom: 16, selling_area: 15, delivery: 5, ending_on_hand: 36}))).toBeNull();
     expect(rowMathOff(r({stockroom: 16, selling_area: 15, delivery: 5, ending_on_hand: 31}))).toBeNull();
   });
-  it('flags a row that matches neither reading', () => {
-    expect(rowMathOff(r({stockroom: 16, selling_area: 15, delivery: 5, ending_on_hand: 40}))).toEqual({written: 40, counted: 31, withDelivery: 36});
+  it('flags an ending that adds the delivery in, or matches nothing', () => {
+    expect(rowMathOff(r({stockroom: 16, selling_area: 15, delivery: 5, ending_on_hand: 36}))).toEqual({written: 36, counted: 31});
+    expect(rowMathOff(r({stockroom: 16, selling_area: 15, delivery: 5, ending_on_hand: 40}))).toEqual({written: 40, counted: 31});
   });
   it('skips rows with no written ending or no parts', () => {
     expect(rowMathOff(r({stockroom: 16}))).toBeNull();
     expect(rowMathOff(r({ending_on_hand: 6}))).toBeNull();
+    expect(rowMathOff(r({delivery: 6, ending_on_hand: 6}))).toBeNull();
   });
 });
 

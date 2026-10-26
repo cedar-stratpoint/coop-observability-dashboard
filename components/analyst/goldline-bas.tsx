@@ -8,7 +8,7 @@ import type {BaDirectory, BaScorecard, BaScoreRow, BaStoreRow} from '@/src/goldl
 import {FLAG_CAUSES, type BaTag} from '@/src/goldline-checks';
 import {CAUSE, TAG, tint, toneVar} from '@/components/analyst/goldline-flags';
 import {NativeSelect} from '@/components/ui/native-select';
-import {assignBaAction, importBasAction, type BaActionResult} from '@/app/bas/actions';
+import {assignBaAction, type BaActionResult} from '@/app/bas/actions';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
@@ -18,10 +18,10 @@ import {cn} from '@/lib/utils';
 // BAs: the scorecard (F8) and the BA list (A1). The scorecard is each BA's month across
 // every store they covered: points, tag (Clear · At risk · Delinquent), category and an
 // auto remark, with each store linking to its tile on Flags.
-// The BA list: which BA covers which store from when. The inventory form has a
-// "Beauty Consultant" line, but it's often blank; with the list, a form with no name
-// still counts against the store's BA, and "Liza M." resolves to "Liza Mendoza".
-// Stores whose saved forms have no BA come first. Full names only (Oct 26).
+// The BA list: which BA covers which store from when, learned from the names written
+// on uploaded forms (Oct 27: no list is typed in). A form with no name counts against
+// the store's BA, and "Liza M." resolves to "Liza Mendoza". Admins can correct a
+// store's BA here. Stores whose saved forms have no BA come first. Full names only.
 
 const PAGE_SIZE = 20;
 const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -113,7 +113,7 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
         <Scorecard data={scorecard} onList={() => setTab('list')} />
       ) : (
       <>
-      {canEdit && <PasteList company={company} pending={pending} act={act} />}
+      <p className="text-xs text-muted-foreground">Coop learns each BA from the name written on the forms: a known BA is recognised, a new one is added, and they become the store’s BA from that cycle. Change a store’s BA here only to correct it.</p>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium">
@@ -135,7 +135,7 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
       {rows.length === 0 ? (
         <Card>
           <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-            {data.stores.length ? 'No stores match.' : 'No store has sent a form or has a BA yet. Paste the BA list above to start.'}
+            {data.stores.length ? 'No stores match.' : 'No store has sent a form yet. BAs appear here as forms are uploaded.'}
           </CardContent>
         </Card>
       ) : (
@@ -161,37 +161,6 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
 }
 
 type Act = (fn: () => Promise<BaActionResult>, after?: () => void) => void;
-
-function PasteList({company, pending, act}: {company: string; pending: boolean; act: Act}) {
-  const [text, setText] = useState('');
-  const [from, setFrom] = useState(monthStart());
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">Paste the BA list</p>
-          <p className="text-xs text-muted-foreground">One store per line: store code, then the BA’s full name (comma or tab between, as copied from a spreadsheet).</p>
-        </div>
-        <textarea
-          aria-label="BA list"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={4}
-          placeholder={'1, Liza Mendoza\n2, Ana Perez'}
-          className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-        />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Covering from <input type="date" aria-label="Covering from" value={from} onChange={(e) => setFrom(e.target.value)} className={field} />
-          </label>
-          <Button size="sm" disabled={pending || !text.trim() || !from} onClick={() => act(() => importBasAction({company, text, from}), () => setText(''))}>
-            Save list
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function StoreLine({s, company, canEdit, pending, act}: {s: BaStoreRow; company: string; canEdit: boolean; pending: boolean; act: Act}) {
   const [editing, setEditing] = useState(false);
@@ -338,7 +307,7 @@ function Scorecard({data, onList}: {data: BaScorecard; onList: () => void}) {
       {rows.length === 0 ? (
         <Card>
           <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-            {inMonth.length ? 'No BAs match.' : `No BA is named on ${fmtMonth(month)}’s forms yet. Set each store’s BA on the BA list.`}
+            {inMonth.length ? 'No BAs match.' : `No BA is named on ${fmtMonth(month)}’s forms yet. BAs are read from the forms as they’re uploaded.`}
           </CardContent>
         </Card>
       ) : (

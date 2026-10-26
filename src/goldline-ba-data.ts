@@ -3,14 +3,17 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlStores} from './goldline-ref-data';
 import {runChecks} from './goldline-checks-data';
-import {cleanName, normName, parseBaLines, resolveBa, type StoreBa} from './goldline-ba';
+import {cleanName, normName, resolveBa, shouldRecordBa, type StoreBa} from './goldline-ba';
 import {baScores, baTags, type BaScore, type FlagCause} from './goldline-checks';
 
-// The BA directory (A1): who covers which store from when (store_bas), read when a
-// form is saved without a BA name and written from /bas. Assigning a BA also fills in
-// that store's saved forms from that date that have no name, then re-runs the store's
-// checks, so their flags count against the right BA (Oct 26: every flag counts).
-// A name written on a form is never overwritten. Pure rules: src/goldline-ba.ts.
+// The BA directory (A1): every BA (bas) and who covers which store from when
+// (store_bas). Learned from the forms (Oct 27): saving a form with a BA name adds that
+// BA if new and records them as the store's BA from the form's cycle (learnFormBa); a
+// form with no name gets the store's BA from that directory. /bas can correct a
+// store's BA by hand. Assigning a BA also fills in that store's saved forms from that
+// date that have no name, then re-runs the store's checks, so their flags count against
+// the right BA (Oct 26: every flag counts). A name written on a form is never
+// overwritten. Pure rules: src/goldline-ba.ts.
 
 const db = nichidoDb;
 
@@ -38,15 +41,43 @@ export async function getStoreBas(companyId: string, stores?: string[]): Promise
   return out;
 }
 
-/** The BA to save on a form: written name completed from the directory, else the store's BA. */
+async function knownBas(companyId: string): Promise<string[]> {
+  const rows = (await fetchAllRows('bas', (from, to) => db().from('bas').select('name').eq('company_id', companyId).order('name').range(from, to))) as unknown as Array<{name: string}>;
+  return rows.map((r) => r.name);
+}
+
+/**
+ * The BA to save on a form: the written name recognised among the store's BAs, then
+ * every known BA, else kept as a new BA; with no name, the store's BA on the last day.
+ */
 export async function resolveFormBa(companyId: string, store: string, periodEnd: string, written: string | null | undefined): Promise<string | null> {
   try {
-    const dir = await getStoreBas(companyId, [store]);
-    return resolveBa({written, storeBas: dir.get(store) ?? [], periodEnd}).name;
+    const [dir, known] = await Promise.all([getStoreBas(companyId, [store]), cleanName(written ?? '') ? knownBas(companyId) : Promise.resolve([])]);
+    return resolveBa({written, storeBas: dir.get(store) ?? [], known, periodEnd}).name;
   } catch (e) {
     // The directory is a convenience: a failed read never blocks saving a form.
     console.error('resolveFormBa', e);
     return cleanName(written ?? '') || null;
+  }
+}
+
+/**
+ * After a form is saved with a BA name: store the BA if new, and record them as the
+ * store's BA from the form's first day when they aren't already (and the form isn't
+ * older than the current assignment). Fills the store's later unnamed forms; the
+ * caller re-runs the checks. Never throws: learning the BA must not fail a commit.
+ */
+export async function learnFormBa(companyId: string, input: {store: string; periodStart: string; name: string | null; written: string | null | undefined; by: string | null}): Promise<void> {
+  if (!input.name || !cleanName(input.written ?? '')) return; // only names read off a form
+  try {
+    // The BA is kept even when the store can't be recorded (e.g. not on the store list).
+    await baId(companyId, cleanName(input.name), input.by);
+    const dir = (await getStoreBas(companyId, [input.store])).get(input.store) ?? [];
+    if (shouldRecordBa(input.name, dir, input.periodStart)) {
+      await assignBa(companyId, null, {store: input.store, name: input.name, from: input.periodStart, by: input.by}, false);
+    }
+  } catch (e) {
+    console.error('learnFormBa', e);
   }
 }
 
@@ -172,33 +203,6 @@ export async function assignBa(
   const filled = fill.count ?? 0;
   if (rerun && filled) await runChecks(companyId, [input.store]).catch((e) => console.error('runChecks after assignBa', e));
   return {filled, unchanged};
-}
-
-/** Paste "store code, BA name" lines (e.g. Justin's list): assign each from `from`. */
-export async function importBas(
-  companyId: string,
-  scope: string[] | null,
-  input: {text: string; from: string; by: string | null},
-): Promise<{assigned: number; filled: number; errors: string[]}> {
-  const {rows, errors} = parseBaLines(input.text);
-  if (!rows.length) throw new BaError(errors.length ? `Couldn’t read: ${errors.slice(0, 3).join(' · ')}` : 'Paste one “store code, BA name” per line.');
-  if (rows.length > 1000) throw new BaError('Paste up to 1,000 lines at a time.');
-  let assigned = 0;
-  let filled = 0;
-  const touched = new Set<string>();
-  for (const r of rows) {
-    try {
-      const res = await assignBa(companyId, scope, {store: r.store, name: r.name, from: input.from, by: input.by}, false);
-      assigned++;
-      filled += res.filled;
-      if (res.filled) touched.add(r.store);
-    } catch (e) {
-      if (e instanceof BaError) errors.push(`${r.store}: ${e.message}`);
-      else throw e;
-    }
-  }
-  if (touched.size) await runChecks(companyId, [...touched]).catch((e) => console.error('runChecks after importBas', e));
-  return {assigned, filled, errors};
 }
 
 // ── BA scorecard (F8) ───────────────────────────────────────────────────────────────
