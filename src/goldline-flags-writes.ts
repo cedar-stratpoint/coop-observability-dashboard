@@ -1,11 +1,10 @@
 import 'server-only';
 import {nichidoDb} from './nichido-client';
 import {runChecks, type FlagStatus} from './goldline-checks-data';
-import type {FlagCause} from './goldline-checks';
 
-// Writes behind the flag queue (F7) and adjustments (F5): close or reopen a flag (a
-// remark is required, the cause may change), log stock that left without a sale, and
-// re-run the store's checks after every adjustment so the next start is right.
+// Writes behind the flag queue (F7) and adjustments (F5): remark on a flag (it never
+// changes the count), log stock that left without a sale, and re-run the store's checks
+// after every adjustment so the next start is right.
 // Store-scoped roles pass their scope; anything outside it is refused.
 
 const db = nichidoDb;
@@ -17,7 +16,7 @@ export class FlagError extends Error {}
 async function flagFor(companyId: string, id: string, scope: string[] | null) {
   const res = await db()
     .from('flags')
-    .select('id,store_code,item_code,period_start,period_end,status,cause')
+    .select('id,store_code,item_code,period_start,period_end,status')
     .eq('company_id', companyId)
     .eq('id', id)
     .maybeSingle();
@@ -31,56 +30,21 @@ async function flagFor(companyId: string, id: string, scope: string[] | null) {
     period_start: string;
     period_end: string;
     status: FlagStatus;
-    cause: FlagCause;
   };
 }
 
-/** Close a flag as checked or dismissed. A remark is required (plan F7); the cause may change. */
-export async function closeFlag(
-  companyId: string,
-  scope: string[] | null,
-  input: {
-    id: string;
-    status: 'checked' | 'dismissed';
-    remark: string;
-    cause?: FlagCause;
-    by: string | null;
-  },
-) {
-  const f = await flagFor(companyId, input.id, scope);
-  if (f.status !== 'open') throw new FlagError('This flag is already closed.');
-  const changed = input.cause && input.cause !== f.cause;
+/**
+ * Add or replace an admin's remark on a flag. A remark never changes the count: every
+ * flag Coop raises counts against the BA (Oct 26, no approve or dismiss step).
+ */
+export async function remarkFlag(companyId: string, scope: string[] | null, input: {id: string; remark: string; by: string | null}) {
+  await flagFor(companyId, input.id, scope);
   const res = await db()
     .from('flags')
-    .update({
-      status: input.status,
-      remark: input.remark,
-      closed_by: input.by,
-      closed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      ...(changed ? {cause: input.cause, original_cause: f.cause} : {}),
-    })
+    .update({remark: input.remark, remark_by: input.by, remarked_at: new Date().toISOString(), updated_at: new Date().toISOString()})
     .eq('company_id', companyId)
-    .eq('id', input.id)
-    .eq('status', 'open');
-  if (res.error) throw new Error(`close failed: ${res.error.message}`);
-}
-
-/** Reopen a flag an admin closed by mistake. */
-export async function reopenFlag(companyId: string, scope: string[] | null, id: string) {
-  const f = await flagFor(companyId, id, scope);
-  if (f.status === 'open') return;
-  const res = await db()
-    .from('flags')
-    .update({
-      status: 'open',
-      closed_by: null,
-      closed_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('company_id', companyId)
-    .eq('id', id);
-  if (res.error) throw new Error(`reopen failed: ${res.error.message}`);
+    .eq('id', input.id);
+  if (res.error) throw new Error(`remark failed: ${res.error.message}`);
 }
 
 /** Log stock that left without a sale (F5), then re-run that store's checks. */
@@ -124,7 +88,11 @@ export async function addAdjustment(
   if (rerun) await runChecks(companyId, [input.store]);
 }
 
-/** Log the missing stock behind a sales-gap flag as an adjustment and close the flag. */
+/**
+ * Log the stock behind a sales-gap flag as a pull-out, damage or loss, keep the remark on
+ * the flag, then re-run the store's checks so next month starts from the right number.
+ * The flag keeps counting against the BA either way (Oct 26).
+ */
 export async function logLossFromFlag(
   companyId: string,
   scope: string[] | null,
@@ -137,9 +105,6 @@ export async function logLossFromFlag(
   },
 ): Promise<void> {
   const f = await flagFor(companyId, input.id, scope);
-  if (f.status !== 'open') throw new FlagError('This flag is already closed.');
-  // Record the loss first (it validates store and item), then close the flag, then re-run
-  // the store's checks. A failure before the close leaves the flag open to try again.
   await addAdjustment(
     companyId,
     scope,
@@ -156,12 +121,7 @@ export async function logLossFromFlag(
     },
     false,
   );
-  await closeFlag(companyId, scope, {
-    id: input.id,
-    status: 'checked',
-    remark: input.remark,
-    by: input.by,
-  });
+  await remarkFlag(companyId, scope, {id: input.id, remark: input.remark, by: input.by});
   await runChecks(companyId, [f.store_code]);
 }
 
