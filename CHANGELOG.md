@@ -12,6 +12,16 @@ Dates are local working dates (GMT+8). Newest first.
 
 ## 2026-10-26
 
+### Shopee same-day sync, slice 3: review fixes, alert seam, pilot check and runbook (SYN-04, SYN-06 dashboard side)
+- **Card follows the viewed week.** The sync card and the "Behind" tag now count only the missing days inside the week on screen (`scopeToWindow`), with a note when the sync will also load days from other weeks. A week with no gaps shows no card. A custom range keeps the global view, because it has no single window.
+- **Mac names, not emails.** A workmate's sync is named by its Mac ("Waiting for Ana MacBook to finish its sync"); the requester's address is used only while nobody has claimed the job.
+- **Header overflow at 390px:** not reproduced in mock mode (no overflow, scrollWidth 390 = viewport) and the shell/header files are untouched by this branch; the overflow was seen only with live sync data, where the new "Behind" chip is the one addition to the header row, and that row wraps. Not fixed, not proven ours: re-check once a real status is on screen.
+- **Review findings fixed:** the worker's `docker run` binds noVNC to `127.0.0.1` and adds `--shm-size=1g`; confirming a review applies only sales_overview, non-restated runs inside the job's days that this job planned, all or none (runs planned by a worker are stamped `imported_by = sync:<jobId>`); a worker applies only runs its own job planned and never a flagged plan; removing a Mac fails the sync it was running so it stops blocking the team; an enrolment code is redeemed and the caps checked in one atomic SQL function (`redeem_shopee_sync_enrolment`), so a capped redemption no longer spends the code. Decision: the Monday quiet window blocks starting and claiming only; a running sync finishes (pinned by a test).
+- **Alerts (seam only).** `src/shopee-sync/alerts.ts` decides which jobs alert (failed, or awaiting verification over 2 hours; not cancels or removed Macs) and builds the message (job id, days, scrubbed reason; no screenshot, link, buyer data, requester email, per-day note, password or code) with an injected sender. The dashboard has no email mechanism, so Resend wiring is a marked `TODO(SYN-06 wiring)`; no dependency added.
+- **Pilot check.** `src/shopee-sync/pilot.ts`: a synced day passes when placed is within 1% and confirmed within 5% of the weekly figure; the pilot passes at 7 compared days with none outside. Runbook: `docs/shopee-sync-runbook.md`.
+- Apply the new function by hand with the rest of `supabase/shopee_sync.sql` (local Docker only so far).
+
+
 ### Shopee same-day sync, slice 2: the Overview card and "My sync Macs" (SYN-04, SYN-05 UI side, SYN-08)
 The Overview (`ChannelOverview`) shows a Shopee sync card when Shopee is selected and the server says days are missing or a sync is active or finished in the last day, and the Shopee chip carries a "Behind" tag while days are missing. One button labelled from the server's `canSync` ("Sync 7 missing days"), no day picker, no mode choice. Every status has an icon and a label; `awaiting_verification` tells the person to type the password in the Shopee browser on their Mac and has no input of any kind. Settings gets "My sync Macs" (`/settings/shopee-sync`): own Macs (admins: everyone's, with owner), Revoke, and Add a Mac with the one-time command, Copy, and the three steps.
 Decisions:
