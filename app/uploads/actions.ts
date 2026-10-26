@@ -1,6 +1,7 @@
 'use server';
 
 import {revalidatePath} from 'next/cache';
+import {runChecks} from '@/src/goldline-checks-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {auth} from '@/auth';
@@ -100,8 +101,13 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
   try {
     const out = await outOfScopeFor(ctx, input.uploadId);
     if (out) return {ok: false, error: out};
+    // A scan's stores are few (its counts); a sales file can touch every store, and its
+    // rows only matter to counted stores, so it re-runs the checks for those instead.
+    const upload = await getUpload(ctx.companyId, input.uploadId);
+    const touched = upload?.kind === 'inventory_pdf' ? await uploadStores(ctx.companyId, input.uploadId).catch(() => [] as string[]) : null;
     const ok = await deleteUpload(ctx.companyId, input.uploadId);
     if (!ok) return {ok: false, error: 'Upload not found.'};
+    await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
     revalidatePath('/uploads');
     revalidatePath('/stock');
     revalidatePath('/overview');
@@ -169,8 +175,11 @@ export async function commitReview(input: {
       consultant: input.consultant ?? null,
       rows,
     });
+    // The P2 checks follow every change to counts; a failing check never fails the commit.
+    await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/${input.uploadId}`);
+    revalidatePath('/flags');
     return {ok: true, committed};
   } catch (e) {
     // Don't leak Postgres/schema detail to the browser; log it server-side.
@@ -305,9 +314,12 @@ export async function commitBatchAction(input: {
       consultant: input.consultant ?? null,
       pages,
     });
+    // The P2 checks follow every change to counts; a failing check never fails the commit.
+    await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/batch/${input.batchId}`);
     revalidatePath('/stock');
+    revalidatePath('/flags');
     return {ok: true, committed};
   } catch (e) {
     if (e instanceof BatchConflictError) {
