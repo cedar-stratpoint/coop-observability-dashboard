@@ -1,6 +1,6 @@
 # Nichido (Goldline) prod cutover
 
-The one controlled pass that takes Goldline from Staging to prod. Prepared Oct 26, 2026, after P1, P2, the Oct 26 flag rework, the BA list and scorecard, the multi-store scan split and F2 landed on `staging`. Run it only after Justin's UAT sign-off (P5).
+The one controlled pass that takes Goldline from Staging to prod. Prepared Oct 26, 2026, after P1, P2, the Oct 26 flag rework, the BA list and scorecard, the multi-store scan split and F2 landed on `staging`; updated Oct 27 (SKU links screen removed, BAs learned from forms, Q23 ending rule). Run it only after Justin's UAT sign-off (P5).
 
 Who: **Rick** (Nichido database, copy), **the co-worker who owns prod Vercel** (env vars, deploy), **Lance** (code to `main`, data load, smoke test).
 
@@ -39,6 +39,7 @@ Cherry-pick with `-x`, in this order (hashes as on `staging`):
 1. Rick's Nichido move: `e7a80a9`, `3bc44f6`, `6480545`, `ea2ff24`, `21e6842`, `11978ad`
 2. P1 and P2: `6b819c5`, `4500ce8`, `7a371df`, `6b6214d`, `ef6b208`, `8357634`
 3. Oct 26 rework and after: `1b80d80`, `f1ec392`, `ff406c9`, `78cfb73`, `9c15af9`, `df9c3f1`
+4. Oct 27: `acfd64d` (SKU links screen removed), `858b85d` (BAs learned from forms, ending excludes delivery)
 
 Expect `CHANGELOG.md` conflicts on most picks: keep `main`'s file and add the Goldline entries in one commit at the end. Typecheck and tests on the branch before the PR. A release commit (`chore(release): v1.x.0 …`) follows the repo's usual pattern.
 
@@ -57,8 +58,8 @@ The pairing check refuses a Staging Nichido URL on prod (and the reverse). Redep
 | Step | How | Note |
 |---|---|---|
 | 10 months of POS Sales Data | Uploads, one Watsons `.xlsx` at a time (Oct 2025 to Sep 2026, plus Feb and Mar 2026 once Justin sends them) | High-confidence SKU links are made automatically on load |
-| SKU links confirmed on Staging | Export Staging's `products.sku_code` / `sku_linked_by` and `chain_skus` decisions to a reviewed `.sql`, apply on prod | Prod's catalog comes from the archive copy and won't have Staging's links |
-| BA list | `/bas` → paste Justin's "store code, BA name" list | Fills earlier forms with no BA name |
+| SKU links confirmed on Staging | Decisions come from the plan page's SKU link matrix (remarks); export Staging's `products.sku_code` / `sku_linked_by` and `chain_skus` decisions to a reviewed `.sql`, apply on prod | Prod's catalog comes from the archive copy and won't have Staging's links |
+| BAs | Nothing to load: Coop learns each BA from the name on the uploaded forms | `/bas` only to correct a store's BA |
 | Store scope overrides | `/stores` | Only if Justin wants any store forced in or out |
 | Access | Main database: `company_users` rows giving Justin and the owner `company_admin` on `goldline` (D4) | |
 
@@ -71,7 +72,7 @@ The pairing check refuses a Staging Nichido URL on prod (and the reverse). Redep
 1. Overview and Stores load with the 10 months; Stores shows "In scope N of M".
 2. Uploads: one real form PDF reads, reviews and saves; a two-store PDF splits into two forms.
 3. Flags: tiles per store per BA; a tile opens the digital form with boxed, numbered cells and notes.
-4. BAs: the scorecard lists BAs; each store links to its form.
+4. BAs: a form saved with a BA name puts that BA on `/bas` for its store; the scorecard lists BAs; each store links to its form.
 5. Zoomy's Ask Coop can't see Nichido data; Coop Admin stays data-blind.
 
 ## 7 · Rollback
