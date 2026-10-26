@@ -5,6 +5,7 @@ import {classifyUpload} from '@/src/goldline-upload';
 import {parseGoldlinePos} from '@/src/goldline-csv';
 import {readWatsonsWorkbook} from '@/src/goldline-pos-xlsx';
 import {applyWatsonsMonth} from '@/src/goldline-watsons-data';
+import {runChecks} from '@/src/goldline-checks-data';
 import {glTags} from '@/src/goldline-ref-data';
 import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
@@ -247,6 +248,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const committed = await upsertSales(companyId, rows, {start, end}, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      await runChecks(companyId).catch((e) => console.error('runChecks after CSV upload', msg(e)));
       return json({uploadId, status: 'committed', rowsCommitted: committed, warnings: errors});
     } catch (e) {
       console.error('goldline upload: sales commit failed', e);
@@ -265,10 +267,10 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       await setUploadStatus(uploadId, 'failed', {rejectReason: reason});
       return json({uploadId, status: 'failed', error: reason, errors: wb.errors}, 422);
     }
-    // A chain-wide file touches every store, so only someone who sees every store may load it.
-    const outXlsx = outOfScopeStores(ctx.storeScope, wb.stores.map((s) => s.storeCode));
-    if (outXlsx.length) {
-      const reason = `This file covers stores outside your access (${outXlsx.length}, e.g. ${outXlsx.slice(0, 5).join(', ')}).`;
+    // A chain-wide file adds stores and changes SKU links for the whole company, so only
+    // a role that sees every store may load it (same rule as the SKU links screen).
+    if (Array.isArray(ctx.storeScope)) {
+      const reason = 'Only someone who sees every store can load POS Sales Data for the whole chain.';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
       return json({uploadId, status: 'rejected', error: reason}, 403);
     }
@@ -276,6 +278,8 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const summary = await applyWatsonsMonth(companyId, wb, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      // A new month of POS data can open or clear form vs. sales flags (counted stores only).
+      await runChecks(companyId).catch((e) => console.error('runChecks after Watsons upload', msg(e)));
       revalidateTag(glTags.stores(companyId), {expire: 0});
       revalidateTag(glTags.catalog(companyId), {expire: 0});
       return json({uploadId, status: 'committed', rowsCommitted: summary.salesRows, watsons: summary, warnings: wb.errors});
@@ -293,7 +297,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     return json({
       uploadId,
       status: 'needs_review',
-      note: 'Stored. Extraction is not configured (ANTHROPIC_API_KEY missing), so review it manually.',
+      note: 'Stored. Extraction is not configured (GOLDLINE_ANTHROPIC_API_KEY missing), so review it manually.',
     });
   }
 

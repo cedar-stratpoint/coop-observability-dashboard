@@ -277,6 +277,13 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
             )}
           </section>
 
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">₱{Math.round(summary.stockValue).toLocaleString('en-US')}</span> stock on hand ·{' '}
+            <span className="font-medium text-foreground tabular-nums">₱{Math.round(summary.deliveredValue).toLocaleString('en-US')}</span> delivered in the latest count (
+            <span className="tabular-nums">{summary.deliveredUnits.toLocaleString('en-US')}</span> units) · at selling price
+            {summary.unpriced ? ` · ${summary.unpriced} counted item${summary.unpriced === 1 ? '' : 's'} without a price left out` : ''}
+          </p>
+
           {data.count && (data.count.sources.length > 0 || data.count.missingPages.length > 0) && (
             <section aria-label="Source scans" className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
               <span className="text-muted-foreground">Latest count from:</span>

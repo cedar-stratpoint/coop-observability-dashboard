@@ -206,7 +206,7 @@ export async function relinkWatsons(companyId: string): Promise<{linked: Array<{
     fetchAllRows('chain_skus', (from, to) =>
       supa
         .from('chain_skus')
-        .select('sku_code,name,dismissed_item_code,suggested_item_code')
+        .select('sku_code,name,dismissed_item_codes,suggested_item_code')
         .eq('company_id', companyId)
         .eq('chain', CHAIN)
         .order('sku_code')
@@ -216,7 +216,7 @@ export async function relinkWatsons(companyId: string): Promise<{linked: Array<{
   ]);
   if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
   const products = productsRes as unknown as Array<CatalogItem & {sku_code: string | null; retired_at: string | null}>;
-  const skus = skuRows as unknown as Array<{sku_code: string; name: string; dismissed_item_code: string | null; suggested_item_code: string | null}>;
+  const skus = skuRows as unknown as Array<{sku_code: string; name: string; dismissed_item_codes: string[] | null; suggested_item_code: string | null}>;
   const totals = new Map(
     ((rollup.data as {bySku?: Array<{sku_code: string; units: unknown; gross: unknown}>} | null)?.bySku ?? []).map((r) => [
       r.sku_code,
@@ -225,7 +225,7 @@ export async function relinkWatsons(companyId: string): Promise<{linked: Array<{
   );
 
   const taken = products.filter((p) => p.sku_code?.trim()).map((p) => ({skuCode: p.sku_code!.trim(), itemCode: p.item_code}));
-  const blocked = new Set(skus.filter((s) => s.dismissed_item_code).map((s) => `${s.sku_code}|${s.dismissed_item_code}`));
+  const blocked = new Set(skus.flatMap((s) => (s.dismissed_item_codes ?? []).map((item) => `${s.sku_code}|${item}`)));
   const catalog = products.filter((p) => !p.retired_at).map(({item_code, product_line, variant, unit_price}) => ({
     item_code,
     product_line,
