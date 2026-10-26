@@ -10,6 +10,22 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 — Watsons SKU links rechecked by hand (Nichido Staging data only)
+A final check of the SKU link matrix against the 10 raw Watsons Scan Data files and the inventory form PDFs. No code changed; data edits were applied directly on Nichido Staging.
+- **Source check passed.** The files total 313 SKUs, 2,130,613 units and ₱317.6M, equal to every month's TOTAL row and to `sales` per SKU (units, sales and store count). All 263 catalog items are on the form; prices match on the 237 that parse cleanly.
+- **50 hand-checked links** (`sku_linked_by = 'admin'`), each matched on product, shade and exact selling price: 6-in-1 foundations, Ultra Stay matte lip colors, Cloud Drops, the True Colors 3.5G blushes, Glamour Lashes, Latex Sponge, Rosette lip pencil and more. Coverage went from 67% to 82% of units (64% to 80% of sales). Saved as links, not suggestions, because `relinkWatsons` (run on every upload and every "turn down") wipes suggestions it didn't make.
+- **One wrong link undone:** 38006111 (old ₱88 Cool Rum blush) gave TCPBCR04 to the ₱160 3.5G SKU 70120834; the pair is in `dismissed_item_codes`.
+- **Matcher bugs found, not yet fixed in `matchSkus`:** Glamour Lashes suggestions were shifted one row (84331 → TLGL4440, 84440 → TLGL4452, …), the Pink and Silver retractable lip brushes were swapped, the ₱88 legacy blushes were offered the ₱160 items, and the 150-peso Matte Oriental two way cake was offered the 185-peso non-matte one. Nine more wrong suggestions were turned down; price fit should weigh more in the matcher.
+- Still for Justin's code list (Q20): the two "PROFESSIONAL EYE PENCI" SKUs, the two retractable eye pencils, the three Gorgeous eye pencils, the truncated True Colors eye shadows and the Elise Diva lashes.
+
+## 2026-10-26 — Goldline flags: each flag points at the cell that's wrong
+The digital form on `/flags` now matches the plan's F7 mockup: a flag sits on the exact part of the form where the inconsistency is, with a short description, instead of a "Check" column at the end of the row.
+- **The wrong cell is boxed and numbered.** The box style names the cause without colour: solid for Incorrect total, dashed for Padding, dotted for Messy handwriting (a key under the form says so). A month's form vs. POS gap points at the ending, the number POS disagrees with.
+- **A note under the row points up at it** with an arrow and one plain sentence ("Stockroom 47 + drawer 52 + selling area 33 = 132, but the ending says 162."). For an incorrect total the numbers it should add up to are underlined. The remark, if any, shows in the note.
+- **Numbers tie it together:** the boxed cell, its note and its card under the form ("Remarks and adjustments") share a number, counted down the page.
+- **Phones:** the form scrolls sideways, so each note pins to the visible left edge and drops the arrow; the note already names the column.
+- The digital form uses a fixed column layout (product 30%, each count 14%) so an arrow lands on its cell.
+
 ## 2026-10-26 — Goldline flags reworked to the Oct 26 meeting decisions
 Justin's team reviewed the plan on Oct 26 (`../docs/scoping/Nichido Feedback - Combined.txt`). The flag queue now follows what they decided.
 - **Causes renamed** to the words Justin's dad uses: Messy handwriting (was unreadable), Incorrect total (was human error), Padding (was manipulation). A form vs. sales gap is named by its direction: POS sold more than the counts show is **Padding**; the counts show more gone than POS sold is **Incorrect total**. A count at 0 or below stays Padding. `supabase/nichido/p2b_flag_causes.sql` migrates existing rows (applied on Nichido Staging).
