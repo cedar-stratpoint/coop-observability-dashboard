@@ -10,8 +10,9 @@ export interface ApiDeps {
   store: ImportStore;
   token: string | undefined;
   now: () => Date;
-  /** True when a bearer is an enrolled, non-revoked Shopee sync worker. Such a worker may plan and apply sales_overview only (never restate, undo or coverage). */
-  workerAuth?: (bearer: string) => Promise<boolean>;
+  /** The grant of an enrolled, non-revoked Shopee sync worker, or null. Such a worker may plan and apply sales_overview only (never restate, undo or coverage),
+   * and only for days of the job it is running right now. */
+  workerAuth?: (bearer: string) => Promise<{days: readonly string[]} | null>;
 }
 
 export const MAX_FILES = 30;
@@ -26,14 +27,26 @@ export function authorize(req: Request, token: string | undefined): 'ok' | 'deni
 
 const reply = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
 /** `workerOk`: the route accepts a worker token (plan, apply). Every other route answers a worker token with 403. */
-async function gate(req: Request, d: ApiDeps, workerOk = false): Promise<{denied: Response | null; worker: boolean}> {
+async function gate(req: Request, d: ApiDeps, workerOk = false): Promise<{denied: Response | null; worker: boolean; days: ReadonlySet<string>}> {
+  const none = new Set<string>();
   const a = authorize(req, d.token);
-  if (a === 'ok') return {denied: null, worker: false};
+  if (a === 'ok') return {denied: null, worker: false, days: none};
   const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1].trim();
-  if (bearer && d.workerAuth && (await d.workerAuth(bearer))) return workerOk ? {denied: null, worker: true} : {denied: reply({error: 'A worker token cannot do that.'}, 403), worker: true};
-  if (a === 'not_configured' && !(bearer && d.workerAuth)) return {denied: reply({error: 'The import API is not configured on this deployment.'}, 503), worker: false};
-  return {denied: reply({error: 'Unauthorized.'}, 401), worker: false};
+  const grant = bearer && d.workerAuth ? await d.workerAuth(bearer) : null;
+  if (grant) return workerOk ? {denied: null, worker: true, days: new Set(grant.days)} : {denied: reply({error: 'A worker token cannot do that.'}, 403), worker: true, days: none};
+  if (a === 'not_configured' && !(bearer && d.workerAuth)) return {denied: reply({error: 'The import API is not configured on this deployment.'}, 503), worker: false, days: none};
+  return {denied: reply({error: 'Unauthorized.'}, 401), worker: false, days: none};
 }
+/** Every day from..to is one of `days` (a worker may only load days of its own running job). Unreadable or absurdly long periods are refused. */
+export function periodWithin(from: string | null | undefined, to: string | null | undefined, days: ReadonlySet<string>): boolean {
+  if (!from || !to || days.size === 0) return false;
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a || (b - a) / 86_400_000 > 62) return false;
+  for (let t = a; t <= b; t += 86_400_000) if (!days.has(new Date(t).toISOString().slice(0, 10))) return false;
+  return true;
+}
+const outsideJob = (): Response => reply({error: 'A worker token can only load days of the sync job it is running now.'}, 403);
 const workerRefused = (what: string): Response => reply({error: `A worker token can only plan and apply plain sales_overview files, not ${what}.`}, 403);
 const phToday = (now: Date): string => new Date(now.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
 const body = async (req: Request): Promise<Record<string, unknown> | null> => {
@@ -46,7 +59,7 @@ const body = async (req: Request): Promise<Record<string, unknown> | null> => {
 };
 
 export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
-  const {denied, worker} = await gate(req, d, true);
+  const {denied, worker, days} = await gate(req, d, true);
   if (denied) return denied;
   let form: FormData;
   try {
@@ -62,6 +75,7 @@ export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
   const restate = form.get('restate');
   if (worker && restate !== null) return workerRefused('a restate');
   if (worker && files.some((f) => classifyFile(f.name).type !== 'sales_overview')) return workerRefused('other report types');
+  if (worker && files.some((f) => !periodWithin(classifyFile(f.name).period?.from, classifyFile(f.name).period?.to, days))) return outsideJob();
   const ordered = [...files].sort((a, b) => (classifyFile(a.name).period?.from ?? '').localeCompare(classifyFile(b.name).period?.from ?? ''));
   const results = [];
   for (const f of ordered) {
@@ -79,7 +93,7 @@ export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
 }
 
 export async function handleApply(req: Request, d: ApiDeps): Promise<Response> {
-  const {denied, worker} = await gate(req, d, true);
+  const {denied, worker, days} = await gate(req, d, true);
   if (denied) return denied;
   const b = await body(req);
   const ids = b && Array.isArray(b.importIds) ? b.importIds.filter((x): x is string => typeof x === 'string') : null;
@@ -88,6 +102,7 @@ export async function handleApply(req: Request, d: ApiDeps): Promise<Response> {
     for (const id of ids) {
       const run = await d.store.getRun(id);
       if (run && (run.reportType !== 'sales_overview' || run.restated)) return workerRefused('a restate or other report types');
+      if (run && !periodWithin(run.periodFrom, run.periodTo, days)) return outsideJob();
     }
   }
   const results = [];
