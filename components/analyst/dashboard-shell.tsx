@@ -4,7 +4,7 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useSearchParams} from 'next/navigation';
 import {signOut} from 'next-auth/react';
-import {Activity, BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Contact, FileBarChart, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
+import {Activity, BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Contact, FileBarChart, Flag, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
 import type {DigestArchiveRow} from '../../src/types';
 import {cn} from '@/lib/utils';
 import {fmtRange, hasNoSalesData, periodKind} from '../../src/week';
@@ -227,6 +227,7 @@ export function DashboardShell({
   const stockTab: NavItem = {href: '/stock', label: 'Inventory', icon: Package};
   const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU links', icon: Link2};
   const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
+  const flagsTab: NavItem = {href: '/flags', label: 'Flags', icon: Flag};
   const healthTab: NavItem = {href: '/store-health', label: 'Health', icon: HeartPulse};
   const usersTab: NavItem = {href: '/admin/users', label: 'Users & Roles', icon: Users};
   // Settings for non-Zoomy views only matters to multi-role users (Starting view).
@@ -238,7 +239,7 @@ export function DashboardShell({
     ? FLAT_TABS
     : isCoopAdminView
       ? [usersTab, ...(multiView ? [settingsTab] : [])]
-      : [overviewTab, storesTab, stockTab, skuLinksTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
+      : [overviewTab, storesTab, stockTab, skuLinksTab, flagsTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
 
   // ── Mobile nav model (below md only) ──────────────────────────────────────
   // The left rail is hidden under md; these drive a bottom tab bar + a "More" sheet.
@@ -275,7 +276,7 @@ export function DashboardShell({
       ? multiView
         ? [settingsTab]
         : []
-      : [storesTab, skuLinksTab, healthTab, ...(multiView ? [settingsTab] : [])];
+      : [storesTab, skuLinksTab, flagsTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 
   return (
