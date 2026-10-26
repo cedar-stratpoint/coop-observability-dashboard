@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.15.0 (2026-10-26): Event lead contacts show the full name
+**Selective release** of the spin-the-wheel name work from `develop` (PR #262) and nothing else; the Goldline Nichido work on `staging` is not in it. One SQL file, no environment variable, no backfill script.
+- **Before deploy:** `supabase/spin_wheel_leads_name.sql` has run on PROD (`qkxb…wipi`, 2026-10-26), and zoomy-crm with `name` on `GET /api/spin-leads` is live.
+- **After deploy:** press **Update leads** on `/customers/leads`. It reports how many names it filled on leads imported earlier, and the Name column appears.
+
 ## 2026-10-26 — Spin-the-wheel leads show the full name
 - **Why:** the booth form now asks for the furparent's full name and no longer asks whether the pet is a picky eater.
 - **What:** Event lead contacts gain a **Name** column after Contact. **Picky eater** stays, so older leads keep their answers; each column shows only when some lead has a value, and a lead without one shows "—".
