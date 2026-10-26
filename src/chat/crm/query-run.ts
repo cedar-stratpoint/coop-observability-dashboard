@@ -39,7 +39,7 @@ async function read(deps: RunDeps, spec: WireSpec, paged: boolean): Promise<Page
 /** How many rows match, from an aggregate count over the same filters (never by summing the table). null when it cannot be asked. */
 async function countMatching(deps: RunDeps, spec: WireSpec): Promise<number | null> {
   try {
-    const page = await read(deps, {table: spec.table, select: [{agg: 'count', as: 'n'}], filters: spec.filters, group_by: [], order_by: [], ...(spec.tz ? {tz: spec.tz} : {})}, false);
+    const page = await read(deps, {table: spec.table, select: [{agg: 'count', as: 'n'}], filters: spec.filters, group_by: [], order_by: [], ...(spec.joins ? {joins: spec.joins} : {}), ...(spec.tz ? {tz: spec.tz} : {})}, false);
     const n = page.rows[0]?.n;
     return typeof n === 'number' ? n : null;
   } catch {
@@ -58,7 +58,7 @@ export async function runQuery(req: Query, deps: RunDeps): Promise<RunOutcome> {
 
   const clock = deps.clock ?? Date.now;
   const t0 = clock();
-  const size = Math.min(L.pageRows, identity ? cat.identity?.cap ?? L.modelIdentity : cat.rowCap);
+  const size = Math.min(L.pageRows, identity ? cat.identity?.cap ?? L.modelIdentity : cat.pagedCap);
   const rows: Page['rows'] = [];
   const notes = new Set<string>();
   let first: Page | null = null;
@@ -70,7 +70,7 @@ export async function runQuery(req: Query, deps: RunDeps): Promise<RunOutcome> {
     const want = Math.min(size, L.csvRows - rows.length);
     let page: Page;
     try {
-      page = await read(deps, {...spec, limit: want, ...(cursor ? {cursor} : {})}, true);
+      page = await read(deps, {...spec, limit: want, cursor: cursor ?? 'start'}, true); // "start" opens the CRM's keyset paging: pages of 500, no 64 KB cap
     } catch (e) {
       if (first === null || !(e instanceof CrmError)) throw e;
       stopped = 'pages'; // a later page failed or the request limit was reached: keep what was read, and say so
@@ -82,7 +82,7 @@ export async function runQuery(req: Query, deps: RunDeps): Promise<RunOutcome> {
     partial ||= page.partial;
     cursor = page.nextCursor;
     if (!cursor) {
-      if (page.truncated) stopped = 'cap'; // the CRM ended the walk itself (its own paging limit)
+      if (page.truncated) stopped = 'cap'; // the CRM ended the walk without a cursor (it has no paging ceiling of its own; this is not expected)
       break;
     }
     if (rows.length >= L.csvRows) stopped = 'ceiling';
