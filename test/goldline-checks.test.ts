@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {allowedGap, baTags, categoryOf, monthlyChecks, rowFindings, rowMathOff, tagFor, type CountRow} from '../src/goldline-checks';
+import {allowedGap, baScores, baTags, categoryOf, monthlyChecks, rowFindings, rowMathOff, tagFor, type CountRow} from '../src/goldline-checks';
 
 const row = (p: Partial<CountRow> & Pick<CountRow, 'period_start' | 'period_end'>): CountRow => ({
   store_code: '1', item_code: 'LIPT01', stockroom: null, drawer: null, selling_area: null, delivery: null,
@@ -134,6 +134,24 @@ describe('BA tags', () => {
       ['1', 'Grace Tan', 2, 'delinquent', 'padding'],
       ['1', 'Liza Mendoza', 1, 'at_risk', 'incorrect_total'],
       ['2', 'Ana Perez', 0, 'clear', null],
+    ]);
+  });
+});
+
+describe('baScores', () => {
+  it('rolls one BA across stores into one month row and skips tiles with no BA', () => {
+    const tiles = baTags(
+      [
+        {store_code: '1', period_end: '2026-10-15', consultant: 'Liza Mendoza', cause: 'messy_handwriting'},
+        {store_code: '2', period_end: '2026-10-31', consultant: 'Liza Mendoza', cause: 'incorrect_total'},
+        {store_code: '2', period_end: '2026-10-31', consultant: 'Liza Mendoza', cause: 'incorrect_total'},
+        {store_code: '3', period_end: '2026-10-31', consultant: null, cause: 'padding'},
+      ],
+      [{store_code: '4', month: '2026-10', consultant: 'Ana Perez'}],
+    );
+    expect(baScores(tiles).map((r) => [r.ba, r.stores.sort().join('+'), r.points, r.tag, r.category])).toEqual([
+      ['Liza Mendoza', '1+2', 3, 'delinquent', 'incorrect_total'],
+      ['Ana Perez', '4', 0, 'clear', null],
     ]);
   });
 });
