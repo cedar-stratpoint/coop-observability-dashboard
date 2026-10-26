@@ -15,9 +15,10 @@
 /** One lead as the CRM worker's GET /api/spin-leads returns it. */
 export interface RemoteSpinLead {
   contact: string; // email, or "@handle"
+  name: string | null; // full name; the booth form asks for it since 2026-10
   phone: string | null;
   pet: string | null;
-  picky: string | null;
+  picky: string | null; // older leads only; the question was removed 2026-10
   prize: string | null; // storefront prize id
   campaign: string | null;
   subscribedAt: string | null;
@@ -28,6 +29,7 @@ export interface RemoteSpinLead {
 export interface SpinLeadInsert {
   email: string | null;
   instagram: string | null;
+  name: string | null;
   pet: string | null;
   picky: string | null;
   mobile: string | null;
@@ -88,6 +90,7 @@ export function newSpinLeadRows(
     known.add(key); // a contact listed twice in Shopify is still one lead
     rows.push({
       ...who,
+      name: r.name,
       pet: r.pet,
       picky: r.picky,
       mobile: r.phone,
@@ -98,4 +101,40 @@ export function newSpinLeadRows(
     });
   }
   return rows;
+}
+
+/** An empty name on a stored lead that Shopify now has a name for. */
+export interface NameFill {
+  column: 'email' | 'instagram';
+  value: string; // the contact exactly as stored, to match the row on
+  name: string;
+}
+
+/**
+ * Names for leads already in the table without one: the ones imported before
+ * Coop stored names. Only an empty name is ever filled; a stored name and every
+ * other column are left as they are.
+ *
+ * @param remote every lead Shopify holds
+ * @param existing the contacts already in the table, with their stored name
+ */
+export function nameFills(
+  remote: RemoteSpinLead[],
+  existing: {email: string | null; instagram: string | null; name: string | null}[],
+): NameFill[] {
+  const names = new Map<string, string>();
+  for (const r of remote) {
+    const who = splitContact(r.contact);
+    const name = r.name?.trim();
+    if (!who || !name) continue;
+    names.set(who.email ? `e:${who.email.toLowerCase()}` : `i:${who.instagram}`, name);
+  }
+  const fills: NameFill[] = [];
+  for (const e of existing) {
+    if (e.name) continue;
+    const name = e.email ? names.get(`e:${e.email.toLowerCase()}`) : e.instagram ? names.get(`i:${e.instagram.toLowerCase()}`) : undefined;
+    if (!name) continue;
+    fills.push(e.email ? {column: 'email', value: e.email, name} : {column: 'instagram', value: e.instagram as string, name});
+  }
+  return fills;
 }
