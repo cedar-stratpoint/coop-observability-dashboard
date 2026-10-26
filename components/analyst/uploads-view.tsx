@@ -14,7 +14,8 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
 import {cn} from '@/lib/utils';
 
-// The Uploads inbox for one company: add a POS .csv or a scanned inventory .pdf
+// The Uploads inbox for one company: add a POS .csv, a Watsons POS Sales Data .xlsx
+// (one month, every store) or a scanned inventory .pdf
 // (BatchUploader — a store's form in one go, live per-file progress), then triage the file list. CSVs commit
 // straight to sales; PDFs are read by Claude Vision and land in review — selecting
 // one opens its review page. Search, status/type filters (status also from
@@ -22,6 +23,8 @@ import {cn} from '@/lib/utils';
 // that spells out any committed data it takes with it, then a toast confirms it.
 
 const PAGE_SIZE = 8;
+
+const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
 
 type StatusFilter = 'all' | UploadStatus;
 type KindFilter = 'all' | UploadKind;
@@ -110,8 +113,8 @@ export function UploadsView({
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
         <p className="text-sm text-muted-foreground">
-          Add a store&apos;s inventory form (every page at once) or a POS sales export. Scans are read automatically and wait
-          for your review; sales are saved right away.
+          Add a store&apos;s inventory form (every page at once), a POS sales export, or a month of Watsons POS Sales Data.
+          Scans are read automatically and wait for your review; sales are saved right away.
         </p>
       </header>
 
@@ -165,6 +168,7 @@ export function UploadsView({
             >
               <option value="all">All types</option>
               <option value="pos_csv">Sales CSV</option>
+              <option value="pos_xlsx">POS Sales Data</option>
               <option value="inventory_pdf">Inventory PDF</option>
             </NativeSelect>
           </div>
@@ -190,7 +194,7 @@ export function UploadsView({
                       {u.filename}
                     </Link>
                     <span className="truncate text-xs text-muted-foreground">
-                      {u.kind === 'pos_csv' ? 'Sales export' : 'Inventory scan'} · {fmtWhen(u.created_at)}
+                      {KIND_LABEL[u.kind] ?? 'Inventory scan'} · {fmtWhen(u.created_at)}
                     </span>
                     <StatusPill status={u.status} />
                     {/* Touch screens never show a tooltip: say why it was rejected / failed. */}
@@ -246,7 +250,7 @@ export function UploadsView({
                         </span>
                       </td>
                       <td className="py-2.5 pr-3 text-xs text-muted-foreground">
-                        {u.kind === 'pos_csv' ? 'Sales export' : 'Inventory scan'}
+                        {KIND_LABEL[u.kind] ?? 'Inventory scan'}
                       </td>
                       {/* The pill carries the state; the reason is a hover detail, not a red line per row. */}
                       <td className="py-2.5 pr-3" title={u.reject_reason ?? undefined}>
