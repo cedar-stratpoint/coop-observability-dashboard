@@ -132,6 +132,39 @@ describe('claim', () => {
   });
 });
 
+describe('the Monday quiet window blocks starting, never finishing', () => {
+  // Intended (plan, "Collision with the weekly RPA"): the server refuses to START or CLAIM a sync in 08:30 to 11:00 Monday; one already running is allowed to finish.
+  it('lets a job claimed before 08:30 keep polling and reporting through the window, while a new claim waits', async () => {
+    clock = at('2026-10-26T08:25:00');
+    const a = await enrol('a@x.com');
+    await handleClaim(post('claim', {sessionState: 'ready'}, a.token), api());
+    const r = await requestSync(sd(), 'a@x.com');
+    if (!r.ok) throw new Error(r.error);
+    expect((await (await handleClaim(post('claim', {sessionState: 'ready'}, a.token), api())).json()).job).toMatchObject({id: r.job.id});
+    clock = at('2026-10-26T08:34:00'); // inside the window, still within the heartbeat limit
+    expect(await (await handleClaim(post('claim', {sessionState: 'ready'}, a.token), api())).json()).toEqual({job: null, activeJobId: r.job.id});
+    const prog = await handleProgress(post('progress', {jobId: r.job.id, status: 'running', days: {[r.job.days[0]]: {state: 'loaded'}}}, a.token), api());
+    expect(prog.status).toBe(200);
+    expect((await store.getJob(r.job.id))?.status).toBe('running');
+    expect((await handleProgress(post('progress', {jobId: r.job.id, status: 'done'}, a.token), api())).status).toBe(200);
+    expect((await store.getJob(r.job.id))?.status).toBe('done');
+  });
+  it('does not hand a queued job to a worker inside the window, and does not queue a new one', async () => {
+    clock = at('2026-10-26T08:25:00');
+    const a = await enrol('a@x.com');
+    await handleClaim(post('claim', {sessionState: 'ready'}, a.token), api());
+    const r = await requestSync(sd(), 'a@x.com');
+    if (!r.ok) throw new Error(r.error);
+    clock = at('2026-10-26T08:40:00'); // inside the window, before the 30 minute queue expiry
+    expect((await (await handleClaim(post('claim', {sessionState: 'ready'}, a.token), api())).json()).job).toBeNull();
+    expect((await store.getJob(r.job.id))?.status).toBe('queued');
+    await store.transitionJob(r.job.id, ['queued'], {status: 'expired', finishedAt: clock.toISOString()});
+    const again = await requestSync(sd(), 'a@x.com');
+    expect(again.ok).toBe(false);
+    expect(again.ok === false && again.error).toMatch(/Monday/);
+  });
+});
+
 describe('progress', () => {
   async function running() {
     const w = await enrol('a@x.com');
