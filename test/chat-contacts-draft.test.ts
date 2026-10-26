@@ -5,7 +5,7 @@ import {draftLeads, PLACEHOLDERS} from '../src/chat/contacts/draft';
 import type {SpinLead} from '../src/spin-leads-types';
 
 // Synthetic people only.
-const lead = (o: Partial<SpinLead> & {collectedAt: string}): SpinLead => ({email: null, instagram: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, consentAt: null, ...o});
+const lead = (o: Partial<SpinLead> & {collectedAt: string}): SpinLead => ({email: null, instagram: null, name: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, consentAt: null, ...o});
 const L1 = lead({collectedAt: '2026-09-26T02:00:00Z', email: 'ana@example.com', mobile: '0917 000 0001', pet: 'mimi / Puspin'});
 const L2 = lead({collectedAt: '2026-09-27T03:00:00Z', email: 'bo@example.com', pet: null, prize: '35% off'});
 const L3 = lead({collectedAt: '2026-09-28T03:00:00Z', mobile: '0917 000 0003', pet: '{{prize}} https://evil.example/x <b>Rex</b> / Aspin'});

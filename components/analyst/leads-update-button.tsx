@@ -21,10 +21,11 @@ export function LeadsUpdateButton() {
       setStatus(null);
       const res = await updateSpinLeads();
       if (!res.ok) return setStatus({tone: 'error', text: res.error});
-      setStatus({
-        tone: 'ok',
-        text: res.added ? `${res.added} new lead${res.added === 1 ? '' : 's'} added` : 'Already up to date',
-      });
+      const parts = [
+        res.added && `${res.added} new lead${res.added === 1 ? '' : 's'} added`,
+        res.named && `${res.named} name${res.named === 1 ? '' : 's'} filled in`,
+      ].filter(Boolean);
+      setStatus({tone: 'ok', text: parts.length ? parts.join(', ') : 'Already up to date'});
       router.refresh();
     });
 

@@ -47,6 +47,9 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
   // Only Sep 27 onwards collects pets; older events keep the table as it was.
   const hasPets = leads.some((l) => l.pet);
   const hasPicky = leads.some((l) => l.picky);
+  // Full name replaced the picky-eater question in late Oct 2026; both columns
+  // stay so older and newer leads each keep what they collected.
+  const hasNames = leads.some((l) => l.name);
   const top = prizes[0]?.count ?? 1;
 
   // Every day these leads actually span, newest first — the filter only offers
@@ -158,6 +161,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
             <thead className="bg-muted/40 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Contact</th>
+                {hasNames && <th className="px-3 py-2 text-left font-semibold">Name</th>}
                 {hasPets && <th className="px-3 py-2 text-left font-semibold">Pet</th>}
                 {hasPicky && <th className="px-3 py-2 text-left font-semibold">Picky eater</th>}
                 <th className="px-3 py-2 text-left font-semibold">Mobile</th>
@@ -174,6 +178,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
               {rows.map((l, i) => (
                 <tr key={`${contactOf(l)}-${l.collectedAt}`} className={cn(i > 0 && 'border-t')}>
                   <td className="max-w-[220px] truncate px-3 py-2" title={contactOf(l)}>{contactOf(l)}</td>
+                  {hasNames && <td className="max-w-[180px] truncate px-3 py-2" title={l.name ?? undefined}>{l.name ?? '—'}</td>}
                   {hasPets && <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground" title={l.pet ?? undefined}>{l.pet ?? '—'}</td>}
                   {hasPicky && <td className="px-3 py-2 text-muted-foreground">{l.picky ?? '—'}</td>}
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{l.mobile ?? '—'}</td>

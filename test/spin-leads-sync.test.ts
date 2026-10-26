@@ -1,8 +1,8 @@
 import {describe, expect, it} from 'vitest';
-import {newSpinLeadRows, splitContact, type RemoteSpinLead} from '../src/spin-leads-sync';
+import {nameFills, newSpinLeadRows, splitContact, type RemoteSpinLead} from '../src/spin-leads-sync';
 
 const remote = (over: Partial<RemoteSpinLead> = {}): RemoteSpinLead => ({
-  contact: '@andrhey16', phone: null, pet: 'Nyx / Puspin', picky: 'No', prize: 'free-item',
+  contact: '@andrhey16', name: null, phone: null, pet: 'Nyx / Puspin', picky: 'No', prize: 'free-item',
   campaign: 'oct-market', subscribedAt: '2026-10-12T23:43:05.120Z', consentAt: '2026-10-12T23:43:05.120Z', ...over,
 });
 
@@ -16,7 +16,7 @@ describe('spin-lead sync', () => {
 
   it('turns a new Shopify lead into a table row with its prize label', () => {
     expect(newSpinLeadRows([remote()], [])).toEqual([{
-      email: null, instagram: 'andrhey16', pet: 'Nyx / Puspin', picky: 'No', mobile: null, prize: 'Free Zoomy! Item',
+      email: null, instagram: 'andrhey16', name: null, pet: 'Nyx / Puspin', picky: 'No', mobile: null, prize: 'Free Zoomy! Item',
       campaign: 'oct-market', collected_at: '2026-10-12T23:43:05.120Z', consent_at: '2026-10-12T23:43:05.120Z',
     }]);
     expect(newSpinLeadRows([remote({prize: 'peso300'})], [])[0].prize).toBe('₱300 Off');
@@ -45,5 +45,32 @@ describe('spin-lead sync', () => {
       [],
     );
     expect(rows.map((r) => r.instagram)).toEqual(['dup']);
+  });
+
+  // Form since 2026-10: full name collected, picky-eater question removed.
+  it('carries the full name of a new lead', () => {
+    const [row] = newSpinLeadRows([remote({name: 'Zoe Taylor Go', picky: null})], []);
+    expect(row.name).toBe('Zoe Taylor Go');
+    expect(row.picky).toBeNull();
+  });
+
+  // Leads imported before Coop knew about names get theirs on the next Update.
+  // Only an empty name is filled; nothing else about the row is touched.
+  it('fills a missing name on a lead already in the table, and nothing more', () => {
+    const existing = [
+      {email: null, instagram: 'andrhey16', name: null}, // gets its name
+      {email: 'Old@x.com', instagram: null, name: null}, // matched case-insensitively, keyed by the stored value
+      {email: null, instagram: 'named', name: 'Already Set'}, // never overwritten
+      {email: null, instagram: 'noname', name: null}, // Shopify has no name either: left alone
+    ];
+    const fills = nameFills(
+      [remote({name: 'Andrei Hey'}), remote({contact: 'old@X.com', name: 'Old Lead'}),
+        remote({contact: '@named', name: 'Different'}), remote({contact: '@noname'})],
+      existing,
+    );
+    expect(fills).toEqual([
+      {column: 'instagram', value: 'andrhey16', name: 'Andrei Hey'},
+      {column: 'email', value: 'Old@x.com', name: 'Old Lead'},
+    ]);
   });
 });

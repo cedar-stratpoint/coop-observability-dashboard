@@ -17,6 +17,7 @@ function asLeads(): SpinLead[] {
     email: r.email,
     instagram: r.instagram,
     pet: r.pet,
+    name: r.name,
     picky: r.picky,
     mobile: r.mobile,
     prize: r.prize,
@@ -73,5 +74,15 @@ describe('event card lead helpers', () => {
     expect(leadsInDays(leads, ['2026-09-18', '2026-09-19'], manilaDayKey).map((l) => l.email)).toEqual(['b@x.com', 'c@x.com']);
     expect(leadsInDays(leads, [], manilaDayKey)).toEqual([]);
     expect(prizeTally(leads)).toEqual([{prize: '35% Off', count: 2}, {prize: 'Zoomy! Bandana', count: 1}]);
+  });
+});
+
+// Oct 2026 onwards: a Name column, and no Picky eater column.
+describe('spin-the-wheel CSV import, name layout', () => {
+  it('reads the full name', () => {
+    const rows = parseSpinLeadsCsv(`Contact,Pet,Name,Mobile number,Prize,Event,Collected at (PH time),Consent given at (PH time)
+'@zo3_.png,"Akira, Zelda, Mochi / Cats",Zoe Taylor Go,,₱300 Off,oct-market,"Oct 22, 2026, 8:12 PM","Oct 22, 2026, 8:12 PM"
+`);
+    expect(rows[0]).toMatchObject({instagram: 'zo3_.png', name: 'Zoe Taylor Go', picky: null, pet: 'Akira, Zelda, Mochi / Cats'});
   });
 });

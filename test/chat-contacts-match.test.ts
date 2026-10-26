@@ -8,7 +8,7 @@ import type {PeopleSource} from '../src/chat/contacts/people';
 
 // Synthetic people only.
 const web = (o: Partial<EnrichedCustomer>): EnrichedCustomer => ({shopifyCustomerId: 'w', email: null, firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null, membershipTier: null, petName: null, petBirthday: null, emailMarketingState: null, createdAt: '2026-07-01T00:00:00Z', updatedAt: null, orderCount: 0, spent: 0, spendYtd: 0, ...o});
-const lead = (o: Partial<SpinLead>): SpinLead => ({email: null, instagram: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, collectedAt: '2026-09-26T02:00:00Z', ...o});
+const lead = (o: Partial<SpinLead>): SpinLead => ({email: null, instagram: null, name: null, pet: null, picky: null, mobile: null, prize: 'Free treat', campaign: null, collectedAt: '2026-09-26T02:00:00Z', ...o});
 const laz = (o: Partial<LazadaCustomer>): LazadaCustomer => ({phone: '', name: null, city: null, lastOrderAt: '2026-08-01T00:00:00Z', firstOrderAt: '2026-05-01T00:00:00Z', lastProduct: null, payMethod: null, totalSpent: 0, avgOrder: 0, orderCount: 0, daysSince: 10, ...o});
 
 const SRC: PeopleSource = {

@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 — Spin-the-wheel leads show the full name
+- **Why:** the booth form now asks for the furparent's full name and no longer asks whether the pet is a picky eater.
+- **What:** Event lead contacts gain a **Name** column after Contact. **Picky eater** stays, so older leads keep their answers; each column shows only when some lead has a value, and a lead without one shows "—".
+- **Update leads** also fills the name on leads Coop imported before it stored names. It only fills an empty name and never changes any other column, so pressing it again is still safe. The CSV import reads a Name column too.
+- **Needs:** zoomy-crm `feat/spin-leads-name` deployed (adds `name` to `GET /api/spin-leads`), and `supabase/spin_wheel_leads_name.sql` run on Staging, then PROD, **before** this deploys. Until it runs, Update leads stops with "Run supabase/spin_wheel_leads_name.sql first."
+- Ask Coop's contacts tool is unchanged: it still does not see names.
+
 ## 2026-10-24 — Goldline tables in Nichido drop the gl_ prefix
 In the Nichido project Goldline is the only tenant, so its tables, view and functions lose the `gl_` prefix the shared archive needed: `gl_sales` is now `sales`, `gl_inventory_snapshots` is `inventory_snapshots`, `gl_commit_batch` is `commit_batch`, and so on. The same goes for their indexes, constraints and sequences. Only database names change. TypeScript names such as `glTags` and `getGlCatalog`, the `goldline-uploads` bucket and storage paths stay as they are.
 - **Decision:** the archive's old copy keeps its `gl_*` names. It is kept indefinitely, Ask Coop's explore blocklist still fences `gl_` there, and `archive_lock_goldline.sql` still targets those names. The copy script reads archive `gl_<name>` and writes Nichido `<name>`.
