@@ -41,6 +41,8 @@ describe('kindOfFile', () => {
   it('reads the extension', () => {
     expect(kindOfFile('cubao.CSV')).toBe('csv');
     expect(kindOfFile('scan.pdf')).toBe('pdf');
-    expect(kindOfFile('promo.xlsx')).toBeNull();
+    expect(kindOfFile('[2026 SEP] Watsons Scan Data.XLSX')).toBe('xlsx');
+    expect(kindOfFile('old.xls')).toBeNull();
+    expect(kindOfFile('photo.png')).toBeNull();
   });
 });

@@ -76,6 +76,10 @@ export interface TableBlock extends BlockBase {
   copyColumns?: {emails?: string; mobiles?: string; messages?: string};
   /** File name for the CSV download. */
   csvName?: string;
+  /** crm_query "all": the app holds every row for Copy and CSV (not only the first `screenRows`), and shows the Download CSV button even for non-contact data. */
+  exportable?: true;
+  /** Rows drawn on screen when `rows` holds more (the CSV and Copy use all of `rows`). */
+  screenRows?: number;
 }
 
 export interface ChartBlock extends BlockBase {

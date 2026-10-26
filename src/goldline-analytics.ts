@@ -1,6 +1,5 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
-import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {buildOverview, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
 
@@ -169,21 +168,21 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
   if (latest.error) throw new Error(`sales latest period failed: ${latest.error.message}`);
   const cur = latest.data as Period | null;
 
-  const salesFor = async (p: Period) =>
-    (await fetchAllRows(
-      'sales',
-      (from, to) =>
-        supa
-          .from('sales')
-          .select('sku_code,gross_retail,units,net_of_vat,period_start,period_end')
-          .eq('company_id', companyId)
-          .eq('period_start', p.period_start)
-          .eq('period_end', p.period_end)
-          .order('id', {ascending: true})
-          .range(from, to),
-      undefined,
-      {concurrency: 4},
-    )) as unknown as Array<Record<string, unknown>>;
+  // One row per SKU for the period, totalled in the database (sales_by_sku): a Watsons
+  // month is ~40k rows but the page only needs per-SKU sums, which buildOverview treats
+  // exactly like the raw rows.
+  const salesFor = async (p: Period): Promise<Array<Record<string, unknown>>> => {
+    const res = await supa.rpc('sales_by_sku', {p_company: companyId, p_start: p.period_start, p_end: p.period_end});
+    if (res.error) throw new Error(`sales_by_sku failed: ${res.error.message}`);
+    return ((res.data ?? []) as Array<{sku_code: string; units: unknown; gross: unknown; net: unknown}>).map((r) => ({
+      sku_code: r.sku_code,
+      units: r.units,
+      gross_retail: r.gross,
+      net_of_vat: r.net,
+      period_start: p.period_start,
+      period_end: p.period_end,
+    }));
+  };
 
   // The current period's rows and the comparison period's marker together, then its rows.
   let sales: Array<Record<string, unknown>> = [];

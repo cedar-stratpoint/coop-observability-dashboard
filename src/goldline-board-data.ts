@@ -56,26 +56,32 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
   // Reference data (catalog, stores, supply) comes from the per-company cache; counts
   // and shipments are read fresh, the big counts read in parallel pages.
   const productsP = getGlCatalog(companyId);
-  // Linked sales start as soon as the (cached) catalog is known — alongside the counts.
-  const salesP = productsP.then((products) => linkedSales(supa, companyId, products, since, storeScope));
+  // The counts are small; the board only shows stores that have them, so linked sales
+  // are read for those stores alone once the counts are in. Reading every store's sales
+  // would grow with each linked SKU (a Watsons month is ~40k rows across ~300 stores).
+  const countsP = fetchAllRows(
+    'inventory',
+    (from, to) => {
+      let q = supa
+        .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
+        .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
+        .eq('company_id', companyId)
+        .gte('period_end', since);
+      if (storeScope) q = q.in('store_code', storeScope);
+      return q.order('id').range(from, to);
+    },
+    undefined,
+    {concurrency: 4},
+  ) as unknown as Promise<Row[]>;
+  const salesP = Promise.all([productsP, countsP]).then(([products, rows]) => {
+    const counted = [...new Set(rows.map((r) => r.store_code))];
+    return counted.length ? linkedSales(supa, companyId, products, since, counted) : [];
+  });
   const [storesRows, products, supply, counts, shipments, sales] = await Promise.all([
     getGlStores(companyId),
     productsP,
     getGlSupplyRef(companyId),
-    fetchAllRows(
-      'inventory',
-      (from, to) => {
-        let q = supa
-          .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
-          .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
-          .eq('company_id', companyId)
-          .gte('period_end', since);
-        if (storeScope) q = q.in('store_code', storeScope);
-        return q.order('id').range(from, to);
-      },
-      undefined,
-      {concurrency: 4},
-    ) as unknown as Promise<Row[]>,
+    countsP,
     fetchAllRows('shipments', (from, to) => {
       let q = supa
         .from('shipments') // pagination-ok: paged by fetchAllRows (.range below)
@@ -100,6 +106,7 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
       price: p.unit_price == null ? null : Number(p.unit_price),
       bestseller: Boolean(p.is_bestseller),
       hidden: Boolean(p.hidden),
+      retired: Boolean(p.retired_at),
     };
   }
 

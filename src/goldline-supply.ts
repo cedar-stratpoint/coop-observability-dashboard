@@ -49,7 +49,7 @@ export type StoreBlock = {
   }>;
 };
 
-export type CatalogItem = {name: string; productLine: string | null; price: number | null; bestseller: boolean; hidden: boolean};
+export type CatalogItem = {name: string; productLine: string | null; price: number | null; bestseller: boolean; hidden: boolean; retired?: boolean};
 
 export type DateOrNow = {kind: 'now'} | {kind: 'date'; date: string} | null;
 
@@ -60,12 +60,14 @@ export type BoardRow = {
   price: number | null;
   bestseller: boolean;
   hidden: boolean;
+  retired: boolean; // no longer sold: left out of SKU matching and the restock (F2)
   status: ItemMovement['status'] | 'not_moving';
   storesNeeding: number; // all-stores view: stores out or to reorder
   storesCounted: number;
   onHand: number | null;
   backRoom: number | null; // stockroom + drawer
   display: number | null; // selling area
+  delivered: number | null; // delivery column of the latest count (F9)
   trend: [number | null, number | null, number | null]; // two months ago → this month
   thisMonth: number | null;
   lastMonth: number | null;
@@ -93,6 +95,11 @@ export type BoardSummary = {
   shipNow: number;
   warehouseShort: number;
   produceSoon: number; // produce by within PRODUCE_SOON_DAYS (or now)
+  // F9 · peso value at selling price (the catalog price; no cost or margin in v1).
+  stockValue: number; // on hand × price, counted and priced rows
+  deliveredValue: number; // latest count's delivery × price
+  deliveredUnits: number;
+  unpriced: number; // counted rows with no price (left out of the values)
 };
 
 export const PRODUCE_SOON_DAYS = 14;
@@ -176,7 +183,7 @@ export function buildBoard(input: {
 
   const rows: BoardRow[] = [];
   for (const [itemCode, all] of byItem) {
-    const c = catalog[itemCode] ?? {name: itemCode, productLine: null, price: null, bestseller: false, hidden: false};
+    const c = catalog[itemCode] ?? {name: itemCode, productLine: null, price: null, bestseller: false, hidden: false, retired: false};
     const cells = input.store ? all.filter((x) => x.store.storeCode === input.store) : all;
     if (!cells.length) continue;
 
@@ -208,12 +215,14 @@ export function buildBoard(input: {
       price: c.price,
       bestseller: c.bestseller,
       hidden: c.hidden,
+      retired: Boolean(c.retired),
       status,
       storesNeeding: cells.filter((x) => x.mv.status === 'out' || x.mv.status === 'reorder').length,
       storesCounted: counted.length,
       onHand,
       backRoom: sum(counted.map((x) => (x.row ? sum([x.row.stockroom, x.row.drawer]) : null))),
       display: sum(counted.map((x) => x.row?.selling_area ?? null)),
+      delivered: sum(counted.map((x) => x.row?.delivery ?? null)),
       trend: monthly as BoardRow['trend'],
       thisMonth: monthly[2],
       lastMonth: monthly[1],
@@ -251,6 +260,10 @@ export function boardSummary(rows: BoardRow[], today: string): BoardSummary {
     shipNow: visible.filter((r) => r.shipBy?.kind === 'now' && r.need > 0).length,
     warehouseShort: visible.filter((r) => r.warehouseShort).length,
     produceSoon: visible.filter((r) => r.produceBy?.kind === 'now' || (r.produceBy?.kind === 'date' && r.produceBy.date <= soon)).length,
+    stockValue: visible.reduce((a, r) => a + (r.price != null && r.onHand != null && r.onHand > 0 ? r.onHand * r.price : 0), 0),
+    deliveredValue: visible.reduce((a, r) => a + (r.price != null && r.delivered ? r.delivered * r.price : 0), 0),
+    deliveredUnits: visible.reduce((a, r) => a + (r.delivered ?? 0), 0),
+    unpriced: visible.filter((r) => r.price == null && r.onHand != null).length,
   };
 }
 

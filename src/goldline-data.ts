@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
+import {groupForms, scanOrder} from './upload-batch';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
 // project (src/nichido-client.ts): service-role key, never exposed to the browser.
@@ -34,7 +35,9 @@ export function safeObjectName(filename: string): string {
   return cleaned.slice(0, 180) || 'upload';
 }
 
-export type UploadKind = 'pos_csv' | 'inventory_pdf';
+export type UploadKind = 'pos_csv' | 'pos_xlsx' | 'inventory_pdf';
+
+const SALES_CHUNK = 2000;
 export type UploadStatus = 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
@@ -221,10 +224,13 @@ export async function upsertSales(
     net_of_vat: r.netOfVat,
     source_upload_id: uploadId,
   }));
-  const res = await supa
-    .from('sales')
-    .upsert(payload, {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
-  if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
+  // A Watsons month is ~40k rows: send it in chunks so no single request is huge.
+  for (let i = 0; i < payload.length; i += SALES_CHUNK) {
+    const res = await supa
+      .from('sales')
+      .upsert(payload.slice(i, i + SALES_CHUNK), {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
+    if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
+  }
   return payload.length;
 }
 
@@ -573,6 +579,72 @@ export async function updateBatchInfo(
     .eq('id', id)
     .eq('status', 'open');
   if (res.error) throw new Error(`upload_batches update failed: ${res.error.message}`);
+}
+
+/** One form found in a scan, after splitting (see splitBatchIntoForms). */
+export type SplitForm = {
+  batchId: string;
+  pages: number[]; // page numbers read, in scan order (null = not numbered)
+  files: number;
+  storeCode: string | null; // from page 1's header, when written
+  periodStart: string | null;
+  periodEnd: string | null;
+  consultant: string | null;
+};
+
+/**
+ * Many stores in one scan (Q25): after every page of a drop is read, split the batch
+ * into one batch per form. Pages are put in scan order and a new form starts whenever
+ * the page number drops (…5, 1…). The first form keeps this batch; each other form
+ * gets a new open batch. Store and period come from each form's page 1 header at
+ * review, as for any batch. Returns every form; one form means nothing moved.
+ */
+export async function splitBatchIntoForms(companyId: string, batchId: string, createdBy: string | null): Promise<SplitForm[]> {
+  const batch = await getBatch(companyId, batchId);
+  if (!batch || batch.status !== 'open') return [];
+  const supa = db();
+  const uploads = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,filename,created_at').eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
+  )) as unknown as Array<{id: string; filename: string; created_at: string}>;
+  if (!uploads.length) return [];
+  const heads = new Map<string, {page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>();
+  for (let i = 0; i < uploads.length; i += 100) {
+    const res = await supa
+      .from('extractions')
+      .select('upload_id,page,store:rows->>store_code,ps:rows->>period_start,pe:rows->>period_end,ba:rows->>consultant')
+      .eq('company_id', companyId)
+      .in('upload_id', uploads.slice(i, i + 100).map((u) => u.id)); // pagination-ok: ≤100 ids, one row each
+    if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
+    for (const e of (res.data ?? []) as Array<{upload_id: string; page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>) {
+      heads.set(e.upload_id, {page: e.page ?? null, store: e.store?.trim() || null, ps: e.ps || null, pe: e.pe || null, ba: e.ba?.trim() || null});
+    }
+  }
+  const ordered = scanOrder(uploads).map((u) => ({...u, ...(heads.get(u.id) ?? {page: null, store: null, ps: null, pe: null, ba: null})}));
+  const forms = groupForms(ordered);
+  const out: SplitForm[] = [];
+  for (let f = 0; f < forms.length; f++) {
+    const group = forms[f];
+    let id = batchId;
+    if (f > 0) {
+      id = await createBatch(companyId, createdBy);
+      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', group.map((g) => g.id));
+      if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
+    }
+    const head = group.find((g) => g.page === 1);
+    out.push({
+      batchId: id,
+      pages: group.map((g) => g.page).filter((n): n is number => n != null),
+      files: group.length,
+      storeCode: head?.store ?? null,
+      periodStart: head?.ps ?? null,
+      periodEnd: head?.pe ?? null,
+      consultant: head?.ba ?? null,
+    });
+  }
+  // The first form keeps this batch; whatever store or period was typed for the whole
+  // drop belongs to it only when the scan held one form.
+  if (forms.length > 1) await updateBatchInfo(companyId, batchId, {storeCode: null, periodStart: null, periodEnd: null});
+  return out;
 }
 
 export type BatchPage = {

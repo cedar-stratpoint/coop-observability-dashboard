@@ -3,7 +3,7 @@ import {POST} from '../app/api/chat/route';
 import {buildDigestBlock, buildLiveContextBlock, buildStaticSystem} from '../src/chat/context';
 import {CHAT_DEADLINE_MS, SAFE_ERROR_TEXT} from '../src/chat/loop';
 import {DEFAULT_TURN_BUDGET} from '../src/chat/cost';
-import {CHAT_TOOLS} from '../src/chat/tool-defs';
+import {chatTools} from '../src/chat/tool-defs';
 import type {DigestArchiveRow} from '../src/types';
 import {MOCK_DIGESTS} from '../src/mock';
 import {BASE_SPEC, goldenData} from './support/golden-cases';
@@ -366,10 +366,10 @@ describe('POST /api/chat: live mode (no digest, no period)', () => {
     expect(JSON.stringify(systemOf(lastRequest()))).not.toContain('[digests]');
   });
 
-  it('the tools are the eleven read-only tools, with tool_choice auto', async () => {
+  it('the tools are the twelve read-only tools plus compare_sku, with tool_choice auto', async () => {
     await drain(await post(ask()));
     const p = lastRequest();
-    expect((p.tools as {name: string}[]).map((t) => t.name)).toEqual(CHAT_TOOLS.map((t) => t.name));
+    expect((p.tools as {name: string}[]).map((t) => t.name)).toEqual(chatTools({explore: false, crm: false, sku: true}).map((t) => t.name));
     expect(p.tool_choice).toEqual({type: 'auto'});
   });
 
@@ -493,19 +493,19 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
   };
   const toolNames = (p: Record<string, unknown>) => (p.tools as {name: string}[]).map((t) => t.name);
 
-  it('off by default: eleven tools, no run_query, no exploratory prompt block, no coverage query', async () => {
+  it('off by default: the base tools plus compare_sku, no run_query, no exploratory prompt block, no coverage query', async () => {
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toEqual(CHAT_TOOLS.map((t) => t.name));
+    expect(toolNames(lastRequest())).toEqual(chatTools({explore: false, crm: false, sku: true}).map((t) => t.name));
     expect(systemOf(lastRequest())[0].text).toBe(buildStaticSystem({tools: true}));
     expect(systemOf(lastRequest())[0].text).not.toMatch(/coop_explore_/);
     expect(h.exploreRuns).toEqual([]);
   });
 
-  it('on for an allowed user: run_query, list_tables and describe_table are sent with contacts (16 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
+  it('on for an allowed user: run_query, list_tables and describe_table are sent with contacts and compare_sku (17 tools), the prompt has the catalog and the all-available-data rule, and the preamble carries the coverage line source', async () => {
     ON();
     await drain(await post(ask()));
     expect(toolNames(lastRequest())).toEqual(expect.arrayContaining(['run_query', 'list_tables', 'describe_table', 'contacts']));
-    expect(toolNames(lastRequest())).toHaveLength(16);
+    expect(toolNames(lastRequest())).toHaveLength(17);
     expect(systemOf(lastRequest())[0].text).toBe(buildStaticSystem({tools: true, explore: true}));
     expect(systemOf(lastRequest())[1].text).toBe(buildLiveContextBlock({explore: true}));
     expect(h.exploreRuns).toHaveLength(1); // the fixed coverage statement, wrapped in the cursor, through the injected driver
@@ -518,7 +518,7 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     ON();
     vi.stubEnv('EXPLORE_ALLOWED_EMAILS', 'someone.else@example.test');
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toHaveLength(12);
+    expect(toolNames(lastRequest())).toHaveLength(13);
     expect(h.exploreRuns).toEqual([]);
   });
 
@@ -526,7 +526,7 @@ describe('POST /api/chat: Explore gating (fail closed)', () => {
     ON();
     vi.stubEnv('EXPLORE_DATABASE_URL', 'postgres://postgres:pw@127.0.0.1:54421/postgres');
     await drain(await post(ask()));
-    expect(toolNames(lastRequest())).toHaveLength(12);
+    expect(toolNames(lastRequest())).toHaveLength(13);
   });
 
   it('on but the live read path is degraded (digest-only): no tools at all, so no run_query', async () => {

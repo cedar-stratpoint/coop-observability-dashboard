@@ -9,7 +9,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 const db = nichidoDb;
 
 export class SupplyError extends Error {
-  constructor(public code: 'not_enough_stock' | 'not_in_transit' | 'already_arrived' | 'item_not_found', public detail?: number) {
+  constructor(public code: 'not_enough_stock' | 'not_in_transit' | 'already_arrived' | 'item_not_found' | 'store_not_found', public detail?: number) {
     super(code);
   }
 }
@@ -90,6 +90,27 @@ export async function setHidden(companyId: string, item: string, hidden: boolean
   const {data, error} = await db().from('products').update({hidden}).eq('company_id', companyId).eq('item_code', item).select('item_code');
   if (error) throw new Error(`products update failed: ${error.message}`);
   if (!data?.length) throw new SupplyError('item_not_found');
+}
+
+/** Retire a product (no longer sold) or bring it back. Separate from hiding it on the board. */
+export async function setRetired(companyId: string, item: string, retired: boolean): Promise<void> {
+  // pagination-ok: one row by primary key (company_id, item_code).
+  const {data, error} = await db()
+    .from('products')
+    .update({retired_at: retired ? new Date().toISOString() : null})
+    .eq('company_id', companyId)
+    .eq('item_code', item)
+    .select('item_code');
+  if (error) throw new Error(`products update failed: ${error.message}`);
+  if (!data?.length) throw new SupplyError('item_not_found');
+}
+
+/** Switch a store's scope: true (always in), false (always out), null (automatic). */
+export async function setStoreScope(companyId: string, store: string, inScope: boolean | null): Promise<void> {
+  // pagination-ok: one row by primary key (company_id, store_code).
+  const {data, error} = await db().from('stores').update({in_scope: inScope}).eq('company_id', companyId).eq('store_code', store).select('store_code');
+  if (error) throw new Error(`stores update failed: ${error.message}`);
+  if (!data?.length) throw new SupplyError('store_not_found');
 }
 
 export async function saveSupplySettings(

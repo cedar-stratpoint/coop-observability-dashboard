@@ -236,7 +236,96 @@ const listCrmCheckouts: ToolDefinition = {
   },
 };
 
-export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts]);
+// crm_query: the flexible read (plan 2026-10-23). NOT strict (it would blow the compiled-grammar cap, and nested lists are not allowed there);
+// src/chat/crm/query-spec.ts validates everything against the live CRM catalog before any request, and the CRM checks it again.
+const NAME_ITEM = {type: 'string', description: 'A column name from describe.'};
+const crmQuery: ToolDefinition = {
+  name: 'crm_query',
+  description:
+    'Ask the live website CRM any read-only question over its whitelisted tables (orders, order_lines, order_discount_codes, checkouts, checkout_lines, customers and a few more): rows, counts, sums, averages, ranks, per-day/week/month series, repeat buyers, discount codes, SKUs, refunds, abandoned carts. ' +
+    'WHEN TO USE: list_crm_orders, list_crm_customers, list_crm_checkouts and get_crm_metrics keep their fixed views (a plain order list, the CRM snapshot); use crm_query for anything else, e.g. per-SKU, discount codes, repeat buyers, refund rate, customer detail, or any grouping or filter those tools lack. get_channel_report stays the choice for comparing channels. ' +
+    'FIRST call it with describe true (and a table) if you do not know the columns; never guess a column. Tables with a date column need a window: filters on that column with gte and lte (YYYY-MM-DD, Philippine time; ask the owner if no dates were given). ' +
+    'Aggregates (select {agg, column, as}) and group_by (a column or {column, bucket day|week|month}) are computed by the CRM: never add or average rows yourself, state the formula for a rate and take its parts from aggregates. ' +
+    'detail "identity" on customers returns names, email, phone, pet and orders (at most 50 rows to you); it is refused for people who are not allowed. deliver "all" gives the OWNER the full table with Copy and CSV (drawn by the app: do NOT call render_table and do NOT retype rows) while you see a sample of 50 and the count; use it when the owner asks for everything or a long list. ' +
+    'Results state row_count, truncated, partial, next_cursor and definitions in meta.checks: say the count, and say so when truncated or partial. To continue a stopped list call again with the same query and cursor. ' + UNTRUSTED,
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {
+      describe: {type: 'boolean', description: 'true: list the tables, or with `table` its columns, filters and aggregates. Send nothing else with it.'},
+      table: {type: 'string', description: 'The table to read (from describe).'},
+      select: {type: 'array', description: 'Columns to return (a list of rows) OR aggregates {agg: count|count_distinct|sum|avg|min|max, column, as} (never both). Count has no column. A computed item {expr, as} combines the aggregates of this select: expr is a number, {ref: name}, or {op: + - * / round, args: [a, b]} (round: [x] or [x, digits 0 to 6]); / gives null for a zero divisor; at most 4 deep, 15 nodes.', items: {anyOf: [NAME_ITEM, {type: 'object', properties: {agg: {type: 'string'}, column: {type: 'string'}, as: {type: 'string'}, min: {type: 'number'}, expr: {}}, additionalProperties: false}]}},
+      filters: {type: 'array', description: 'AND-ed filters {column, op: eq|in|gte|lte|between|is_null, value}. Dates are YYYY-MM-DD; in takes a list, between [low, high].', items: {type: 'object', properties: {column: {type: 'string'}, op: {type: 'string', enum: ['eq', 'in', 'gte', 'lte', 'between', 'is_null']}, value: {}}, required: ['column', 'op'], additionalProperties: false}},
+      group_by: {type: 'array', description: 'Group keys: a column, or {column, bucket: day|week|month, as} for a date. Needs an aggregate in select.', items: {anyOf: [NAME_ITEM, {type: 'object', properties: {column: {type: 'string'}, bucket: {type: 'string', enum: ['day', 'week', 'month']}, as: {type: 'string'}}, required: ['column'], additionalProperties: false}]}},
+      order_by: {type: 'array', description: 'Sort by names this query returns: {by, dir: asc|desc}.', items: {type: 'object', properties: {by: {type: 'string'}, dir: {type: 'string', enum: ['asc', 'desc']}}, required: ['by'], additionalProperties: false}},
+      limit: {type: 'integer', description: 'Rows (at most 200 for a list, 500 for groups, 50 for identity). Default is small (50 rows, 100 groups, 25 people).'},
+      cursor: {type: 'string', description: 'The next_cursor of the previous result, unchanged, to continue a list (default order: no order_by).'},
+      tz: {type: 'string', enum: ['Asia/Manila', 'UTC'], description: 'Day boundaries. Default Asia/Manila.'},
+      detail: {type: 'string', enum: ['identity'], description: 'customers only: names, email, phone, pet, membership and order facts. Only for people who may see them.'},
+      deliver: {type: 'string', enum: ['sample', 'all'], description: 'all: the owner gets the full table (up to 1,000 rows on screen, 10,000 in the CSV). Default sample.'},
+      joins: {type: 'array', description: 'Declared joins from describe: ["customers"] on orders, order_lines, order_discount_codes. Then use customers.<column> (membership_tier, orders_count, total_spent...) as group keys, filters and aggregates only, never rows.', items: {type: 'string'}},
+      having: {type: 'array', description: 'Filters on aggregate or computed results (max 6) {by, op: eq|gte|lte|between, value: number or [low, high]}.', items: {type: 'object', properties: {by: {type: 'string'}, op: {type: 'string'}, value: {}}, required: ['by', 'op', 'value'], additionalProperties: false}},
+      top_n: {type: 'object', description: 'Needs two or more group_by names. {n, by: aggregate name, dir, key: group name} keeps the n best values of that key over the whole result, then breaks them down by the other keys (weekly units for the top 5 SKUs). per instead of key keeps the n best rows inside each value of that group.', properties: {n: {type: 'integer'}, by: {type: 'string'}, dir: {type: 'string', enum: ['asc', 'desc']}, key: {type: 'string'}, per: {type: 'string'}}, required: ['n', 'by'], additionalProperties: false},
+    },
+    required: [],
+    additionalProperties: false,
+  },
+};
+
+// shopify_query: ONE read-only Shopify Admin GraphQL query through the CRM's door (POST /api/shopify/query, zoomy-crm docs/api-shopify-query.md). NOT strict (free text);
+// src/chat/crm/shopify-query.ts checks it in code before any request, and the CRM parses it for real and allows only the fields below. Field names mirror the CRM's allowlist
+// (src/lib/shopify-query-schema.ts): a name not listed there is refused, so keep this list and that file in step.
+const shopifyQuery: ToolDefinition = {
+  name: 'shopify_query',
+  description:
+    'Read live from Shopify (through the website CRM, read-only) what crm_query cannot: full order history beyond the CRM, live inventory, collections, product metafields, discount code and refund detail, shop metafields. ' +
+    'SLOWER than crm_query and limited by Shopify query cost: crm_query stays the fast path for common analytics (sales, SKUs, repeat buyers, abandoned carts); use this only for what the CRM tables do not hold. ' +
+    'Send ONE GraphQL query (no mutation, no subscription, no introspection, no second operation). Every list needs first or last, 1 to 100; page with pageInfo { hasNextPage endCursor } and an after variable. Filter orders and customers with the query: argument (Shopify search, e.g. "created_at:>=2026-09-01 financial_status:paid"). ' +
+    'Allowed fields. QueryRoot: shop, orders, order, ordersCount, products, product, productsCount, productVariants, productVariant, collections, collection, customers, customer, customersCount, discountNodes, inventoryItems, inventoryItem. ' +
+    'Order: id name createdAt processedAt cancelledAt displayFinancialStatus displayFulfillmentStatus currencyCode tags totalPriceSet subtotalPriceSet totalDiscountsSet totalRefundedSet totalShippingPriceSet totalTaxSet (each { shopMoney { amount currencyCode } }) discountCodes discountApplications lineItems refunds customer. ' +
+    'LineItem: name title quantity currentQuantity sku variantTitle vendor originalTotalSet discountedTotalSet totalDiscountSet product variant. Refund: createdAt totalRefundedSet refundLineItems { quantity subtotalSet lineItem }. ' +
+    'Product: title handle vendor productType status tags totalInventory variants collections metafield. ProductVariant: title sku price compareAtPrice inventoryQuantity availableForSale product inventoryItem. InventoryItem: sku tracked inventoryLevels { location { name } quantities(names: ["available"]) { name quantity } }. Collection: title handle productsCount products. ' +
+    'DiscountNode: discount { ... on DiscountCodeBasic { title status startsAt endsAt asyncUsageCount codes(first: 5) { nodes { code asyncUsageCount } } } } (also DiscountCodeBxgy, DiscountCodeFreeShipping, DiscountAutomaticBasic, DiscountAutomaticBxgy, DiscountAutomaticFreeShipping). ' +
+    'Metafields only in namespace "custom": metafield(namespace: "custom", key: "...") { value }. Never reachable: street addresses, order notes, tokens, payment data. ' +
+    'Customer fields (email, phone, firstName, lastName, displayName, customer or shop metafields) are refused in code for people who are not allowed to see them: then query non-personal fields only and say so. ' +
+    'Examples. Orders with line items and SKU: { orders(first: 25, query: "created_at:>=2026-09-01", sortKey: CREATED_AT, reverse: true) { pageInfo { hasNextPage endCursor } nodes { name createdAt displayFinancialStatus lineItems(first: 20) { nodes { sku quantity title } } } } } ' +
+    'Inventory: { productVariants(first: 50) { nodes { sku title inventoryQuantity product { title } } } } ' +
+    'Discount codes: { discountNodes(first: 50) { nodes { discount { ... on DiscountCodeBasic { title status asyncUsageCount codes(first: 3) { nodes { code } } } } } } }. ' +
+    'Shopify answers a missing permission with an error inside a normal answer: the result then says SCOPE MISSING; tell the owner plainly that Shopify has not granted the CRM that data and give no figure. Results state their row count, more_pages and Shopify errors in meta.checks: say them. Counts and totals come from Shopify fields (ordersCount, productsCount), never from adding a page of rows. ' + UNTRUSTED,
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: {type: 'string', description: 'One read-only GraphQL query (at most 10,000 characters).'},
+      variables: {type: 'object', description: 'Optional GraphQL variables, e.g. {"after": "<endCursor>"} (at most 8,000 bytes).'},
+    },
+    required: ['query'],
+    additionalProperties: false,
+  },
+};
+
+export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts, crmQuery, shopifyQuery]);
+
+// compare_sku: one product across offline (POS), Shopee and the website (src/sku-compare.ts; contract knowledge/tasks/2026-10-26-sku-compare-contract.md). NOT strict (grammar cap); validated in src/chat/sku-compare-tool.ts.
+export const COMPARE_SKU_TOOL: ToolDefinition = {
+  name: 'compare_sku',
+  description:
+    'Compare ONE product (its POS product code, e.g. ZMYFDMEATBEFWHL01) side by side across Offline (POS), Shopee and the Website over whole Monday to Sunday weeks, with a combined total. ' +
+    'Use it for "compare Shopee, website and offline units for SKU X for the week of ...". "The week of 12 Oct" is that week\'s Monday to Sunday (from 2026-10-12, to 2026-10-18). If the owner gave a name, find the code with lookup_product first; never guess a code. For a plain channel total with no SKU use get_channel_report. ' +
+    'The result is computed in code and its checks must be stated: each channel\'s basis and units, coverage (Shopee lists only top products, so its figure and the total are "at least"), "mixed basis" in the total, partial or missing channels, the unmapped share per channel (rows with no confirmed alias are kept apart, never added to the SKU), and that the Website mapping is UNVERIFIED until its aliases are confirmed. Quote the figures; never recompute them. ' +
+    'Dates that are not whole Monday to Sunday weeks give each channel on its own with no total.',
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {
+      sku: {type: 'string', description: 'The POS product code (letters and digits), e.g. ZMYFDMEATBEFWHL01.'},
+      from: {type: 'string', description: 'First day, YYYY-MM-DD, a Monday for a whole-week comparison.'},
+      to: {type: 'string', description: 'Last day, YYYY-MM-DD, a Sunday for a whole-week comparison.'},
+    },
+    required: ['sku', 'from', 'to'],
+    additionalProperties: false,
+  },
+};
 
 const BLOCK_FIELD = {type: 'string', description: '"new" to add a block, or the id of a block already on the dashboard (b1, b2...) to change that block in place.'};
 const SOURCE_FIELD = {type: 'string', description: 'The id of a query_metric result (r1, r2...) or of a block on the dashboard (b1, b2...). You give an id and field names, never values: the app reads the numbers from that result.'};
@@ -421,11 +510,12 @@ const VARIANTS = new Map<string, readonly ToolDefinition[]>();
 
 /**
  * The tool list for one request: CHAT_TOOLS, plus run_query, list_tables and describe_table after query_metric (Explore users), plus
- * the four CRM tools after get_channel_report (CRM configured and CHAT_CRM_TOOLS not off). set_report_title stays last and keeps the
- * cache breakpoint. Sizes: 12 base, 15 with Explore, 16 with the CRM tools, 19 with both, 20 with `contacts` too (the request cap; `contacts` is not strict).
+ * the CRM tools after get_channel_report (CRM configured and CHAT_CRM_TOOLS not off). set_report_title stays last and keeps the
+ * cache breakpoint. Sizes: 12 base, 15 with Explore, 18 with the six CRM tools (crm_query and shopify_query included), 22 with Explore, CRM and `contacts`, 23 with `compare_sku` too.
+ * Only STRICT tools are capped (20, and the compiled grammar sooner): 13 are strict here, their bytes are pinned in test/chat-tool-defs.test.ts; crm_query, shopify_query, compare_sku and contacts are not strict.
  */
-export function chatTools(opts: {explore: boolean; crm: boolean; contacts?: boolean}): readonly ToolDefinition[] {
-  const key = `${opts.explore}-${opts.crm}-${opts.contacts === true}`;
+export function chatTools(opts: {explore: boolean; crm: boolean; contacts?: boolean; sku?: boolean}): readonly ToolDefinition[] {
+  const key = `${opts.explore}-${opts.crm}-${opts.contacts === true}-${opts.sku === true}`;
   const hit = VARIANTS.get(key);
   if (hit) return hit;
   const out: ToolDefinition[] = [];
@@ -434,8 +524,9 @@ export function chatTools(opts: {explore: boolean; crm: boolean; contacts?: bool
     if (opts.explore && t.name === 'query_metric') out.push(runQuery, listTables, describeTable);
     if (opts.crm && t.name === 'get_channel_report') out.push(...CRM_TOOLS);
     if (opts.contacts && t.name === 'lookup_product') out.push(CONTACTS_TOOL);
+    if (opts.sku && t.name === 'lookup_product') out.push(COMPARE_SKU_TOOL);
   }
-  const frozen = opts.explore || opts.crm || opts.contacts ? deepFreeze(out) : CHAT_TOOLS;
+  const frozen = opts.explore || opts.crm || opts.contacts || opts.sku ? deepFreeze(out) : CHAT_TOOLS;
   VARIANTS.set(key, frozen);
   return frozen;
 }
