@@ -5,7 +5,7 @@ import {missingClosedDays} from './missing-days';
 import {canAddWorker, sameEmail} from './routing';
 import {startBlock, staleSweep} from './rules';
 import {ENROL_TTL_MS, hashSecret, newEnrolmentCode} from './tokens';
-import {isActive, type Job} from './types';
+import {isActive, type Job, type Worker} from './types';
 
 export interface SyncDeps {
   store: SyncStore;
@@ -30,17 +30,22 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
   return store.recentJobs(RECENT_JOBS);
 }
 
+/** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
+export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
+  const {days, more} = missingClosedDays(i.loadedDays, i.now);
+  if (days.length === 0) return fail('Shopee is up to date');
+  if (!i.workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who))) return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
+  const blocked = startBlock(i.now, i.jobs);
+  return blocked ? fail(blocked) : {ok: true, days, more};
+}
+
 export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true; job: Job} | Fail> {
   const who = email.trim().toLowerCase();
   const now = d.now();
   const jobs = await sweepJobs(d.store, now);
-  const {days} = missingClosedDays(await d.loadLoadedDays(), now);
-  if (days.length === 0) return fail('Shopee is up to date');
-  const workers = await d.store.listWorkers();
-  if (!workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, who))) return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
-  const blocked = startBlock(now, jobs);
-  if (blocked) return fail(blocked);
-  const job = await d.store.createJob({requestedBy: who, days}, now);
+  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays()});
+  if (!gate.ok) return gate;
+  const job = await d.store.createJob({requestedBy: who, days: gate.days}, now);
   return job === 'conflict' ? fail('A Shopee sync is already queued or running. Wait for it to finish.') : {ok: true, job};
 }
 

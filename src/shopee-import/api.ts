@@ -10,6 +10,8 @@ export interface ApiDeps {
   store: ImportStore;
   token: string | undefined;
   now: () => Date;
+  /** True when a bearer is an enrolled, non-revoked Shopee sync worker. Such a worker may plan and apply sales_overview only (never restate, undo or coverage). */
+  workerAuth?: (bearer: string) => Promise<boolean>;
 }
 
 export const MAX_FILES = 30;
@@ -23,11 +25,16 @@ export function authorize(req: Request, token: string | undefined): 'ok' | 'deni
 }
 
 const reply = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
-function gate(req: Request, d: ApiDeps): Response | null {
+/** `workerOk`: the route accepts a worker token (plan, apply). Every other route answers a worker token with 403. */
+async function gate(req: Request, d: ApiDeps, workerOk = false): Promise<{denied: Response | null; worker: boolean}> {
   const a = authorize(req, d.token);
-  if (a === 'not_configured') return reply({error: 'The import API is not configured on this deployment.'}, 503);
-  return a === 'denied' ? reply({error: 'Unauthorized.'}, 401) : null;
+  if (a === 'ok') return {denied: null, worker: false};
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1].trim();
+  if (bearer && d.workerAuth && (await d.workerAuth(bearer))) return workerOk ? {denied: null, worker: true} : {denied: reply({error: 'A worker token cannot do that.'}, 403), worker: true};
+  if (a === 'not_configured' && !(bearer && d.workerAuth)) return {denied: reply({error: 'The import API is not configured on this deployment.'}, 503), worker: false};
+  return {denied: reply({error: 'Unauthorized.'}, 401), worker: false};
 }
+const workerRefused = (what: string): Response => reply({error: `A worker token can only plan and apply plain sales_overview files, not ${what}.`}, 403);
 const phToday = (now: Date): string => new Date(now.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
 const body = async (req: Request): Promise<Record<string, unknown> | null> => {
   try {
@@ -39,7 +46,7 @@ const body = async (req: Request): Promise<Record<string, unknown> | null> => {
 };
 
 export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
-  const denied = gate(req, d);
+  const {denied, worker} = await gate(req, d, true);
   if (denied) return denied;
   let form: FormData;
   try {
@@ -53,6 +60,8 @@ export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
   if (files.some((f) => f.size > MAX_FILE_BYTES)) return reply({error: `A file is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`}, 413);
   const only = form.get('only_new');
   const restate = form.get('restate');
+  if (worker && restate !== null) return workerRefused('a restate');
+  if (worker && files.some((f) => classifyFile(f.name).type !== 'sales_overview')) return workerRefused('other report types');
   const ordered = [...files].sort((a, b) => (classifyFile(a.name).period?.from ?? '').localeCompare(classifyFile(b.name).period?.from ?? ''));
   const results = [];
   for (const f of ordered) {
@@ -70,11 +79,17 @@ export async function handlePlan(req: Request, d: ApiDeps): Promise<Response> {
 }
 
 export async function handleApply(req: Request, d: ApiDeps): Promise<Response> {
-  const denied = gate(req, d);
+  const {denied, worker} = await gate(req, d, true);
   if (denied) return denied;
   const b = await body(req);
   const ids = b && Array.isArray(b.importIds) ? b.importIds.filter((x): x is string => typeof x === 'string') : null;
   if (!ids || ids.length === 0 || ids.length > MAX_FILES) return reply({error: `Send {"importIds": [...]} with 1 to ${MAX_FILES} ids from a plan.`}, 400);
+  if (worker) {
+    for (const id of ids) {
+      const run = await d.store.getRun(id);
+      if (run && (run.reportType !== 'sales_overview' || run.restated)) return workerRefused('a restate or other report types');
+    }
+  }
   const results = [];
   for (const id of ids) {
     const r = await applyRun(d.store, id);
@@ -84,7 +99,7 @@ export async function handleApply(req: Request, d: ApiDeps): Promise<Response> {
 }
 
 export async function handleUndo(req: Request, d: ApiDeps): Promise<Response> {
-  const denied = gate(req, d);
+  const {denied} = await gate(req, d);
   if (denied) return denied;
   const b = await body(req);
   const id = typeof b?.importId === 'string' ? b.importId : '';
@@ -95,7 +110,7 @@ export async function handleUndo(req: Request, d: ApiDeps): Promise<Response> {
 }
 
 export async function handleCoverage(req: Request, d: ApiDeps): Promise<Response> {
-  const denied = gate(req, d);
+  const {denied} = await gate(req, d);
   if (denied) return denied;
   const yesterday = new Date(Date.parse(`${phToday(d.now())}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   const weeks = weeksCoverage(await d.store.loadLoadedDays(), yesterday);
