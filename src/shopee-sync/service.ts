@@ -1,5 +1,6 @@
 // The rules of the sync as plain functions over SyncStore: press Sync, cancel, enrol a Mac, revoke a Mac, and the stale-job sweep.
 // The server actions (src/shopee-sync-actions.ts) and the worker routes (api.ts) are thin shells around these; authentication is theirs.
+import {periodWithin, syncStamp} from '../shopee-import/api';
 import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
 import {missingClosedDays} from './missing-days';
@@ -66,10 +67,17 @@ export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Acto
   if (!job) return fail('That sync no longer exists.');
   if (!who.isAdmin && !sameEmail(job.requestedBy, who.email)) return fail('Only the person who started a sync can confirm it.');
   if (job.status !== 'review') return fail('That sync is not waiting for review.');
+  // Check every run before applying any: a run only counts if this job planned it, as a plain sales_overview inside the job's days.
+  const days = new Set(job.days);
+  const toApply: string[] = [];
   for (const id of job.importIds) {
     const run = await imports.getRun(id);
     if (run?.status === 'accepted') continue; // already applied
     if (!run || run.status !== 'staged') return fail('One of the imports was replaced or removed since this sync ran. Run Sync again.');
+    if (run.reportType !== 'sales_overview' || run.restated || run.importedBy !== syncStamp(jobId) || !periodWithin(run.periodFrom, run.periodTo, days)) return fail('One of the imports does not belong to this sync, so nothing was applied. Run Sync again.');
+    toApply.push(id);
+  }
+  for (const id of toApply) {
     const r = await applyRun(imports, id);
     if (!r.ok) return fail(r.message);
   }
