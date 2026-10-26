@@ -3,6 +3,7 @@ import {nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {upsertSales} from './goldline-data';
 import {categoryFromSubclass, itemCodeFromName, type Category, type WatsonsWorkbook} from './goldline-pos-xlsx';
+import {matchSkus, type CatalogItem} from './goldline-sku-match';
 
 // Apply one month of Watsons POS Sales Data (P1 · F2, F4) to Goldline's Nichido tables.
 // The workbook is authoritative for Watsons:
@@ -13,6 +14,9 @@ import {categoryFromSubclass, itemCodeFromName, type Category, type WatsonsWorkb
 //   * a catalog item whose code the Watsons name ends with gets that SKU linked
 //     (products.sku_code), only when the item has no link yet and nothing else holds
 //     the code. Everything else waits for an admin to link it
+//   * then every still-unlinked SKU with sales is matched by name, price and the numbers
+//     in its name (src/goldline-sku-match.ts): high-confidence pairs are linked
+//     automatically, medium and low ones wait on chain_skus as suggestions to confirm
 //   * linked items without a category get one from the Watsons subclass
 //   * the month's sales are upserted, then any older rows for the same stores and
 //     month are removed, so re-uploading a month replaces it
@@ -30,6 +34,7 @@ export type WatsonsLoadSummary = {
   skus: number;
   skusNew: number;
   linkedNow: string[]; // item codes auto-linked by this upload
+  suggested: number; // SKUs now waiting with a suggestion to confirm
   categorized: number;
   units: number;
   linkedUnits: number; // units on SKUs linked to a catalog item, after this upload
@@ -93,7 +98,7 @@ export async function applyWatsonsMonth(
   );
   if (skuRes.error) throw new Error(`chain_skus upsert failed: ${skuRes.error.message}`);
 
-  // 3 · Auto-link by the item code at the end of the Watsons name, then categories.
+  // 3 · Auto-link by the item code at the end of the Watsons name.
   const products = (await fetchAllRows('products', (from, to) =>
     supa.from('products').select('item_code,sku_code,category').eq('company_id', companyId).order('item_code').range(from, to),
   )) as unknown as ProductRow[];
@@ -108,7 +113,7 @@ export async function applyWatsonsMonth(
     if (!p || p.sku_code?.trim()) continue;
     const res = await supa
       .from('products')
-      .update({sku_code: s.skuCode})
+      .update({sku_code: s.skuCode, sku_linked_by: 'code', sku_linked_at: new Date().toISOString()})
       .eq('company_id', companyId)
       .eq('item_code', p.item_code)
       .is('sku_code', null);
@@ -116,20 +121,6 @@ export async function applyWatsonsMonth(
     p.sku_code = s.skuCode;
     linkedSkus.add(s.skuCode);
     linkedNow.push(p.item_code);
-  }
-
-  const subclassBySku = new Map(wb.skus.map((s) => [s.skuCode, s.subclass]));
-  const toCategorize = new Map<Category, string[]>();
-  for (const p of products) {
-    if (p.category || !p.sku_code) continue;
-    const c = categoryFromSubclass(subclassBySku.get(p.sku_code.trim()));
-    if (c) toCategorize.set(c, [...(toCategorize.get(c) ?? []), p.item_code]);
-  }
-  let categorized = 0;
-  for (const [category, items] of toCategorize) {
-    const res = await supa.from('products').update({category}).eq('company_id', companyId).in('item_code', items).is('category', null);
-    if (res.error) throw new Error(`product category failed: ${res.error.message}`);
-    categorized += items.length;
   }
 
   // 4 · Sales: upsert the month, then drop older rows for these stores and month.
@@ -149,6 +140,34 @@ export async function applyWatsonsMonth(
     replacedRows += res.count ?? 0;
   }
 
+  // 5 · Name/price/number matching for the rest, now that this month's sales count too.
+  const matched = await relinkWatsons(companyId);
+  for (const m of matched.linked) {
+    const p = byItem.get(m.itemCode);
+    if (p) p.sku_code = m.skuCode;
+    linkedSkus.add(m.skuCode);
+    linkedNow.push(m.itemCode);
+  }
+
+  // 6 · Categories for linked items, from the subclass Watsons gave each SKU in any month.
+  const subclasses = (await fetchAllRows('chain_skus', (from, to) =>
+    supa.from('chain_skus').select('sku_code,subclass').eq('company_id', companyId).eq('chain', CHAIN).order('sku_code').range(from, to),
+  )) as unknown as Array<{sku_code: string; subclass: string | null}>;
+  const subclassBySku = new Map(subclasses.map((s) => [s.sku_code, s.subclass]));
+  for (const s of wb.skus) if (s.subclass) subclassBySku.set(s.skuCode, s.subclass);
+  const toCategorize = new Map<Category, string[]>();
+  for (const p of products) {
+    if (p.category || !p.sku_code) continue;
+    const c = categoryFromSubclass(subclassBySku.get(p.sku_code.trim()));
+    if (c) toCategorize.set(c, [...(toCategorize.get(c) ?? []), p.item_code]);
+  }
+  let categorized = 0;
+  for (const [category, items] of toCategorize) {
+    const res = await supa.from('products').update({category}).eq('company_id', companyId).in('item_code', items).is('category', null);
+    if (res.error) throw new Error(`product category failed: ${res.error.message}`);
+    categorized += items.length;
+  }
+
   const units = wb.rows.reduce((a, r) => a + (r.units ?? 0), 0);
   const linkedUnits = wb.rows.reduce((a, r) => a + (linkedSkus.has(r.skuCode) ? (r.units ?? 0) : 0), 0);
   return {
@@ -160,8 +179,94 @@ export async function applyWatsonsMonth(
     skus: wb.skus.length,
     skusNew: wb.skus.filter((s) => !priorBy.has(s.skuCode)).length,
     linkedNow,
+    suggested: matched.suggested,
     categorized,
     units,
     linkedUnits,
   };
+}
+
+/**
+ * Match every Watsons SKU that has sales but no linked item. High-confidence pairs are
+ * linked (products.sku_code, sku_linked_by 'match'); medium and low ones are saved on
+ * chain_skus as suggestions. Pairs an admin turned down are never offered again.
+ * Safe to run any time; existing links are never changed.
+ */
+export async function relinkWatsons(companyId: string): Promise<{linked: Array<{skuCode: string; itemCode: string}>; suggested: number}> {
+  const supa = db();
+  const [productsRes, skuRows, rollup] = await Promise.all([
+    fetchAllRows('products', (from, to) =>
+      supa
+        .from('products')
+        .select('item_code,product_line,variant,unit_price,sku_code,retired_at')
+        .eq('company_id', companyId)
+        .order('item_code')
+        .range(from, to),
+    ),
+    fetchAllRows('chain_skus', (from, to) =>
+      supa
+        .from('chain_skus')
+        .select('sku_code,name,dismissed_item_code,suggested_item_code')
+        .eq('company_id', companyId)
+        .eq('chain', CHAIN)
+        .order('sku_code')
+        .range(from, to),
+    ),
+    supa.rpc('sales_rollup', {p_company: companyId}),
+  ]);
+  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
+  const products = productsRes as unknown as Array<CatalogItem & {sku_code: string | null; retired_at: string | null}>;
+  const skus = skuRows as unknown as Array<{sku_code: string; name: string; dismissed_item_code: string | null; suggested_item_code: string | null}>;
+  const totals = new Map(
+    ((rollup.data as {bySku?: Array<{sku_code: string; units: unknown; gross: unknown}>} | null)?.bySku ?? []).map((r) => [
+      r.sku_code,
+      {units: Number(r.units) || 0, gross: Number(r.gross) || 0},
+    ]),
+  );
+
+  const taken = products.filter((p) => p.sku_code?.trim()).map((p) => ({skuCode: p.sku_code!.trim(), itemCode: p.item_code}));
+  const blocked = new Set(skus.filter((s) => s.dismissed_item_code).map((s) => `${s.sku_code}|${s.dismissed_item_code}`));
+  const catalog = products.filter((p) => !p.retired_at).map(({item_code, product_line, variant, unit_price}) => ({
+    item_code,
+    product_line,
+    variant,
+    unit_price: unit_price == null ? null : Number(unit_price),
+  }));
+  const stats = skus.map((s) => ({sku_code: s.sku_code, name: s.name, ...(totals.get(s.sku_code) ?? {units: 0, gross: 0})}));
+  const matches = matchSkus(stats, catalog, taken, blocked);
+
+  const now = new Date().toISOString();
+  const linked: Array<{skuCode: string; itemCode: string}> = [];
+  for (const m of matches.filter((x) => x.tier === 'high')) {
+    const res = await supa
+      .from('products')
+      .update({sku_code: m.skuCode, sku_linked_by: 'match', sku_linked_at: now})
+      .eq('company_id', companyId)
+      .eq('item_code', m.itemCode)
+      .is('sku_code', null);
+    if (res.error) throw new Error(`product match link failed: ${res.error.message}`);
+    linked.push({skuCode: m.skuCode, itemCode: m.itemCode});
+  }
+
+  // Suggestions: set the current ones, clear any that no longer apply.
+  const suggestions = new Map(matches.filter((x) => x.tier !== 'high').map((m) => [m.skuCode, m]));
+  const rows = skus
+    .filter((s) => suggestions.has(s.sku_code) || s.suggested_item_code)
+    .map((s) => {
+      const m = suggestions.get(s.sku_code);
+      return {
+        company_id: companyId,
+        chain: CHAIN,
+        sku_code: s.sku_code,
+        name: s.name,
+        suggested_item_code: m?.itemCode ?? null,
+        match_score: m?.score ?? null,
+        match_tier: m?.tier ?? null,
+      };
+    });
+  for (let i = 0; i < rows.length; i += 500) {
+    const res = await supa.from('chain_skus').upsert(rows.slice(i, i + 500), {onConflict: 'company_id,chain,sku_code'});
+    if (res.error) throw new Error(`chain_skus suggestions failed: ${res.error.message}`);
+  }
+  return {linked, suggested: suggestions.size};
 }
