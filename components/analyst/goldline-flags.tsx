@@ -65,7 +65,7 @@ function cellsOf(f: FlagRow): FormCell[] {
 }
 /** For an incorrect row total, the cells it should add up (underlined, not boxed). */
 const partsOf = (f: FlagRow, r: FormRow): FormCell[] =>
-  f.kind === 'row_math' ? (['stockroom', 'drawer', 'selling_area', 'delivery'] as FormCell[]).filter((c) => r[c] != null && (c !== 'delivery' || f.details.counted !== f.details.withDelivery)) : [];
+  f.kind === 'row_math' ? (['stockroom', 'drawer', 'selling_area'] as FormCell[]).filter((c) => r[c] != null) : [];
 // The box style names the cause without colour: solid, dashed, dotted.
 const BORDER: Record<FlagCause, 'solid' | 'dashed' | 'dotted'> = {incorrect_total: 'solid', padding: 'dashed', messy_handwriting: 'dotted'};
 // Column layout of the digital form (fixed, so a note's arrow can land on its cell).
@@ -86,8 +86,7 @@ export function explain(f: FlagRow): string {
     )
       .filter(([, v]) => v != null)
       .map(([k, v], i) => `${i === 0 ? k[0].toUpperCase() + k.slice(1) : k} ${n(v)}`);
-    const sum = d.counted === d.withDelivery ? n(d.counted) : `${n(d.counted)} (${n(d.withDelivery)} with delivery)`;
-    return `${parts.join(' + ') || 'Nothing counted'} = ${sum}, but the ending says ${n(d.written)}.`;
+    return `${parts.join(' + ') || 'Nothing counted'} = ${n(d.counted)}, but the ending says ${n(d.written)}.`;
   }
   if (f.kind === 'zero_or_below') return Number(d.onHand) === 0 ? 'The count is 0.' : `The count is below 0 (${n(d.onHand)}).`;
   if (f.kind === 'unreadable') {
