@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "check:pagination": "node scripts/check-pagination.mjs",
     "test": "vitest run",
-    "shopee:import": "tsx scripts/shopee-import.ts"
+    "shopee:import": "tsx scripts/shopee-import.ts",
+    "sku:aliases": "tsx scripts/sku-aliases.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
