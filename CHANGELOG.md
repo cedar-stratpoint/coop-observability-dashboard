@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 — Goldline P1: Watsons SKUs matched to Nichido items, and a SKU links screen
+Only 25% of units sold were on linked SKUs after the first load: Watsons names rarely carry the Nichido item code. The inventory form gives three other clues (product line + shade, price, numbers in names like brush #525 or lash 84552), so SKUs are now matched on those.
+- **Matcher** (`src/goldline-sku-match.ts`, pure, `test/goldline-sku-match.test.ts`): Watsons words are compared as abbreviations (`MTTE`→Matte, `EP`→Eye Pencil, glued `PRBNFRCHKYPNCHOPNK`), shade words weigh more than line words, numbers in names must agree, and the Watsons average price (lower is normal, it includes discounts) must not sit far above the catalog price. Pairs are taken best first, one to one. Tiers: high (strong and clearly ahead of the runner-up), medium, low.
+- **Measured** on all 10 months: high pairs agreed with all 37 links read from item codes, and a random 45-pair check was all correct.
+- **Decision (owner):** high-confidence pairs are linked automatically (`products.sku_linked_by = 'match'`); medium and low wait on `chain_skus` as suggestions to confirm. Result on Staging: 67.2% of units linked (25.4% by code, 41.8% by match), 12.7% waiting as suggestions, ~20% with no match (cut-short names, such as two SKUs both called "PROFESSIONAL EYE PENCI", and items not on the form).
+- **Runs after every Watsons upload** (`relinkWatsons`), after the month's sales are saved, so new SKUs get matched as they appear. Existing links are never changed; a pair an admin turned down or unlinked is never offered again (`chain_skus.dismissed_item_code`). Categories now come from the subclass saved for each SKU, not only the current file's.
+- **SKU links screen** (`/stock/skus`, nav "SKU links"): share of units linked, then To confirm / No match / Linked, biggest sellers first. Confirm or "Not this" on a suggestion, pick an item for an unmatched SKU, unlink with the source shown (Code in name, Matched, By an admin). Company-wide data, so only roles that see every store can change it.
+- **Staging cleanup:** the six sample links (38005001 and similar, in no Watsons file) were cleared; they blocked real links.
+
 ## 2026-10-26 — Goldline P1: Watsons POS Sales Data upload (one month, every store)
 Uploads now take the monthly Watsons workbook (`.xlsx`) beside the per-store POS `.csv` and inventory `.pdf`. One file is one calendar month for every Watsons store; it seeds the store list and the Watsons SKU list as it loads.
 - **Decisions (owner):** Nichido has two chains, Watsons and Robinsons; Watsons is the first implementation. The 26 Watsons branches inside Robinsons malls are Watsons stores and stay in scope (this reverses the plan's earlier "Robinsons out of scope"). Robinsons the chain comes later with its own stores and data.

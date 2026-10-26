@@ -54,3 +54,25 @@ as $$
 $$;
 revoke all on function public.sales_by_sku(text, date, date) from public, anon, authenticated;
 grant execute on function public.sales_by_sku(text, date, date) to service_role;
+
+-- Watsons SKU matching (src/goldline-sku-match.ts). The link itself stays on
+-- products.sku_code; these columns say where it came from and hold the suggestions an
+-- admin still has to confirm.
+--   products.sku_linked_by   'code' (item code in the Watsons name), 'match' (high-confidence
+--                            name/price match, linked automatically) or 'admin'
+--   chain_skus.suggested_item_code / match_score / match_tier  a medium or low suggestion
+--   chain_skus.dismissed_item_code  a suggestion an admin turned down (never offered again)
+alter table public.products add column if not exists sku_linked_by text;
+alter table public.products add column if not exists sku_linked_at timestamptz;
+do $$ begin
+  alter table public.products add constraint products_sku_linked_by_check
+    check (sku_linked_by is null or sku_linked_by in ('code', 'match', 'admin'));
+exception when duplicate_object then null; end $$;
+alter table public.chain_skus add column if not exists suggested_item_code text;
+alter table public.chain_skus add column if not exists match_score numeric;
+alter table public.chain_skus add column if not exists match_tier text;
+alter table public.chain_skus add column if not exists dismissed_item_code text;
+do $$ begin
+  alter table public.chain_skus add constraint chain_skus_match_tier_check
+    check (match_tier is null or match_tier in ('high', 'medium', 'low'));
+exception when duplicate_object then null; end $$;
