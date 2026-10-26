@@ -31,7 +31,7 @@ export const CAUSE: Record<FlagCause, {label: string; tone: Tone; Icon: typeof P
   incorrect_total: {label: 'Incorrect total', tone: 'warn', Icon: Calculator, help: 'A row that doesn’t add up, or more gone than POS sold.'},
   padding: {label: 'Padding', tone: 'crit', Icon: TriangleAlert, help: 'POS sold more than the counts show, or a count at 0 or below.'},
 };
-const TAG: Record<BaTag, {label: string; tone: Tone; Icon: typeof CircleCheck}> = {
+export const TAG: Record<BaTag, {label: string; tone: Tone; Icon: typeof CircleCheck}> = {
   clear: {label: 'Clear', tone: 'good', Icon: CircleCheck},
   at_risk: {label: 'At risk', tone: 'warn', Icon: CircleAlert},
   delinquent: {label: 'Delinquent', tone: 'crit', Icon: OctagonAlert},
@@ -44,8 +44,8 @@ const CELLS: Array<[FormCell, string]> = [
   ['delivery', 'Delivery'],
   ['ending_on_hand', 'Ending'],
 ];
-const toneVar = (t: Tone) => (t === 'info' ? 'var(--chart-2, var(--muted-foreground))' : `var(--status-${t})`);
-const tint = (t: Tone, pct = 12) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
+export const toneVar = (t: Tone) => (t === 'info' ? 'var(--chart-2, var(--muted-foreground))' : `var(--status-${t})`);
+export const tint = (t: Tone, pct = 12) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -117,17 +117,30 @@ const breakdown = (t: BaTile) =>
 
 type Act = (fn: () => Promise<FlagActionResult>, okText: string, after?: () => void) => void;
 
-export function GoldlineFlags({company, data, canEdit}: {company: string; data: FlagsData; canEdit: boolean}) {
+export function GoldlineFlags({
+  company,
+  data,
+  canEdit,
+  initialOpen = null,
+  initialMonth = null,
+}: {
+  company: string;
+  data: FlagsData;
+  canEdit: boolean;
+  /** Tile key (store|month|BA) to open on, from the BA scorecard. */
+  initialOpen?: string | null;
+  initialMonth?: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [notice, setNotice] = useState<{kind: 'ok' | 'err'; text: string} | null>(null);
   const [tab, setTab] = useState<Tab>('bas');
   const months = useMemo(() => [...new Set(data.tiles.map((t) => t.month))].sort().reverse(), [data.tiles]);
-  const [month, setMonth] = useState(months[0] ?? '');
+  const [month, setMonth] = useState(initialMonth && months.includes(initialMonth) ? initialMonth : (months[0] ?? ''));
   const [tagFilter, setTagFilter] = useState<BaTag | 'all'>('all');
   const [store, setStore] = useState('all');
   const [page, setPage] = useState(1);
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(initialOpen);
 
   function act(fn: () => Promise<FlagActionResult>, okText: string, after?: () => void) {
     setNotice(null);

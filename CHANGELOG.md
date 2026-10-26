@@ -18,6 +18,15 @@ A final check of the SKU link matrix against the 10 raw Watsons Scan Data files 
 - **Matcher bugs found, not yet fixed in `matchSkus`:** Glamour Lashes suggestions were shifted one row (84331 → TLGL4440, 84440 → TLGL4452, …), the Pink and Silver retractable lip brushes were swapped, the ₱88 legacy blushes were offered the ₱160 items, and the 150-peso Matte Oriental two way cake was offered the 185-peso non-matte one. Nine more wrong suggestions were turned down; price fit should weigh more in the matcher.
 - Still for Justin's code list (Q20): the two "PROFESSIONAL EYE PENCI" SKUs, the two retractable eye pencils, the three Gorgeous eye pencils, the truncated True Colors eye shadows and the Elise Diva lashes.
 
+## 2026-10-26 — Goldline BA scorecard (F8)
+`/bas` now opens on a **Scorecard**: each BA's month across every store they covered, as decided Oct 26.
+- **One row per BA per month** (`baScores` in `src/goldline-checks.ts`, tested): a BA covering two stores gets one row with both stores' flags and one tag from the sum. Tag: Clear (0) · At risk (1 to 2) · Delinquent (3 or more, or any padding). Every flag counts, resolved ones too.
+- **Remarks** are written out from the flags, most first ("Padding 3 times, incorrect total 1 time"), with the category ("Mostly padding"). Admins' own remarks stay on each flag; a per-BA remark field can come later if Justin wants one.
+- **Last six months** as small bars coloured by that month's tag, with a text label for screen readers.
+- **Each store links to its tile on Flags** (`/flags?open=store|month|BA`), which opens the digital form with the flagged cells boxed.
+- Flags on forms with no BA name are counted separately with a link to the BA list, so nothing that should count is hidden.
+- Tag counters filter the table; phones get one card per BA instead of a sideways table.
+
 ## 2026-10-26 — Goldline BA list: every form lands on a BA
 The forms have a "Beauty Consultant" line, but every sample scan leaves it blank (store and period too), so every saved form had no BA and its flags counted against nobody. With the first real forms due Oct 30, Coop now knows each store's BA from a list.
 - **BA list** (`supabase/nichido/a1_ba_directory.sql`, applied on Nichido Staging): `bas` (full names, unique per company in any case) and `store_bas` (BA to store with `started_on`/`ended_on`; a move ends one row and starts another, so history stays). This is the plan's A1 directory, brought forward from P4.

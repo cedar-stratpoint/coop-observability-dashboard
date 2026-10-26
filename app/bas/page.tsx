@@ -1,12 +1,12 @@
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {getBaDirectory} from '@/src/goldline-ba-data';
+import {getBaDirectory, getBaScorecard} from '@/src/goldline-ba-data';
 import {GoldlineBas} from '@/components/analyst/goldline-bas';
 
 export const dynamic = 'force-dynamic';
 
-// BA list (Goldline · A1): which BA covers which store, so a form with no BA name still
-// counts against the right BA. Store-scoped roles see their stores only.
+// BAs (Goldline · F8 scorecard, A1 list): each BA's month (points, tag, category), and
+// which BA covers which store, so a form with no BA name still counts against the right BA. Store-scoped roles see their stores only.
 export default async function Page() {
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
@@ -18,6 +18,6 @@ export default async function Page() {
     );
   }
   const scope = Array.isArray(ctx.storeScope) ? ctx.storeScope : null;
-  const data = await getBaDirectory(ctx.companyId, scope);
-  return <GoldlineBas company={ctx.companyId} data={data} canEdit={canEditData(ctx.role)} />;
+  const [data, scorecard] = await Promise.all([getBaDirectory(ctx.companyId, scope), getBaScorecard(ctx.companyId, scope)]);
+  return <GoldlineBas company={ctx.companyId} data={data} scorecard={scorecard} canEdit={canEditData(ctx.role)} />;
 }

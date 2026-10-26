@@ -314,3 +314,38 @@ export function baTags(flags: TagFlag[], forms: Array<{store_code: string; month
   const rank: Record<BaTag, number> = {delinquent: 0, at_risk: 1, clear: 2};
   return [...by.values()].sort((a, b) => b.month.localeCompare(a.month) || rank[a.tag] - rank[b.tag] || b.points - a.points || a.store_code.localeCompare(b.store_code, undefined, {numeric: true}));
 }
+
+/** One BA's month across every store they covered (F8 scorecard). */
+export type BaScore = {
+  ba: string;
+  month: string;
+  stores: string[];
+  points: number;
+  byCause: Record<FlagCause, number>;
+  tag: BaTag;
+  category: FlagCause | null;
+};
+
+/**
+ * Store tiles (baTags) rolled up per BA and month: a BA who covers two stores gets one
+ * row with both stores' flags, and one tag from the sum. Tiles with no BA name are
+ * left out (the BA list on /bas is how they get one).
+ */
+export function baScores(tiles: BaMonth[]): BaScore[] {
+  const by = new Map<string, BaScore>();
+  for (const t of tiles) {
+    if (!t.ba) continue;
+    const key = `${t.ba}|${t.month}`;
+    const r = by.get(key) ?? {ba: t.ba, month: t.month, stores: [], points: 0, byCause: {messy_handwriting: 0, incorrect_total: 0, padding: 0}, tag: 'clear', category: null};
+    if (!r.stores.includes(t.store_code)) r.stores.push(t.store_code);
+    for (const c of FLAG_CAUSES) r.byCause[c] += t.byCause[c];
+    r.points += t.points;
+    by.set(key, r);
+  }
+  for (const r of by.values()) {
+    r.tag = tagFor(r.byCause);
+    r.category = categoryOf(r.byCause);
+  }
+  const rank: Record<BaTag, number> = {delinquent: 0, at_risk: 1, clear: 2};
+  return [...by.values()].sort((a, b) => b.month.localeCompare(a.month) || rank[a.tag] - rank[b.tag] || b.points - a.points || a.ba.localeCompare(b.ba));
+}
