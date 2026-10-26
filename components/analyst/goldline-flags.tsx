@@ -1,6 +1,6 @@
 'use client';
 
-import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
+import {Fragment, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
 import {ArrowLeft, Calculator, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, OctagonAlert, PenLine, RefreshCw, TriangleAlert, Trash2} from 'lucide-react';
 import type {AdjustmentReason, AdjustmentRow, BaTile, FlagRow, FlagsData, FormCell, FormCycle, FormRow} from '@/src/goldline-flags-data';
@@ -54,21 +54,40 @@ const fmtMonth = (ym: string) => `${FULL_MONTHS[Number(ym.slice(5, 7)) - 1]} ${y
 const fmtCycle = (a: string, b: string) => (a.slice(0, 7) === b.slice(0, 7) ? `${fmtDay(a)} to ${Number(b.slice(8, 10))}` : `${fmtDay(a)} to ${fmtDay(b)}`);
 const plural = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
 
-/** Which cells on the form a flag points at (none for the month's sales gap). */
+/**
+ * Which cells on the form a flag points at; the first is where its note's arrow lands.
+ * A sales gap points at the month's ending: that's the number POS disagrees with.
+ */
 function cellsOf(f: FlagRow): FormCell[] {
   if (f.kind === 'unreadable') return ((f.details.marks as Array<{field: string}> | undefined) ?? []).map((m) => m.field as FormCell);
-  if (f.kind === 'row_math') return ['ending_on_hand'];
-  if (f.kind === 'zero_or_below') return f.details.source === 'parts' ? ['stockroom', 'drawer', 'selling_area'] : ['ending_on_hand'];
-  return [];
+  if (f.kind === 'zero_or_below' && f.details.source === 'parts') return ['stockroom', 'drawer', 'selling_area'];
+  return ['ending_on_hand'];
 }
+/** For an incorrect row total, the cells it should add up (underlined, not boxed). */
+const partsOf = (f: FlagRow, r: FormRow): FormCell[] =>
+  f.kind === 'row_math' ? (['stockroom', 'drawer', 'selling_area', 'delivery'] as FormCell[]).filter((c) => r[c] != null && (c !== 'delivery' || f.details.counted !== f.details.withDelivery)) : [];
+// The box style names the cause without colour: solid, dashed, dotted.
+const BORDER: Record<FlagCause, 'solid' | 'dashed' | 'dotted'> = {incorrect_total: 'solid', padding: 'dashed', messy_handwriting: 'dotted'};
+// Column layout of the digital form (fixed, so a note's arrow can land on its cell).
+const PRODUCT_W = 30;
+const CELL_W = (100 - PRODUCT_W) / 5;
+const cellCenter = (c: FormCell) => PRODUCT_W + (CELLS.findIndex(([k]) => k === c) + 0.5) * CELL_W;
 
 /** One plain sentence saying what Coop saw, in the words on the form. */
 export function explain(f: FlagRow): string {
   const d = f.details;
   if (f.kind === 'row_math') {
-    const parts = [d.stockroom, d.drawer, d.selling_area].filter((p) => p != null).map(n);
-    const sum = d.counted === d.withDelivery ? n(d.counted) : `${n(d.counted)}, or ${n(d.withDelivery)} with delivery`;
-    return `Ending written as ${n(d.written)}, but ${parts.join(' + ') || '0'} = ${sum}.`;
+    const parts = (
+      [
+        ['stockroom', d.stockroom],
+        ['drawer', d.drawer],
+        ['selling area', d.selling_area],
+      ] as Array<[string, unknown]>
+    )
+      .filter(([, v]) => v != null)
+      .map(([k, v], i) => `${i === 0 ? k[0].toUpperCase() + k.slice(1) : k} ${n(v)}`);
+    const sum = d.counted === d.withDelivery ? n(d.counted) : `${n(d.counted)} (${n(d.withDelivery)} with delivery)`;
+    return `${parts.join(' + ') || 'Nothing counted'} = ${sum}, but the ending says ${n(d.written)}.`;
   }
   if (f.kind === 'zero_or_below') return Number(d.onHand) === 0 ? 'The count is 0.' : `The count is below 0 (${n(d.onHand)}).`;
   if (f.kind === 'unreadable') {
@@ -78,8 +97,8 @@ export function explain(f: FlagRow): string {
   }
   const gap = Number(d.gap);
   return gap > 0
-    ? `The counts show ${n(d.form_sold)} gone this month, POS sold ${n(d.pos_sold)}: ${n(gap)} more left than were sold.`
-    : `POS sold ${n(d.pos_sold)} this month, the counts show only ${n(d.form_sold)} gone: the counts are ${n(-gap)} too high.`;
+    ? `The counts show ${n(d.form_sold)} gone this month, but POS sold ${n(d.pos_sold)}: ${n(gap)} more left than were sold.`
+    : `POS sold ${n(d.pos_sold)} this month, but the counts show only ${n(d.form_sold)} gone. The ending looks ${n(-gap)} too high.`;
 }
 
 function Pill({tone, Icon, children}: {tone: Tone; Icon?: typeof PenLine; children: React.ReactNode}) {
@@ -376,6 +395,8 @@ function FormView({tile, company, flags, canEdit, pending, act, onBack}: {tile: 
   const pg = cycle?.pages[pi];
   const rows = (pg?.rows ?? []).filter((r) => !onlyFlagged || r.flagIds.length);
   const pageFlags = (pg?.rows ?? []).flatMap((r) => r.flagIds.map((id) => byId.get(id)).filter((f): f is FlagRow => !!f));
+  // Flags are numbered down the page, so a boxed cell, its note and its card share a number.
+  const num = new Map(pageFlags.map((f, i) => [f.id, i + 1]));
   const tag = TAG[tile.tag];
 
   return (
@@ -467,7 +488,13 @@ function FormView({tile, company, flags, canEdit, pending, act, onBack}: {tile: 
           <Card className="py-0">
             <CardContent className="px-0 py-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
+                <table className="w-full min-w-[640px] table-fixed text-sm">
+                  <colgroup>
+                    <col style={{width: `${PRODUCT_W}%`}} />
+                    {CELLS.map(([c]) => (
+                      <col key={c} style={{width: `${CELL_W}%`}} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
                       <th className="px-4 py-2.5 font-medium">Product</th>
@@ -476,22 +503,22 @@ function FormView({tile, company, flags, canEdit, pending, act, onBack}: {tile: 
                           {label}
                         </th>
                       ))}
-                      <th className="px-4 py-2.5 font-medium">Check</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={CELLS.length + 2} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={CELLS.length + 1} className="px-4 py-8 text-center text-muted-foreground">
                           Nothing flagged on this page.
                         </td>
                       </tr>
                     ) : (
-                      rows.map((r, i) => <FormLine key={`${r.itemCode}|${i}`} r={r} byId={byId} />)
+                      rows.map((r, i) => <FormLine key={`${r.itemCode}|${i}`} r={r} byId={byId} num={num} />)
                     )}
                   </tbody>
                 </table>
               </div>
+              <FormKey />
             </CardContent>
           </Card>
         </>
@@ -499,11 +526,11 @@ function FormView({tile, company, flags, canEdit, pending, act, onBack}: {tile: 
 
       {[...pageFlags, ...loose].length > 0 && (
         <div className="flex flex-col gap-2.5">
-          <p className="text-sm font-medium">{loose.length && !pageFlags.length ? 'Flags not on a page' : 'Flags on this page'}</p>
+          <p className="text-sm font-medium">{loose.length && !pageFlags.length ? 'Flags not on a page' : 'Remarks and adjustments'}</p>
           <ul className="flex flex-col gap-2.5">
             {[...pageFlags, ...loose].map((f) => (
               <li key={f.id}>
-                <FlagNote f={f} company={company} canEdit={canEdit} pending={pending} act={act} />
+                <FlagNote f={f} num={num.get(f.id)} company={company} canEdit={canEdit} pending={pending} act={act} />
               </li>
             ))}
           </ul>
@@ -513,60 +540,111 @@ function FormView({tile, company, flags, canEdit, pending, act, onBack}: {tile: 
   );
 }
 
-function FormLine({r, byId}: {r: FormRow; byId: Map<string, FlagRow>}) {
+/** One form row, then a note under it for each flag, its arrow on the cell that's wrong. */
+function FormLine({r, byId, num}: {r: FormRow; byId: Map<string, FlagRow>; num: Map<string, number>}) {
   const fl = r.flagIds.map((id) => byId.get(id)).filter((f): f is FlagRow => !!f);
   const boxed = new Map<FormCell, FlagRow>();
   for (const f of fl) for (const c of cellsOf(f)) if (!boxed.has(c)) boxed.set(c, f);
+  const parts = new Set(fl.flatMap((f) => partsOf(f, r)));
   return (
-    <tr className="border-b border-border/60 align-top last:border-0" style={fl.length ? {background: tint(CAUSE[fl[0].cause].tone, 6)} : undefined}>
-      <td className="px-4 py-2.5">{r.name}</td>
-      {CELLS.map(([c]) => {
-        const f = boxed.get(c);
-        const v = r[c];
+    <>
+      <tr className={cn('align-top', fl.length ? '' : 'border-b border-border/60 last:border-0')} style={fl.length ? {background: tint(CAUSE[fl[0].cause].tone, 5)} : undefined}>
+        <td className="px-4 py-2.5">{r.name}</td>
+        {CELLS.map(([c]) => {
+          const f = boxed.get(c);
+          const v = r[c];
+          const text = v == null ? '·' : n(v);
+          return (
+            <td key={c} className="px-2 py-2 text-right font-mono tabular-nums">
+              {f ? (
+                <span
+                  className="relative inline-flex min-w-9 items-center justify-end rounded-md border-2 px-1.5 py-0.5 font-semibold"
+                  style={{borderColor: toneVar(CAUSE[f.cause].tone), borderStyle: BORDER[f.cause], background: tint(CAUSE[f.cause].tone, 12)}}
+                  aria-label={`${text}, flag ${num.get(f.id) ?? ''}: ${CAUSE[f.cause].label}`}
+                >
+                  {text}
+                  <sup
+                    aria-hidden
+                    className="absolute -top-2 -right-2 grid size-4 place-items-center rounded-full font-sans text-[10px] leading-none font-semibold text-background"
+                    style={{background: toneVar(CAUSE[f.cause].tone)}}
+                  >
+                    {num.get(f.id)}
+                  </sup>
+                </span>
+              ) : parts.has(c) ? (
+                <span className="underline decoration-dotted decoration-2 underline-offset-4" style={{textDecorationColor: toneVar(CAUSE.incorrect_total.tone)}}>
+                  {text}
+                </span>
+              ) : v == null ? (
+                <span className="text-muted-foreground">·</span>
+              ) : (
+                text
+              )}
+            </td>
+          );
+        })}
+      </tr>
+      {fl.map((f, i) => {
+        const {label, tone, Icon} = CAUSE[f.cause];
+        const at = cellCenter(cellsOf(f)[0]);
+        // Notes under the right-hand columns hang from the right edge, so the arrow always lands on the box.
+        const right = at > 60;
         return (
-          <td key={c} className="px-2 py-2 text-right font-mono tabular-nums">
-            {f ? (
-              <span
-                className="inline-flex min-w-9 items-center justify-end gap-1 rounded-md border-2 px-1.5 py-0.5"
-                style={{borderColor: toneVar(CAUSE[f.cause].tone)}}
-                title={`${CAUSE[f.cause].label}: ${explain(f)}`}
-              >
-                {v == null ? '·' : n(v)}
-              </span>
-            ) : v == null ? (
-              <span className="text-muted-foreground">·</span>
-            ) : (
-              n(v)
-            )}
-          </td>
+          <Fragment key={f.id}>
+            <tr className={cn(i === fl.length - 1 && 'border-b border-border/60 last:border-0')} style={{background: tint(tone, 5)}}>
+              <td colSpan={CELLS.length + 1} className="relative px-3 pt-1.5 pb-3">
+                <span
+                  aria-hidden
+                  className="absolute top-0 size-3 rotate-45 border-t-[1.5px] border-l-[1.5px] max-sm:hidden"
+                  style={{left: `calc(${at}% - 6px)`, borderColor: toneVar(tone), borderStyle: BORDER[f.cause], background: `color-mix(in oklab, ${toneVar(tone)} 12%, var(--card))`}}
+                />
+                <span
+                  // On a phone the form scrolls sideways: the note pins to the visible left edge instead (it names the column).
+                  className="block w-fit max-w-[22rem] rounded-lg border-[1.5px] px-2.5 py-1.5 text-xs leading-relaxed max-sm:sticky max-sm:left-3 max-sm:!ml-0 max-sm:max-w-[calc(100vw-4.5rem)]"
+                  style={{
+                    borderColor: toneVar(tone),
+                    borderStyle: BORDER[f.cause],
+                    background: `color-mix(in oklab, ${toneVar(tone)} 12%, var(--card))`,
+                    ...(right ? {marginLeft: 'auto'} : {marginLeft: `clamp(0px, calc(${at}% - 3rem), calc(100% - 22rem))`}),
+                  }}
+                >
+                  <span className="mr-1.5 inline-flex items-center gap-1 font-semibold" style={{color: toneVar(tone)}}>
+                    {num.get(f.id)} · <Icon aria-hidden className="size-3.5" /> {label}
+                  </span>
+                  {explain(f)}
+                  {f.status === 'resolved' && <span className="text-muted-foreground"> Data changed since, still counts.</span>}
+                  {f.remark && <span className="mt-0.5 block text-muted-foreground">Remark: {f.remark}</span>}
+                </span>
+              </td>
+            </tr>
+          </Fragment>
         );
       })}
-      <td className="px-4 py-2.5">
-        {fl.length === 0 ? (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <CircleCheck aria-hidden className="size-3.5" /> OK
-          </span>
-        ) : (
-          <span className="flex flex-col gap-1">
-            {fl.map((f) => {
-              const {label, tone, Icon} = CAUSE[f.cause];
-              return (
-                <span key={f.id} className="text-xs">
-                  <span className="inline-flex items-center gap-1 font-medium" style={{color: toneVar(tone)}}>
-                    <Icon aria-hidden className="size-3.5" /> {label}
-                  </span>{' '}
-                  <span className="text-muted-foreground">{explain(f)}</span>
-                </span>
-              );
-            })}
-          </span>
-        )}
-      </td>
-    </tr>
+    </>
   );
 }
 
-function FlagNote({f, company, canEdit, pending, act}: {f: FlagRow; company: string; canEdit: boolean; pending: boolean; act: Act}) {
+/** What the box styles mean, so the form reads without colour. */
+function FormKey() {
+  return (
+    <p className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+      {FLAG_CAUSES.map((c) => (
+        <span key={c} className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="inline-block h-3 w-4 rounded-[3px] border-2" style={{borderColor: toneVar(CAUSE[c].tone), borderStyle: BORDER[c], background: tint(CAUSE[c].tone, 12)}} />
+          {CAUSE[c].label} · {BORDER[c]} box
+        </span>
+      ))}
+      <span className="inline-flex items-center gap-1.5">
+        <span className="font-mono underline decoration-dotted decoration-2 underline-offset-4" style={{textDecorationColor: toneVar(CAUSE.incorrect_total.tone)}}>
+          12
+        </span>
+        the numbers a total should add up to
+      </span>
+    </p>
+  );
+}
+
+function FlagNote({f, num, company, canEdit, pending, act}: {f: FlagRow; num?: number; company: string; canEdit: boolean; pending: boolean; act: Act}) {
   const c = CAUSE[f.cause];
   const lossy = f.kind === 'sales_gap' && Number(f.details.gap) > 0;
   const [mode, setMode] = useState<'none' | 'remark' | 'loss'>('none');
@@ -581,6 +659,7 @@ function FlagNote({f, company, canEdit, pending, act}: {f: FlagRow; company: str
           <div className="flex min-w-0 flex-col gap-1">
             <p className="flex flex-wrap items-center gap-2 text-xs">
               <Pill tone={c.tone} Icon={c.Icon}>
+                {num != null ? `${num} · ` : ''}
                 {c.label}
               </Pill>
               <span className="text-muted-foreground">{f.kind === 'sales_gap' ? `${fmtMonth(f.periodEnd.slice(0, 7))} vs. POS` : fmtCycle(f.periodStart, f.periodEnd)}</span>
