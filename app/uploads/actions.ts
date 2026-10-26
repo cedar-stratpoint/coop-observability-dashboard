@@ -2,6 +2,7 @@
 
 import {revalidatePath} from 'next/cache';
 import {runChecks} from '@/src/goldline-checks-data';
+import {resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {auth} from '@/auth';
@@ -172,7 +173,7 @@ export async function commitReview(input: {
       uploadId: input.uploadId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: input.consultant ?? null,
+      consultant: await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant),
       rows,
     });
     // The P2 checks follow every change to counts; a failing check never fails the commit.
@@ -311,7 +312,7 @@ export async function commitBatchAction(input: {
       batchId: input.batchId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: input.consultant ?? null,
+      consultant: await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant),
       pages,
     });
     // The P2 checks follow every change to counts; a failing check never fails the commit.
