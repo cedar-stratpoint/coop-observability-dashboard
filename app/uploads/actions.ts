@@ -17,9 +17,11 @@ import {
   getBatch,
   getBatchPages,
   getUpload,
+  splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
   type DeleteImpact,
+  type SplitForm,
   type ReviewedInventoryRow,
 } from '@/src/goldline-data';
 
@@ -334,5 +336,25 @@ export async function commitBatchAction(input: {
     }
     console.error('commitBatchAction', e);
     return {ok: false, error: 'Could not commit these pages. Please try again; committing again is safe.'};
+  }
+}
+
+/**
+ * Many stores in one scan: once every page of the drop is read, split the batch into
+ * one batch per form (a new form wherever the page number drops back, e.g. 5 to 1).
+ */
+export async function splitFormsAction(input: {company: string | null; batchId: string}): Promise<{ok: true; forms: SplitForm[]} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  if (!/^[0-9a-f-]{36}$/i.test(input.batchId ?? '')) return {ok: false, error: 'Upload batch not found.'};
+  try {
+    const session = await auth();
+    const forms = await splitBatchIntoForms(ctx.companyId, input.batchId, session?.user?.email ?? null);
+    revalidatePath('/uploads');
+    return {ok: true, forms};
+  } catch (e) {
+    console.error('splitFormsAction', e);
+    return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
   }
 }

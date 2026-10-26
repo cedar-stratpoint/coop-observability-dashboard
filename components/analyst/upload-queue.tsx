@@ -2,9 +2,10 @@
 
 import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {createBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {createBatchAction, splitFormsAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import type {SplitForm} from '@/src/goldline-data';
 import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progress';
-import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
+import {groupForms, MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
 import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
@@ -57,6 +58,9 @@ type QueueApi = {
   items: QueueItem[];
   preparing: boolean; // splitting multi-page PDFs
   notice: string | null; // add-time problems (wrong type, too big, too many)
+  /** Set when the drop held more than one store's form: each is its own batch to review. */
+  forms: SplitForm[] | null;
+  splitting: boolean;
   active: number; // queued + running + waiting
   addFiles: (files: File[]) => Promise<void>;
   retry: (id: string) => void;
@@ -83,6 +87,9 @@ export function UploadQueueProvider({company, children}: {company: string | null
   const [batch, setBatch] = useState<BatchInfo>(EMPTY_BATCH);
   const [preparing, setPreparing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [forms, setForms] = useState<SplitForm[] | null>(null);
+  const [splitting, setSplitting] = useState(false);
+  const splitFor = useRef<string | null>(null); // batch id already split
   const aborts = useRef(new Map<string, () => void>());
   const batchPromise = useRef<Promise<string | null> | null>(null);
   // Run attempt per item: cancelling (before the request goes out) or retrying bumps
@@ -246,6 +253,26 @@ export function UploadQueueProvider({company, children}: {company: string | null
 
   const active = items.filter((i) => i.state === 'queued' || i.state === 'running' || i.state === 'waiting_period').length;
 
+  // Many stores in one scan (Q25): once every page is read, if the page numbers restart
+  // (…5, 1…) the drop held several forms. Split them into one batch each, once.
+  useEffect(() => {
+    if (active > 0 || !batch.id || splitting || splitFor.current === batch.id) return;
+    const pdfs = items.filter((i) => i.kind === 'pdf' && i.state === 'done');
+    if (groupForms(pdfs.map((i) => ({page: i.page ?? null}))).length < 2) return;
+    splitFor.current = batch.id;
+    setSplitting(true);
+    void splitFormsAction({company: queueCompany.current, batchId: batch.id})
+      .then((r) => {
+        if (r.ok && r.forms.length > 1) {
+          setForms(r.forms);
+          // The store and period typed for the drop no longer apply: each form has its own.
+          setBatch((b) => ({...b, storeCode: '', periodStart: '', periodEnd: '', consultant: null, prefilled: false}));
+        } else if (!r.ok) setNotice(r.error);
+        router.refresh();
+      })
+      .finally(() => setSplitting(false));
+  }, [active, batch.id, items, splitting, router]);
+
   // Leaving the app (reload / close) would kill in-flight uploads — warn first.
   useEffect(() => {
     if (!items.some((i) => i.state === 'queued' || i.state === 'running')) return;
@@ -319,6 +346,8 @@ export function UploadQueueProvider({company, children}: {company: string | null
       items,
       preparing,
       notice,
+      forms,
+      splitting,
       active,
       addFiles,
       retry: (id) =>
@@ -341,6 +370,8 @@ export function UploadQueueProvider({company, children}: {company: string | null
         if (items.some((i) => i.state === 'running')) return;
         setItems([]);
         setBatch(EMPTY_BATCH);
+        setForms(null);
+        splitFor.current = null;
         batchPromise.current = null;
         attempt.current.clear();
         setNotice(null);
@@ -348,7 +379,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
       dismissNotice: () => setNotice(null),
     }),
     // company: queueCompany.current follows it whenever the queue is empty.
-    [batch, items, preparing, notice, active, addFiles, patch, company],
+    [batch, items, preparing, notice, forms, splitting, active, addFiles, patch, company],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
