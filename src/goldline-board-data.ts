@@ -106,6 +106,7 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
       price: p.unit_price == null ? null : Number(p.unit_price),
       bestseller: Boolean(p.is_bestseller),
       hidden: Boolean(p.hidden),
+      retired: Boolean(p.retired_at),
     };
   }
 

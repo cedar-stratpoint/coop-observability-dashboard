@@ -49,7 +49,7 @@ export type StoreBlock = {
   }>;
 };
 
-export type CatalogItem = {name: string; productLine: string | null; price: number | null; bestseller: boolean; hidden: boolean};
+export type CatalogItem = {name: string; productLine: string | null; price: number | null; bestseller: boolean; hidden: boolean; retired?: boolean};
 
 export type DateOrNow = {kind: 'now'} | {kind: 'date'; date: string} | null;
 
@@ -60,6 +60,7 @@ export type BoardRow = {
   price: number | null;
   bestseller: boolean;
   hidden: boolean;
+  retired: boolean; // no longer sold: left out of SKU matching and the restock (F2)
   status: ItemMovement['status'] | 'not_moving';
   storesNeeding: number; // all-stores view: stores out or to reorder
   storesCounted: number;
@@ -182,7 +183,7 @@ export function buildBoard(input: {
 
   const rows: BoardRow[] = [];
   for (const [itemCode, all] of byItem) {
-    const c = catalog[itemCode] ?? {name: itemCode, productLine: null, price: null, bestseller: false, hidden: false};
+    const c = catalog[itemCode] ?? {name: itemCode, productLine: null, price: null, bestseller: false, hidden: false, retired: false};
     const cells = input.store ? all.filter((x) => x.store.storeCode === input.store) : all;
     if (!cells.length) continue;
 
@@ -214,6 +215,7 @@ export function buildBoard(input: {
       price: c.price,
       bestseller: c.bestseller,
       hidden: c.hidden,
+      retired: Boolean(c.retired),
       status,
       storesNeeding: cells.filter((x) => x.mv.status === 'out' || x.mv.status === 'reorder').length,
       storesCounted: counted.length,

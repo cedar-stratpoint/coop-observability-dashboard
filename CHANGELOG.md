@@ -18,6 +18,14 @@ A final check of the SKU link matrix against the 10 raw Watsons Scan Data files 
 - **Matcher bugs found, not yet fixed in `matchSkus`:** Glamour Lashes suggestions were shifted one row (84331 → TLGL4440, 84440 → TLGL4452, …), the Pink and Silver retractable lip brushes were swapped, the ₱88 legacy blushes were offered the ₱160 items, and the 150-peso Matte Oriental two way cake was offered the 185-peso non-matte one. Nine more wrong suggestions were turned down; price fit should weigh more in the matcher.
 - Still for Justin's code list (Q20): the two "PROFESSIONAL EYE PENCI" SKUs, the two retractable eye pencils, the three Gorgeous eye pencils, the truncated True Colors eye shadows and the Elise Diva lashes.
 
+## 2026-10-26 — Goldline store scope and retiring products (F2)
+The two P1 switches that only had columns now work.
+- **Store scope** (S2, decided Oct 26): a store is in scope when it sold anything in the latest 3 loaded months of POS Sales Data; an admin can set any store Always in or Always out (`stores.in_scope`, null = automatic). `store_scope()` (`supabase/nichido/f2_store_scope.sql`, applied on Nichido Staging) works it out in one pass over sales (about 0.6 s on 392k rows), cached with the store list and refreshed by a Watsons upload or a scope change. `inScopeStores()` is ready for the restock (P3).
+- **Stores page:** "In scope 301 of 326", All · In scope · Out of scope filter, and per store the scope with why ("sold in the last 3 months", "no sales since Jan 2026", "set by an admin") and an Automatic / Always in / Always out switch for company-wide admins.
+- Found on Staging data: 25 stores are out of scope, including large ones (San Lazaro, Iloilo, Bicutan) with no sales since January 2026. Worth confirming with Justin whether they closed.
+- **Retire a product:** "Retire product" / "Bring back (sold again)" in the inventory board's row menu (company-wide roles), separate from hiding it on the board. Retired items show "retired" under their name and are left out of Watsons SKU matching (already) and the restock.
+- Fixed in passing: the Stores subtitle's period range now reads "2025-10-01 to 2026-09-30" instead of an arrow.
+
 ## 2026-10-26 — Goldline: many stores in one scanned PDF
 We agreed Justin scans whichever way is easiest (Q25), and the easiest is often one PDF with many stores' forms. Before this, a drop was one store's form for one cycle, capped at 20 pages: a two-store scan showed every page 1 as "uploaded twice" and couldn't be saved.
 - **Split by form** (`groupForms`, `scanOrder` in `src/upload-batch.ts`, tested): pages are put back in scan order (their position in the PDF) and a new form starts wherever the page number drops (…5, 1…). A page scanned twice in a row stays in its form, where the review already asks to remove the copy.
