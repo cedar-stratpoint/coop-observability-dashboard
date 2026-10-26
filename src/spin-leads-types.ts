@@ -2,8 +2,9 @@
 export interface SpinLead {
   email: string | null; // null when the lead gave an Instagram handle instead
   instagram: string | null; // handle without the "@" (Sep 27 event onwards)
+  name: string | null; // full name (late Oct 2026 events onwards)
   pet: string | null; // e.g. "Mimi / Puspin" (Sep 27 event onwards)
-  picky: string | null; // "Yes" / "No": is the pet a picky eater (Oct 2026 events onwards)
+  picky: string | null; // "Yes" / "No": is the pet a picky eater (Oct 2026 events, until the full name replaced it)
   mobile: string | null;
   prize: string;
   campaign: string | null; // the storefront admin's event slug, e.g. "modern-market-sept2026"

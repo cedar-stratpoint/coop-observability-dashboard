@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.15.0 (2026-10-26): Event lead contacts show the full name
+**Selective release** of the spin-the-wheel name work from `develop` (PR #262) and nothing else; the Goldline Nichido work on `staging` is not in it. One SQL file, no environment variable, no backfill script.
+- **Before deploy:** `supabase/spin_wheel_leads_name.sql` has run on PROD (`qkxb…wipi`, 2026-10-26), and zoomy-crm with `name` on `GET /api/spin-leads` is live.
+- **After deploy:** press **Update leads** on `/customers/leads`. It reports how many names it filled on leads imported earlier, and the Name column appears.
+
+## 2026-10-26 — Spin-the-wheel leads show the full name
+- **Why:** the booth form now asks for the furparent's full name and no longer asks whether the pet is a picky eater.
+- **What:** Event lead contacts gain a **Name** column after Contact. **Picky eater** stays, so older leads keep their answers; each column shows only when some lead has a value, and a lead without one shows "—".
+- **Update leads** also fills the name on leads Coop imported before it stored names. It only fills an empty name and never changes any other column, so pressing it again is still safe. The CSV import reads a Name column too.
+- **Needs:** zoomy-crm `feat/spin-leads-name` deployed (adds `name` to `GET /api/spin-leads`), and `supabase/spin_wheel_leads_name.sql` run on Staging, then PROD, **before** this deploys. Until it runs, Update leads stops with "Run supabase/spin_wheel_leads_name.sql first."
+- Ask Coop's contacts tool is unchanged: it still does not see names.
+
 ## v1.14.0 (2026-10-23): Ask Coop can add and compare figures, and says where figures come from
 **Selective release** of the Ask Coop calculation work from `develop` (PRs #250, #252, #254, #256). No SQL, no environment variable, no backfill.
 - **Totals and arithmetic.** "Give me the total" no longer gets refused. `get_channel_report` returns an Online total and an All channels total computed in code (whole centavos), marked partial and naming what is left out when a channel is incomplete; Ask Coop may add, subtract, divide or average figures from this turn's tool results, shows the working and says "calculated", and still never estimates, forecasts or prorates, and never adds or averages AOV, ROAS, ACOS or percentages.

@@ -52,6 +52,8 @@ const spinLeadsCached = unstable_cache(async (): Promise<SpinLead[]> => {
     email: (l.email as string | null) ?? null,
     // Absent until spin_wheel_leads_instagram.sql has run on this environment.
     instagram: (l.instagram as string | null) ?? null,
+    // Absent until spin_wheel_leads_name.sql has run on this environment.
+    name: (l.name as string | null) ?? null,
     pet: (l.pet as string | null) ?? null,
     // Absent until spin_wheel_leads_picky.sql has run on this environment.
     picky: (l.picky as string | null) ?? null,
