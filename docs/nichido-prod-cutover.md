@@ -27,6 +27,7 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 6 | `p2b_flag_causes.sql` | Lance | Oct 26 cause names, every flag counts, remark columns |
 | 7 | `a1_ba_directory.sql` | Lance | `bas`, `store_bas` |
 | 8 | `f2_store_scope.sql` | Lance | `store_scope()` |
+| 9 | `p3_forecast.sql` | Rick | `forecast_settings` (seeded 3 + 1), `forecast_months()`, `forecast_history()` (F10) |
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).
 
