@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 — Goldline: many stores in one scanned PDF
+We agreed Justin scans whichever way is easiest (Q25), and the easiest is often one PDF with many stores' forms. Before this, a drop was one store's form for one cycle, capped at 20 pages: a two-store scan showed every page 1 as "uploaded twice" and couldn't be saved.
+- **Split by form** (`groupForms`, `scanOrder` in `src/upload-batch.ts`, tested): pages are put back in scan order (their position in the PDF) and a new form starts wherever the page number drops (…5, 1…). A page scanned twice in a row stays in its form, where the review already asks to remove the copy.
+- **One batch per form** (`splitBatchIntoForms`, `splitFormsAction`): once every page of the drop is read, the first form keeps the batch and each other form gets its own. Store and period come from each form's page 1 header at review, as for any batch; when the header is blank the reviewer picks the store.
+- **Uploader:** while reading, "This scan holds more than one store's form" replaces the single store and period fields; afterwards "N forms in this scan" lists each form (store from its header or "store not on the form", pages, period, BA) with a link to its review. Up to 250 pages per drop (about 50 forms); at 2 pages at a time, budget roughly 15 seconds a page.
+- **Safety net:** if the tab closes mid-upload, the pages stay as one batch; opening that batch's review splits it then.
+- Tested on Nichido Staging with a 10-page PDF of two forms: 2 batches of pages 1 to 5, each reviewable (only the store left to pick). Test files removed afterwards.
+
 ## 2026-10-26 — Goldline BA scorecard (F8)
 `/bas` now opens on a **Scorecard**: each BA's month across every store they covered, as decided Oct 26.
 - **One row per BA per month** (`baScores` in `src/goldline-checks.ts`, tested): a BA covering two stores gets one row with both stores' flags and one tag from the sum. Tag: Clear (0) · At risk (1 to 2) · Delinquent (3 or more, or any padding). Every flag counts, resolved ones too.
