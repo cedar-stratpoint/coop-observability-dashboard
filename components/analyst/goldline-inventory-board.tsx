@@ -9,7 +9,7 @@ import {useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
-import {ArrowDown, ArrowUp, ChevronsUpDown, Eye, EyeOff, FileText, Info, MoreHorizontal, Package, Pencil, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
+import {Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronsUpDown, Eye, EyeOff, FileText, Info, MoreHorizontal, Package, Pencil, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
 import type {BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
 import {lastsLabel, sortRank} from '@/src/goldline-supply';
 import {Metric} from '@/components/analyst/metric';
@@ -20,7 +20,7 @@ import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
 import {fmtDay, MOVEMENT_STATUS, peso, StorePicker, ToneChip} from '@/components/analyst/goldline-ops-shared';
 import {NumberDialog, priceSubmit, ShipmentDialog, SupplySettingsDialog, warehouseSubmit, type ShipTarget} from '@/components/analyst/goldline-supply-dialogs';
-import {cancelShipmentAction, setHiddenAction} from '@/app/stock/actions';
+import {cancelShipmentAction, setHiddenAction, setRetiredAction} from '@/app/stock/actions';
 import {cn} from '@/lib/utils';
 import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 
@@ -177,6 +177,14 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
     startHide(async () => {
       const res = await setHiddenAction({company: data.company, item: r.itemCode, hidden: !r.hidden});
       setNotice(res.ok ? (r.hidden ? `${r.name} is back on the board.` : `${r.name} is hidden. Turn on “Show hidden” to see it.`) : res.error);
+      router.refresh();
+    });
+  }
+
+  function toggleRetired(r: BoardRow) {
+    startHide(async () => {
+      const res = await setRetiredAction({company: data.company, item: r.itemCode, retired: !r.retired});
+      setNotice(res.ok ? (r.retired ? `${r.name} is back in matching and restock.` : `${r.name} is retired: left out of SKU matching and restock.`) : res.error);
       router.refresh();
     });
   }
@@ -425,6 +433,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                                 {r.itemCode}
                                 {r.productLine ? ` · ${r.productLine}` : ''}
                                 {r.hidden ? ' · hidden' : ''}
+                                {r.retired ? ' · retired' : ''}
                               </span>
                             </td>
                             <td className="py-2 pr-3">
@@ -474,6 +483,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                                 onWarehouse={() => setWhEdit(r)}
                                 onPrice={() => setPriceEdit(r)}
                                 onHide={() => toggleHidden(r)}
+                                onRetire={() => toggleRetired(r)}
                               />
                             </td>
                           </tr>
@@ -507,6 +517,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                               onWarehouse={() => setWhEdit(r)}
                               onPrice={() => setPriceEdit(r)}
                               onHide={() => toggleHidden(r)}
+                              onRetire={() => toggleRetired(r)}
                             />
                           </div>
                         </div>
@@ -700,6 +711,7 @@ function RowMenu({
   onWarehouse,
   onPrice,
   onHide,
+  onRetire,
 }: {
   r: BoardRow;
   href: string;
@@ -709,6 +721,7 @@ function RowMenu({
   onWarehouse: () => void;
   onPrice: () => void;
   onHide: () => void;
+  onRetire: () => void;
 }) {
   return (
     <Menu.Root>
@@ -738,6 +751,10 @@ function RowMenu({
                 <Menu.Item className={MENU_ITEM} onClick={onHide}>
                   {r.hidden ? <Eye className="size-4 text-muted-foreground" /> : <EyeOff className="size-4 text-muted-foreground" />}
                   {r.hidden ? 'Show on the board' : 'Hide product'}
+                </Menu.Item>
+                <Menu.Item className={MENU_ITEM} onClick={onRetire}>
+                  {r.retired ? <ArchiveRestore className="size-4 text-muted-foreground" /> : <Archive className="size-4 text-muted-foreground" />}
+                  {r.retired ? 'Bring back (sold again)' : 'Retire product'}
                 </Menu.Item>
               </>
             )}

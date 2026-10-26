@@ -14,6 +14,7 @@ import {
   recordShipment,
   saveSupplySettings,
   setHidden,
+  setRetired,
   setPrice,
   setWarehouseStock,
   shipmentStore,
@@ -140,6 +141,23 @@ export async function setHiddenAction(input: {company: string | null; item: stri
   } catch (err) {
     if (err instanceof SupplyError) return {ok: false, error: 'Product not found.'};
     console.error('setHiddenAction', err);
+    return {ok: false, error: 'Could not update the product. Please try again.'};
+  }
+}
+
+export async function setRetiredAction(input: {company: string | null; item: string; retired: boolean}): Promise<ActionResult> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (e.ctx.storeScope) return {ok: false, error: 'Only company-wide roles can retire products.'};
+  if (!ITEM.test(input.item ?? '')) return {ok: false, error: 'Product not found.'};
+  try {
+    await setRetired(e.companyId, input.item, Boolean(input.retired));
+    refresh(e.companyId, ['catalog']);
+    revalidatePath('/stock/skus');
+    return {ok: true};
+  } catch (err) {
+    if (err instanceof SupplyError) return {ok: false, error: 'Product not found.'};
+    console.error('setRetiredAction', err);
     return {ok: false, error: 'Could not update the product. Please try again.'};
   }
 }
