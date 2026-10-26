@@ -12,7 +12,7 @@ const compactPeso = (n: number) =>
 
 // "Top categories" on the Goldline Overview: net sales by product line for the
 // current window, as horizontal bars scaled to the leader. Uncategorized (SKUs not
-// mapped in gl_products yet) always sits last and reads as muted, so it never
+// mapped in products yet) always sits last and reads as muted, so it never
 // looks like a real product line. "View all" expands past the top five in place.
 export function GoldlineCategories({categories, unmappedSkus}: {categories: OverviewCategory[]; unmappedSkus: number}) {
   const [showAll, setShowAll] = useState(false);

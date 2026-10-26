@@ -24,7 +24,7 @@ import {
 // Server action behind the review screen's "Commit" button. Re-derives the tenant
 // context server-side (never trusts a company id from the client beyond the switcher
 // hint), re-checks write capability + store scope, coerces the submitted rows, then
-// writes gl_inventory and closes the upload. All the authorization that the upload
+// writes inventory and closes the upload. All the authorization that the upload
 // route enforces is enforced again here — the two are independent entry points.
 
 export type CommitResult = {ok: true; committed: number} | {ok: false; error: string};
@@ -127,7 +127,7 @@ export async function commitReview(input: {
 
   // Ownership: the uploadId is client-supplied — confirm it belongs to THIS tenant
   // before any write, so a crafted id can't cross-link one company's inventory to
-  // another's upload (the gl_inventory insert stamps our company_id but would
+  // another's upload (the inventory insert stamps our company_id but would
   // otherwise store a foreign source_upload_id, and the status updates would no-op).
   const upload = await getUpload(ctx.companyId, input.uploadId);
   if (!upload) return {ok: false, error: 'Upload not found.'};

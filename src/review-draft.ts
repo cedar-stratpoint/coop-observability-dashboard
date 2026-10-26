@@ -1,7 +1,7 @@
 // Unsaved review edits for an upload batch (pure, unit-tested). A reviewer can leave
 // the batch review (back to Uploads, another page) and return: their edited counts and
 // the flags they marked as checked come back. Drafts live in the browser (per batch),
-// NOT in gl_extractions: that table keeps the reader's original values, which the
+// NOT in extractions: that table keeps the reader's original values, which the
 // writer profile compares with the confirmed ones. A draft is tied to the exact reading
 // it was made on, so a re-read page starts fresh, and it's dropped once committed.
 

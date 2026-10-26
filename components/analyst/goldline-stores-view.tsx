@@ -8,7 +8,7 @@ import {Pagination} from '@/components/analyst/pagination';
 import {cn} from '@/lib/utils';
 import {GL_TILES_MOBILE} from '@/src/goldline-ui';
 
-// Store leaderboard for the active company: sales rolled up per store (from gl_sales),
+// Store leaderboard for the active company: sales rolled up per store (from sales),
 // searchable and sortable. Derived entirely from props the server already scoped by
 // company_id — no fetching here.
 

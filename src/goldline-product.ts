@@ -1,7 +1,7 @@
 // Goldline product page: one item's sales and stock, month by month (pure, unit-tested).
 //
 // Input is the item's committed counts per store (the semi-monthly form) and — once the
-// item's POS SKU is linked in gl_products — its sales-report units. Output feeds the
+// item's POS SKU is linked in products — its sales-report units. Output feeds the
 // shared StockSalesChart (3 real + 3 forecast months) plus the page's numbers.
 //
 // Rules (also stated on the page):

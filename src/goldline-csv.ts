@@ -1,6 +1,6 @@
 // Goldline POS sales CSV parser (P1). Pure + unit-tested.
 //
-// Turns a Nichido POS export into gl_sales-ready rows. The file is store × SKU ×
+// Turns a Nichido POS export into sales-ready rows. The file is store × SKU ×
 // period; its real columns (see the plan's source-file schema) are:
 //   Location · Location Desc · SKU Code · SKU Desc · Gross Sales Retail TY ·
 //   Sales Units TY · Sales Net of Vat Net of Discount
