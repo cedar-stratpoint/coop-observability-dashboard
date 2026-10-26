@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import type {InventoryRowIn} from './goldline-inventory';
@@ -14,17 +14,13 @@ import {addDays, formTimeliness, isCurrentCount, pickCurrentPeriod, storeHealth,
 // full 300-store ramp this is a few hundred thousand rows per load; that's the point
 // to move the rollup into a SQL function / materialized view.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const HISTORY_DAYS = 70;
 const SNAPSHOT_WINDOW_DAYS = 180; // pickers / current period only need recent periods
 // Typical gap between today and the latest count (forms are semi-monthly, committed
 // within days). A store counted longer ago than this is re-read with its own window.
 const EARLY_LAG_DAYS = 25;
 
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type StoreOps = {
   storeCode: string;
@@ -44,7 +40,7 @@ export type OpsData = {
 
 export async function getOpsData(companyId: string, storeScope?: string[] | null): Promise<OpsData> {
   const empty: OpsData = {currentPeriod: null, stores: [], catalog: {}, pendingReview: 0};
-  if (!url || !key) return empty;
+  if (!nichidoConfigured()) return empty;
   const supa = db();
   const scope = storeScope ? new Set(storeScope) : null;
   const sinceSnapshots = addDays(new Date().toISOString().slice(0, 10), -SNAPSHOT_WINDOW_DAYS);
@@ -55,10 +51,10 @@ export async function getOpsData(companyId: string, storeScope?: string[] | null
   const today = new Date().toISOString().slice(0, 10);
   const readCounts = (since: string) =>
     fetchAllRows(
-      'gl_inventory',
+      'inventory',
       (from, to) => {
         let q = supa
-          .from('gl_inventory') // pagination-ok: paged by fetchAllRows (.range below)
+          .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
           .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
           .eq('company_id', companyId)
           .gte('period_end', since);
@@ -73,9 +69,9 @@ export async function getOpsData(companyId: string, storeScope?: string[] | null
   earlyCounts.catch(() => {}); // awaited below (re-throws there); never an unhandled rejection on early return
 
   const [snapsAll, storesRows, products, pending] = await Promise.all([
-    fetchAllRows('gl_inventory_snapshots', (from, to) => {
+    fetchAllRows('inventory_snapshots', (from, to) => {
       let q = supa
-        .from('gl_inventory_snapshots') // pagination-ok: paged by fetchAllRows (.range below)
+        .from('inventory_snapshots') // pagination-ok: paged by fetchAllRows (.range below)
         .select('store_code,period_start,period_end,last_committed_at')
         .eq('company_id', companyId)
         .gte('period_end', sinceSnapshots);
@@ -85,7 +81,7 @@ export async function getOpsData(companyId: string, storeScope?: string[] | null
     getGlStores(companyId),
     getGlCatalog(companyId),
     // pagination-ok: count-only head request, returns no rows.
-    supa.from('gl_uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('status', 'needs_review'),
+    supa.from('uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('status', 'needs_review'),
   ]);
 
   const snaps = scope ? snapsAll.filter((s) => scope.has(s.store_code)) : snapsAll;

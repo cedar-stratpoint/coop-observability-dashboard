@@ -1,7 +1,7 @@
 // Pure rollups behind the Goldline Overview page (no I/O, so it's unit-testable).
-// gl_sales arrives as one row per store × SKU × period; the POS export is periodic
+// sales arrives as one row per store × SKU × period; the POS export is periodic
 // (semi-monthly), so "this window" = the latest period and the delta compares it
-// to the period just before it. Categories come from the gl_products crosswalk
+// to the period just before it. Categories come from the products crosswalk
 // (POS sku_code → product_line); SKUs not mapped yet roll into "Uncategorized".
 
 export type OverviewSaleRow = {

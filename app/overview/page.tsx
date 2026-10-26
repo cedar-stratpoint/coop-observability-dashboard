@@ -32,7 +32,7 @@ function manilaHour(): number {
 
 // Goldline (non-Zoomy company) Overview, per plan §07a: greeting + window + stores
 // live, three KPI tiles with change vs the previous period, and top categories.
-// Reads gl_sales / gl_products / gl_stores scoped to the active company. With no
+// Reads sales / products / stores scoped to the active company. With no
 // sales yet it keeps the same frame (greeting, pill, "—" tiles) and swaps the
 // categories for an upload prompt, so the page never looks broken.
 export default async function Page() {

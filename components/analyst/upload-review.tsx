@@ -19,7 +19,7 @@ import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from 
 // Review workbench for one scanned inventory page. Shows the staged Claude Vision
 // read, pre-filled and editable; low-confidence rows are flagged so the reviewer
 // fixes the exceptions, confirms the header (store + period), and commits to
-// gl_inventory. A sales CSV has no extraction, so it renders a status summary.
+// inventory. A sales CSV has no extraction, so it renders a status summary.
 
 const LOW = LOW_BELOW; // below this a row is flagged for human eyes (shared with the confidence summary).
 const peso = (n: number) => `₱${n.toLocaleString('en-US', {maximumFractionDigits: 0})}`;

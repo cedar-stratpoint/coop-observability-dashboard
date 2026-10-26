@@ -1,5 +1,6 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import type {SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores, getGlSupplyRef} from './goldline-ref-data';
 import type {InventoryRowIn} from './goldline-inventory';
@@ -16,13 +17,9 @@ import {manilaDate, type CatalogItem, type Shipment, type StoreBlock, type Suppl
 // Reads ~4 months of counts for the caller's stores. At the 300-store ramp that's the
 // point to move this rollup into a SQL function / materialized view.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const HISTORY_DAYS = 130;
 
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type BoardData = {
   stores: StoreBlock[];
@@ -51,7 +48,7 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
     currentMonth: today.slice(0, 7),
     today,
   };
-  if (!url || !key) return empty;
+  if (!nichidoConfigured()) return empty;
   const supa = db();
   const since = addDays(today, -HISTORY_DAYS);
   const scope = storeScope ? new Set(storeScope) : null;
@@ -66,10 +63,10 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
     productsP,
     getGlSupplyRef(companyId),
     fetchAllRows(
-      'gl_inventory',
+      'inventory',
       (from, to) => {
         let q = supa
-          .from('gl_inventory') // pagination-ok: paged by fetchAllRows (.range below)
+          .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
           .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
           .eq('company_id', companyId)
           .gte('period_end', since);
@@ -79,9 +76,9 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
       undefined,
       {concurrency: 4},
     ) as unknown as Promise<Row[]>,
-    fetchAllRows('gl_shipments', (from, to) => {
+    fetchAllRows('shipments', (from, to) => {
       let q = supa
-        .from('gl_shipments') // pagination-ok: paged by fetchAllRows (.range below)
+        .from('shipments') // pagination-ok: paged by fetchAllRows (.range below)
         .select('id,store_code,item_code,qty,shipped_on,arrives_on')
         .eq('company_id', companyId)
         .eq('status', 'in_transit')
@@ -197,10 +194,10 @@ async function linkedSales(
     chunks.map(
       (chunk) =>
         fetchAllRows(
-          'gl_sales',
+          'sales',
           (from, to) => {
             let q = supa
-              .from('gl_sales') // pagination-ok: paged by fetchAllRows (.range below)
+              .from('sales') // pagination-ok: paged by fetchAllRows (.range below)
               .select('store_code,sku_code,period_end,units')
               .eq('company_id', companyId)
               .in('sku_code', chunk)
