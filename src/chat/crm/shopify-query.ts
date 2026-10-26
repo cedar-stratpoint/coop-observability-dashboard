@@ -22,7 +22,7 @@ const IDENTITY_FIELDS = new Set(['email', 'phone', 'firstname', 'lastname', 'dis
 const METAFIELD_FIELDS = new Set(['metafield', 'metafields']);
 const METAFIELD_IDENTITY_PARENTS = new Set(['customer', 'customers', 'lastorder', 'shop']);
 /** A search string aimed at a person (email:, phone:, first_name:, an address with @, a phone-like number): refused for users who may not see identity. */
-const IDENTITY_SEARCH = /(^|[\s(:"'])(e-?mail|phone|first_?name|last_?name)\s*:|@|\+?\d[\d\s().-]{8,}\d/i;
+const IDENTITY_SEARCH = /(^|[\s(:"'])(e-?mail|phone|first_?name|last_?name)\s*:|@|^\s*\+?\d[\d\s().-]{7,}\d\s*$/i;
 
 interface Tok {
   name: string;
@@ -35,6 +35,10 @@ interface Tok {
 interface Scan {
   names: Tok[];
   strings: string[];
+  /** At least one selection set `{` was seen (a document with none, e.g. only a comment, is not a query). */
+  opened: boolean;
+  /** Anonymous operations: top-level `{` that is not the body of a named query or a fragment. */
+  anon: number;
 }
 
 /** A small GraphQL lexer: names, strings (also block strings), comments, punctuators. `null` when it meets anything it cannot read (fail closed). */
@@ -43,6 +47,8 @@ export function scanGraphql(src: string): Scan | null {
   const strings: string[] = [];
   let depth = 0;
   let paren = 0;
+  let opened = false;
+  let anon = 0;
   let prev: string | null = null;
   let i = 0;
   const n = src.length;
@@ -97,7 +103,11 @@ export function scanGraphql(src: string): Scan | null {
       prev = '...';
       i += 3;
     } else if ('{}()[]:=!$@|&'.includes(c)) {
-      if (c === '{') depth += 1;
+      if (c === '{') {
+        if (depth === 0 && paren === 0 && (prev === null || prev === '}')) anon += 1;
+        depth += 1;
+        opened = true;
+      }
       if (c === '}') depth -= 1;
       if (c === '(') paren += 1;
       if (c === ')') paren -= 1;
@@ -107,7 +117,7 @@ export function scanGraphql(src: string): Scan | null {
     } else return null; // a character GraphQL does not use (also every non-ASCII one): the CRM's parser refuses it too
   }
   if (depth !== 0 || paren !== 0) return null;
-  return {names, strings};
+  return {names, strings, opened, anon};
 }
 
 export interface ShopifyRequest {
@@ -151,6 +161,7 @@ export function readShopifyInput(input: unknown, opts: {allowIdentity: boolean})
     // fail closed, for everyone: the CRM could not parse it either, so no request is wasted
     return fail('That is not a GraphQL query this tool can read (an unbalanced bracket, an unterminated string or a character GraphQL does not use). Rewrite it as one plain query.');
   }
+  if (!scan.opened) return fail('That is not a query: it has no selection (a query needs braces with fields inside).');
   // courtesy: one document of query operations and fragments only. The CRM re-checks with a real parser and stays the authority.
   for (const t of scan.names) {
     if (t.depth === 0 && t.paren === 0 && (t.prev === null || t.prev === '}') && t.name !== 'query' && t.name !== 'fragment') {
@@ -158,7 +169,8 @@ export function readShopifyInput(input: unknown, opts: {allowIdentity: boolean})
     }
     if (t.name.startsWith('__') && t.name !== '__typename') return fail('Introspection (__schema, __type) is not available. Use the fields listed in the tool description.');
   }
-  if (scan.names.filter((t) => t.depth === 0 && t.paren === 0 && t.name === 'query' && (t.prev === null || t.prev === '}')).length > 1) return fail('Send exactly one query operation.');
+  const named = scan.names.filter((t) => t.depth === 0 && t.paren === 0 && t.name === 'query' && (t.prev === null || t.prev === '}')).length;
+  if (named + scan.anon > 1) return fail('Send exactly one query operation.');
 
   const lower = new Set(scan.names.map((t) => t.name.toLowerCase()));
   const identityField = [...lower].some((n) => IDENTITY_FIELDS.has(n));

@@ -15,6 +15,8 @@ import type {Check, MeasureDecl, MetricData, MetricError, MetricResult, MetricRo
 import type {CrmGet} from './crm/tools';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day: 2026-02-30 rolls over in Date.parse, so the round trip must give the same text. */
+const realDay = (d: string): boolean => DAY.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
 const SKU = /^[A-Za-z0-9][A-Za-z0-9._-]{1,39}$/;
 const MAX_WEEKS = 13;
 const fail = (error: string): MetricError => ({error});
@@ -33,7 +35,7 @@ export function readCompareInput(input: unknown): CompareRequest | MetricError {
   if (Object.keys(o).some((k) => k !== 'sku' && k !== 'from' && k !== 'to') || typeof o.sku !== 'string' || typeof o.from !== 'string' || typeof o.to !== 'string') return fail(keys);
   const sku = o.sku.trim().toUpperCase();
   if (!SKU.test(sku)) return fail('sku must be the product code itself (letters, digits, dashes), for example ZMYFDMEATBEFWHL01. If the owner gave a name, find its code with lookup_product first; do not guess one.');
-  if (!DAY.test(o.from) || !DAY.test(o.to) || Number.isNaN(Date.parse(`${o.from}T00:00:00Z`)) || Number.isNaN(Date.parse(`${o.to}T00:00:00Z`))) return fail('from and to must be the owner\'s dates as YYYY-MM-DD. Ask the owner if they gave none; do not pick dates yourself.');
+  if (!realDay(o.from) || !realDay(o.to)) return fail('from and to must be the owner\'s dates as YYYY-MM-DD. Ask the owner if they gave none; do not pick dates yourself.');
   if (o.to < o.from) return fail('from is after to. Ask the owner for the dates again.');
   if (Math.round((Date.parse(`${o.to}T00:00:00Z`) - Date.parse(`${o.from}T00:00:00Z`)) / 86_400_000) + 1 > MAX_WEEKS * 7) return fail(`That is more than ${MAX_WEEKS} weeks. Ask the owner for a shorter range.`);
   return {sku, from: o.from, to: o.to};
@@ -166,7 +168,7 @@ export function skuCompareResult(cmp: SkuComparison, now: Date): MetricResult {
                 label: `${cmp.sku} units across ${t.channels.map((c) => CHANNEL_LABEL[c]).join(', ')} (${t.label})`,
                 channels_included: t.channels.map((c) => CHANNEL_LABEL[c]),
                 channels_excluded: t.missing.map((c) => ({channel: CHANNEL_LABEL[c], reason: 'not usable for every week'})),
-                status: t.partial ? ('partial' as const) : ('complete' as const),
+                status: t.partial || t.label === 'at least' ? ('partial' as const) : ('complete' as const), // "at least" is not the whole channel set: never shown as complete
                 revenue: t.revenue,
                 orders: null,
                 units: t.units,
