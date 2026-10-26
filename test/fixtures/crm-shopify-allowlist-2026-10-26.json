@@ -1,0 +1,451 @@
+{
+ "fixture": "zoomy-crm feat/api-shopify-query src/lib/shopify-query-schema.ts, 2026-10-26 (schema metadata only)",
+ "schema": {
+  "QueryRoot": {
+   "shop": "Shop",
+   "orders": "OrderConnection",
+   "order": "Order",
+   "ordersCount": "Count",
+   "products": "ProductConnection",
+   "product": "Product",
+   "productsCount": "Count",
+   "productVariants": "ProductVariantConnection",
+   "productVariant": "ProductVariant",
+   "collections": "CollectionConnection",
+   "collection": "Collection",
+   "customers": "CustomerConnection",
+   "customer": "Customer",
+   "customersCount": "Count",
+   "discountNodes": "DiscountNodeConnection",
+   "inventoryItems": "InventoryItemConnection",
+   "inventoryItem": "InventoryItem",
+   "currentAppInstallation": "AppInstallation"
+  },
+  "AppInstallation": {
+   "accessScopes": "AccessScope"
+  },
+  "AccessScope": {
+   "handle": null
+  },
+  "Count": {
+   "count": null,
+   "precision": null
+  },
+  "PageInfo": {
+   "hasNextPage": null,
+   "hasPreviousPage": null,
+   "startCursor": null,
+   "endCursor": null
+  },
+  "MoneyV2": {
+   "amount": null,
+   "currencyCode": null
+  },
+  "MoneyBag": {
+   "shopMoney": "MoneyV2",
+   "presentmentMoney": "MoneyV2"
+  },
+  "Metafield": {
+   "id": null,
+   "namespace": null,
+   "key": null,
+   "value": null,
+   "type": null,
+   "createdAt": null,
+   "updatedAt": null
+  },
+  "Shop": {
+   "id": null,
+   "name": null,
+   "currencyCode": null,
+   "metafield": "Metafield",
+   "metafields": "MetafieldConnection"
+  },
+  "Order": {
+   "id": null,
+   "name": null,
+   "createdAt": null,
+   "processedAt": null,
+   "updatedAt": null,
+   "cancelledAt": null,
+   "closedAt": null,
+   "displayFinancialStatus": null,
+   "displayFulfillmentStatus": null,
+   "currencyCode": null,
+   "tags": null,
+   "email": null,
+   "phone": null,
+   "totalPriceSet": "MoneyBag",
+   "subtotalPriceSet": "MoneyBag",
+   "totalDiscountsSet": "MoneyBag",
+   "totalRefundedSet": "MoneyBag",
+   "totalShippingPriceSet": "MoneyBag",
+   "totalTaxSet": "MoneyBag",
+   "discountCodes": null,
+   "discountApplications": "DiscountApplicationConnection",
+   "lineItems": "LineItemConnection",
+   "refunds": "Refund",
+   "customer": "Customer"
+  },
+  "LineItem": {
+   "id": null,
+   "name": null,
+   "title": null,
+   "quantity": null,
+   "currentQuantity": null,
+   "sku": null,
+   "variantTitle": null,
+   "vendor": null,
+   "originalUnitPriceSet": "MoneyBag",
+   "discountedUnitPriceSet": "MoneyBag",
+   "originalTotalSet": "MoneyBag",
+   "discountedTotalSet": "MoneyBag",
+   "totalDiscountSet": "MoneyBag",
+   "product": "Product",
+   "variant": "ProductVariant"
+  },
+  "Refund": {
+   "id": null,
+   "createdAt": null,
+   "totalRefundedSet": "MoneyBag",
+   "refundLineItems": "RefundLineItemConnection"
+  },
+  "RefundLineItem": {
+   "id": null,
+   "quantity": null,
+   "subtotalSet": "MoneyBag",
+   "lineItem": "LineItem"
+  },
+  "DiscountApplication": {
+   "allocationMethod": null,
+   "targetType": null,
+   "targetSelection": null
+  },
+  "DiscountCodeApplication": {
+   "allocationMethod": null,
+   "targetType": null,
+   "targetSelection": null,
+   "code": null
+  },
+  "AutomaticDiscountApplication": {
+   "allocationMethod": null,
+   "targetType": null,
+   "targetSelection": null,
+   "title": null
+  },
+  "ManualDiscountApplication": {
+   "allocationMethod": null,
+   "targetType": null,
+   "targetSelection": null,
+   "title": null
+  },
+  "ScriptDiscountApplication": {
+   "allocationMethod": null,
+   "targetType": null,
+   "targetSelection": null,
+   "title": null
+  },
+  "Customer": {
+   "id": null,
+   "createdAt": null,
+   "updatedAt": null,
+   "firstName": null,
+   "lastName": null,
+   "displayName": null,
+   "email": null,
+   "phone": null,
+   "numberOfOrders": null,
+   "tags": null,
+   "amountSpent": "MoneyV2",
+   "emailMarketingConsent": "ConsentState",
+   "lastOrder": "Order",
+   "orders": "OrderConnection",
+   "metafield": "Metafield",
+   "metafields": "MetafieldConnection"
+  },
+  "ConsentState": {
+   "marketingState": null,
+   "consentUpdatedAt": null
+  },
+  "Product": {
+   "id": null,
+   "title": null,
+   "handle": null,
+   "vendor": null,
+   "productType": null,
+   "status": null,
+   "tags": null,
+   "createdAt": null,
+   "updatedAt": null,
+   "publishedAt": null,
+   "totalInventory": null,
+   "tracksInventory": null,
+   "variants": "ProductVariantConnection",
+   "collections": "CollectionConnection",
+   "metafield": "Metafield",
+   "metafields": "MetafieldConnection"
+  },
+  "ProductVariant": {
+   "id": null,
+   "title": null,
+   "sku": null,
+   "price": null,
+   "compareAtPrice": null,
+   "barcode": null,
+   "inventoryQuantity": null,
+   "availableForSale": null,
+   "createdAt": null,
+   "updatedAt": null,
+   "selectedOptions": "SelectedOption",
+   "product": "Product",
+   "inventoryItem": "InventoryItem",
+   "metafield": "Metafield",
+   "metafields": "MetafieldConnection"
+  },
+  "SelectedOption": {
+   "name": null,
+   "value": null
+  },
+  "InventoryItem": {
+   "id": null,
+   "sku": null,
+   "tracked": null,
+   "createdAt": null,
+   "updatedAt": null,
+   "unitCost": "MoneyV2",
+   "inventoryLevels": "InventoryLevelConnection"
+  },
+  "InventoryLevel": {
+   "id": null,
+   "updatedAt": null,
+   "location": "Location",
+   "quantities": "InventoryQuantity"
+  },
+  "InventoryQuantity": {
+   "name": null,
+   "quantity": null,
+   "updatedAt": null
+  },
+  "Location": {
+   "id": null,
+   "name": null
+  },
+  "Collection": {
+   "id": null,
+   "title": null,
+   "handle": null,
+   "updatedAt": null,
+   "productsCount": "Count",
+   "products": "ProductConnection",
+   "metafield": "Metafield",
+   "metafields": "MetafieldConnection"
+  },
+  "DiscountNode": {
+   "id": null,
+   "discount": "Discount"
+  },
+  "Discount": {},
+  "DiscountCodeBasic": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "usageLimit": null,
+   "asyncUsageCount": null,
+   "codes": "DiscountRedeemCodeConnection"
+  },
+  "DiscountCodeBxgy": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "usageLimit": null,
+   "asyncUsageCount": null,
+   "codes": "DiscountRedeemCodeConnection"
+  },
+  "DiscountCodeFreeShipping": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "usageLimit": null,
+   "asyncUsageCount": null,
+   "codes": "DiscountRedeemCodeConnection"
+  },
+  "DiscountAutomaticBasic": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "asyncUsageCount": null
+  },
+  "DiscountAutomaticBxgy": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "asyncUsageCount": null
+  },
+  "DiscountAutomaticFreeShipping": {
+   "title": null,
+   "status": null,
+   "startsAt": null,
+   "endsAt": null,
+   "summary": null,
+   "asyncUsageCount": null
+  },
+  "DiscountRedeemCode": {
+   "id": null,
+   "code": null,
+   "asyncUsageCount": null
+  },
+  "OrderConnection": {
+   "nodes": "Order",
+   "edges": "OrderEdge",
+   "pageInfo": "PageInfo"
+  },
+  "OrderEdge": {
+   "cursor": null,
+   "node": "Order"
+  },
+  "ProductConnection": {
+   "nodes": "Product",
+   "edges": "ProductEdge",
+   "pageInfo": "PageInfo"
+  },
+  "ProductEdge": {
+   "cursor": null,
+   "node": "Product"
+  },
+  "ProductVariantConnection": {
+   "nodes": "ProductVariant",
+   "edges": "ProductVariantEdge",
+   "pageInfo": "PageInfo"
+  },
+  "ProductVariantEdge": {
+   "cursor": null,
+   "node": "ProductVariant"
+  },
+  "CollectionConnection": {
+   "nodes": "Collection",
+   "edges": "CollectionEdge",
+   "pageInfo": "PageInfo"
+  },
+  "CollectionEdge": {
+   "cursor": null,
+   "node": "Collection"
+  },
+  "CustomerConnection": {
+   "nodes": "Customer",
+   "edges": "CustomerEdge",
+   "pageInfo": "PageInfo"
+  },
+  "CustomerEdge": {
+   "cursor": null,
+   "node": "Customer"
+  },
+  "DiscountNodeConnection": {
+   "nodes": "DiscountNode",
+   "edges": "DiscountNodeEdge",
+   "pageInfo": "PageInfo"
+  },
+  "DiscountNodeEdge": {
+   "cursor": null,
+   "node": "DiscountNode"
+  },
+  "InventoryItemConnection": {
+   "nodes": "InventoryItem",
+   "edges": "InventoryItemEdge",
+   "pageInfo": "PageInfo"
+  },
+  "InventoryItemEdge": {
+   "cursor": null,
+   "node": "InventoryItem"
+  },
+  "InventoryLevelConnection": {
+   "nodes": "InventoryLevel",
+   "edges": "InventoryLevelEdge",
+   "pageInfo": "PageInfo"
+  },
+  "InventoryLevelEdge": {
+   "cursor": null,
+   "node": "InventoryLevel"
+  },
+  "MetafieldConnection": {
+   "nodes": "Metafield",
+   "edges": "MetafieldEdge",
+   "pageInfo": "PageInfo"
+  },
+  "MetafieldEdge": {
+   "cursor": null,
+   "node": "Metafield"
+  },
+  "LineItemConnection": {
+   "nodes": "LineItem",
+   "edges": "LineItemEdge",
+   "pageInfo": "PageInfo"
+  },
+  "LineItemEdge": {
+   "cursor": null,
+   "node": "LineItem"
+  },
+  "RefundLineItemConnection": {
+   "nodes": "RefundLineItem",
+   "edges": "RefundLineItemEdge",
+   "pageInfo": "PageInfo"
+  },
+  "RefundLineItemEdge": {
+   "cursor": null,
+   "node": "RefundLineItem"
+  },
+  "DiscountApplicationConnection": {
+   "nodes": "DiscountApplication",
+   "edges": "DiscountApplicationEdge",
+   "pageInfo": "PageInfo"
+  },
+  "DiscountApplicationEdge": {
+   "cursor": null,
+   "node": "DiscountApplication"
+  },
+  "DiscountRedeemCodeConnection": {
+   "nodes": "DiscountRedeemCode",
+   "edges": "DiscountRedeemCodeEdge",
+   "pageInfo": "PageInfo"
+  },
+  "DiscountRedeemCodeEdge": {
+   "cursor": null,
+   "node": "DiscountRedeemCode"
+  }
+ },
+ "forbiddenField": "address|note|token|secret|password|credential|apikey|staff|^apps?$|^appInstallations?$|payment|gateway|transaction|billing|shipping(?!PriceSet)|customattributes|rawpayload",
+ "forbiddenFlags": "i",
+ "argKind": {
+  "first": "int",
+  "last": "int",
+  "after": "string",
+  "before": "string",
+  "query": "string",
+  "id": "string",
+  "namespace": "string",
+  "key": "string",
+  "reverse": "boolean",
+  "sortKey": "enum",
+  "names": "strings"
+ },
+ "limits": {
+  "bodyBytes": 20000,
+  "queryChars": 10000,
+  "tokens": 3000,
+  "depth": 10,
+  "cost": 20000,
+  "queryArg": 500,
+  "variablesBytes": 8000
+ },
+ "maxPage": 100,
+ "metafieldNamespace": "custom"
+}

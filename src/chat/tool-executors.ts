@@ -6,7 +6,11 @@ import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
 import {tracked} from './crm/executors';
 import {crmEnrichedCustomers} from './crm/tools';
 import {listEventLeads, readContactsInput} from './contacts/leads';
-import {logPiiRead} from './audit';
+import {logCrmCall, logPiiRead} from './audit';
+import {CrmError} from './crm/client';
+import type {CrmGet} from './crm/tools';
+import {paramsFingerprint} from './explore/fingerprint';
+import {compareForChat, readCompareInput, skuCompareResult} from './sku-compare-tool';
 import {askOwner, isClarify, type ClarifyResult} from './clarify';
 import {rangeLabel} from './range';
 import {describeData} from './coverage';
@@ -64,7 +68,38 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...createReportExecutors(ctx, session, data),
     ...(ctx.explore ? {run_query: ctx.explore} : {}),
     ...(ctx.exploreSchema ? {list_tables: ctx.exploreSchema.list_tables, describe_table: ctx.exploreSchema.describe_table} : {}),
-    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep}) : {}),
+    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true}) : {}),
+    // One product across POS, Shopee and the website (src/sku-compare.ts). Not strict: validated in code. The website channel reads the CRM once per week through the
+    // same client (one chat_crm_call line for the whole call); a CRM failure makes that channel "failed" in the result, never a silent zero.
+    ...(ctx.sku
+      ? {
+          compare_sku: async (input: unknown) => {
+            const req = readCompareInput(input);
+            if ('error' in req) return {error: req.error};
+            const t0 = Date.now();
+            const endpoints = new Set<string>();
+            let bytes = 0;
+            let failure: string | null = null;
+            const crm = ctx.crm;
+            const crmGet: CrmGet | undefined = crm
+              ? async (endpoint, query, opts) => {
+                  endpoints.add(endpoint);
+                  try {
+                    const r = await crm.get(endpoint, query, opts);
+                    bytes += r.cached ? 0 : r.bytes;
+                    return r;
+                  } catch (e) {
+                    failure = e instanceof CrmError ? e.code : 'internal';
+                    throw e;
+                  }
+                }
+              : undefined;
+            const cmp = await compareForChat(req, {data: async () => data(), aliases: ctx.sku!.aliases, shopee: ctx.sku!.shopee, crmGet, now: ctx.now});
+            if (crm) logCrmCall({tool: 'compare_sku', endpoints: [...endpoints], paramsFp: paramsFingerprint(req), ok: failure === null, code: failure, rows: cmp.channels.length, bytes, ms: Date.now() - t0, user: ctx.user}, ctx.sink);
+            return keep(skuCompareResult(cmp, ctx.now));
+          },
+        }
+      : {}),
     describe_data: async (input) => describeData(input as {metric: string}, await data(), ctx.now, !!ctx.explore, !!ctx.crm, !!ctx.crmOrders || !!ctx.crm),
     query_metric: async (input) => {
       let result = runMetric(input, await data(), ctx.now);
@@ -203,13 +238,15 @@ function compact(r: MetricResult, id: string) {
   const {measures, ...meta} = r.meta;
   const used = measures.find((m) => m.key === meta.measure);
   const total = r.rows.length;
+  // crm_query already capped its rows and bytes for the model (src/chat/crm/query-config.ts); every other result keeps the 100-row payload
+  const cap = r.metric === 'crm_query' ? total : MAX_PAYLOAD_ROWS;
   return {
     id,
     metric: r.metric,
     dimension: r.dimension,
     columns: r.columns,
-    rows: total > MAX_PAYLOAD_ROWS ? r.rows.slice(0, MAX_PAYLOAD_ROWS) : r.rows,
-    ...(total > MAX_PAYLOAD_ROWS ? {truncated: {shown: MAX_PAYLOAD_ROWS, total}} : {}),
+    rows: total > cap ? r.rows.slice(0, cap) : r.rows,
+    ...(total > cap ? {truncated: {shown: cap, total}} : {}),
     meta: {...meta, method: used?.method ?? '', declared_measures: measures.map((m) => m.key)},
   };
 }
@@ -231,6 +268,9 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'get_digest') return 'Reading a stored digest';
   if (name === 'get_channel_report') return 'Building the channel report';
   if (name === 'get_crm_metrics') return 'Reading the website CRM totals';
+  if (name === 'crm_query') return 'Querying the website CRM';
+  if (name === 'shopify_query') return 'Reading live from Shopify (slower)';
+  if (name === 'compare_sku') return 'Comparing one product across channels';
   if (name === 'list_crm_orders') return 'Looking up website orders';
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';

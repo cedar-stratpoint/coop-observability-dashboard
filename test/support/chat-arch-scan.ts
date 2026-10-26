@@ -13,6 +13,7 @@ export type FileMap = Record<string, string>; // repo-relative posix path -> sou
 // removed when the route is rewritten in F5 / slice 5. (Train 4 removed src/crm-data.ts: the Website row reads the GET-only client.)
 // The leads seam is the route's one deliberate door to contact data (it reuses the /customers/leads loaders); a test pins what it imports.
 export const LEADS_SEAM = 'app/api/chat/leads-seam.ts';
+export const SKU_SEAM = 'app/api/chat/sku-seam.ts';
 export const LEGACY_ALLOWED_IMPORTS: readonly string[] = ['src/data.ts'];
 export const LEGACY_ROUTE = 'app/api/chat/route.ts';
 
@@ -87,7 +88,7 @@ export type Closure = {files: Set<string>; bare: Map<string, Set<string>>; legac
 export function buildClosure(
   entries: string[],
   files: FileMap,
-  legacy: {from: string; allowed: readonly string[]} = {from: LEGACY_ROUTE, allowed: [...LEGACY_ALLOWED_IMPORTS, LEADS_SEAM]},
+  legacy: {from: string; allowed: readonly string[]} = {from: LEGACY_ROUTE, allowed: [...LEGACY_ALLOWED_IMPORTS, LEADS_SEAM, SKU_SEAM]},
 ): Closure {
   const seen = new Set<string>();
   const bare = new Map<string, Set<string>>();

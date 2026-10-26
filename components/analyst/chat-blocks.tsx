@@ -177,7 +177,7 @@ function ContactActions({block}: {block: TableBlock}) {
     }
   };
   return (
-    <div className="flex flex-wrap items-center gap-1.5" aria-label="Contact list actions">
+    <div className="flex flex-wrap items-center gap-1.5" aria-label={block.pii ? 'Contact list actions' : 'Table actions'}>
       {block.copyColumns?.emails && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('emails')}>{done === 'emails' ? 'Copied' : 'Copy emails'}</button>}
       {block.copyColumns?.mobiles && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('mobiles')}>{done === 'mobiles' ? 'Copied' : 'Copy mobiles'}</button>}
       {block.copyColumns?.messages && <button type="button" className={cn(ACTION_BTN, FOCUS)} onClick={() => copy('messages')}>{done === 'messages' ? 'Copied' : 'Copy all messages'}</button>}
@@ -243,8 +243,8 @@ export function ChatBlocks({blocks}: {blocks: ChatBlock[]}) {
         <ChartCard key={b.id} block={b} />
       ) : (
         <BlockCard key={b.id} block={b}>
-          {b.pii && <ContactActions block={b} />}
-          <DataTable columns={b.columns} rows={b.rows} total={b.total} label={b.title} />
+          {(b.pii || b.exportable) && <ContactActions block={b} />}
+          <DataTable columns={b.columns} rows={b.screenRows ? b.rows.slice(0, b.screenRows) : b.rows} total={b.total} label={b.title} />
         </BlockCard>
       ),
     );
