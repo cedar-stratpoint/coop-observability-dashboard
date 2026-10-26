@@ -79,7 +79,10 @@
     "marketplace_ads_weekly",
     "marketplace_sku_weekly",
     "marketplace_traffic_daily",
-    "marketplace_funnel_daily"
+    "marketplace_funnel_daily",
+    "shopee_sync_workers",
+    "shopee_sync_enrolments",
+    "shopee_sync_jobs"
    ]
   },
   {
@@ -450,6 +453,30 @@
    "domain": "digest",
    "about": "A VIEW: per PH day, the figures of the newest accepted product funnel import.",
    "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "shopee_sync_workers": {
+   "name": "shopee_sync_workers",
+   "domain": "digest",
+   "about": "A Mac running the Shopee same-day sync worker (one row per enrolled Mac; plan knowledge/tasks/2026-10-26-shopee-same-day-sync-plan.md, SYN-02 and SYN-08).",
+   "columns": "id, owner_email (who enrolled it; only they can sync on it), name, token_hash (sha256 of the worker's token; the token is shown once and never stored; Ask Coop hides it by its name part), last_seen (every poll; online = within 2 minutes), session_state (signed_out, ready, expired), created_at, revoked_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "shopee_sync_enrolments": {
+   "name": "shopee_sync_enrolments",
+   "domain": "digest",
+   "about": "One-time codes for adding a Mac (SYN-08).",
+   "columns": "code_hash (sha256 of the code; the code is shown once), owner_email, worker_name, expires_at (15 minutes after it was made), used_at (single use, set atomically on redemption).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "shopee_sync_jobs": {
+   "name": "shopee_sync_jobs",
+   "domain": "digest",
+   "about": "One press of \"Sync Shopee\": the missing closed days and their progress (SYN-02).",
+   "columns": "id, requested_by, days (date[], 1 to 31, filled by the server from import coverage, closed days only), status (queued, running, awaiting_verification, importing, done, failed, review, expired), claimed_by (worker id), claimed_at, heartbeat_at (a running job silent for 10 minutes becomes failed \"worker lost\"; a queued job unclaimed for 30 minutes becomes expired \"worker offline\"), import_ids (link only: import_runs stays the ledger and the only writer of daily facts), error, created_at, finished_at, progress (jsonb, per-day results). There is no column for a Shopee password, code or session.",
    "prefer": null,
    "testOrders": null
   },
@@ -1344,12 +1371,17 @@
   {
    "id": "crm-api",
    "source": "Website CRM Worker (Cloudflare Worker over D1; Shopify customers, orders, checkouts)",
-   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts (GET only)"
+   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts, crm_query (GET; identity detail only for the Explore allowlist), shopify_query (the one POST: a read-only Shopify GraphQL query through the CRM; identity fields only for the Explore allowlist), compare_sku (one SKU across POS, Shopee and the website; reads GET /api/products/sales)"
   },
   {
    "id": "shopee-files",
    "source": "Shopee Seller-Center exports and a browser price snapshot",
    "askCoop": "none: Shopee exports are files on the backend machine; only their digest figures are readable"
+  },
+  {
+   "id": "shopee-sync-api",
+   "source": "Dashboard routes for the Shopee sync worker (/api/shopee/sync/{enrol,claim,progress}; /api/shopee/import/{plan,apply} also accept a worker token)",
+   "askCoop": "none: not a data source"
   },
   {
    "id": "lazada-api",

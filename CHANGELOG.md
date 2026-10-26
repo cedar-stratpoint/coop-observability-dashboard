@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26
+
+### Shopee same-day sync, slice 1: jobs, workers and enrolment (SYN-02, SYN-08)
+Backend half only; the Overview card, the Settings screen and the worker itself come later. Applied by hand: `supabase/shopee_sync.sql` (three tables and one claim function; local Docker only so far).
+- **Decision: workers call out, the website never calls the Mac.** A worker polls `/api/shopee/sync/claim` over outbound HTTPS, so there is no tunnel or inbound port. Each Mac has its own revocable token (stored as a sha256 hash, shown once) obtained by swapping a one-time code (15 minutes, single use), instead of one shared `SHOPEE_SYNC_TOKEN`.
+- **Decision: the server decides the days.** A sync loads every missing closed Shopee day (before today in Manila time and past 06:00 the next day), 1 to 31 per job, oldest first; the client sends none. One press is refused with a plain reason for: nothing missing ("Shopee is up to date"), no ready Mac owned by the presser, a sync already queued or running (team-wide), the 10-minute cooldown, the 6-a-day cap, or the Monday 08:30 to 11:00 quiet window (the coworker's weekly export uses the same login).
+- **Decision: a job runs only on its presser's own ready Mac**, so the person who pressed Sync types the Shopee password, on their own Mac. Caps: 2 Macs per person, 3 per team. The database enforces one queued and one in-flight job through partial unique indexes, so a lost race cannot start two syncs; the claim is a single compare-and-set.
+- **Decision: no Shopee password, code or session anywhere** (no column, no route, unknown request fields are dropped). A worker token may plan and apply `sales_overview` files only; restate, undo, coverage and every other report type answer 403. `SHOPEE_IMPORT_TOKEN` is unchanged.
+- Stale jobs are ended by a sweep on every poll and read: a running job silent for 10 minutes fails ("worker lost"), a queued one unclaimed for 30 minutes expires ("worker offline").
+- Seams for the UI: `src/shopee-sync-data.ts` (`getShopeeSyncStatus`) and `src/shopee-sync-actions.ts` (`createSyncJob`, `cancelSyncJob`, `startEnrolment`, `revokeWorker`). Data catalog updated (tables, apis; the pages entries for `/` and Settings land with the UI slice). Plan: `knowledge/tasks/2026-10-26-shopee-same-day-sync-plan.md`.
+
+
 ## 2026-10-26 — Spin-the-wheel leads show the full name
 - **Why:** the booth form now asks for the furparent's full name and no longer asks whether the pet is a picky eater.
 - **What:** Event lead contacts gain a **Name** column after Contact. **Picky eater** stays, so older leads keep their answers; each column shows only when some lead has a value, and a lead without one shows "—".
