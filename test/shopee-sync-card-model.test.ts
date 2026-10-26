@@ -119,6 +119,15 @@ describe('statusMeta', () => {
     expect(done.title).toBe('Loaded through Tue 20 Oct');
     expect(done.body).toMatch(/2 days/);
   });
+  it('ends the reason with a full stop before the next sentence', () => {
+    expect(statusMeta(job({status: 'failed', error: 'Cancelled by a@x.com'})).body).toMatch(/^Cancelled by a@x\.com\. Days/);
+  });
+  it('does not name a workmate\'s Mac, and does not tell you to type their password', () => {
+    const o = statusMeta(job({status: 'awaiting_verification', mine: false, requestedBy: 'bea@x.com', workerName: 'Bea Mac'}));
+    expect(JSON.stringify(o)).not.toMatch(/Bea Mac/);
+    expect(o.title).toBe('Waiting for bea@x.com to verify');
+    expect(statusMeta(job({status: 'running', mine: false, requestedBy: 'bea@x.com', workerName: 'Bea Mac'})).body).not.toMatch(/Bea Mac/);
+  });
   it('running reports how many days are done', () => {
     const m = statusMeta(job({status: 'running', days: ['2026-10-19', '2026-10-20', '2026-10-21'], progress: {'2026-10-19': {state: 'loaded'}}}));
     expect(m.body).toMatch(/1 of 3 days/);

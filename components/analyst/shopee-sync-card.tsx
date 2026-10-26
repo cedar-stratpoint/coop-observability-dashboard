@@ -53,7 +53,7 @@ function Steps({job}: {job: SyncJobView}) {
             className={cn(
               'grid size-4 place-items-center rounded-full border text-[10px] transition-colors duration-200',
               s.state === 'done' && 'border-primary bg-primary text-primary-foreground',
-              s.state === 'now' && 'border-primary bg-primary/15',
+              s.state === 'now' && 'border-primary bg-primary/25 ring-2 ring-primary/20',
               s.state === 'bad' && 'border-destructive bg-destructive text-background',
               s.state === 'todo' && 'border-border',
             )}
@@ -77,7 +77,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
   const btn = syncButton(status);
   const worker = workerLine(status, now);
   const retryJob = !status.currentJob && meta && (meta.status === 'failed' || meta.status === 'expired');
-  const showMainButton = !status.currentJob && status.missingDays.length > 0 && !retryJob;
+  const showMainButton = !status.currentJob && status.missingDays.length > 0 && !retryJob && meta?.status !== 'review';
 
   const run = (fn: () => Promise<{ok: boolean; error?: string}>) =>
     start(async () => {
@@ -103,7 +103,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
                 {meta.label}
               </Pill>
               <h2 className="font-serif text-[1.5rem] font-normal leading-tight text-foreground max-md:text-[1.35rem]">{meta.title}</h2>
-              <p className="max-w-[60ch] text-sm text-muted-foreground">{meta.body}</p>
+              <p className="max-w-[60ch] text-sm text-foreground/75">{meta.body}</p>
               {meta.status !== 'expired' && <Steps job={job} />}
               {meta.status === 'awaiting_verification' && (
                 <p className="max-w-[60ch] rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">

@@ -71,10 +71,12 @@ export interface StatusMeta {
   actions: JobAction[];
 }
 
+const sentence = (t: string): string => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
 const loadedDays = (j: SyncJobView): string[] => j.days.filter((d) => j.progress[d]?.state === 'loaded').sort();
 
 export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: false}): StatusMeta {
-  const mac = j.workerName ?? 'your Mac';
+  // Another person's Mac is not named to you: their sync is theirs to babysit.
+  const mac = j.mine ? (j.workerName ?? 'your Mac') : `${j.requestedBy}'s Mac`;
   const total = j.days.length;
   const done = loadedDays(j).length;
   const m = (label: string, tone: Tone, title: string, body: string, actions: JobAction[]): StatusMeta => ({status: j.status, label, tone, title, body, actions: j.mine || who.isAdmin ? actions : []});
@@ -84,7 +86,7 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: f
     case 'running':
       return m('Running', 'info', 'Exporting from Shopee', `${mac} is in Seller Centre: ${done} of ${plural(total, 'day')} done. This can take a few minutes, one day a minute at most.`, ['cancel']);
     case 'awaiting_verification':
-      return m('Needs your password', 'warn', 'Shopee needs you to verify', `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.`, ['cancel']);
+      return m(j.mine ? 'Needs your password' : 'Waiting for a password', 'warn', j.mine ? 'Shopee needs you to verify' : `Waiting for ${j.requestedBy} to verify`, j.mine ? `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.` : `${j.requestedBy} has to type the Shopee password on their own Mac. Your sync can start after theirs.`, ['cancel']);
     case 'importing':
       return m('Importing', 'info', 'Importing orders', `${done} of ${plural(total, 'day')} received. Checking dates and totals before anything is saved.`, ['cancel']);
     case 'done': {
@@ -92,11 +94,11 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: f
       return m('Done', 'good', `Loaded through ${dayLabel(last)}`, `${plural(done || total, 'day')} loaded, provisional until each day settles. The Monday import can refresh them.`, []);
     }
     case 'failed':
-      return m('Failed', 'crit', 'Sync failed', `${j.error ?? 'The worker reported a failure.'} Days already loaded are kept; Retry loads the rest.`, ['retry']);
+      return m('Failed', 'crit', 'Sync failed', `${sentence(j.error ?? 'The worker reported a failure')} Days already loaded are kept; Retry loads the rest.`, ['retry']);
     case 'review':
       return m('Review', 'warn', 'Needs your review', 'The totals differ from what is loaded by more than the sync allows on its own. Nothing is applied until you confirm.', ['confirm']);
     case 'expired':
-      return m('Expired', 'neutral', 'Sync expired', `${j.error ?? 'Nobody picked it up in time.'} Nothing was loaded.`, ['retry']);
+      return m('Expired', 'neutral', 'Sync expired', `${sentence(j.error ?? 'Nobody picked it up in time')} Nothing was loaded.`, ['retry']);
   }
 }
 

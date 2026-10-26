@@ -1009,6 +1009,18 @@
    "redirectTo": null
   },
   {
+   "route": "/settings/shopee-sync",
+   "title": "My sync Macs",
+   "shows": "Settings screen to add, list and revoke the Macs that run the Shopee same-day sync: status, session state, last seen, last sync; admins also see everyone's Macs with the owner; Add a Mac shows a one-time docker run command (code valid 15 minutes, single use)",
+   "data": "",
+   "domains": [
+    "platform"
+   ],
+   "fenced": false,
+   "access": "n/a",
+   "redirectTo": null
+  },
+  {
    "route": "/signin",
    "title": "Sign in",
    "shows": "Google sign-in page (outside the auth matcher)",

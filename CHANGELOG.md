@@ -12,6 +12,16 @@ Dates are local working dates (GMT+8). Newest first.
 
 ## 2026-10-26
 
+### Shopee same-day sync, slice 2: the Overview card and "My sync Macs" (SYN-04, SYN-05 UI side, SYN-08)
+The Overview (`ChannelOverview`) shows a Shopee sync card when Shopee is selected and the server says days are missing or a sync is active or finished in the last day, and the Shopee chip carries a "Behind" tag while days are missing. One button labelled from the server's `canSync` ("Sync 7 missing days"), no day picker, no mode choice. Every status has an icon and a label; `awaiting_verification` tells the person to type the password in the Shopee browser on their Mac and has no input of any kind. Settings gets "My sync Macs" (`/settings/shopee-sync`): own Macs (admins: everyone's, with owner), Revoke, and Add a Mac with the one-time command, Copy, and the three steps.
+Decisions:
+- **All wording and rules live in `src/shopee-sync/card-model.ts`** (pure, 26 tests); the components only render it. The server stays the authority on whether Sync may be pressed: the card shows the server's reason, never its own.
+- **Live status is a GET route polled by a small hook, not a server action.** Actions run one at a time and are for changes; a poll must not queue behind a Sync press. It polls every 3 seconds only while a sync is current and the tab is visible; an idle page never polls. When a sync turns `done` the page refreshes once so the Overview figures pick up the new days.
+- **Confirm for `review` is real**, not a stub: `confirmReview` applies the job's staged imports through the same `applyRun` as the import API, then ends the job as `done`; requester or admin only. If a staged import was replaced since, it refuses and the job stays in `review`.
+- **Security fix:** a worker token could plan and apply any staged `sales_overview` run. It may now do so only while that worker owns a running or importing job and only for days of that job (403 otherwise). The import API's `workerAuth` now returns the worker's days, not a boolean.
+- **A workmate's sync names their email, not their Mac,** and tells you nothing to type; Macs are private to their owner.
+- The local dev bypass (`DEV_AUTH_BYPASS`) now works for the sync viewer, so the card can be driven on the local Docker stack. Verified there (never a hosted project): queued, running, awaiting password, importing, done, failed (also with the cooldown reason), review (Confirm), no Mac, offline Mac, another person's sync, Add a Mac and Revoke, at desktop and 390px, light and dark.
+
 ### Shopee same-day sync, slice 1: jobs, workers and enrolment (SYN-02, SYN-08)
 Backend half only; the Overview card, the Settings screen and the worker itself come later. Applied by hand: `supabase/shopee_sync.sql` (three tables and one claim function; local Docker only so far).
 - **Decision: workers call out, the website never calls the Mac.** A worker polls `/api/shopee/sync/claim` over outbound HTTPS, so there is no tunnel or inbound port. Each Mac has its own revocable token (stored as a sha256 hash, shown once) obtained by swapping a one-time code (15 minutes, single use), instead of one shared `SHOPEE_SYNC_TOKEN`.
