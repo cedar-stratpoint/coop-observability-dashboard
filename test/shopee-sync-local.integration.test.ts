@@ -71,14 +71,23 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
     await store.transitionJob(j2.id, ['running'], {status: 'failed', error: 'x'});
   });
 
-  it('an enrolment code is consumed exactly once, even when redeemed twice at once', async () => {
+  it('an enrolment code is redeemed exactly once, even twice at once; a capped redemption keeps the code; an expired one is invalid', async () => {
     const now = new Date();
-    const codeHash = hashSecret(`zse_${randomUUID()}`);
-    await store.createEnrolment({codeHash, ownerEmail: owner, workerName: 'm', expiresAt: new Date(now.getTime() + 60_000).toISOString(), usedAt: null});
-    const [a, b] = await Promise.all([store.consumeEnrolment(codeHash, now), store.consumeEnrolment(codeHash, now)]);
-    expect([a, b].filter(Boolean)).toHaveLength(1);
-    const expired = hashSecret(`zse_${randomUUID()}`);
-    await store.createEnrolment({codeHash: expired, ownerEmail: owner, workerName: 'm', expiresAt: new Date(now.getTime() - 1000).toISOString(), usedAt: null});
-    expect(await store.consumeEnrolment(expired, now)).toBeNull();
+    const who = `race-enrol-${randomUUID()}@example.com`;
+    const mk = async (expiresInMs = 60_000) => {
+      const codeHash = hashSecret(`zse_${randomUUID()}`);
+      await store.createEnrolment({codeHash, ownerEmail: who, workerName: 'm', expiresAt: new Date(now.getTime() + expiresInMs).toISOString(), usedAt: null});
+      return codeHash;
+    };
+    const big = {perPerson: 100, perTeam: 1000};
+    const code = await mk();
+    const [a, b] = await Promise.all([store.redeemEnrolment(code, hashSecret(newWorkerToken()), now, big), store.redeemEnrolment(code, hashSecret(newWorkerToken()), now, big)]);
+    expect([a, b].filter((r) => r.status === 'ok')).toHaveLength(1);
+    expect([a, b].filter((r) => r.status === 'invalid')).toHaveLength(1);
+    expect(await store.redeemEnrolment(await mk(-1000), hashSecret(newWorkerToken()), now, big)).toEqual({status: 'invalid'});
+    // the person already has one live Mac: a cap of 1 refuses and leaves the code unspent, so it works under a bigger cap
+    const held = await mk();
+    expect(await store.redeemEnrolment(held, hashSecret(newWorkerToken()), now, {perPerson: 1, perTeam: 1000})).toEqual({status: 'capped', ownerEmail: who});
+    expect((await store.redeemEnrolment(held, hashSecret(newWorkerToken()), now, big)).status).toBe('ok');
   });
 });

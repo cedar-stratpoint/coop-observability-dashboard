@@ -47,11 +47,14 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       const {error} = await sb.from('shopee_sync_enrolments').insert({code_hash: e.codeHash, owner_email: e.ownerEmail, worker_name: e.workerName, expires_at: e.expiresAt});
       fail('making the enrolment code', error);
     },
-    async consumeEnrolment(codeHash, now) {
-      const {data, error} = await sb.from('shopee_sync_enrolments').update({used_at: now.toISOString()}).eq('code_hash', codeHash).is('used_at', null).gt('expires_at', now.toISOString()).select('code_hash,owner_email,worker_name,expires_at,used_at'); // pagination-ok: one primary key
-      fail('using the enrolment code', error);
-      const r = data?.[0] as {code_hash: string; owner_email: string; worker_name: string; expires_at: string; used_at: string | null} | undefined;
-      return r ? {codeHash: r.code_hash, ownerEmail: r.owner_email, workerName: r.worker_name, expiresAt: r.expires_at, usedAt: r.used_at} : null;
+    async redeemEnrolment(codeHash, tokenHash, now, caps) {
+      // One SQL function (supabase/shopee_sync.sql): consume the code, check both caps and add the worker in a single transaction.
+      const {data, error} = await sb.rpc('redeem_shopee_sync_enrolment', {p_code_hash: codeHash, p_token_hash: tokenHash, p_now: now.toISOString(), p_per_person: caps.perPerson, p_per_team: caps.perTeam});
+      fail('redeeming the enrolment code', error);
+      const row = (Array.isArray(data) ? data[0] : data) as ({outcome: 'ok' | 'capped' | 'invalid'; owner_email: string | null} & Partial<WorkerRow>) | undefined;
+      if (!row || row.outcome === 'invalid') return {status: 'invalid'};
+      if (row.outcome === 'capped') return {status: 'capped', ownerEmail: row.owner_email ?? ''};
+      return {status: 'ok', worker: toWorker(row as unknown as WorkerRow)};
     },
     async recentJobs(limit) {
       const {data, error} = await sb.from('shopee_sync_jobs').select(JOB_COLS).order('created_at', {ascending: false}).limit(limit); // pagination-ok: a bounded recent window

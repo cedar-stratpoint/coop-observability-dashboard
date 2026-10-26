@@ -11,6 +11,8 @@ export interface JobPatch {
   finishedAt?: string | null;
 }
 
+export type RedeemResult = {status: 'ok'; worker: Worker} | {status: 'capped'; ownerEmail: string} | {status: 'invalid'};
+
 export interface SyncStore {
   /** Every worker, revoked ones included (the caps and the screens filter). */
   listWorkers(): Promise<Worker[]>;
@@ -22,8 +24,11 @@ export interface SyncStore {
   revokeWorker(id: string, now: Date): Promise<boolean>;
 
   createEnrolment(e: Enrolment): Promise<void>;
-  /** Marks the code used and returns it, only if it exists, is unused and is unexpired, in one atomic step. Otherwise null. */
-  consumeEnrolment(codeHash: string, now: Date): Promise<Enrolment | null>;
+  /**
+   * Redeems a one-time code for a new worker in ONE atomic step: the code must exist, be unused and unexpired, AND the person and team caps must
+   * leave room. A capped redemption does not spend the code (it works again once a Mac is removed). 'invalid' covers unknown, used and expired.
+   */
+  redeemEnrolment(codeHash: string, tokenHash: string, now: Date, caps: {perPerson: number; perTeam: number}): Promise<RedeemResult>;
 
   /** Newest first. Enough history for the daily cap (6) and the cooldown. */
   recentJobs(limit: number): Promise<Job[]>;

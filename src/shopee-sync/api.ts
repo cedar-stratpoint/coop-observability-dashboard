@@ -2,7 +2,7 @@
 // src/shopee-import/api.ts; the files in app/api/shopee/sync/ are thin wrappers. Auth is the worker's own bearer token (hash lookup,
 // revocable per Mac). No field anywhere carries a Shopee password or code: unknown request fields are dropped, never stored.
 import type {SyncStore} from './store';
-import {canAddWorker, chooseJob} from './routing';
+import {canAddWorker, chooseJob, MAX_PER_PERSON, MAX_PER_TEAM} from './routing';
 import {inQuietWindow} from './rules';
 import {sweepJobs} from './service';
 import {hashSecret, newWorkerToken, verifySecret} from './tokens';
@@ -39,12 +39,11 @@ export async function handleEnrol(req: Request, d: SyncApiDeps): Promise<Respons
   const b = await readBody(req);
   const code = typeof b.code === 'string' ? b.code.trim() : '';
   if (!code) return denied();
-  const e = await d.store.consumeEnrolment(hashSecret(code), d.now());
-  if (!e) return denied(); // unknown, used or expired: one answer for all three
-  const capped = canAddWorker(await d.store.listWorkers(), e.ownerEmail);
-  if (capped) return reply({error: capped}, 409);
   const token = newWorkerToken();
-  const w = await d.store.createWorker({ownerEmail: e.ownerEmail, name: e.workerName, tokenHash: hashSecret(token)}, d.now());
+  const r = await d.store.redeemEnrolment(hashSecret(code), hashSecret(token), d.now(), {perPerson: MAX_PER_PERSON, perTeam: MAX_PER_TEAM});
+  if (r.status === 'invalid') return denied(); // unknown, used or expired: one answer for all three
+  if (r.status === 'capped') return reply({error: canAddWorker(await d.store.listWorkers(), r.ownerEmail) ?? 'No room for another Mac. Remove one first.'}, 409); // the code is not spent
+  const w = r.worker;
   return reply({workerId: w.id, name: w.name, token}); // the token is shown this once
 }
 

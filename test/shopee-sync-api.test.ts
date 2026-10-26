@@ -49,6 +49,19 @@ describe('enrol', () => {
     expect((await handleEnrol(post('enrol', {code: e2.code}), api())).status).toBe(401);
     expect(store.workers).toHaveLength(1);
   });
+  it('does not spend a code the cap refused: it works once a Mac is removed', async () => {
+    const owners = ['a@x.com', 'b@x.com', 'c@x.com', 'd@x.com'];
+    const codes: string[] = [];
+    for (const o of owners) {
+      const e = await beginEnrolment(sd(), o, 'm');
+      if (e.ok) codes.push(e.code);
+    }
+    for (const c of codes.slice(0, 3)) expect((await handleEnrol(post('enrol', {code: c}), api())).status).toBe(200);
+    expect((await handleEnrol(post('enrol', {code: codes[3]}), api())).status).toBe(409);
+    expect(store.enrolments.find((e) => e.ownerEmail === 'd@x.com')?.usedAt).toBeNull();
+    await store.revokeWorker(store.workers[0].id, clock);
+    expect((await handleEnrol(post('enrol', {code: codes[3]}), api())).status).toBe(200);
+  });
   it('re-checks the team cap at redemption', async () => {
     const codes: string[] = [];
     for (const o of ['a@x.com', 'b@x.com', 'c@x.com', 'd@x.com']) {

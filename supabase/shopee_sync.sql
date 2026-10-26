@@ -70,3 +70,36 @@ as $$
 $$;
 revoke all on function public.claim_shopee_sync_job(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.claim_shopee_sync_job(uuid, uuid) to service_role;
+
+-- Redeem an enrolment code: consume it, check the caps and add the worker in ONE transaction, so a capped redemption never spends the code
+-- and two redemptions at once cannot both squeeze under a cap. The advisory lock serialises redemptions (a handful per year).
+-- Caps are passed in by the app (src/shopee-sync/routing.ts) so there is one place to change them.
+drop function if exists public.redeem_shopee_sync_enrolment(text, text, timestamptz, int, int);
+create function public.redeem_shopee_sync_enrolment(p_code_hash text, p_token_hash text, p_now timestamptz, p_per_person int, p_per_team int)
+returns table (outcome text, owner_email text, id uuid, name text, token_hash text, last_seen timestamptz, session_state text, created_at timestamptz, revoked_at timestamptz)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  e public.shopee_sync_enrolments%rowtype;
+  w public.shopee_sync_workers%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('shopee_sync_enrol'));
+  select * into e from public.shopee_sync_enrolments x where x.code_hash = p_code_hash and x.used_at is null and x.expires_at > p_now for update;
+  if not found then
+    return query select 'invalid'::text, null::text, null::uuid, null::text, null::text, null::timestamptz, null::text, null::timestamptz, null::timestamptz;
+    return;
+  end if;
+  if (select count(*) from public.shopee_sync_workers k where k.revoked_at is null) >= p_per_team
+     or (select count(*) from public.shopee_sync_workers k where k.revoked_at is null and lower(k.owner_email) = lower(e.owner_email)) >= p_per_person then
+    return query select 'capped'::text, e.owner_email, null::uuid, null::text, null::text, null::timestamptz, null::text, null::timestamptz, null::timestamptz;
+    return;
+  end if;
+  update public.shopee_sync_enrolments set used_at = p_now where code_hash = p_code_hash;
+  insert into public.shopee_sync_workers (owner_email, name, token_hash, created_at) values (e.owner_email, e.worker_name, p_token_hash, p_now) returning * into w;
+  return query select 'ok'::text, w.owner_email, w.id, w.name, w.token_hash, w.last_seen, w.session_state, w.created_at, w.revoked_at;
+end;
+$$;
+revoke all on function public.redeem_shopee_sync_enrolment(text, text, timestamptz, int, int) from public, anon, authenticated;
+grant execute on function public.redeem_shopee_sync_enrolment(text, text, timestamptz, int, int) to service_role;

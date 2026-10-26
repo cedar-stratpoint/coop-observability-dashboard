@@ -33,11 +33,13 @@ export class FakeSyncStore implements SyncStore {
   async createEnrolment(e: Enrolment) {
     this.enrolments.push({...e});
   }
-  async consumeEnrolment(codeHash: string, now: Date) {
+  async redeemEnrolment(codeHash: string, tokenHash: string, now: Date, caps: {perPerson: number; perTeam: number}) {
     const e = this.enrolments.find((x) => x.codeHash === codeHash && x.usedAt === null && Date.parse(x.expiresAt) > now.getTime());
-    if (!e) return null;
+    if (!e) return {status: 'invalid' as const};
+    const live = this.workers.filter((w) => !w.revokedAt);
+    if (live.length >= caps.perTeam || live.filter((w) => w.ownerEmail.toLowerCase() === e.ownerEmail.toLowerCase()).length >= caps.perPerson) return {status: 'capped' as const, ownerEmail: e.ownerEmail};
     e.usedAt = now.toISOString();
-    return {...e};
+    return {status: 'ok' as const, worker: await this.createWorker({ownerEmail: e.ownerEmail, name: e.workerName, tokenHash}, now)};
   }
   async recentJobs(limit: number) {
     return [...this.jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((j) => ({...j}));
