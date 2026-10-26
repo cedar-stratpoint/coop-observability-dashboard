@@ -17,7 +17,7 @@ import {Sparkles} from 'lucide-react';
 import {ShopeeIcon, LazadaIcon} from './brand-icons';
 import {ShopeeSyncCard} from './shopee-sync-card';
 import {useShopeeSyncStatus} from './use-shopee-sync-status';
-import {behindTag, cardVisible} from '../../src/shopee-sync/card-model';
+import {behindTag, cardVisible, scopeToWindow} from '../../src/shopee-sync/card-model';
 import type {ShopeeSyncStatus} from '../../src/shopee-sync/status';
 import {usePlaybook, usePlaybookProgress, recAction, recSteps, recIsComplete} from './playbook';
 import {InfoTip} from './info-tip';
@@ -544,6 +544,8 @@ function ChannelDetail({channel, row}: {channel: Channel; row: DigestArchiveRow}
 // ── the unified overview ─────────────────────────────────────────────────────────
 export function ChannelOverview({row, priorRow, initialChannels, offline, custom, shopeeSync}: {brief: AnalystBrief; row: DigestArchiveRow; priorRow?: DigestArchiveRow | null; initialChannels: Channel[]; offline?: ChannelMetrics | null; custom?: CustomView | null; shopeeSync?: {status: ShopeeSyncStatus | null; at: string}}) {
   const sync = useShopeeSyncStatus(shopeeSync?.status ?? null, shopeeSync?.at ?? new Date(0).toISOString());
+  // The card speaks about the week on screen: missing days outside it are not this page's gap (a custom range has no single window, so it keeps the global view).
+  const syncView = useMemo(() => (custom ? sync.status : scopeToWindow(sync.status, row.window_from, row.window_to)), [custom, sync.status, row.window_from, row.window_to]);
   const [selected, setSelected] = useState<Channel[]>(initialChannels.length ? initialChannels : ['shopee', 'lazada', 'website']);
   // Default to Revenue (not Ad spend) so every channel — including offline, which
   // has no ad spend — shows a bar on first paint.
@@ -639,7 +641,7 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
               >
                 <Icon className="size-4" style={{color: on ? c.accent : undefined}} />
                 {c.label}
-                {c.key === 'shopee' && behindTag(sync.status) && (
+                {c.key === 'shopee' && behindTag(syncView) && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-[var(--amber-bg)] px-1.5 py-0.5 text-[10.5px] font-semibold text-[color-mix(in_oklab,var(--amber-fg)_55%,var(--foreground))]" title="Shopee is missing finished days. Sync them from the card below.">
                     <AlertTriangle className="size-2.5" aria-hidden />
                     Behind
@@ -660,7 +662,7 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
         </div>
       </div>
 
-      {selected.includes('shopee') && sync.status && cardVisible(sync.status, sync.now) && <ShopeeSyncCard status={sync.status} now={sync.now} refresh={sync.refresh} />}
+      {selected.includes('shopee') && syncView && cardVisible(syncView, sync.now) && <ShopeeSyncCard status={syncView} now={sync.now} refresh={sync.refresh} />}
 
       {single ? (
         /* single channel — full-width detail, no compact comparison layout */

@@ -4,7 +4,7 @@ import {useState, useTransition} from 'react';
 import Link from 'next/link';
 import {AlertTriangle, CalendarClock, Check, CheckCircle2, ClipboardCheck, Clock, Download, Hourglass, KeyRound, Laptop, RefreshCw, X} from 'lucide-react';
 import {cancelSyncJob, confirmSyncReview, createSyncJob} from '@/src/shopee-sync-actions';
-import {rangeText, statusMeta, stepsFor, syncButton, workerLine, type JobAction, type Tone} from '@/src/shopee-sync/card-model';
+import {macOf, rangeText, statusMeta, stepsFor, syncButton, workerLine, type JobAction, type Tone} from '@/src/shopee-sync/card-model';
 import type {JobStatus} from '@/src/shopee-sync/types';
 import type {ShopeeSyncStatus, SyncJobView} from '@/src/shopee-sync/status';
 import {Button} from '@/components/ui/button';
@@ -69,7 +69,7 @@ function Steps({job}: {job: SyncJobView}) {
   );
 }
 
-export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus; now: Date; refresh: () => Promise<void>}) {
+export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus & {outsideWindow?: number}; now: Date; refresh: () => Promise<void>}) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const job = status.currentJob ?? status.lastJob;
@@ -155,6 +155,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
                 {rangeText(status.missingDays)}
                 {status.moreMissing > 0 ? `, ${status.moreMissing} more after this sync` : ''}
               </div>
+              {status.outsideWindow ? <div className="text-[13px] text-muted-foreground">Sync also loads {status.outsideWindow} missing {status.outsideWindow === 1 ? 'day' : 'days'} from other weeks.</div> : null}
             </div>
           )}
           {showMainButton && (
@@ -171,7 +172,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
             </>
           )}
           {status.currentJob && !status.currentJob.mine && (
-            <p className="text-[13px] text-muted-foreground">Waiting for {status.currentJob.requestedBy}&apos;s sync to finish. Yours can start after it.</p>
+            <p className="text-[13px] text-muted-foreground">Waiting for {macOf(status.currentJob)} to finish its sync. Yours can start after it.</p>
           )}
           <p className={cn('flex items-start gap-2 text-[13px]', worker.kind === 'online' ? 'text-foreground' : 'text-muted-foreground')}>
             <Laptop className="mt-0.5 size-3.5 shrink-0" aria-hidden />

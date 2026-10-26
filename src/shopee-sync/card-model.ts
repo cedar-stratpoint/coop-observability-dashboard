@@ -44,10 +44,26 @@ export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
 /** The small "Behind" tag on the Shopee chip. */
 export const behindTag = (s: ShopeeSyncStatus | null): boolean => Boolean(s && !s.mock && s.missingDays.length > 0);
 
+/** Which Mac a sync is on: "your Mac" for yours, otherwise the Mac's name (the requester's email only while nobody has claimed the job). */
+export const macOf = (j: SyncJobView): string => (j.mine ? (j.workerName ?? 'your Mac') : (j.workerName ?? `${j.requestedBy}'s Mac`));
+
+/**
+ * The status as seen from the viewed window: only the missing days inside [from, to] (YYYY-MM-DD) count, so an older week with no gaps shows no card.
+ * `outsideWindow` is how many missing days the sync will also load that are not in this window.
+ */
+export function scopeToWindow(s: ShopeeSyncStatus, from: string, to: string): ShopeeSyncStatus & {outsideWindow: number};
+export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null;
+export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null {
+  if (!s) return null;
+  const inside = s.missingDays.filter((d) => d >= from && d <= to);
+  const outside = s.missingDays.length - inside.length;
+  return {...s, missingDays: inside, moreMissing: outside === 0 ? s.moreMissing : 0, outsideWindow: outside};
+}
+
 export function syncButton(s: ShopeeSyncStatus): {label: string; disabled: boolean; reason: string | null} {
   if (s.canSync.ok) return {label: `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
   const other = s.currentJob && !s.currentJob.mine ? s.currentJob : null;
-  return {label: 'Sync Shopee', disabled: true, reason: other ? `Waiting for ${other.requestedBy}'s sync to finish.` : s.canSync.reason};
+  return {label: 'Sync Shopee', disabled: true, reason: other ? `Waiting for ${macOf(other)} to finish its sync.` : s.canSync.reason};
 }
 
 export function workerLine(s: ShopeeSyncStatus, now: Date): {kind: 'online' | 'offline' | 'none'; text: string} {
@@ -76,7 +92,7 @@ const loadedDays = (j: SyncJobView): string[] => j.days.filter((d) => j.progress
 
 export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: false}): StatusMeta {
   // Another person's Mac is not named to you: their sync is theirs to babysit.
-  const mac = j.mine ? (j.workerName ?? 'your Mac') : `${j.requestedBy}'s Mac`;
+  const mac = macOf(j);
   const total = j.days.length;
   const done = loadedDays(j).length;
   const m = (label: string, tone: Tone, title: string, body: string, actions: JobAction[]): StatusMeta => ({status: j.status, label, tone, title, body, actions: j.mine || who.isAdmin ? actions : []});
@@ -86,7 +102,7 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: f
     case 'running':
       return m('Running', 'info', 'Exporting from Shopee', `${mac} is in Seller Centre: ${done} of ${plural(total, 'day')} done. This can take a few minutes, one day a minute at most.`, ['cancel']);
     case 'awaiting_verification':
-      return m(j.mine ? 'Needs your password' : 'Waiting for a password', 'warn', j.mine ? 'Shopee needs you to verify' : `Waiting for ${j.requestedBy} to verify`, j.mine ? `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.` : `${j.requestedBy} has to type the Shopee password on their own Mac. Your sync can start after theirs.`, ['cancel']);
+      return m(j.mine ? 'Needs your password' : 'Waiting for a password', 'warn', j.mine ? 'Shopee needs you to verify' : `Waiting for ${mac} to verify`, j.mine ? `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.` : `Someone has to type the Shopee password on ${mac}. Your sync can start after theirs.`, ['cancel']);
     case 'importing':
       return m('Importing', 'info', 'Importing orders', `${done} of ${plural(total, 'day')} received. Checking dates and totals before anything is saved.`, ['cancel']);
     case 'done': {

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {agoText, behindTag, cardVisible, pollInterval, enrolCommand, macStatus, rangeText, statusMeta, stepsFor, syncButton, workerLine} from '../src/shopee-sync/card-model';
+import {scopeToWindow, macOf, agoText, behindTag, cardVisible, pollInterval, enrolCommand, macStatus, rangeText, statusMeta, stepsFor, syncButton, workerLine} from '../src/shopee-sync/card-model';
 import type {ShopeeSyncStatus, SyncJobView, SyncWorkerView} from '../src/shopee-sync/status';
 
 const now = new Date('2026-10-27T06:00:00Z');
@@ -62,7 +62,7 @@ describe('syncButton', () => {
   it('is disabled while a job is current, with a reason naming whose sync it is', () => {
     expect(syncButton(status({currentJob: job(), canSync: {ok: false, reason: 'A Shopee sync is already queued or running. Wait for it to finish.'}}))).toMatchObject({disabled: true});
     const other = syncButton(status({currentJob: job({mine: false, requestedBy: 'bea@x.com'}), canSync: {ok: false, reason: 'A Shopee sync is already queued or running. Wait for it to finish.'}}));
-    expect(other.reason).toMatch(/bea@x.com/);
+    expect(other.reason).toBe('Waiting for Dave MacBook to finish its sync.');
   });
 });
 
@@ -122,11 +122,11 @@ describe('statusMeta', () => {
   it('ends the reason with a full stop before the next sentence', () => {
     expect(statusMeta(job({status: 'failed', error: 'Cancelled by a@x.com'})).body).toMatch(/^Cancelled by a@x\.com\. Days/);
   });
-  it('does not name a workmate\'s Mac, and does not tell you to type their password', () => {
+  it('names a workmate\'s Mac, not their email, and does not tell you to type their password', () => {
     const o = statusMeta(job({status: 'awaiting_verification', mine: false, requestedBy: 'bea@x.com', workerName: 'Bea Mac'}));
-    expect(JSON.stringify(o)).not.toMatch(/Bea Mac/);
-    expect(o.title).toBe('Waiting for bea@x.com to verify');
-    expect(statusMeta(job({status: 'running', mine: false, requestedBy: 'bea@x.com', workerName: 'Bea Mac'})).body).not.toMatch(/Bea Mac/);
+    expect(JSON.stringify(o)).not.toMatch(/bea@x.com/);
+    expect(o.title).toBe('Waiting for Bea Mac to verify');
+    expect(o.body).not.toMatch(/Open the Shopee browser/);
   });
   it('running reports how many days are done', () => {
     const m = statusMeta(job({status: 'running', days: ['2026-10-19', '2026-10-20', '2026-10-21'], progress: {'2026-10-19': {state: 'loaded'}}}));
@@ -172,5 +172,44 @@ describe('enrolCommand', () => {
   it('puts the dashboard address into the command and leaves the image placeholder alone', () => {
     const cmd = 'docker run -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=abc <WORKER_IMAGE>';
     expect(enrolCommand(cmd, 'https://coop.example')).toBe('docker run -e COOP_URL=https://coop.example -e ENROL_CODE=abc <WORKER_IMAGE>');
+  });
+});
+
+describe('scopeToWindow', () => {
+  const s = status({missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 2});
+  it('keeps only the missing days inside the viewed week and counts the rest', () => {
+    const v = scopeToWindow(s, '2026-10-19', '2026-10-20');
+    expect(v.missingDays).toEqual(['2026-10-19', '2026-10-20']);
+    expect(v.outsideWindow).toBe(1);
+    expect(v.moreMissing).toBe(0);
+  });
+  it('shows nothing missing on an older week with no gaps', () => {
+    const v = scopeToWindow(s, '2026-09-28', '2026-10-04');
+    expect(v.missingDays).toEqual([]);
+    expect(cardVisible(v, now)).toBe(false);
+  });
+  it('is the identity when the window covers every missing day', () => {
+    const v = scopeToWindow(s, '2026-10-19', '2026-10-25');
+    expect(v.missingDays).toEqual(s.missingDays);
+    expect(v.moreMissing).toBe(2);
+    expect(v.outsideWindow).toBe(0);
+  });
+  it('leaves a null status alone', () => expect(scopeToWindow(null, 'a', 'b')).toBeNull());
+});
+
+describe('macOf', () => {
+  it('names the Mac, never the person, once a worker has claimed the job', () => {
+    expect(macOf(job({mine: false, requestedBy: 'x@y.com', workerName: 'Ana MacBook'}))).toBe('Ana MacBook');
+    expect(macOf(job({mine: true, workerName: null}))).toBe('your Mac');
+  });
+  it('falls back to the requester only while nobody has claimed it', () => {
+    expect(macOf(job({mine: false, requestedBy: 'x@y.com', workerName: null}))).toBe("x@y.com's Mac");
+  });
+  it('is used in the waiting messages', () => {
+    const other = job({mine: false, requestedBy: 'x@y.com', workerName: 'Ana MacBook', status: 'running'});
+    expect(statusMeta(other).body).toContain('Ana MacBook');
+    expect(statusMeta(other).body).not.toContain('x@y.com');
+    const st = status({currentJob: other, canSync: {ok: false, reason: 'busy'}});
+    expect(syncButton(st).reason).toBe('Waiting for Ana MacBook to finish its sync.');
   });
 });
