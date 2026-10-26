@@ -79,7 +79,7 @@ export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Acto
 
 const NAME_MAX = 60;
 export const dockerCommand = (code: string): string =>
-  `docker run -d --name zoomy-shopee-sync --restart unless-stopped -p 6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
+  `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -p 127.0.0.1:6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
 
 /** Makes a one-time enrolment code for one of the person's own Macs. The code is shown once and stored only as a hash. */
 export async function beginEnrolment(d: SyncDeps, email: string, name: string): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {

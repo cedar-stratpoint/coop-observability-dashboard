@@ -1,5 +1,5 @@
 import {beforeEach, describe, expect, it} from 'vitest';
-import {beginEnrolment, cancelSync, requestSync, revokeWorkerFor, type SyncDeps} from '../src/shopee-sync/service';
+import {dockerCommand, beginEnrolment, cancelSync, requestSync, revokeWorkerFor, type SyncDeps} from '../src/shopee-sync/service';
 import {hashSecret, newWorkerToken} from '../src/shopee-sync/tokens';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
 
@@ -129,5 +129,15 @@ describe('revokeWorkerFor', () => {
     const w2 = await addWorker('a@x.com');
     expect((await revokeWorkerFor(deps(), {email: 'admin@x.com', isAdmin: true}, w2.id)).ok).toBe(true);
     expect((await revokeWorkerFor(deps(), {email: 'a@x.com', isAdmin: false}, 'nope')).ok).toBe(false);
+  });
+});
+
+describe('dockerCommand', () => {
+  it('publishes the noVNC port on loopback only and gives Chrome enough shared memory', () => {
+    const c = dockerCommand('CODE');
+    expect(c).toContain('-p 127.0.0.1:6080:6080');
+    expect(c).not.toMatch(/-p 6080:6080/);
+    expect(c).toContain('--shm-size=1g');
+    expect(c).toContain('ENROL_CODE=CODE');
   });
 });
