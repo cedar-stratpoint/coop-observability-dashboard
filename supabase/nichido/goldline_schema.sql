@@ -569,6 +569,20 @@ create table if not exists public.chain_skus (
 alter table public.chain_skus enable row level security;
 revoke all on public.chain_skus from anon, authenticated;
 
+-- One period's sales totalled per SKU, for the Overview. A Watsons month is ~40k rows;
+-- the page only needs ~300 totals, so add them up here instead of shipping every row.
+create or replace function public.sales_by_sku(p_company text, p_start date, p_end date)
+returns table (sku_code text, units bigint, gross numeric, net numeric)
+language sql stable security invoker set search_path = public
+as $$
+  select coalesce(sku_code, ''), coalesce(sum(units), 0), coalesce(sum(gross_retail), 0), coalesce(sum(net_of_vat), 0)
+  from sales
+  where company_id = p_company and period_start = p_start and period_end = p_end
+  group by coalesce(sku_code, '');
+$$;
+revoke all on function public.sales_by_sku(text, date, date) from public, anon, authenticated;
+grant execute on function public.sales_by_sku(text, date, date) to service_role;
+
 -- ---------------------------------------------------------------------------------
 -- Storage: private bucket for the uploaded source files (paths are `${companyId}/…`,
 -- kept identical to the archive so uploads.storage_path stays valid).
