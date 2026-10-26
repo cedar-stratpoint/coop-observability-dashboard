@@ -20,17 +20,20 @@ import {
 //   * a new finding opens a flag
 //   * an open flag whose finding is still there gets fresh numbers
 //   * an open flag whose finding is gone (a corrected count, a logged adjustment, a
-//     newly linked SKU) is closed as 'resolved'
-//   * a flag an admin closed (checked / dismissed) is never touched again
-// Re-running is safe; flags are unique per kind, store, item and period.
+//     newly linked SKU) is marked 'resolved': the data changed since, but it still counts
+//   * a resolved flag whose finding comes back opens again
+// There's no checked or dismissed, and no admin step: every flag Coop raises counts
+// against the BA for good (Oct 26).
+// An admin's remark is kept through every re-run. Re-running is safe; flags are unique
+// per kind, store, item and period.
 
 const db = nichidoDb;
 
-export type FlagStatus = 'open' | 'checked' | 'dismissed' | 'resolved';
+export type FlagStatus = 'open' | 'resolved';
 export type MonthCoverage = {month: string; match: number; flag: number; baseline: number; waiting_sales: number; unlinked: number; not_counted: number};
 export type ChecksRun = {opened: number; updated: number; resolved: number; months: MonthCheck[]};
 
-type StoredFlag = {id: string; kind: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus; consultant: string | null; source_upload_id: string | null; details: unknown};
+type StoredFlag = {id: string; kind: string; cause: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus; consultant: string | null; source_upload_id: string | null; details: unknown};
 
 const fkey = (f: {kind: string; store_code: string; item_code: string; period_start: string; period_end: string}) =>
   `${f.kind}|${f.store_code}|${f.item_code}|${f.period_start}|${f.period_end}`;
@@ -43,6 +46,7 @@ const stable = (v: unknown): string =>
       ? `[${v.map(stable).join(',')}]`
       : JSON.stringify(v ?? null);
 const sameFlag = (prev: StoredFlag, f: Finding) =>
+  prev.cause === f.cause &&
   (prev.consultant ?? null) === (f.consultant ?? null) && (prev.source_upload_id ?? null) === (f.source_upload_id ?? null) && stable(prev.details) === stable(f.details);
 
 export async function getCheckSettings(companyId: string): Promise<CheckSettings> {
@@ -154,7 +158,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
   const existing = (await fetchAllRows('flags', (from, to) =>
     supa
       .from('flags')
-      .select('id,kind,store_code,item_code,period_start,period_end,status,consultant,source_upload_id,details')
+      .select('id,kind,cause,store_code,item_code,period_start,period_end,status,consultant,source_upload_id,details')
       .eq('company_id', companyId)
       .in('store_code', flagStores)
       .order('id')
@@ -170,13 +174,13 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
     const k = fkey(f);
     seen.add(k);
     const prev = byKey.get(k);
-    const fields = {consultant: f.consultant, source_upload_id: f.source_upload_id, details: f.details, updated_at: now};
-    if (!prev) inserts.push({company_id: companyId, kind: f.kind, cause: f.cause, store_code: f.store_code, item_code: f.item_code, period_start: f.period_start, period_end: f.period_end, ...fields});
+    const fields = {cause: f.cause, consultant: f.consultant, source_upload_id: f.source_upload_id, details: f.details, updated_at: now};
+    if (!prev) inserts.push({company_id: companyId, kind: f.kind, store_code: f.store_code, item_code: f.item_code, period_start: f.period_start, period_end: f.period_end, ...fields});
     else if (prev.status === 'resolved' || (prev.status === 'open' && !sameFlag(prev, f))) {
       // Still there (or back again after it cleared): refresh the numbers, keep it open.
       const res = await supa
         .from('flags')
-        .update({...fields, status: 'open', closed_at: null, closed_by: null, ...(prev.status === 'resolved' ? {remark: null} : {})})
+        .update({...fields, status: 'open', closed_at: null, closed_by: null})
         .eq('id', prev.id);
       if (res.error) throw new Error(`flag update failed: ${res.error.message}`);
       updated++;
@@ -190,7 +194,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
   for (let i = 0; i < gone.length; i += 200) {
     const res = await supa
       .from('flags')
-      .update({status: 'resolved', remark: 'Cleared by the data (the count, an adjustment or a SKU link changed).', closed_at: now, closed_by: 'coop', updated_at: now})
+      .update({status: 'resolved', closed_at: now, closed_by: 'coop', updated_at: now})
       .in('id', gone.slice(i, i + 200));
     if (res.error) throw new Error(`flag resolve failed: ${res.error.message}`);
   }

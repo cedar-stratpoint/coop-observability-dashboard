@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {allowedGap, monthlyChecks, rowFindings, rowMathOff, type CountRow} from '../src/goldline-checks';
+import {allowedGap, baTags, categoryOf, monthlyChecks, rowFindings, rowMathOff, tagFor, type CountRow} from '../src/goldline-checks';
 
 const row = (p: Partial<CountRow> & Pick<CountRow, 'period_start' | 'period_end'>): CountRow => ({
   store_code: '1', item_code: 'LIPT01', stockroom: null, drawer: null, selling_area: null, delivery: null,
@@ -31,20 +31,20 @@ describe('rowMathOff', () => {
 });
 
 describe('rowFindings', () => {
-  it('names one cause per check: math is human error, 0 or below is manipulation', () => {
+  it('names one cause per check: math is an incorrect total, 0 or below is padding', () => {
     const f = rowFindings([
       row({period_start: '2026-10-01', period_end: '2026-10-15', stockroom: 3, selling_area: 2, ending_on_hand: 9}),
       row({item_code: 'BB03N', period_start: '2026-10-01', period_end: '2026-10-15', stockroom: 0, drawer: 0, selling_area: 0}),
     ]);
     expect(f.map((x) => [x.item_code, x.kind, x.cause])).toEqual([
-      ['LIPT01', 'row_math', 'human_error'],
-      ['BB03N', 'zero_or_below', 'manipulation'],
+      ['LIPT01', 'row_math', 'incorrect_total'],
+      ['BB03N', 'zero_or_below', 'padding'],
     ]);
   });
   it('an unreadable cell skips the math check on that row', () => {
     const r = row({period_start: '2026-10-01', period_end: '2026-10-15', stockroom: 3, ending_on_hand: 9});
     const f = rowFindings([r], [{store_code: '1', item_code: 'LIPT01', period_start: '2026-10-01', period_end: '2026-10-15', upload_id: 'u9', marks: [{field: 'stockroom', mark: 'overwritten', written: '3 or 8'}]}]);
-    expect(f.map((x) => x.kind)).toEqual(['unreadable']);
+    expect(f.map((x) => [x.kind, x.cause])).toEqual([['unreadable', 'messy_handwriting']]);
     expect(f[0].source_upload_id).toBe('u9');
   });
 });
@@ -67,7 +67,7 @@ describe('monthlyChecks', () => {
   it('Store B: POS says 70, a 15-unit gap is flagged with both BAs', () => {
     const {findings} = monthlyChecks({...base, posSold: () => 70});
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({kind: 'sales_gap', cause: 'human_error', period_start: '2026-10-01', period_end: '2026-10-31', consultant: 'Liza M., Ana P.'});
+    expect(findings[0]).toMatchObject({kind: 'sales_gap', cause: 'incorrect_total', period_start: '2026-10-01', period_end: '2026-10-31', consultant: 'Liza M., Ana P.'});
     expect(findings[0].details).toMatchObject({form_sold: 85, pos_sold: 70, gap: 15, allowed: 3.5, direction: 'form_sold_more'});
   });
   it('a logged pull-out explains the gap before it is flagged', () => {
@@ -94,9 +94,47 @@ describe('monthlyChecks', () => {
     expect(months.find((m) => m.month === '2026-10')?.state).toBe('waiting_sales');
     expect(findings).toEqual([]);
   });
+  it('POS sold more than the counts show is padding', () => {
+    const {findings} = monthlyChecks({...base, posSold: () => 100});
+    expect(findings[0]).toMatchObject({kind: 'sales_gap', cause: 'padding'});
+    expect(findings[0].details).toMatchObject({form_sold: 85, pos_sold: 100, gap: -15, direction: 'pos_sold_more'});
+  });
   it('no POS units for a linked item counts as 0 sold', () => {
     const {findings} = monthlyChecks({...base, posSold: () => undefined});
     expect(findings[0].details).toMatchObject({pos_sold: 0, gap: 85});
+  });
+});
+
+describe('BA tags', () => {
+  const zero = {messy_handwriting: 0, incorrect_total: 0, padding: 0};
+  it('Clear at 0, At risk at 1 to 2, Delinquent at 3+ or any padding', () => {
+    expect(tagFor(zero)).toBe('clear');
+    expect(tagFor({...zero, messy_handwriting: 2})).toBe('at_risk');
+    expect(tagFor({...zero, messy_handwriting: 2, incorrect_total: 1})).toBe('delinquent');
+    expect(tagFor({...zero, padding: 1})).toBe('delinquent');
+  });
+  it('category is the cause seen most, padding first on a tie', () => {
+    expect(categoryOf(zero)).toBeNull();
+    expect(categoryOf({...zero, incorrect_total: 1, padding: 2})).toBe('padding');
+    expect(categoryOf({...zero, incorrect_total: 1, padding: 1})).toBe('padding');
+    expect(categoryOf({...zero, messy_handwriting: 2, incorrect_total: 1})).toBe('messy_handwriting');
+  });
+  it('one row per store, month and BA; a shared gap counts for both BAs; clean forms show as Clear', () => {
+    const rows = baTags(
+      [
+        {store_code: '1', period_end: '2026-10-15', consultant: 'Grace Tan', cause: 'padding'},
+        {store_code: '1', period_end: '2026-10-31', consultant: 'Grace Tan, Liza Mendoza', cause: 'incorrect_total'},
+      ],
+      [
+        {store_code: '1', month: '2026-10', consultant: 'Grace Tan'},
+        {store_code: '2', month: '2026-10', consultant: 'Ana Perez'},
+      ],
+    );
+    expect(rows.map((r) => [r.store_code, r.ba, r.points, r.tag, r.category])).toEqual([
+      ['1', 'Grace Tan', 2, 'delinquent', 'padding'],
+      ['1', 'Liza Mendoza', 1, 'at_risk', 'incorrect_total'],
+      ['2', 'Ana Perez', 0, 'clear', null],
+    ]);
   });
 });
 

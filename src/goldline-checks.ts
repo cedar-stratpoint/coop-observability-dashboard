@@ -2,13 +2,17 @@
 // src/goldline-checks-data.ts.
 //
 // Every committed form row goes through the plan's checks, and each finding names one
-// of three causes (plan §06):
+// of three causes, in the words Justin's dad uses (plan §06, Oct 26 meeting):
 //   unreadable     a cell the scan reader marked as overwritten, unclear or straddling
-//   row_math       the written ending doesn't add up            → human error
-//   zero_or_below  ending at 0 or less (every 0, plan Q13)       → manipulation
-//   sales_gap      the month's form sold vs. POS sold differ     → human error
+//                                                                  → messy handwriting
+//   row_math       the written ending doesn't add up               → incorrect total
+//   zero_or_below  ending at 0 or less (every 0, plan Q13)         → padding
+//   sales_gap      the month's form sold vs. POS sold differ:
+//                    the counts show more gone than POS sold       → incorrect total
+//                    POS sold more than the counts show            → padding
 // A row with an unreadable cell skips the math check: the math can't be judged on a
-// number nobody could read.
+// number nobody could read. Every flag counts against the BA as soon as it's raised;
+// there's no approve or dismiss step (baTags below).
 //
 // Form vs. sales runs per store, item and calendar month, because POS Sales Data is
 // whole-month totals (plan §05):
@@ -20,13 +24,15 @@
 import {onHandOf} from './goldline-inventory';
 
 export type FlagKind = 'sales_gap' | 'zero_or_below' | 'row_math' | 'unreadable';
-export type FlagCause = 'human_error' | 'unreadable' | 'manipulation';
-export const CAUSE_OF: Record<FlagKind, FlagCause> = {
-  unreadable: 'unreadable',
-  row_math: 'human_error',
-  zero_or_below: 'manipulation',
-  sales_gap: 'human_error',
+export type FlagCause = 'messy_handwriting' | 'incorrect_total' | 'padding';
+export const FLAG_CAUSES: FlagCause[] = ['messy_handwriting', 'incorrect_total', 'padding'];
+export const CAUSE_OF: Record<Exclude<FlagKind, 'sales_gap'>, FlagCause> = {
+  unreadable: 'messy_handwriting',
+  row_math: 'incorrect_total',
+  zero_or_below: 'padding',
 };
+/** A sales gap is named by its direction: POS sold more than the counts show is padding. */
+export const gapCause = (gap: number): FlagCause => (gap < 0 ? 'padding' : 'incorrect_total');
 
 export type CountRow = {
   store_code: string;
@@ -212,7 +218,7 @@ export function monthlyChecks(input: {
         const {start, end} = monthBounds(month);
         findings.push({
           kind: 'sales_gap',
-          cause: CAUSE_OF.sales_gap,
+          cause: gapCause(row.gap),
           store_code: store,
           item_code: item,
           period_start: start,
@@ -238,4 +244,73 @@ export function monthlyChecks(input: {
     }
   }
   return {months, findings};
+}
+
+// ── BA tags (F7 tiles, F8) ──────────────────────────────────────────────────────────
+// Per BA, store and month: Clear with no flags, At risk with 1 to 2, Delinquent with 3 or
+// more or any padding (Oct 26). Every flag Coop raises counts, with no admin step: a
+// flag whose data later changed (status 'resolved') still counts, because the form was
+// wrong when the BA wrote it. The category is the cause seen most, padding first on a tie.
+
+export type BaTag = 'clear' | 'at_risk' | 'delinquent';
+export type TagFlag = {store_code: string; period_end: string; consultant: string | null; cause: FlagCause};
+export type BaMonth = {
+  key: string; // store|month|ba
+  store_code: string;
+  month: string; // YYYY-MM
+  ba: string | null; // full name from the form, null when the form has none
+  points: number;
+  byCause: Record<FlagCause, number>;
+  tag: BaTag;
+  category: FlagCause | null;
+};
+
+export function tagFor(byCause: Record<FlagCause, number>): BaTag {
+  const points = byCause.messy_handwriting + byCause.incorrect_total + byCause.padding;
+  if (points === 0) return 'clear';
+  return byCause.padding > 0 || points >= 3 ? 'delinquent' : 'at_risk';
+}
+
+const TIE_ORDER: FlagCause[] = ['padding', 'incorrect_total', 'messy_handwriting'];
+export function categoryOf(byCause: Record<FlagCause, number>): FlagCause | null {
+  let best: FlagCause | null = null;
+  for (const c of TIE_ORDER) if (byCause[c] > 0 && (best == null || byCause[c] > byCause[best])) best = c;
+  return best;
+}
+
+/** BA names on a flag: a sales gap shared by a mid-month change lists both ("A, B"). */
+export const basOf = (consultant: string | null | undefined): Array<string | null> => {
+  const names = (consultant ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return names.length ? names : [null];
+};
+
+/**
+ * One row per store, month and BA. `forms` lists the store, month and BA of every
+ * committed form, so a BA with a clean form shows as Clear; flags add the points.
+ */
+export function baTags(flags: TagFlag[], forms: Array<{store_code: string; month: string; consultant: string | null}> = []): BaMonth[] {
+  const by = new Map<string, BaMonth>();
+  const get = (store: string, month: string, ba: string | null) => {
+    const key = `${store}|${month}|${ba ?? ''}`;
+    let r = by.get(key);
+    if (!r) {
+      r = {key, store_code: store, month, ba, points: 0, byCause: {messy_handwriting: 0, incorrect_total: 0, padding: 0}, tag: 'clear', category: null};
+      by.set(key, r);
+    }
+    return r;
+  };
+  for (const f of forms) for (const ba of basOf(f.consultant)) get(f.store_code, f.month, ba);
+  for (const f of flags) {
+    for (const ba of basOf(f.consultant)) {
+      const r = get(f.store_code, monthOf(f.period_end), ba);
+      r.byCause[f.cause]++;
+      r.points++;
+    }
+  }
+  for (const r of by.values()) {
+    r.tag = tagFor(r.byCause);
+    r.category = categoryOf(r.byCause);
+  }
+  const rank: Record<BaTag, number> = {delinquent: 0, at_risk: 1, clear: 2};
+  return [...by.values()].sort((a, b) => b.month.localeCompare(a.month) || rank[a.tag] - rank[b.tag] || b.points - a.points || a.store_code.localeCompare(b.store_code, undefined, {numeric: true}));
 }
