@@ -9,5 +9,5 @@ export const maxDuration = 60;
 
 export async function GET(req: Request): Promise<Response> {
   const deps = shopeeImportDeps();
-  return deps ? handleCoverage(req, deps) : new Response(JSON.stringify({error: 'The import API is not configured on this deployment.'}), {status: 503, headers: {'content-type': 'application/json'}});
+  return deps ? handleCoverage(req, deps) : new Response(JSON.stringify({error: 'The archive database is not configured on this deployment (mock mode).'}), {status: 503, headers: {'content-type': 'application/json'}});
 }

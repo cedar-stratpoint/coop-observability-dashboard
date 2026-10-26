@@ -12,7 +12,7 @@ import {estimateTokens} from '../src/chat/skills/load';
 import {buildPreamble} from '../src/chat/preamble';
 import type {MetricData} from '../src/chat/result-types';
 
-const BUDGET = 14300; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%
+const BUDGET = 14400; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic)
 
 describe('2b.2 data index in the cached prompt', () => {
   const text = buildDataIndexText();
@@ -41,7 +41,7 @@ describe('2b.2 data index in the cached prompt', () => {
     expect(text).toMatch(/- sales: default completed orders \(pos_orders_completed\)/);
   });
   it('stays small (most-used tables only, never the whole catalog)', () => {
-    expect(estimateTokens(text)).toBeLessThan(1650); // measured about 1,500 on 2026-10-07 (Train 3 Task 8); 1,612 on 2026-10-22 after the Shopee import tables (import_runs, marketplace_daily_observations) joined the digest domain line
+    expect(estimateTokens(text)).toBeLessThan(1700); // measured about 1,500 on 2026-10-07 (Train 3 Task 8); 1,612 on 2026-10-22 after the Shopee import tables (import_runs, marketplace_daily_observations) joined the digest domain line; 1,682 after the four weekly report tables and their four views
     expect(estimateTokens(text)).toBeLessThan(estimateTokens(JSON.stringify(CATALOG_DATA)) / 3);
   });
   it('the Explore system prompt uses it instead of the coop_explore_ views list', () => {

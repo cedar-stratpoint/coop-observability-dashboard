@@ -69,7 +69,7 @@ export function buildStaticSystem(opts: {tools?: boolean; explore?: boolean; crm
     `You are ${COOP_CHAT.agentName}, ${COOP_CHAT.persona}`,
     '',
     '## Guardrails',
-    buildGuardrails({explore, crm, website}),
+    buildGuardrails({explore, crm, website, tools: withTools}),
     READ_ONLY_STATEMENT,
     `If a request is out of scope, reply exactly: "${COOP_CHAT.refusal}"`,
     '',
