@@ -157,3 +157,14 @@ export async function saveSupplySettings(
     if (error) throw new Error(`store_transit upsert failed: ${error.message}`);
   }
 }
+
+/** Restock window and safety months (F10), company-wide. */
+export async function saveForecastSettings(companyId: string, input: {windowMonths: number; safetyMonths: number}, by: string | null): Promise<void> {
+  const {error} = await db()
+    .from('forecast_settings')
+    .upsert(
+      {company_id: companyId, window_months: input.windowMonths, safety_months: input.safetyMonths, updated_by: by, updated_at: now()},
+      {onConflict: 'company_id'},
+    );
+  if (error) throw new Error(`forecast_settings upsert failed: ${error.message}`);
+}
