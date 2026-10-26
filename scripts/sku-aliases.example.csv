@@ -1,0 +1,5 @@
+channel,alias_type,alias_value,label,product_id,bundle_id,component_qty,valid_from,valid_to,source,confirmed
+shopee,sku,ZMYFDMEATBEFWHL01,Example Freeze-Dried Beef Whole,ZMYFDMEATBEFWHL01,,1,,,auto,yes
+website,sku,WEB-BEEF-01,Example Beef Treats (website listing),ZMYFDMEATBEFWHL01,,1,,,manual,yes
+website,title,Example Treat Duo,Example Treat Duo,ZMYFDMEATBEFWHL01,duo-1,1,,,manual,no
+website,title,Example Treat Duo,Example Treat Duo,ZMYFDMEATDCKWHL01,duo-1,1,,,manual,no
