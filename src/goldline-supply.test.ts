@@ -178,3 +178,21 @@ describe('review fixes', () => {
     expect(manilaDate(new Date('2026-10-20T15:30:00Z'))).toBe('2026-10-20');
   });
 });
+
+describe('boardSummary · values (F9)', () => {
+  it('values stock on hand and the latest delivery at selling price, all stores added up', () => {
+    const withDelivery = (code: string, onHand: number, delivery: number) => ({...item(code, {onHand}), row: {item_code: code, stockroom: onHand, drawer: 0, selling_area: 0, delivery, ending_on_hand: null}});
+    const rows = buildBoard({
+      stores: [block('1', [withDelivery('TWC', 10, 4), withDelivery('LIP', 2, 0)]), block('4', [withDelivery('TWC', 5, 1)])],
+      catalog,
+      warehouse: {},
+      config: cfg,
+      shipments: [],
+      currentMonth: '2026-10',
+      today: TODAY,
+      store: null,
+    });
+    // TWC: 15 on hand × ₱185 + LIP: 2 × ₱299; delivered: TWC 5 × ₱185
+    expect(boardSummary(rows, TODAY)).toMatchObject({stockValue: 15 * 185 + 2 * 299, deliveredValue: 5 * 185, deliveredUnits: 5, unpriced: 0});
+  });
+});

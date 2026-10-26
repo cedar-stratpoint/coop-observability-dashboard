@@ -11,8 +11,8 @@ import {describe, expect, it} from 'vitest';
 const ROOT = join(__dirname, '..');
 const SCAN = ['src', 'app', 'components'];
 const NICHIDO_TABLES = ['stores', 'products', 'sales', 'inventory', 'inventory_snapshots', 'uploads', 'extractions', 'upload_batches',
-  'supply_settings', 'line_lead_times', 'store_transit', 'warehouse_stock', 'shipments', 'price_changes'];
-const NICHIDO_FUNCTIONS = ['commit_batch', 'sales_rollup', 'count_sources', 'record_shipment', 'cancel_shipment', 'set_price'];
+  'supply_settings', 'line_lead_times', 'store_transit', 'warehouse_stock', 'shipments', 'price_changes', 'chain_skus'];
+const NICHIDO_FUNCTIONS = ['commit_batch', 'sales_rollup', 'sales_by_sku', 'count_sources', 'record_shipment', 'cancel_shipment', 'set_price'];
 const q = (call: string, names: string[]) => `\\.${call}\\(\\s*['"\`](?:${names.join('|')})['"\`]`;
 // Storage is Goldline's only when it names the goldline-uploads bucket (other features,
 // e.g. the Shopee importer, keep their own buckets in the archive).

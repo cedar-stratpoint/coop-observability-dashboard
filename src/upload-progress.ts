@@ -6,7 +6,7 @@
 // moving without ever claiming to be done before it is. The upload band itself is
 // a true byte percentage from the browser.
 
-export type UploadKindGuess = 'csv' | 'pdf';
+export type UploadKindGuess = 'csv' | 'xlsx' | 'pdf';
 export type Phase = 'uploading' | 'stored' | 'parsing' | 'detecting' | 'reading' | 'saving' | 'done';
 
 export type Step = {key: string; label: string; phases: Phase[]};
@@ -23,14 +23,21 @@ export const STEPS: Record<UploadKindGuess, Step[]> = {
     {key: 'parse', label: 'Read the rows', phases: ['stored', 'parsing']},
     {key: 'save', label: 'Save sales', phases: ['saving']},
   ],
+  // A Watsons month is ~40k rows plus stores and SKUs, so saving is the long step.
+  xlsx: [
+    {key: 'upload', label: 'Upload', phases: ['uploading']},
+    {key: 'parse', label: 'Read the month', phases: ['stored', 'parsing']},
+    {key: 'save', label: 'Save sales', phases: ['saving']},
+  ],
 };
 
 /** [start, end, time-constant ms] of each phase's band, as % of the bar. */
 const BANDS: Record<UploadKindGuess, Partial<Record<Phase, [number, number, number]>>> = {
   pdf: {stored: [14, 16, 1000], detecting: [16, 30, 4000], reading: [30, 92, 30000], saving: [94, 98, 1500]},
   csv: {stored: [52, 56, 800], parsing: [56, 80, 1500], saving: [82, 96, 2000]},
+  xlsx: {stored: [40, 44, 800], parsing: [44, 56, 1500], saving: [56, 96, 15000]},
 };
-const UPLOAD_SHARE: Record<UploadKindGuess, number> = {pdf: 12, csv: 50};
+const UPLOAD_SHARE: Record<UploadKindGuess, number> = {pdf: 12, csv: 50, xlsx: 40};
 
 /** Eases from 0 toward 1 with time constant tau; stays below 1. */
 const approach = (t: number, tau: number) => (tau <= 0 ? 0 : 1 - Math.exp(-Math.max(0, t) / tau));
@@ -54,5 +61,5 @@ export function stepStates(kind: UploadKindGuess, phase: Phase): Array<Step & {s
 
 export const kindOfFile = (name: string): UploadKindGuess | null => {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
-  return ext === 'csv' ? 'csv' : ext === 'pdf' ? 'pdf' : null;
+  return ext === 'csv' ? 'csv' : ext === 'xlsx' ? 'xlsx' : ext === 'pdf' ? 'pdf' : null;
 };

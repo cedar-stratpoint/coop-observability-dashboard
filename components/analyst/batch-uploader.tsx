@@ -77,7 +77,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
           ref={inputRef}
           type="file"
           multiple
-          accept=".csv,.pdf,text/csv,application/pdf"
+          accept=".csv,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="sr-only"
           tabIndex={-1}
           aria-hidden
@@ -154,6 +154,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <FileTypeBadge filename="x.csv" /> POS sales export
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <FileTypeBadge filename="x.xlsx" /> POS Sales Data (Watsons, one month)
               </span>
             </span>
           </div>
