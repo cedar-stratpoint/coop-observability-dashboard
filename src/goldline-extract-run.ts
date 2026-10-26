@@ -25,6 +25,15 @@ export type ExtractedRow = {
   ending_on_hand: number | null;
   confidence: number;
   alt?: string | null;
+  // F3 · cells the reader couldn't read cleanly, so erasures can be counted (plan §06 b).
+  // `written` keeps what was on the paper when the reader chose another reading.
+  marks?: CellMark[] | null;
+};
+
+export type CellMark = {
+  field: 'stockroom' | 'drawer' | 'selling_area' | 'delivery' | 'ending_on_hand';
+  mark: 'overwritten' | 'unclear' | 'straddle';
+  written?: string | null;
 };
 
 export type ExtractedPage = {

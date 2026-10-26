@@ -5,6 +5,7 @@ import {classifyUpload} from '@/src/goldline-upload';
 import {parseGoldlinePos} from '@/src/goldline-csv';
 import {readWatsonsWorkbook} from '@/src/goldline-pos-xlsx';
 import {applyWatsonsMonth} from '@/src/goldline-watsons-data';
+import {runChecks} from '@/src/goldline-checks-data';
 import {glTags} from '@/src/goldline-ref-data';
 import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
@@ -276,6 +277,8 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const summary = await applyWatsonsMonth(companyId, wb, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      // A new month of POS data can open or clear form vs. sales flags (counted stores only).
+      await runChecks(companyId).catch((e) => console.error('runChecks after Watsons upload', msg(e)));
       revalidateTag(glTags.stores(companyId), {expire: 0});
       revalidateTag(glTags.catalog(companyId), {expire: 0});
       return json({uploadId, status: 'committed', rowsCommitted: summary.salesRows, watsons: summary, warnings: wb.errors});

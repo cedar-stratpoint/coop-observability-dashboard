@@ -11,6 +11,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
 import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
+import {itemDisplayName} from '@/src/goldline-item-name';
 
 // Watsons SKU links: which Watsons SKU code is which Nichido item. Three lists, biggest
 // sellers first: suggestions to confirm, SKUs with no match (pick an item), and links
@@ -24,17 +25,7 @@ const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 :
 
 const SOURCE: Record<string, string> = {code: 'Code in name', match: 'Matched', admin: 'By an admin'};
 
-/** "Line · shade", dropping the words the catalog's shade repeats from the line
- *  ("Lip and Cheek Tint Beach Glow" under "Lip and Cheek Tint Paraben-Free" → "Beach Glow"). */
-function itemText(i: SkuLinkItem) {
-  const line = (i.productLine ?? '').trim();
-  const words = (i.variant ?? '').trim().split(/\s+/).filter(Boolean);
-  const lineWords = line.toLowerCase().split(/\s+/);
-  let k = 0;
-  while (k < words.length - 1 && k < lineWords.length && words[k].toLowerCase() === lineWords[k]) k++;
-  const shade = words.slice(k).join(' ');
-  return [line, shade].filter(Boolean).join(' · ') || i.itemCode;
-}
+const itemText = (i: SkuLinkItem) => itemDisplayName(i.productLine, i.variant, i.itemCode);
 
 export function GoldlineSkuLinks({company, data, canEdit}: {company: string; data: SkuLinkData; canEdit: boolean}) {
   const router = useRouter();
