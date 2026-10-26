@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-26 — Goldline P1/P2: fixes from the regression review
+A high-effort review of the P1 and P2 branches against `develop` found ten issues; all are fixed here and re-checked on Staging.
+- **Actions and Health flooded:** the Watsons file adds every Watsons branch as an `active` store, and both pages treated every active store as one that should send a form, so ~320 "missing count" items buried the real ones. A store is now expected to send forms once it has sent one recently (until BAs are assigned to stores in P4). Action feed page 1.26 MB → 78 KB, Health 856 KB → 68 KB.
+- **False gaps when POS data is partial:** "this month has POS data" was company-wide, so a counted store missing from that month's file got POS sold 0 and every item was flagged. It is now per store, and only whole-month rows (1st to last day) count; partial-period CSVs no longer feed the monthly check (`sales_months()` is no longer used).
+- **Skipped months:** a month is compared only with the month right before it; when the previous count is older, the month restarts as a baseline instead of comparing two months of form sold with one month of POS.
+- **Deleted counts left flags open:** checks for a store with no counts left now resolve its open flags.
+- **Watsons upload fence:** only roles that see every store may load the chain-wide file (it adds stores and changes SKU links for the whole company), the same rule as the SKU links screen.
+- **Turned-down pairs:** a second "Not this" or unlink no longer un-blocks the first; `chain_skus.dismissed_item_codes` keeps them all (additive; old column kept, unused; applied on Staging).
+- **Checks now follow** SKU link changes and POS `.csv` uploads, not only form commits and Watsons uploads.
+- **Log as a loss** records the adjustment first, then closes the flag, then re-runs; a failure can no longer leave a closed flag with no adjustment.
+- **Cheaper:** deleting a sales upload no longer pages its ~40k rows to find stores; checks update only flags whose numbers changed and read only the scans behind the counts being checked.
+
 ## 2026-10-26 — Goldline P2: checks, flag queue, adjustments, stock value, scan marks
 Every committed form row now goes through the plan's checks, and each finding names one of three causes (unreadable, human error, manipulation).
 - **Checks** (`src/goldline-checks.ts`, pure, `test/goldline-checks.test.ts`): unreadable cell (from the reader's marks), row math, ending at 0 or below (every 0, Q13), and form vs. sales per store, item and calendar month (POS Sales Data is whole-month totals): start = on hand before the month + delivered − adjustments; form sold = start − final on hand; flag when |form sold − POS sold| > max(1 unit, 5%). The first count is the baseline only (Q11); a month with no POS file waits; unlinked items are held out. A mid-month BA change tags both names.

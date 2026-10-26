@@ -116,7 +116,13 @@ export async function getOpsData(companyId: string, storeScope?: string[] | null
   const committedAt = new Map<string, string | null>();
   for (const s of snaps) if (isCurrentCount(s.period_end, currentPeriod) && !committedAt.has(s.store_code)) committedAt.set(s.store_code, s.last_committed_at);
   const nameOf = new Map(storesRows.map((s) => [s.store_code, s.name]));
-  const activeStores = storesRows.filter((s) => s.status === 'active' && (!scope || scope.has(s.store_code))).map((s) => s.store_code);
+  // A store is expected to send forms once it has sent one recently (snapshot window). The Watsons file adds every
+  // Watsons branch as an active store, but only stores with a Nichido BA count stock;
+  // until BAs are assigned to stores (P4), "has counted before" is that signal.
+  const everCounted = new Set(snaps.map((s) => s.store_code));
+  const activeStores = storesRows
+    .filter((s) => s.status === 'active' && everCounted.has(s.store_code) && (!scope || scope.has(s.store_code)))
+    .map((s) => s.store_code);
   const codes = [...new Set([...activeStores, ...byStore.keys()])].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
 
   const priceOf = (code: string) => catalog[code]?.price ?? null;

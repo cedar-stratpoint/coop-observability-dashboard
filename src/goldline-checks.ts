@@ -76,6 +76,10 @@ export type MonthCheck = {
 };
 
 const monthOf = (isoDate: string) => isoDate.slice(0, 7);
+export const prevMonth = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+};
 export const monthBounds = (month: string) => {
   const [y, m] = month.split('-').map(Number);
   const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -138,8 +142,11 @@ export function rowFindings(counts: CountRow[], marked: MarkedRow[] = []): Findi
 
 /**
  * Form vs. sales per store, item and month. `posSold` gives a month's POS units for a
- * store and item (undefined = no units recorded); `salesMonths` lists months with a POS
- * file loaded; `linked` lists items with a Watsons SKU.
+ * store and item (undefined = no units recorded); `salesMonths` lists `store|YYYY-MM`
+ * pairs that have whole-month POS data for that store; `linked` lists items with a
+ * Watsons SKU. A month is only compared against the month right before it: when the
+ * previous count is older, form sold would span months POS doesn't, so the month
+ * restarts as a baseline.
  */
 export function monthlyChecks(input: {
   counts: CountRow[];
@@ -181,8 +188,8 @@ export function monthlyChecks(input: {
         months.push({...row, state: 'not_counted'}); // left blank on the form this month
         continue;
       }
-      if (!before) {
-        months.push(row); // first count for this item at this store: baseline only (Q11)
+      if (!before || before.period_end.slice(0, 7) !== prevMonth(month)) {
+        months.push(row); // first count, or a month skipped since the last one: baseline (Q11)
         continue;
       }
       row.start = (onHandOf(before).onHand as number) + delivered - adjusted;
@@ -191,7 +198,7 @@ export function monthlyChecks(input: {
         months.push({...row, state: 'unlinked'});
         continue;
       }
-      if (!input.salesMonths.has(month)) {
+      if (!input.salesMonths.has(`${store}|${month}`)) {
         months.push({...row, state: 'waiting_sales'});
         continue;
       }

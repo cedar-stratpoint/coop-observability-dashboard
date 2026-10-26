@@ -143,12 +143,17 @@ export async function linkSku(companyId: string, skuCode: string, itemCode: stri
 /** Turn a suggestion down: it is never offered again, and the next best is looked for. */
 export async function dismissSuggestion(companyId: string, skuCode: string): Promise<void> {
   const supa = db();
-  const cur = await supa.from('chain_skus').select('suggested_item_code').eq('company_id', companyId).eq('chain', CHAIN).eq('sku_code', skuCode).maybeSingle();
+  const cur = await supa.from('chain_skus').select('suggested_item_code,dismissed_item_codes').eq('company_id', companyId).eq('chain', CHAIN).eq('sku_code', skuCode).maybeSingle();
   if (cur.error) throw new Error(cur.error.message);
   if (!cur.data?.suggested_item_code) throw new LinkError('There’s no suggestion to turn down.');
   const res = await supa
     .from('chain_skus')
-    .update({dismissed_item_code: cur.data.suggested_item_code, suggested_item_code: null, match_score: null, match_tier: null})
+    .update({
+      dismissed_item_codes: [...new Set([...((cur.data.dismissed_item_codes as string[] | null) ?? []), cur.data.suggested_item_code])],
+      suggested_item_code: null,
+      match_score: null,
+      match_tier: null,
+    })
     .eq('company_id', companyId)
     .eq('chain', CHAIN)
     .eq('sku_code', skuCode);
@@ -169,6 +174,13 @@ export async function unlinkSku(companyId: string, skuCode: string): Promise<voi
     .eq('company_id', companyId)
     .eq('item_code', itemCode);
   if (res.error) throw new Error(`unlink failed: ${res.error.message}`);
-  const mark = await supa.from('chain_skus').update({dismissed_item_code: itemCode}).eq('company_id', companyId).eq('chain', CHAIN).eq('sku_code', skuCode);
+  const prior = await supa.from('chain_skus').select('dismissed_item_codes').eq('company_id', companyId).eq('chain', CHAIN).eq('sku_code', skuCode).maybeSingle();
+  if (prior.error) throw new Error(prior.error.message);
+  const mark = await supa
+    .from('chain_skus')
+    .update({dismissed_item_codes: [...new Set([...((prior.data?.dismissed_item_codes as string[] | null) ?? []), itemCode])]})
+    .eq('company_id', companyId)
+    .eq('chain', CHAIN)
+    .eq('sku_code', skuCode);
   if (mark.error) throw new Error(`unlink note failed: ${mark.error.message}`);
 }

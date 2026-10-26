@@ -56,7 +56,7 @@ describe('monthlyChecks', () => {
     row({period_start: '2026-10-01', period_end: '2026-10-15', stockroom: 40, consultant: 'Liza M.'}),
     row({period_start: '2026-10-16', period_end: '2026-10-31', stockroom: 15, consultant: 'Ana P.'}),
   ];
-  const base = {counts, adjustments: [], salesMonths: new Set(['2026-10']), linked: new Set(['LIPT01'])};
+  const base = {counts, adjustments: [], salesMonths: new Set(['1|2026-10']), linked: new Set(['LIPT01'])};
 
   it('Store A: POS also says 85, so it matches', () => {
     const {months, findings} = monthlyChecks({...base, posSold: () => 85});
@@ -84,6 +84,15 @@ describe('monthlyChecks', () => {
     expect(monthlyChecks({...base, posSold: () => 85}).months.find((m) => m.month === '2026-09')?.state).toBe('baseline');
     expect(monthlyChecks({...base, salesMonths: new Set(), posSold: () => 85}).months.find((m) => m.month === '2026-10')?.state).toBe('waiting_sales');
     expect(monthlyChecks({...base, linked: new Set(), posSold: () => 85}).months.find((m) => m.month === '2026-10')?.state).toBe('unlinked');
+  });
+  it('a skipped month restarts the baseline instead of comparing two months to one', () => {
+    const c = [row({period_start: '2026-07-16', period_end: '2026-07-31', stockroom: 100}), ...counts.slice(1)];
+    expect(monthlyChecks({...base, counts: c, posSold: () => 10}).months.find((m) => m.month === '2026-10')?.state).toBe('baseline');
+  });
+  it('a store with no POS rows that month waits, even when other stores have the month', () => {
+    const {months, findings} = monthlyChecks({...base, salesMonths: new Set(['2|2026-10']), posSold: () => undefined});
+    expect(months.find((m) => m.month === '2026-10')?.state).toBe('waiting_sales');
+    expect(findings).toEqual([]);
   });
   it('no POS units for a linked item counts as 0 sold', () => {
     const {findings} = monthlyChecks({...base, posSold: () => undefined});

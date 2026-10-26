@@ -15,15 +15,38 @@ export type AdjustmentReason = 'pull_out' | 'damage' | 'loss';
 export class FlagError extends Error {}
 
 async function flagFor(companyId: string, id: string, scope: string[] | null) {
-  const res = await db().from('flags').select('id,store_code,item_code,period_start,period_end,status,cause').eq('company_id', companyId).eq('id', id).maybeSingle();
+  const res = await db()
+    .from('flags')
+    .select('id,store_code,item_code,period_start,period_end,status,cause')
+    .eq('company_id', companyId)
+    .eq('id', id)
+    .maybeSingle();
   if (res.error) throw new Error(res.error.message);
   if (!res.data) throw new FlagError('That flag no longer exists.');
   if (scope && !scope.includes(res.data.store_code)) throw new FlagError(`Store ${res.data.store_code} is outside your access.`);
-  return res.data as {id: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus; cause: FlagCause};
+  return res.data as {
+    id: string;
+    store_code: string;
+    item_code: string;
+    period_start: string;
+    period_end: string;
+    status: FlagStatus;
+    cause: FlagCause;
+  };
 }
 
 /** Close a flag as checked or dismissed. A remark is required (plan F7); the cause may change. */
-export async function closeFlag(companyId: string, scope: string[] | null, input: {id: string; status: 'checked' | 'dismissed'; remark: string; cause?: FlagCause; by: string | null}) {
+export async function closeFlag(
+  companyId: string,
+  scope: string[] | null,
+  input: {
+    id: string;
+    status: 'checked' | 'dismissed';
+    remark: string;
+    cause?: FlagCause;
+    by: string | null;
+  },
+) {
   const f = await flagFor(companyId, input.id, scope);
   if (f.status !== 'open') throw new FlagError('This flag is already closed.');
   const changed = input.cause && input.cause !== f.cause;
@@ -49,7 +72,12 @@ export async function reopenFlag(companyId: string, scope: string[] | null, id: 
   if (f.status === 'open') return;
   const res = await db()
     .from('flags')
-    .update({status: 'open', closed_by: null, closed_at: null, updated_at: new Date().toISOString()})
+    .update({
+      status: 'open',
+      closed_by: null,
+      closed_at: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq('company_id', companyId)
     .eq('id', id);
   if (res.error) throw new Error(`reopen failed: ${res.error.message}`);
@@ -59,7 +87,18 @@ export async function reopenFlag(companyId: string, scope: string[] | null, id: 
 export async function addAdjustment(
   companyId: string,
   scope: string[] | null,
-  input: {store: string; item: string; periodStart: string; periodEnd: string; reason: AdjustmentReason; qty: number; note: string | null; by: string | null; flagId?: string | null},
+  input: {
+    store: string;
+    item: string;
+    periodStart: string;
+    periodEnd: string;
+    reason: AdjustmentReason;
+    qty: number;
+    note: string | null;
+    by: string | null;
+    flagId?: string | null;
+  },
+  rerun = true,
 ): Promise<void> {
   if (scope && !scope.includes(input.store)) throw new FlagError(`Store ${input.store} is outside your access.`);
   const supa = db();
@@ -82,29 +121,48 @@ export async function addAdjustment(
     source_flag_id: input.flagId ?? null,
   });
   if (res.error) throw new Error(`adjustment failed: ${res.error.message}`);
-  await runChecks(companyId, [input.store]);
+  if (rerun) await runChecks(companyId, [input.store]);
 }
 
 /** Log the missing stock behind a sales-gap flag as an adjustment and close the flag. */
 export async function logLossFromFlag(
   companyId: string,
   scope: string[] | null,
-  input: {id: string; reason: AdjustmentReason; qty: number; remark: string; by: string | null},
+  input: {
+    id: string;
+    reason: AdjustmentReason;
+    qty: number;
+    remark: string;
+    by: string | null;
+  },
 ): Promise<void> {
   const f = await flagFor(companyId, input.id, scope);
   if (f.status !== 'open') throw new FlagError('This flag is already closed.');
-  await closeFlag(companyId, scope, {id: input.id, status: 'checked', remark: input.remark, by: input.by});
-  await addAdjustment(companyId, scope, {
-    store: f.store_code,
-    item: f.item_code,
-    periodStart: f.period_start,
-    periodEnd: f.period_end,
-    reason: input.reason,
-    qty: input.qty,
-    note: input.remark,
+  // Record the loss first (it validates store and item), then close the flag, then re-run
+  // the store's checks. A failure before the close leaves the flag open to try again.
+  await addAdjustment(
+    companyId,
+    scope,
+    {
+      store: f.store_code,
+      item: f.item_code,
+      periodStart: f.period_start,
+      periodEnd: f.period_end,
+      reason: input.reason,
+      qty: input.qty,
+      note: input.remark,
+      by: input.by,
+      flagId: input.id,
+    },
+    false,
+  );
+  await closeFlag(companyId, scope, {
+    id: input.id,
+    status: 'checked',
+    remark: input.remark,
     by: input.by,
-    flagId: input.id,
   });
+  await runChecks(companyId, [f.store_code]);
 }
 
 export async function deleteAdjustment(companyId: string, scope: string[] | null, id: string): Promise<void> {
