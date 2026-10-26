@@ -1344,7 +1344,7 @@
   {
    "id": "crm-api",
    "source": "Website CRM Worker (Cloudflare Worker over D1; Shopify customers, orders, checkouts)",
-   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts (GET only)"
+   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts, crm_query (GET only; crm_query identity detail only for the Explore allowlist)"
   },
   {
    "id": "shopee-files",

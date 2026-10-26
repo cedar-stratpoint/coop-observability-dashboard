@@ -118,7 +118,7 @@ export async function POST(req: Request) {
       preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined, identity: explore !== null})
           : {},
       emit,
       user,

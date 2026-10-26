@@ -236,7 +236,44 @@ const listCrmCheckouts: ToolDefinition = {
   },
 };
 
-export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts]);
+// crm_query: the flexible read (plan 2026-10-23). NOT strict (it would blow the compiled-grammar cap, and nested lists are not allowed there);
+// src/chat/crm/query-spec.ts validates everything against the live CRM catalog before any request, and the CRM checks it again.
+const NAME_ITEM = {type: 'string', description: 'A column name from describe.'};
+const crmQuery: ToolDefinition = {
+  name: 'crm_query',
+  description:
+    'Ask the live website CRM any read-only question over its whitelisted tables (orders, order_lines, order_discount_codes, checkouts, checkout_lines, customers and a few more): rows, counts, sums, averages, ranks, per-day/week/month series, repeat buyers, discount codes, SKUs, refunds, abandoned carts. ' +
+    'WHEN TO USE: list_crm_orders, list_crm_customers, list_crm_checkouts and get_crm_metrics keep their fixed views (a plain order list, the CRM snapshot); use crm_query for anything else, e.g. per-SKU, discount codes, repeat buyers, refund rate, customer detail, or any grouping or filter those tools lack. get_channel_report stays the choice for comparing channels. ' +
+    'FIRST call it with describe true (and a table) if you do not know the columns; never guess a column. Tables with a date column need a window: filters on that column with gte and lte (YYYY-MM-DD, Philippine time; ask the owner if no dates were given). ' +
+    'Aggregates (select {agg, column, as}) and group_by (a column or {column, bucket day|week|month}) are computed by the CRM: never add or average rows yourself, state the formula for a rate and take its parts from aggregates. ' +
+    'detail "identity" on customers returns names, email, phone, pet and orders (at most 50 rows to you); it is refused for people who are not allowed. deliver "all" gives the OWNER the full table with Copy and CSV (drawn by the app: do NOT call render_table and do NOT retype rows) while you see a sample of 50 and the count; use it when the owner asks for everything or a long list. ' +
+    'Results state row_count, truncated, partial, next_cursor and definitions in meta.checks: say the count, and say so when truncated or partial. To continue a stopped list call again with the same query and cursor. ' + UNTRUSTED,
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {
+      describe: {type: 'boolean', description: 'true: list the tables, or with `table` its columns, filters and aggregates. Send nothing else with it.'},
+      table: {type: 'string', description: 'The table to read (from describe).'},
+      select: {type: 'array', description: 'Columns to return (a list of rows) OR aggregates {agg: count|count_distinct|sum|avg|min|max, column, as} (never both). Count has no column.', items: {anyOf: [NAME_ITEM, {type: 'object', properties: {agg: {type: 'string'}, column: {type: 'string'}, as: {type: 'string'}, min: {type: 'number'}}, required: ['agg'], additionalProperties: false}]}},
+      filters: {type: 'array', description: 'AND-ed filters {column, op: eq|in|gte|lte|between|is_null, value}. Dates are YYYY-MM-DD; in takes a list, between [low, high].', items: {type: 'object', properties: {column: {type: 'string'}, op: {type: 'string', enum: ['eq', 'in', 'gte', 'lte', 'between', 'is_null']}, value: {}}, required: ['column', 'op'], additionalProperties: false}},
+      group_by: {type: 'array', description: 'Group keys: a column, or {column, bucket: day|week|month, as} for a date. Needs an aggregate in select.', items: {anyOf: [NAME_ITEM, {type: 'object', properties: {column: {type: 'string'}, bucket: {type: 'string', enum: ['day', 'week', 'month']}, as: {type: 'string'}}, required: ['column'], additionalProperties: false}]}},
+      order_by: {type: 'array', description: 'Sort by names this query returns: {by, dir: asc|desc}.', items: {type: 'object', properties: {by: {type: 'string'}, dir: {type: 'string', enum: ['asc', 'desc']}}, required: ['by'], additionalProperties: false}},
+      limit: {type: 'integer', description: 'Rows (at most 200 for a list, 500 for groups, 50 for identity). Default is small.'},
+      cursor: {type: 'string', description: 'The next_cursor of the previous result, unchanged, to continue a list.'},
+      tz: {type: 'string', enum: ['Asia/Manila', 'UTC'], description: 'Day boundaries. Default Asia/Manila.'},
+      detail: {type: 'string', enum: ['identity'], description: 'customers only: names, email, phone, pet, membership and order facts. Only for people who may see them.'},
+      deliver: {type: 'string', enum: ['sample', 'all'], description: 'all: the owner gets the full table (up to 1,000 rows on screen, 10,000 in the CSV). Default sample.'},
+      joins: {type: 'array', description: 'Declared joins the catalog lists (only when describe shows joins).', items: {type: 'string'}},
+      computed: {type: 'array', description: 'Computed columns {as, expr} over names this query returns, using + - * /, parentheses and round(x, n) only (only when describe shows computed).', items: {type: 'object', properties: {as: {type: 'string'}, expr: {type: 'string'}}, required: ['as', 'expr'], additionalProperties: false}},
+      having: {type: 'array', description: 'Filters on aggregate results {by, op: eq|gte|lte|between, value} (only when describe shows having).', items: {type: 'object', properties: {by: {type: 'string'}, op: {type: 'string'}, value: {}}, required: ['by', 'op', 'value'], additionalProperties: false}},
+      top_n: {type: 'object', description: 'The top n rows per group {n, per: group name, by: aggregate name, dir} (only when describe shows top_n).', properties: {n: {type: 'integer'}, per: {type: 'string'}, by: {type: 'string'}, dir: {type: 'string', enum: ['asc', 'desc']}}, required: ['n', 'per', 'by'], additionalProperties: false},
+    },
+    required: [],
+    additionalProperties: false,
+  },
+};
+
+export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts, crmQuery]);
 
 const BLOCK_FIELD = {type: 'string', description: '"new" to add a block, or the id of a block already on the dashboard (b1, b2...) to change that block in place.'};
 const SOURCE_FIELD = {type: 'string', description: 'The id of a query_metric result (r1, r2...) or of a block on the dashboard (b1, b2...). You give an id and field names, never values: the app reads the numbers from that result.'};

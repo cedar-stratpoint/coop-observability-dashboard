@@ -64,7 +64,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...createReportExecutors(ctx, session, data),
     ...(ctx.explore ? {run_query: ctx.explore} : {}),
     ...(ctx.exploreSchema ? {list_tables: ctx.exploreSchema.list_tables, describe_table: ctx.exploreSchema.describe_table} : {}),
-    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep}) : {}),
+    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true}) : {}),
     describe_data: async (input) => describeData(input as {metric: string}, await data(), ctx.now, !!ctx.explore, !!ctx.crm, !!ctx.crmOrders || !!ctx.crm),
     query_metric: async (input) => {
       let result = runMetric(input, await data(), ctx.now);
@@ -203,13 +203,15 @@ function compact(r: MetricResult, id: string) {
   const {measures, ...meta} = r.meta;
   const used = measures.find((m) => m.key === meta.measure);
   const total = r.rows.length;
+  // crm_query already capped its rows and bytes for the model (src/chat/crm/query-config.ts); every other result keeps the 100-row payload
+  const cap = r.metric === 'crm_query' ? total : MAX_PAYLOAD_ROWS;
   return {
     id,
     metric: r.metric,
     dimension: r.dimension,
     columns: r.columns,
-    rows: total > MAX_PAYLOAD_ROWS ? r.rows.slice(0, MAX_PAYLOAD_ROWS) : r.rows,
-    ...(total > MAX_PAYLOAD_ROWS ? {truncated: {shown: MAX_PAYLOAD_ROWS, total}} : {}),
+    rows: total > cap ? r.rows.slice(0, cap) : r.rows,
+    ...(total > cap ? {truncated: {shown: cap, total}} : {}),
     meta: {...meta, method: used?.method ?? '', declared_measures: measures.map((m) => m.key)},
   };
 }
@@ -231,6 +233,7 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'get_digest') return 'Reading a stored digest';
   if (name === 'get_channel_report') return 'Building the channel report';
   if (name === 'get_crm_metrics') return 'Reading the website CRM totals';
+  if (name === 'crm_query') return 'Querying the website CRM';
   if (name === 'list_crm_orders') return 'Looking up website orders';
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';

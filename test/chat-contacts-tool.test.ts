@@ -62,7 +62,8 @@ describe('contacts tool', () => {
     expect(CHAT_TOOLS.some((t) => t.name === 'contacts')).toBe(false);
     const all = chatTools({explore: true, crm: true, contacts: true});
     expect(all.some((t) => t.name === 'contacts')).toBe(true);
-    expect(all.length).toBeLessThanOrEqual(20);
+    expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20); // Anthropic's limit is on STRICT tools; crm_query and contacts are not strict
+    expect(all.length).toBeLessThanOrEqual(24); // our own sanity ceiling on the total
     expect(() => assertRequestShape({model: 'm', max_tokens: 1, tools: all, messages: []})).not.toThrow();
   });
 
