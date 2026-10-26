@@ -228,6 +228,7 @@ export function DashboardShell({
   const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU links', icon: Link2};
   const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
   const flagsTab: NavItem = {href: '/flags', label: 'Flags', icon: Flag};
+  const basTab: NavItem = {href: '/bas', label: 'BAs', icon: Contact};
   const healthTab: NavItem = {href: '/store-health', label: 'Health', icon: HeartPulse};
   const usersTab: NavItem = {href: '/admin/users', label: 'Users & Roles', icon: Users};
   // Settings for non-Zoomy views only matters to multi-role users (Starting view).
@@ -239,7 +240,7 @@ export function DashboardShell({
     ? FLAT_TABS
     : isCoopAdminView
       ? [usersTab, ...(multiView ? [settingsTab] : [])]
-      : [overviewTab, storesTab, stockTab, skuLinksTab, flagsTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
+      : [overviewTab, storesTab, stockTab, skuLinksTab, flagsTab, basTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
 
   // ── Mobile nav model (below md only) ──────────────────────────────────────
   // The left rail is hidden under md; these drive a bottom tab bar + a "More" sheet.
@@ -276,7 +277,7 @@ export function DashboardShell({
       ? multiView
         ? [settingsTab]
         : []
-      : [storesTab, skuLinksTab, flagsTab, healthTab, ...(multiView ? [settingsTab] : [])];
+      : [storesTab, skuLinksTab, flagsTab, basTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 
   return (

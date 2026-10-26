@@ -4,6 +4,7 @@ import {canEditData} from '@/src/company';
 import {catalogForCodes, getBatch, getBatchPages, listStores} from '@/src/goldline-data';
 import {MANIFESTS} from '@/src/goldline-extract';
 import {orderPages} from '@/src/upload-batch';
+import {getCurrentBas} from '@/src/goldline-ba-data';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +30,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   const raw = await getBatchPages(ctx.companyId, id);
   const pdfPages = raw.filter((p) => p.upload.kind === 'inventory_pdf');
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
-  const [catalog, stores] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId)]);
+  const [catalog, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);
 
   const pages: BatchReviewPage[] = orderPages(
     pdfPages.map((p) => {
@@ -62,6 +63,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       pages={pages}
       catalog={catalog}
       stores={stores}
+      bas={bas}
       initialPageId={typeof openPage === 'string' ? openPage : null}
       otherFiles={raw.filter((p) => p.upload.kind !== 'inventory_pdf').map((p) => p.upload)}
     />
