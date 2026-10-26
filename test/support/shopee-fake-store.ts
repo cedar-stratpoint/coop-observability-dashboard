@@ -29,7 +29,7 @@ export class FakeStore implements ImportStore {
   }
   async createRun(n: NewRun): Promise<string> {
     const importId = `run-${this.runs.length + 1}`;
-    this.runs.push({importId, reportType: n.reportType, periodFrom: n.periodFrom, periodTo: n.periodTo, sourceFilename: n.sourceFilename, sha256: n.sha256, status: n.status, rowCount: n.rowCount, plan: n.plan, restated: Boolean(n.restated), checks: n.checks, acceptedSeq: 0});
+    this.runs.push({importId, reportType: n.reportType, periodFrom: n.periodFrom, periodTo: n.periodTo, sourceFilename: n.sourceFilename, sha256: n.sha256, status: n.status, rowCount: n.rowCount, plan: n.plan, restated: Boolean(n.restated), checks: n.checks, importedBy: n.importedBy ?? null, acceptedSeq: 0});
     return importId;
   }
   async addObservations(importId: string, rows: readonly DayFigures[]): Promise<void> {

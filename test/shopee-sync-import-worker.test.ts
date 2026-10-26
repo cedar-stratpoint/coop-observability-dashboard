@@ -112,6 +112,25 @@ describe('the import API with a worker token', () => {
     store.runs.find((r) => r.importId === id)!.reportType = 'traffic';
     expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
   });
+  it('refuses to apply a run its own job did not plan (an admin-planned or another job\'s run), writing nothing', async () => {
+    const {token, deps, store} = await setup();
+    const planned = await (await handlePlan(await planReq(IMPORT_TOKEN, [await daily()]), deps)).json();
+    const id = planned.results[0].importId;
+    expect(store.runs.find((r) => r.importId === id)?.importedBy).toBe('api');
+    expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
+    store.runs.find((r) => r.importId === id)!.importedBy = 'sync:some-other-job';
+    expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
+    expect(store.runs.find((r) => r.importId === id)?.status).toBe('staged');
+  });
+  it('refuses to apply its own run when the plan carries flags (a person reviews those)', async () => {
+    const {token, deps, store} = await setup();
+    const planned = await (await handlePlan(await planReq(token, [await daily()]), deps)).json();
+    const id = planned.results[0].importId;
+    expect(store.runs.find((r) => r.importId === id)?.importedBy).toMatch(/^sync:/);
+    store.runs.find((r) => r.importId === id)!.plan!.flags.push({code: 'BIG_SWING'} as never);
+    expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
+    expect(store.runs.find((r) => r.importId === id)?.status).toBe('staged');
+  });
   it('refuses undo and coverage with 403', async () => {
     const {token, deps} = await setup();
     expect((await handleUndo(json(token, {importId: 'x', reason: 'r'}), deps)).status).toBe(403);

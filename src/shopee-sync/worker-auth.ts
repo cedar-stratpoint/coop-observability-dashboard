@@ -7,6 +7,8 @@ import type {Job} from './types';
 export interface WorkerGrant {
   /** Days of the job this worker is running or importing now. Empty: it may not plan or apply anything. */
   days: readonly string[];
+  /** The job those days belong to; runs a worker plans are stamped `sync:<jobId>` and it may apply only those. */
+  jobId: string | null;
 }
 const WORKING: readonly Job['status'][] = ['running', 'importing'];
 
@@ -15,5 +17,6 @@ export const workerAuthFor = (store: SyncStore) => async (bearer: string): Promi
   const w = await workerForToken(store, bearer);
   if (!w) return null;
   const jobs = await store.recentJobs(10);
-  return {days: jobs.filter((j) => j.claimedBy === w.id && WORKING.includes(j.status)).flatMap((j) => j.days)};
+  const job = jobs.find((j) => j.claimedBy === w.id && WORKING.includes(j.status));
+  return {days: job?.days ?? [], jobId: job?.id ?? null};
 };
