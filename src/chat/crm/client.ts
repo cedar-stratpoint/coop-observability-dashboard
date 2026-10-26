@@ -1,6 +1,6 @@
 // The GET-only website CRM client for Ask Coop (spec 4.2; knowledge/best-practices/chat-readonly-api-tools.md). Pure: `fetch` is
 // injected, so vitest drives it with a fake and no real CRM is needed. Rules, each pinned by a test:
-//  - GET only (a constant), one base URL, endpoints by id from a frozen allowlist, a typed query allowlist (only /api/query takes one: a JSON `spec` of at most 2,000 characters);
+//  - GET only (a constant), one base URL, endpoints by id from a frozen allowlist, a typed query allowlist (only /api/query takes one: a JSON `spec` of at most 4,096 characters, the CRM's own cap);
 //  - `redirect: 'error'` (a 30x never carries the bearer token anywhere), a timeout, a streamed byte cap;
 //  - one read per endpoint per turn (memoised, failures included), a per-turn GET cap;
 //  - errors carry a code only: never the URL, the token or upstream text.

@@ -1,7 +1,7 @@
 // The CRM query catalog (GET /api/catalog) as Ask Coop uses it: parsed defensively into a small closed shape, cached for ten minutes,
 // dropped as soon as a query answer carries a different `catalog_version`, with a minimal built-in fallback when the CRM serves none
-// (an older CRM, or unreachable). The fallback is deliberately small: the CRM refuses anything outside its own whitelist, so it stays
-// the authority; this copy only lets Coop refuse the obvious mistakes without a round trip. Pure apart from the injected `get`.
+// (the CRM unreachable). The fallback is a trimmed copy of the final zoomy-crm catalog (2026-10-23.1): the CRM refuses anything outside
+// its own whitelist, so it stays the authority; this copy only lets Coop refuse the obvious mistakes without a round trip. Pure apart from the injected `get`.
 import {QUERY_LIMITS} from './query-config';
 import type {CrmGet} from './tools';
 
@@ -30,6 +30,8 @@ export interface CatTable {
   rowLevel: boolean;
   windowCol: string | null;
   maxWindowDays: number | null;
+  /** Declared joins this table offers (the CRM's `joins` list: `customers` on orders, order_lines and order_discount_codes). */
+  joins: string[];
   columns: CatColumn[];
   notAvailable: string[];
 }
@@ -40,9 +42,8 @@ export interface CatIdentity {
   cap: number;
   untrusted: string[];
 }
-/** What the CRM says it can do beyond v1 (declared joins, computed columns, HAVING, top-N per group). Absent keys: not supported yet. */
+/** What the CRM's `v2` block advertises: computed select items, HAVING, top-N (`key` / `per`). Joins are per table (`CatTable.joins`). Absent keys: not offered. */
 export interface CatFeatures {
-  joins: string[];
   computed: boolean;
   having: boolean;
   topN: boolean;
@@ -53,8 +54,13 @@ export interface Catalog {
   identity: CatIdentity | null;
   special: string | null;
   features: CatFeatures;
+  /** Row-level cap without a cursor (to the model). */
   rowCap: number;
   groupedCap: number;
+  /** Row-level page size with a cursor ("start" or a next_cursor): the CRM's ROW_CAP_PAGED. Identity pages stay at the identity cap. */
+  pagedCap: number;
+  /** Longest raw spec the CRM accepts. */
+  specChars: number;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -62,6 +68,8 @@ const strs = (v: unknown, max = 40): string[] => (Array.isArray(v) ? v.filter((x
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '');
 const ID = /^[a-z][a-z0-9_]{0,40}$/;
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d);
+/** A v2 capability is advertised as its grammar text (the CRM) or `true`. */
+const on = (v: unknown): boolean => v === true || (typeof v === 'string' && v.length > 0);
 
 /** The CRM's catalog body, or null when it is not a catalog. Unknown fields are ignored; ids that are not plain names are dropped. */
 export function parseCatalog(body: unknown): Catalog | null {
@@ -76,7 +84,7 @@ export function parseCatalog(body: unknown): Catalog | null {
       const cls: ColClass = c.class === 'identity' ? 'identity' : c.class === 'aggregate_only' ? 'aggregate_only' : 'safe';
       columns.push({name: c.name, type, cls, meaning: str(c.meaning, 240), select: c.select === true, group: c.group === true, filter: strs(c.filter, 6), aggs: strs(c.aggs, 6), distinctOnly: c.count_distinct_only === true, unit: typeof c.unit === 'string' ? c.unit.slice(0, 12) : null});
     }
-    tables.push({name: t.name, meaning: str(t.meaning, 240), rowLevel: t.row_level === true, windowCol: typeof t.window_required === 'string' && ID.test(t.window_required) ? t.window_required : null, maxWindowDays: typeof t.max_window_days === 'number' ? t.max_window_days : null, columns, notAvailable: strs(t.not_available, 12).map((s) => s.slice(0, 80))});
+    tables.push({name: t.name, meaning: str(t.meaning, 240), rowLevel: t.row_level === true, windowCol: typeof t.window_required === 'string' && ID.test(t.window_required) ? t.window_required : null, maxWindowDays: typeof t.max_window_days === 'number' ? t.max_window_days : null, joins: strs(t.joins, 4).filter((j) => ID.test(j)), columns, notAvailable: strs(t.not_available, 12).map((s) => s.slice(0, 80))});
   }
   if (tables.length === 0) return null;
   let identity: CatIdentity | null = null;
@@ -94,9 +102,11 @@ export function parseCatalog(body: unknown): Catalog | null {
     tables,
     identity,
     special: isObj(sp) && typeof sp.name === 'string' && ID.test(sp.name) ? sp.name : null,
-    features: {joins: strs(v2.joins, 12).filter((j) => ID.test(j)), computed: v2.computed === true || isObj(v2.computed), having: v2.having === true, topN: v2.top_n === true},
+    features: {computed: on(v2.computed), having: on(v2.having), topN: on(v2.top_n)},
     rowCap: num(limits.ROW_CAP_ROWS, QUERY_LIMITS.modelRows),
     groupedCap: num(limits.ROW_CAP_GROUPED, QUERY_LIMITS.modelGrouped),
+    pagedCap: num(limits.ROW_CAP_PAGED, QUERY_LIMITS.crmPagedRows),
+    specChars: num(limits.MAX_SPEC_CHARS, QUERY_LIMITS.maxSpecChars),
   };
 }
 
@@ -105,21 +115,30 @@ const col = (name: string, type: CatColumn['type'], meaning: string, o: Partial<
   aggs: type === 'number' ? ['sum', 'avg', 'min', 'max', 'count', 'count_distinct'] : type === 'date' ? ['min', 'max', 'count'] : ['count', 'count_distinct'], distinctOnly: false, unit: null, ...o,
 });
 const email = col('email', 'text', 'Distinct count only: never returned, filtered or grouped.', {cls: 'aggregate_only', select: false, group: false, filter: [], aggs: ['count_distinct'], distinctOnly: true});
+const JOINED = ['customers'];
+// customers columns are aggregate-only: they are group keys, filters and aggregates (also through the `customers` join), never rows
+const agg = (name: string, type: CatColumn['type'], meaning: string, o: Partial<CatColumn> = {}): CatColumn => col(name, type, meaning, {cls: 'aggregate_only', select: false, ...o});
+const ref = col('customer_ref', 'text', 'Opaque customer id (null = guest).', {select: false, group: false, filter: ['eq', 'in', 'is_null'], aggs: ['count', 'count_distinct']});
+const win = {windowCol: 'created_at', maxWindowDays: QUERY_LIMITS.crmWindowDays, notAvailable: []};
 
-/** Used when the CRM serves no catalog. Small on purpose; the CRM still checks everything. */
+/** Used when the CRM serves no catalog. A trimmed copy of the final CRM catalog; the CRM still checks everything. */
 export const FALLBACK_CATALOG: Catalog = Object.freeze({
   version: 'fallback',
   tables: [
-    {name: 'orders', meaning: 'One row per website order.', rowLevel: true, windowCol: 'created_at', maxWindowDays: 90, notAvailable: [], columns: [col('order_number', 'text', 'The order number.', {group: false}), col('created_at', 'date', 'When the order was placed.'), col('financial_status', 'text', 'Payment status.'), col('fulfillment_status', 'text', 'Fulfilment status.'), col('total_price', 'number', 'What the customer paid.'), col('customer_ref', 'text', 'Opaque customer id.', {select: false, aggs: ['count_distinct']}), email]},
-    {name: 'order_lines', meaning: 'One row per order line item.', rowLevel: true, windowCol: 'created_at', maxWindowDays: 90, notAvailable: [], columns: [col('created_at', 'date', 'When the order was placed.'), col('sku', 'text', 'Line SKU.'), col('title', 'text', 'Product title.'), col('quantity', 'number', 'Units on the line.'), col('line_gross', 'number', 'Unit price x quantity.'), email]},
-    {name: 'checkouts', meaning: 'One row per checkout; converted_at null means abandoned.', rowLevel: true, windowCol: 'created_at', maxWindowDays: 90, notAvailable: [], columns: [col('created_at', 'date', 'When the checkout started.'), col('converted_at', 'date', 'When it became an order.'), col('total_price', 'number', 'Cart value.'), email]},
-    {name: 'customers', meaning: 'One row per customer; aggregate-only, identity detail on request.', rowLevel: false, windowCol: null, maxWindowDays: null, notAvailable: [], columns: [col('membership_tier', 'text', 'Membership tier.', {cls: 'aggregate_only', select: false}), col('orders_count', 'number', 'Orders count.', {cls: 'aggregate_only', select: false}), col('total_spent', 'number', 'Total spent.', {cls: 'aggregate_only', select: false}), email]},
+    {name: 'orders', meaning: 'One row per website order.', rowLevel: true, ...win, joins: JOINED, columns: [col('order_number', 'text', 'The order number.', {group: false}), col('created_at', 'date', 'When the order was placed.'), col('financial_status', 'text', 'Payment status.'), col('fulfillment_status', 'text', 'Fulfilment status.'), col('total_price', 'number', 'What the customer paid.'), ref, email]},
+    {name: 'order_lines', meaning: 'One row per order line item.', rowLevel: true, ...win, joins: JOINED, columns: [col('created_at', 'date', 'When the order was placed.'), col('financial_status', 'text', 'Payment status.'), col('sku', 'text', 'Line SKU.'), col('title', 'text', 'Product title.'), col('quantity', 'number', 'Units on the line.'), col('line_gross', 'number', 'Unit price x quantity.'), col('line_discount', 'number', 'Line-level discount.'), ref, email]},
+    {name: 'order_discount_codes', meaning: 'One row per discount code on an order.', rowLevel: true, ...win, joins: JOINED, columns: [col('created_at', 'date', 'When the order was placed.'), col('code', 'text', 'The discount code.'), col('amount', 'number', 'Amount taken off.'), ref, email]},
+    {name: 'checkouts', meaning: 'One row per checkout; converted_at null means abandoned.', rowLevel: true, ...win, joins: [], columns: [col('created_at', 'date', 'When the checkout started.'), col('converted_at', 'date', 'When it became an order.'), col('total_price', 'number', 'Cart value.'), email]},
+    {name: 'checkout_lines', meaning: 'One row per cart line item.', rowLevel: true, ...win, joins: [], columns: [col('created_at', 'date', 'When the checkout started.'), col('converted_at', 'date', 'When it became an order.'), col('sku', 'text', 'Line SKU.'), col('quantity', 'number', 'Units on the line.'), col('line_gross', 'number', 'Unit price x quantity.'), email]},
+    {name: 'customers', meaning: 'One row per customer; aggregate-only, identity detail on request.', rowLevel: false, windowCol: null, maxWindowDays: null, joins: [], notAvailable: [], columns: [agg('membership_tier', 'text', 'Membership tier.'), agg('orders_count', 'number', 'Orders count.'), agg('total_spent', 'number', 'Total spent.'), agg('created_at', 'date', 'When the customer was created.'), agg('email_marketing_state', 'text', 'subscribed, not_subscribed, unsubscribed.'), {...ref, filter: ['eq', 'in']}, email]},
   ],
-  identity: {fields: ['customer_ref', 'full_name', 'email', 'phone', 'pet_name', 'pet_birthday', 'membership_tier', 'orders', 'total_spent', 'first_order_at', 'last_order_at'], filters: {customer_ref: ['eq', 'in'], email: ['eq', 'in'], full_name: ['eq', 'in'], membership_tier: ['eq', 'in', 'is_null'], orders_count: ['eq', 'gte', 'lte', 'between'], total_spent: ['gte', 'lte', 'between']}, orderBy: ['orders_count', 'total_spent', 'created_at'], cap: QUERY_LIMITS.modelIdentity, untrusted: ['full_name', 'pet_name']},
+  identity: {fields: ['customer_ref', 'full_name', 'email', 'phone', 'pet_name', 'pet_birthday', 'pet_profiles', 'membership_tier', 'email_marketing_state', 'orders', 'total_spent', 'first_order_at', 'last_order_at', 'last_order_skus', 'discount_codes_used'], filters: {customer_ref: ['eq', 'in'], email: ['eq', 'in'], full_name: ['eq', 'in'], membership_tier: ['eq', 'in', 'is_null'], orders_count: ['eq', 'gte', 'lte', 'between'], total_spent: ['gte', 'lte', 'between'], created_at: ['gte', 'lte', 'between']}, orderBy: ['orders_count', 'total_spent', 'created_at'], cap: QUERY_LIMITS.modelIdentity, untrusted: ['full_name', 'pet_name', 'pet_profiles']},
   special: 'customers_with_min_orders',
-  features: {joins: [], computed: false, having: false, topN: false},
+  features: {computed: true, having: true, topN: true},
   rowCap: QUERY_LIMITS.modelRows,
   groupedCap: QUERY_LIMITS.modelGrouped,
+  pagedCap: QUERY_LIMITS.crmPagedRows,
+  specChars: QUERY_LIMITS.maxSpecChars,
 } satisfies Catalog);
 
 export const tableOf = (cat: Catalog, name: string): CatTable | null => cat.tables.find((t) => t.name === name) ?? null;
