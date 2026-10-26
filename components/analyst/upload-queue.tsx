@@ -3,16 +3,17 @@
 import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {createBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
-import {kindOfFile, type Phase} from '@/src/upload-progress';
+import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progress';
 import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
-import {sendUpload, splitPdfPages, type UploadResult} from '@/src/upload-transport';
+import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
 // in-app navigation), so uploads keep running while the user moves between pages and
 // a small indicator can follow them. One batch at a time = one store's form for one
 // period: PDFs (multi-page ones split into pages on drop) are read 2 at a time; the
 // batch's store + period are entered once, prefilled from page 1's printed header.
-// A sales CSV rides along but needs the period before it can go.
+// A sales CSV rides along but needs the period before it can go; a Watsons POS Sales
+// Data .xlsx carries its own month and goes straight away (it never joins the batch).
 
 export const CONCURRENCY = 2;
 
@@ -23,7 +24,7 @@ export type QueueItem = {
   file: File;
   name: string;
   size: number;
-  kind: 'pdf' | 'csv';
+  kind: UploadKindGuess;
   state: ItemState;
   phase: Phase; // server milestone while running
   uploadFrac: number; // real bytes sent, 0–1
@@ -37,6 +38,7 @@ export type QueueItem = {
   rows?: number;
   flagged?: number;
   rowsCommitted?: number;
+  watsons?: WatsonsResult;
   error?: string;
 };
 
@@ -196,6 +198,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
           rows: res.rows,
           flagged: res.flagged,
           rowsCommitted: res.rowsCommitted,
+          watsons: res.watsons,
         });
         // Page 1 prints the store + period: prefill the batch if the user hasn't typed them.
         const h = res.header;
@@ -264,7 +267,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
         for (const f of files) {
           const k = kindOfFile(f.name);
           if (!k) {
-            problems.push(`“${f.name}” isn’t a .csv or .pdf.`);
+            problems.push(`“${f.name}” isn’t a .csv, .xlsx or .pdf.`);
             continue;
           }
           if (f.size === 0) {
@@ -294,7 +297,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
           file,
           name: file.name,
           size: file.size,
-          kind: kindOfFile(file.name) === 'csv' ? 'csv' : 'pdf',
+          kind: kindOfFile(file.name) ?? 'pdf',
           state: 'queued',
           phase: 'uploading',
           uploadFrac: 0,

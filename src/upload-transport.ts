@@ -27,6 +27,19 @@ export type UploadResult = {
   flagged?: number;
   docConfidence?: number;
   header?: UploadHeader;
+  watsons?: WatsonsResult; // a Watsons POS Sales Data month
+};
+
+export type WatsonsResult = {
+  month: {start: string; end: string};
+  salesRows: number;
+  stores: number;
+  storesAdded: number;
+  skus: number;
+  skusNew: number;
+  linkedNow: string[];
+  units: number;
+  linkedUnits: number;
 };
 
 export function sendUpload(input: {

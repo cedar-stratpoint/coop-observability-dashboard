@@ -34,7 +34,9 @@ export function safeObjectName(filename: string): string {
   return cleaned.slice(0, 180) || 'upload';
 }
 
-export type UploadKind = 'pos_csv' | 'inventory_pdf';
+export type UploadKind = 'pos_csv' | 'pos_xlsx' | 'inventory_pdf';
+
+const SALES_CHUNK = 2000;
 export type UploadStatus = 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
@@ -221,10 +223,13 @@ export async function upsertSales(
     net_of_vat: r.netOfVat,
     source_upload_id: uploadId,
   }));
-  const res = await supa
-    .from('sales')
-    .upsert(payload, {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
-  if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
+  // A Watsons month is ~40k rows: send it in chunks so no single request is huge.
+  for (let i = 0; i < payload.length; i += SALES_CHUNK) {
+    const res = await supa
+      .from('sales')
+      .upsert(payload.slice(i, i + SALES_CHUNK), {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
+    if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
+  }
   return payload.length;
 }
 
