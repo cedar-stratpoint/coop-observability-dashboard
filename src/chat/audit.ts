@@ -137,9 +137,9 @@ export function logCrmCall(
   sink.info(JSON.stringify({event: 'chat_crm_call', tool: e.tool, endpoints: e.endpoints, params_fp: e.paramsFp, ok: e.ok, code: e.code, rows: e.rows, bytes: e.bytes, ms: e.ms, user: e.user ?? null}));
 }
 
-/** One line per `contacts` call (contact data). Who, which event id, how many rows and which column names: never an email, mobile, handle, pet or the event text typed. */
+/** One line per `contacts` call or per `crm_query` identity call (personal data). Who, which event id, how many rows and which column names: never an email, mobile, handle, name, pet or the text typed. */
 export function logPiiRead(
-  e: {tool: 'contacts'; mode: string; ok: boolean; code: string | null; eventId: string | null; rows: number | null; columns: readonly string[]; user?: string | null},
+  e: {tool: 'contacts' | 'crm_query'; mode: string; ok: boolean; code: string | null; eventId: string | null; rows: number | null; columns: readonly string[]; user?: string | null},
   sink: AuditSink = console,
 ): void {
   sink.info(JSON.stringify({event: 'chat_pii_read', tool: e.tool, mode: e.mode, ok: e.ok, code: e.code, event_id: e.eventId, rows: e.rows, columns: e.columns, consent_filter: 'none', user: e.user ?? null}));
