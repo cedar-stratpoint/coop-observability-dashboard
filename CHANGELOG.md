@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline SKU links screen removed from the app
+Decided Oct 27: the Watsons SKU link review lives only in the plan page's SKU link matrix (with remarks for whoever reviews it), not in Coop Nichido.
+- Removed `/stock/skus` (page, actions, `components/analyst/goldline-sku-links.tsx`, `src/goldline-sku-links-data.ts`) and the "SKU links" nav item (rail and mobile More sheet). Inventory owns all of `/stock` again.
+- Unchanged: the matcher still links high-confidence pairs on every Watsons upload, and the links already saved on Nichido Staging (`products.sku_code`, `chain_skus`) stay. Reviewed decisions from the matrix are applied as data, and carried to prod per `docs/nichido-prod-cutover.md`.
+
 ## 2026-10-26 — Watsons SKU links rechecked by hand (Nichido Staging data only)
 A final check of the SKU link matrix against the 10 raw Watsons Scan Data files and the inventory form PDFs. No code changed; data edits were applied directly on Nichido Staging.
 - **Source check passed.** The files total 313 SKUs, 2,130,613 units and ₱317.6M, equal to every month's TOTAL row and to `sales` per SKU (units, sales and store count). All 263 catalog items are on the form; prices match on the 237 that parse cleanly.

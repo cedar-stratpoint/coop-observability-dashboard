@@ -153,7 +153,6 @@ export async function setRetiredAction(input: {company: string | null; item: str
   try {
     await setRetired(e.companyId, input.item, Boolean(input.retired));
     refresh(e.companyId, ['catalog']);
-    revalidatePath('/stock/skus');
     return {ok: true};
   } catch (err) {
     if (err instanceof SupplyError) return {ok: false, error: 'Product not found.'};
