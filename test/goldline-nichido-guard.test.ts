@@ -14,7 +14,9 @@ const NICHIDO_TABLES = ['stores', 'products', 'sales', 'inventory', 'inventory_s
   'supply_settings', 'line_lead_times', 'store_transit', 'warehouse_stock', 'shipments', 'price_changes'];
 const NICHIDO_FUNCTIONS = ['commit_batch', 'sales_rollup', 'count_sources', 'record_shipment', 'cancel_shipment', 'set_price'];
 const q = (call: string, names: string[]) => `\\.${call}\\(\\s*['"\`](?:${names.join('|')})['"\`]`;
-const NICHIDO_QUERY = new RegExp(`${q('from', NICHIDO_TABLES)}|${q('rpc', NICHIDO_FUNCTIONS)}|\\.storage\\b`);
+// Storage is Goldline's only when it names the goldline-uploads bucket (other features,
+// e.g. the Shopee importer, keep their own buckets in the archive).
+const NICHIDO_QUERY = new RegExp(`${q('from', NICHIDO_TABLES)}|${q('rpc', NICHIDO_FUNCTIONS)}|\\.storage\\.from\\(\\s*GOLDLINE_BUCKET`);
 const GL_ACCESS = new RegExp(`${NICHIDO_QUERY.source}|GOLDLINE_BUCKET|goldline-uploads`);
 
 function files(dir: string): string[] {
