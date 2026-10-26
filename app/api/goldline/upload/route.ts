@@ -268,7 +268,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       return json({uploadId, status: 'failed', error: reason, errors: wb.errors}, 422);
     }
     // A chain-wide file adds stores and changes SKU links for the whole company, so only
-    // a role that sees every store may load it (same rule as the SKU links screen).
+    // a role that sees every store may load it (same rule as SKU linking).
     if (Array.isArray(ctx.storeScope)) {
       const reason = 'Only someone who sees every store can load POS Sales Data for the whole chain.';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
