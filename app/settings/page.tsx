@@ -5,6 +5,8 @@ import {homeFor, shouldRedirectFromZoomy} from '@/src/company-nav';
 import {fetchViewPrefs} from '@/src/company';
 import {SettingsTab} from '@/components/analyst/tabs';
 import {StartViewSettings} from '@/components/analyst/start-view-settings';
+import Link from 'next/link';
+import {Laptop} from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +27,26 @@ export default async function Page() {
       <StartViewSettings views={nav.views} defaultView={prefs?.defaultView ?? null} lastView={prefs?.lastView ?? null} />
     ) : null;
 
-  if (zoomy) return <SettingsTab before={startView} />;
+  const syncLink = (
+    <Link href="/settings/shopee-sync" className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-foreground/25">
+      <Laptop className="size-4 text-muted-foreground" aria-hidden />
+      <span className="flex flex-col">
+        <span className="text-sm font-medium text-foreground">My sync Macs</span>
+        <span className="text-[13px] text-muted-foreground">Add or remove the Macs that load Shopee days for you.</span>
+      </span>
+    </Link>
+  );
+  if (zoomy)
+    return (
+      <SettingsTab
+        before={
+          <div className="flex flex-col gap-4">
+            {startView}
+            {syncLink}
+          </div>
+        }
+      />
+    );
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
       <header className="flex flex-col gap-1">

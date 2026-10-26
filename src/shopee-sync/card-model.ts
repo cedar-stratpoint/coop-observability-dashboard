@@ -119,3 +119,20 @@ export function stepsFor(j: SyncJobView): Step[] {
   const cur = at[j.status];
   return names.map((label, i) => ({label, state: j.status === 'failed' && i === cur ? 'bad' : i < cur ? 'done' : i === cur ? 'now' : 'todo'}));
 }
+
+export interface MacStatus {
+  key: 'online' | 'offline' | 'signin' | 'first';
+  label: string;
+  tone: Tone;
+}
+/** One Mac's state for the Settings list: online, offline, needs sign-in (Seller Centre), or waiting for its first sign-in. */
+export function macStatus(w: {online: boolean; lastSeen: string | null; sessionState: 'signed_out' | 'ready' | 'expired'}): MacStatus {
+  if (!w.lastSeen && w.sessionState === 'signed_out') return {key: 'first', label: 'Waiting for first sign-in', tone: 'neutral'};
+  if (!w.online) return {key: 'offline', label: 'Offline', tone: 'neutral'};
+  if (w.sessionState !== 'ready') return {key: 'signin', label: 'Needs sign-in', tone: 'warn'};
+  return {key: 'online', label: 'Online', tone: 'good'};
+}
+export const SESSION_LABEL = {ready: 'Signed in to Seller Centre', signed_out: 'Not signed in', expired: 'Session expired'} as const;
+
+/** The server leaves the dashboard address as a placeholder; the browser knows it. The worker image stays a placeholder until one is published. */
+export const enrolCommand = (command: string, origin: string): string => command.replace('<DASHBOARD_ADDRESS>', origin);

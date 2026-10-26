@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton, workerLine} from '../src/shopee-sync/card-model';
+import {agoText, behindTag, cardVisible, pollInterval, enrolCommand, macStatus, rangeText, statusMeta, stepsFor, syncButton, workerLine} from '../src/shopee-sync/card-model';
 import type {ShopeeSyncStatus, SyncJobView, SyncWorkerView} from '../src/shopee-sync/status';
 
 const now = new Date('2026-10-27T06:00:00Z');
@@ -146,5 +146,22 @@ describe('stepsFor', () => {
   it('failed marks the step it stopped at: exporting when nothing came back, importing when something did', () => {
     expect(labels(job({status: 'failed'}))[1]).toBe('Exporting from Shopee:bad');
     expect(labels(job({status: 'failed', progress: {'2026-10-19': {state: 'loaded'}}}))[2]).toBe('Importing orders:bad');
+  });
+});
+
+describe('macStatus', () => {
+  it('names the four states of a Mac', () => {
+    expect(macStatus(worker({lastSeen: null, online: false, sessionState: 'signed_out'}))).toEqual({key: 'first', label: 'Waiting for first sign-in', tone: 'neutral'});
+    expect(macStatus(worker())).toEqual({key: 'online', label: 'Online', tone: 'good'});
+    expect(macStatus(worker({sessionState: 'expired'}))).toEqual({key: 'signin', label: 'Needs sign-in', tone: 'warn'});
+    expect(macStatus(worker({sessionState: 'signed_out'}))).toMatchObject({key: 'signin'});
+    expect(macStatus(worker({online: false, lastSeen: ago(900)}))).toEqual({key: 'offline', label: 'Offline', tone: 'neutral'});
+  });
+});
+
+describe('enrolCommand', () => {
+  it('puts the dashboard address into the command and leaves the image placeholder alone', () => {
+    const cmd = 'docker run -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=abc <WORKER_IMAGE>';
+    expect(enrolCommand(cmd, 'https://coop.example')).toBe('docker run -e COOP_URL=https://coop.example -e ENROL_CODE=abc <WORKER_IMAGE>');
   });
 });
