@@ -132,6 +132,22 @@ describe('revokeWorkerFor', () => {
   });
 });
 
+describe('revoking a Mac that is mid-sync', () => {
+  it('fails its in-flight job so it stops blocking the team, and leaves other jobs alone', async () => {
+    const w = await addWorker('a@x.com');
+    const job = (await store.createJob({requestedBy: 'a@x.com', days: ['2026-10-19']}, clock)) as {id: string};
+    await store.claimJob(job.id, w.id, clock);
+    expect((await revokeWorkerFor(deps(), {email: 'a@x.com', isAdmin: false}, w.id)).ok).toBe(true);
+    const after = await store.getJob(job.id);
+    expect(after?.status).toBe('failed');
+    expect(after?.error).toMatch(/removed/i);
+    expect(after?.finishedAt).not.toBeNull();
+    clock = at('2026-10-27T14:30:00');
+    await addWorker('a@x.com');
+    expect((await requestSync(deps(), 'a@x.com')).ok).toBe(true);
+  });
+});
+
 describe('dockerCommand', () => {
   it('publishes the noVNC port on loopback only and gives Chrome enough shared memory', () => {
     const c = dockerCommand('CODE');

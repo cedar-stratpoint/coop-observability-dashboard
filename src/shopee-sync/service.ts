@@ -107,5 +107,10 @@ export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string)
   const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
   if (!worker) return fail('That Mac is not enrolled.');
   if (!who.isAdmin && !sameEmail(worker.ownerEmail, who.email)) return fail('You can only remove your own Macs.');
-  return (await d.store.revokeWorker(workerId, d.now())) ? {ok: true} : fail('That Mac is not enrolled.');
+  if (!(await d.store.revokeWorker(workerId, d.now()))) return fail('That Mac is not enrolled.');
+  // its token is dead, so nothing would ever finish or time out its job faster than the heartbeat sweep: end it now
+  for (const j of await d.store.recentJobs(RECENT_JOBS)) {
+    if (j.claimedBy === workerId && isActive(j.status)) await d.store.transitionJob(j.id, [j.status], {status: 'failed', error: 'The Mac was removed during the sync', finishedAt: d.now().toISOString()});
+  }
+  return {ok: true};
 }
