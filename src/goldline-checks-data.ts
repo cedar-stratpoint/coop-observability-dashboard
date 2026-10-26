@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {
   DEFAULT_SETTINGS,
+  monthBounds,
   monthlyChecks,
   rowFindings,
   type Adjustment,
@@ -29,10 +30,20 @@ export type FlagStatus = 'open' | 'checked' | 'dismissed' | 'resolved';
 export type MonthCoverage = {month: string; match: number; flag: number; baseline: number; waiting_sales: number; unlinked: number; not_counted: number};
 export type ChecksRun = {opened: number; updated: number; resolved: number; months: MonthCheck[]};
 
-type StoredFlag = {id: string; kind: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus};
+type StoredFlag = {id: string; kind: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus; consultant: string | null; source_upload_id: string | null; details: unknown};
 
 const fkey = (f: {kind: string; store_code: string; item_code: string; period_start: string; period_end: string}) =>
   `${f.kind}|${f.store_code}|${f.item_code}|${f.period_start}|${f.period_end}`;
+
+/** Stable JSON (sorted keys) so stored jsonb and fresh details compare equal. */
+const stable = (v: unknown): string =>
+  v && typeof v === 'object' && !Array.isArray(v)
+    ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`
+    : Array.isArray(v)
+      ? `[${v.map(stable).join(',')}]`
+      : JSON.stringify(v ?? null);
+const sameFlag = (prev: StoredFlag, f: Finding) =>
+  (prev.consultant ?? null) === (f.consultant ?? null) && (prev.source_upload_id ?? null) === (f.source_upload_id ?? null) && stable(prev.details) === stable(f.details);
 
 export async function getCheckSettings(companyId: string): Promise<CheckSettings> {
   const res = await db().from('check_settings').select('gap_min_units,gap_pct').eq('company_id', companyId).maybeSingle();
@@ -55,33 +66,48 @@ async function loadInputs(companyId: string, stores?: string[]) {
   if (!counted.length) return {counts, counted, adjustments: [], marked: [], products: [], sales: [], salesMonths: new Set<string>(), settings: DEFAULT_SETTINGS};
 
   const months = [...new Set(counts.map((c) => c.period_end.slice(0, 7)))].sort();
-  const [adjustments, products, salesMonthsRes, settings, extractions] = await Promise.all([
+  const uploadIds = [...new Set(counts.map((c) => c.source_upload_id).filter((u): u is string => !!u))];
+  const [adjustments, products, settings, extractions] = await Promise.all([
     fetchAllRows('adjustments', (from, to) =>
       supa.from('adjustments').select('store_code,item_code,period_end,qty').eq('company_id', companyId).in('store_code', counted).order('id').range(from, to),
     ) as unknown as Promise<Adjustment[]>,
     fetchAllRows('products', (from, to) =>
       supa.from('products').select('item_code,sku_code').eq('company_id', companyId).order('item_code').range(from, to),
     ) as unknown as Promise<Array<{item_code: string; sku_code: string | null}>>,
-    supa.rpc('sales_months', {p_company: companyId}),
     getCheckSettings(companyId),
-    fetchAllRows('extractions', (from, to) =>
-      supa.from('extractions').select('upload_id,rows').eq('company_id', companyId).eq('status', 'confirmed').order('id').range(from, to),
-    ) as unknown as Promise<Array<{upload_id: string; rows: unknown}>>,
+    // Only the scans behind the counts being checked (cell marks, F3), not every scan ever.
+    (async () => {
+      const out: Array<{upload_id: string; rows: unknown}> = [];
+      for (let i = 0; i < uploadIds.length; i += 100) {
+        const chunk = uploadIds.slice(i, i + 100);
+        out.push(
+          ...((await fetchAllRows('extractions', (from, to) =>
+            supa.from('extractions').select('upload_id,rows').eq('company_id', companyId).eq('status', 'confirmed').in('upload_id', chunk).order('id').range(from, to),
+          )) as unknown as Array<{upload_id: string; rows: unknown}>),
+        );
+      }
+      return out;
+    })(),
   ]);
-  if (salesMonthsRes.error) throw new Error(`sales_months failed: ${salesMonthsRes.error.message}`);
-  const salesMonths = new Set(((salesMonthsRes.data ?? []) as unknown as string[]).map((d) => String(d).slice(0, 7)));
 
   // POS units only for counted stores and the months they were counted in.
   const sales = (await fetchAllRows('sales', (from, to) =>
     supa
       .from('sales')
-      .select('store_code,sku_code,period_start,units')
+      .select('store_code,sku_code,period_start,period_end,units')
       .eq('company_id', companyId)
       .in('store_code', counted)
       .gte('period_start', `${months[0]}-01`)
       .order('id')
       .range(from, to),
-  )) as unknown as Array<{store_code: string; sku_code: string; period_start: string; units: number | null}>;
+  )) as unknown as SaleRow[];
+  // A store has POS data for a month only when it has whole-month rows for it (a Watsons
+  // file, or a CSV covering the 1st to the last day). Partial-period CSVs don't count.
+  const wholeMonth = sales.filter((r) => {
+    const b = monthBounds(r.period_start.slice(0, 7));
+    return r.period_start === b.start && r.period_end === b.end;
+  });
+  const salesMonths = new Set(wholeMonth.map((r) => `${r.store_code}|${r.period_start.slice(0, 7)}`));
 
   // Cells the scan reader marked (F3), from confirmed pages, tied to the counted row.
   const countAt = new Map(counts.map((c) => [`${c.source_upload_id}|${c.item_code}`, c]));
@@ -94,11 +120,12 @@ async function loadInputs(companyId: string, stores?: string[]) {
       if (c) marked.push({store_code: c.store_code, item_code: c.item_code, period_start: c.period_start, period_end: c.period_end, upload_id: e.upload_id, marks: r.marks});
     }
   }
-  return {counts, counted, adjustments, marked, products, sales, salesMonths, settings};
+  return {counts, counted, adjustments, marked, products, sales: wholeMonth, salesMonths, settings};
 }
 
 /** POS units per store, item and month, through the Watsons SKU links. */
-function posIndex(products: Array<{item_code: string; sku_code: string | null}>, sales: Array<{store_code: string; sku_code: string; period_start: string; units: number | null}>) {
+type SaleRow = {store_code: string; sku_code: string; period_start: string; period_end: string; units: number | null};
+function posIndex(products: Array<{item_code: string; sku_code: string | null}>, sales: SaleRow[]) {
   const itemBySku = new Map(products.filter((p) => p.sku_code?.trim()).map((p) => [p.sku_code!.trim(), p.item_code]));
   const pos = new Map<string, number>();
   for (const s of sales) {
@@ -115,7 +142,10 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
   if (!nichidoConfigured()) return {opened: 0, updated: 0, resolved: 0, months: []};
   const supa = db();
   const inp = await loadInputs(companyId, stores);
-  if (!inp.counted.length) return {opened: 0, updated: 0, resolved: 0, months: []};
+  // Flags are synced for the stores asked about (even ones whose counts were all deleted,
+  // so their flags resolve), or for every counted store.
+  const flagStores = stores ?? inp.counted;
+  if (!flagStores.length) return {opened: 0, updated: 0, resolved: 0, months: []};
 
   const idx = posIndex(inp.products, inp.sales);
   const monthly = monthlyChecks({counts: inp.counts, adjustments: inp.adjustments, posSold: idx.posSold, salesMonths: inp.salesMonths, linked: idx.linked, settings: inp.settings});
@@ -124,9 +154,9 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
   const existing = (await fetchAllRows('flags', (from, to) =>
     supa
       .from('flags')
-      .select('id,kind,store_code,item_code,period_start,period_end,status')
+      .select('id,kind,store_code,item_code,period_start,period_end,status,consultant,source_upload_id,details')
       .eq('company_id', companyId)
-      .in('store_code', inp.counted)
+      .in('store_code', flagStores)
       .order('id')
       .range(from, to),
   )) as unknown as StoredFlag[];
@@ -142,7 +172,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
     const prev = byKey.get(k);
     const fields = {consultant: f.consultant, source_upload_id: f.source_upload_id, details: f.details, updated_at: now};
     if (!prev) inserts.push({company_id: companyId, kind: f.kind, cause: f.cause, store_code: f.store_code, item_code: f.item_code, period_start: f.period_start, period_end: f.period_end, ...fields});
-    else if (prev.status === 'open' || prev.status === 'resolved') {
+    else if (prev.status === 'resolved' || (prev.status === 'open' && !sameFlag(prev, f))) {
       // Still there (or back again after it cleared): refresh the numbers, keep it open.
       const res = await supa
         .from('flags')

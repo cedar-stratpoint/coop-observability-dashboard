@@ -605,6 +605,12 @@ do $$ begin
     check (match_tier is null or match_tier in ('high', 'medium', 'low'));
 exception when duplicate_object then null; end $$;
 
+-- Every pair an admin turned down or unlinked, not just the last one (review fix): a
+-- second "Not this" must not un-block the first. dismissed_item_code is kept (unused).
+alter table public.chain_skus add column if not exists dismissed_item_codes text[] not null default '{}';
+update public.chain_skus set dismissed_item_codes = array[dismissed_item_code]
+ where dismissed_item_code is not null and not (dismissed_item_code = any(dismissed_item_codes));
+
 -- ---------------------------------------------------------------------------------
 -- From p2_checks.sql (P2 · Checks, Oct 2026), so a fresh project gets it too.
 -- P2 · Checks (Nichido project). Additive and safe to re-run.

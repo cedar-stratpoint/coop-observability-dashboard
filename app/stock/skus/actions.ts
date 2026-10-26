@@ -4,6 +4,7 @@ import {revalidatePath, revalidateTag} from 'next/cache';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {glTags} from '@/src/goldline-ref-data';
+import {runChecks} from '@/src/goldline-checks-data';
 import {dismissSuggestion, linkSku, LinkError, unlinkSku} from '@/src/goldline-sku-links-data';
 
 // Actions behind the Watsons SKU links screen. Links decide which sales count for which
@@ -26,6 +27,7 @@ function refresh(companyId: string) {
   revalidateTag(glTags.catalog(companyId), {expire: 0});
   revalidatePath('/stock', 'layout');
   revalidatePath('/overview');
+  revalidatePath('/flags');
 }
 
 async function run(company: string | null, fn: (companyId: string) => Promise<void>): Promise<LinkActionResult> {
@@ -33,6 +35,8 @@ async function run(company: string | null, fn: (companyId: string) => Promise<vo
   if ('error' in c) return {ok: false, error: c.error as string};
   try {
     await fn(c.companyId);
+    // A link decides which sales count for an item, so the form vs. sales checks follow it.
+    await runChecks(c.companyId).catch((e) => console.error('runChecks after SKU link change', e));
     refresh(c.companyId);
     return {ok: true};
   } catch (e) {

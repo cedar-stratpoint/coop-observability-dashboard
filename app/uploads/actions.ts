@@ -101,10 +101,13 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
   try {
     const out = await outOfScopeFor(ctx, input.uploadId);
     if (out) return {ok: false, error: out};
-    const touched = await uploadStores(ctx.companyId, input.uploadId).catch(() => [] as string[]);
+    // A scan's stores are few (its counts); a sales file can touch every store, and its
+    // rows only matter to counted stores, so it re-runs the checks for those instead.
+    const upload = await getUpload(ctx.companyId, input.uploadId);
+    const touched = upload?.kind === 'inventory_pdf' ? await uploadStores(ctx.companyId, input.uploadId).catch(() => [] as string[]) : null;
     const ok = await deleteUpload(ctx.companyId, input.uploadId);
     if (!ok) return {ok: false, error: 'Upload not found.'};
-    if (touched.length) await runChecks(ctx.companyId, touched).catch((e) => console.error('runChecks after delete', e));
+    await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
     revalidatePath('/uploads');
     revalidatePath('/stock');
     revalidatePath('/overview');
