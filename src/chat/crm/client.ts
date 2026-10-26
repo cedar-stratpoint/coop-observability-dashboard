@@ -1,21 +1,26 @@
 // The GET-only website CRM client for Ask Coop (spec 4.2; knowledge/best-practices/chat-readonly-api-tools.md). Pure: `fetch` is
 // injected, so vitest drives it with a fake and no real CRM is needed. Rules, each pinned by a test:
-//  - GET only (a constant), one base URL, endpoints by id from a frozen allowlist, a typed query allowlist (empty in wave 1);
+//  - GET only (a constant), one base URL, endpoints by id from a frozen allowlist, a typed query allowlist (only /api/query takes one: a JSON `spec` of at most 2,000 characters);
 //  - `redirect: 'error'` (a 30x never carries the bearer token anywhere), a timeout, a streamed byte cap;
 //  - one read per endpoint per turn (memoised, failures included), a per-turn GET cap;
 //  - errors carry a code only: never the URL, the token or upstream text.
 // There is no path under the Worker's admin surface here, and there must never be one: a POST there starts a real customer email batch.
 
-export type CrmParamType = 'int';
+import {QUERY_LIMITS} from './query-config';
+
+export type CrmParamType = 'int' | 'spec';
+export const MAX_SPEC_CHARS = QUERY_LIMITS.maxSpecChars;
 const endpoint = (path: string, query: Record<string, CrmParamType> = {}) => Object.freeze({path, query: Object.freeze({...query}) as Readonly<Record<string, CrmParamType>>});
 
-/** Wave 1 sends no query parameters: the tools filter and page in code over one read per endpoint. */
+/** The list tools send no query parameters (they filter and page in code over one read per endpoint). `query` carries the crm_query spec; `catalog` is the whitelist it is checked against. */
 export const CRM_ENDPOINTS = Object.freeze({
   metrics: endpoint('/api/metrics'),
   customers: endpoint('/api/customers'),
   orders: endpoint('/api/orders'),
   checkouts: endpoint('/api/checkouts'),
   membership: endpoint('/api/membership-config'),
+  catalog: endpoint('/api/catalog'),
+  query: endpoint('/api/query', {spec: 'spec'}),
 });
 export type CrmEndpointId = keyof typeof CRM_ENDPOINTS;
 
@@ -23,6 +28,8 @@ export const CRM_LIMITS = Object.freeze({
   timeoutMs: 5000,
   maxResponseBytes: 4_000_000,
   maxGetsPerTurn: 8,
+  /** GETs a crm_query "all" walk may add in one turn (its pages), counted apart from the normal cap. */
+  maxPagedGets: 60,
   maxToolCallsPerTurn: 6,
   maxRowsPerResult: 100,
   maxResultBytes: 65_536,
@@ -55,7 +62,8 @@ export interface CrmRead {
 }
 
 export interface CrmClient {
-  get(endpoint: CrmEndpointId, query?: Readonly<Record<string, number>>): Promise<CrmRead>;
+  /** `paged`: one page of a crm_query walk, counted against maxPagedGets instead of maxGetsPerTurn. */
+  get(endpoint: CrmEndpointId, query?: Readonly<Record<string, number | string>>, opts?: {paged?: boolean}): Promise<CrmRead>;
 }
 
 export interface CrmClientConfig {
@@ -107,15 +115,32 @@ export function createCrmClient(cfg: CrmClientConfig): CrmClient {
   const basePath = base.pathname.replace(/\/+$/, '');
   const memo = new Map<string, Promise<Omit<CrmRead, 'cached'>>>();
   let gets = 0;
+  let pagedGets = 0;
 
-  function urlFor(id: CrmEndpointId, query: Readonly<Record<string, number>>): string {
+  function urlFor(id: CrmEndpointId, query: Readonly<Record<string, number | string>>): string {
     const spec = CRM_ENDPOINTS[id];
     const keys = Object.keys(query).sort();
+    const parts: string[] = [];
     for (const k of keys) {
       const v = query[k];
-      if (!has(spec.query, k) || !Number.isInteger(v) || v < 0 || v > 100_000) throw new CrmError('refused');
+      if (!has(spec.query, k)) throw new CrmError('refused');
+      if (spec.query[k] === 'int') {
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 100_000) throw new CrmError('refused');
+        parts.push(`${k}=${v}`);
+      } else {
+        // a `spec`: JSON text of an object, short, encoded as one query value (the Worker compiles it against its own catalog)
+        if (typeof v !== 'string' || v.length === 0 || v.length > MAX_SPEC_CHARS) throw new CrmError('refused');
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(v);
+        } catch {
+          throw new CrmError('refused');
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new CrmError('refused');
+        parts.push(`${k}=${encodeURIComponent(v)}`);
+      }
     }
-    const qs = keys.length ? `?${keys.map((k) => `${k}=${query[k]}`).join('&')}` : '';
+    const qs = parts.length ? `?${parts.join('&')}` : '';
     const url = `${base.origin}${basePath}${spec.path}${qs}`;
     const check = new URL(url);
     if (check.origin !== base.origin || check.pathname !== `${basePath}${spec.path}`) throw new CrmError('refused');
@@ -150,13 +175,18 @@ export function createCrmClient(cfg: CrmClientConfig): CrmClient {
   }
 
   return {
-    async get(id, query) {
+    async get(id, query, opts) {
       if (typeof id !== 'string' || !has(CRM_ENDPOINTS, id)) throw new CrmError('refused');
       const url = urlFor(id, query ?? {});
       const hit = memo.get(url);
       if (hit) return {...(await hit), ms: 0, cached: true};
-      if (gets >= limits.maxGetsPerTurn) throw new CrmError('call_cap');
-      gets += 1;
+      if (opts?.paged === true) {
+        if (pagedGets >= limits.maxPagedGets) throw new CrmError('call_cap');
+        pagedGets += 1;
+      } else {
+        if (gets >= limits.maxGetsPerTurn) throw new CrmError('call_cap');
+        gets += 1;
+      }
       const p = load(id, url);
       memo.set(url, p);
       return {...(await p), cached: false};

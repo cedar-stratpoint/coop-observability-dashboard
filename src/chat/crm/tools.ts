@@ -9,7 +9,7 @@ import {dayKeysBetween, MAX_RANGE_DAYS, mondayOf, rangeLabel} from '../range';
 import type {Check, ColumnRole, ColumnUnit, MeasureDecl, MetricError, MetricResult, MetricRow, ResultColumn, ResultMetricId} from '../result-types';
 import {CRM_LIMITS, CrmError, type CrmEndpointId, type CrmRead} from './client';
 
-export type CrmGet = (endpoint: CrmEndpointId) => Promise<CrmRead>;
+export type CrmGet = (endpoint: CrmEndpointId, query?: Readonly<Record<string, number | string>>, opts?: {paged?: boolean}) => Promise<CrmRead>;
 
 export const ORDER_STATUSES = ['all', 'paid', 'pending', 'authorized', 'partially_paid', 'partially_refunded', 'refunded', 'voided', 'expired'] as const;
 export const ORDER_GROUPS = ['none', 'day', 'week', 'month', 'financial_status', 'fulfillment_status', 'product'] as const;
@@ -34,6 +34,7 @@ type Page = {limit: number; offset: number};
 export interface CrmOrdersRequest extends Range, Page {financial_status: (typeof ORDER_STATUSES)[number]; group_by: (typeof ORDER_GROUPS)[number]}
 export interface CrmCustomersRequest extends Page {joined: Range | null; tier: (typeof CUSTOMER_TIERS)[number]; buyers: (typeof CUSTOMER_BUYERS)[number]; group_by: (typeof CUSTOMER_GROUPS)[number]; sort: (typeof CUSTOMER_SORTS)[number]}
 export interface CrmCheckoutsRequest extends Range, Page {stage: (typeof CHECKOUT_STAGES)[number]; status: (typeof CHECKOUT_STATUSES)[number]; group_by: (typeof CHECKOUT_GROUPS)[number]}
+
 export interface CrmMetricsRequest {kind: 'metrics'}
 
 /* ---------- input ---------- */
@@ -156,7 +157,7 @@ export function safeText(v: unknown): string | null {
   return s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s;
 }
 
-const col = (key: string, label: string, unit: ColumnUnit, role: ColumnRole): ResultColumn => ({key, label, unit, role});
+export const col = (key: string, label: string, unit: ColumnUnit, role: ColumnRole): ResultColumn => ({key, label, unit, role});
 const cents = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n * 100) : 0;
@@ -181,7 +182,7 @@ const periodOf = (day: string, p: Period, from: string): string => {
 };
 const periodKeys = (r: Range, p: Period): string[] => [...new Set(dayKeysBetween(r.from, r.to).map((d) => periodOf(d, p, r.from)))];
 const periodColumn = (p: Period): ResultColumn => col('period', p === 'day' ? 'Day' : p === 'week' ? 'Week starting' : 'Month starting', 'date', 'time');
-const info = (text: string, code: Check['code'] = 'partial_coverage'): Check => ({code, status: 'info', text});
+export const info = (text: string, code: Check['code'] = 'partial_coverage'): Check => ({code, status: 'info', text});
 
 function pageOf<T>(all: readonly T[], p: Page): {rows: T[]; note: Check | null} {
   const rows = all.slice(p.offset, p.offset + p.limit);
@@ -199,7 +200,7 @@ export function fitBytes(rows: MetricRow[]): {rows: MetricRow[]; cut: number} {
   return {rows: out, cut: rows.length - out.length};
 }
 
-function finish(metric: ResultMetricId, dimension: string, columns: ResultColumn[], rows: MetricRow[], o: {range: Range; measure: string; measures: MeasureDecl[]; notes: Check[]; days: (string | null)[]}): MetricResult {
+export function finish(metric: ResultMetricId, dimension: string, columns: ResultColumn[], rows: MetricRow[], o: {range: Range; measure: string; measures: MeasureDecl[]; notes: Check[]; days: (string | null)[]}): MetricResult {
   const fitted = fitBytes(rows.slice(0, CRM_LIMITS.maxRowsPerResult));
   const checks: Check[] = [info(BASIS_NOTE), ...o.notes, info(UNTRUSTED_NOTE)];
   if (fitted.cut > 0) checks.push({code: 'partial_coverage', status: 'warn', text: `${fitted.cut} rows were left out to keep the answer small. Ask for fewer rows (limit) or a narrower filter.`});
