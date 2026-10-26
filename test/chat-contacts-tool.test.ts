@@ -9,7 +9,7 @@ import {fakeCrmClient} from './support/crm-fixtures';
 
 const SOURCE: LeadsSource = {
   events: [{event_id: 'e1', name: 'Modern Market Sept 2026', starts_on: '2026-09-26', ends_on: '2026-09-28'}],
-  leads: [{email: 'ana@example.com', instagram: null, pet: 'Mimi / Puspin', picky: null, mobile: '0917 000 0001', prize: 'Free treat', campaign: null, collectedAt: '2026-09-26T02:00:00Z', consentAt: null}],
+  leads: [{email: 'ana@example.com', instagram: null, name: null, pet: 'Mimi / Puspin', picky: null, mobile: '0917 000 0001', prize: 'Free treat', campaign: null, collectedAt: '2026-09-26T02:00:00Z', consentAt: null}],
 };
 const data: MetricData = {source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []};
 const NOW = new Date('2026-10-19T04:00:00Z');

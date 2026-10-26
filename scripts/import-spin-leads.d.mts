@@ -4,6 +4,7 @@
 export interface SpinLeadRow {
   email: string | null;
   instagram: string | null;
+  name: string | null;
   pet: string | null;
   picky: string | null;
   mobile: string | null;
