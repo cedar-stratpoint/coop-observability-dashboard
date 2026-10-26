@@ -1,7 +1,8 @@
 'use server';
 
-import {usingPosMock} from './pos-data';
-import {beginEnrolment, cancelSync, requestSync, revokeWorkerFor, type Actor, type SyncDeps} from './shopee-sync/service';
+import {posClient, usingPosMock} from './pos-data';
+import {supabaseImportStore} from './shopee-import/store-supabase';
+import {beginEnrolment, cancelSync, confirmReview, requestSync, revokeWorkerFor, type Actor, type SyncDeps} from './shopee-sync/service';
 import {revalidateDigestArchive, shopeeSyncDeps} from './shopee-sync/server';
 import {syncViewer} from './shopee-sync/viewer';
 
@@ -68,5 +69,19 @@ export async function revokeWorker(workerId: string): Promise<ActionResult> {
   } catch (e) {
     console.error('revokeWorker failed', e);
     return {ok: false, error: 'Could not remove the Mac. Try again in a moment.'};
+  }
+}
+
+/** Confirm a sync that ended in review: apply its staged imports (the requester or an admin). */
+export async function confirmSyncReview(jobId: string): Promise<ActionResult> {
+  const c = await ctx();
+  if (!c.ok) return c;
+  try {
+    const r = await confirmReview(c.deps, supabaseImportStore(posClient()), c.viewer, String(jobId));
+    if (r.ok) revalidateDigestArchive();
+    return r;
+  } catch (e) {
+    console.error('confirmSyncReview failed', e);
+    return {ok: false, error: 'Could not confirm the sync. Try again in a moment.'};
   }
 }

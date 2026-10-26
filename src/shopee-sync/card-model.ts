@@ -1,0 +1,121 @@
+// What the Overview sync card says and offers, as pure functions of the status. No React, no clock of its own (callers pass `now`).
+// The card is a thin view over this. Nothing here asks for, or has room for, a Shopee password: the person types it in the Shopee browser on their Mac.
+import type {JobStatus} from './types';
+import type {ShopeeSyncStatus, SyncJobView} from './status';
+
+const DAY_MS = 86_400_000;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** "12 seconds ago", "3 hours ago", "never". */
+export function agoText(iso: string | null, now: Date): string {
+  if (!iso) return 'never';
+  const s = Math.floor((now.getTime() - Date.parse(iso)) / 1000);
+  if (Number.isNaN(s)) return 'never';
+  if (s < 0) return 'just now';
+  if (s < 60) return `${plural(s, 'second')} ago`;
+  if (s < 3600) return `${plural(Math.floor(s / 60), 'minute')} ago`;
+  if (s < 86_400) return `${plural(Math.floor(s / 3600), 'hour')} ago`;
+  return `${plural(Math.floor(s / 86_400), 'day')} ago`;
+}
+
+const dayLabel = (iso: string): string => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return `${d.toLocaleDateString('en-GB', {weekday: 'short', timeZone: 'UTC'})} ${d.getUTCDate()} ${d.toLocaleDateString('en-GB', {month: 'short', timeZone: 'UTC'})}`;
+};
+
+/** "Mon 19 Oct to Sun 25 Oct, 7 days"; says "with gaps" when the days are not one run. */
+export function rangeText(days: readonly string[]): string {
+  if (days.length === 0) return '';
+  const sorted = [...days].sort();
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const span = Math.round((Date.parse(last) - Date.parse(first)) / DAY_MS) + 1;
+  const count = plural(sorted.length, 'day') + (span === sorted.length ? '' : ' with gaps');
+  return first === last ? `${dayLabel(first)}, ${count}` : `${dayLabel(first)} to ${dayLabel(last)}, ${count}`;
+}
+
+/** The card shows only when Shopee is behind or a sync is current or finished within the last day. */
+export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
+  if (!s || s.mock) return false;
+  if (s.missingDays.length > 0 || s.currentJob) return true;
+  const fin = s.lastJob?.finishedAt;
+  return Boolean(fin && now.getTime() - Date.parse(fin) < DAY_MS);
+}
+/** The small "Behind" tag on the Shopee chip. */
+export const behindTag = (s: ShopeeSyncStatus | null): boolean => Boolean(s && !s.mock && s.missingDays.length > 0);
+
+export function syncButton(s: ShopeeSyncStatus): {label: string; disabled: boolean; reason: string | null} {
+  if (s.canSync.ok) return {label: `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
+  const other = s.currentJob && !s.currentJob.mine ? s.currentJob : null;
+  return {label: 'Sync Shopee', disabled: true, reason: other ? `Waiting for ${other.requestedBy}'s sync to finish.` : s.canSync.reason};
+}
+
+export function workerLine(s: ShopeeSyncStatus, now: Date): {kind: 'online' | 'offline' | 'none'; text: string} {
+  const own = s.workers.filter((w) => w.own);
+  if (own.length === 0) return {kind: 'none', text: 'You have not added a Mac yet.'};
+  const seen = (w: (typeof own)[number]) => (w.lastSeen ? Date.parse(w.lastSeen) : 0);
+  const online = own.filter((w) => w.online).sort((a, b) => seen(b) - seen(a))[0];
+  if (online) return {kind: 'online', text: `Your Mac ${online.name} is online, last seen ${agoText(online.lastSeen, now)}.`};
+  const newest = [...own].sort((a, b) => seen(b) - seen(a))[0];
+  return {kind: 'offline', text: `None of your Macs is online. Add a Mac or wake yours (${newest.name} was last seen ${agoText(newest.lastSeen, now)}).`};
+}
+
+export type JobAction = 'cancel' | 'retry' | 'confirm';
+export type Tone = 'neutral' | 'info' | 'warn' | 'good' | 'crit';
+export interface StatusMeta {
+  status: JobStatus;
+  label: string;
+  tone: Tone;
+  title: string;
+  body: string;
+  actions: JobAction[];
+}
+
+const loadedDays = (j: SyncJobView): string[] => j.days.filter((d) => j.progress[d]?.state === 'loaded').sort();
+
+export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: false}): StatusMeta {
+  const mac = j.workerName ?? 'your Mac';
+  const total = j.days.length;
+  const done = loadedDays(j).length;
+  const m = (label: string, tone: Tone, title: string, body: string, actions: JobAction[]): StatusMeta => ({status: j.status, label, tone, title, body, actions: j.mine || who.isAdmin ? actions : []});
+  switch (j.status) {
+    case 'queued':
+      return m('Queued', 'neutral', 'Sync requested', `Waiting for ${plural(total, 'day')} to be picked up by your Mac. A sync nobody picks up ends after 30 minutes.`, ['cancel']);
+    case 'running':
+      return m('Running', 'info', 'Exporting from Shopee', `${mac} is in Seller Centre: ${done} of ${plural(total, 'day')} done. This can take a few minutes, one day a minute at most.`, ['cancel']);
+    case 'awaiting_verification':
+      return m('Needs your password', 'warn', 'Shopee needs you to verify', `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.`, ['cancel']);
+    case 'importing':
+      return m('Importing', 'info', 'Importing orders', `${done} of ${plural(total, 'day')} received. Checking dates and totals before anything is saved.`, ['cancel']);
+    case 'done': {
+      const last = loadedDays(j).pop() ?? [...j.days].sort().pop() ?? '';
+      return m('Done', 'good', `Loaded through ${dayLabel(last)}`, `${plural(done || total, 'day')} loaded, provisional until each day settles. The Monday import can refresh them.`, []);
+    }
+    case 'failed':
+      return m('Failed', 'crit', 'Sync failed', `${j.error ?? 'The worker reported a failure.'} Days already loaded are kept; Retry loads the rest.`, ['retry']);
+    case 'review':
+      return m('Review', 'warn', 'Needs your review', 'The totals differ from what is loaded by more than the sync allows on its own. Nothing is applied until you confirm.', ['confirm']);
+    case 'expired':
+      return m('Expired', 'neutral', 'Sync expired', `${j.error ?? 'Nobody picked it up in time.'} Nothing was loaded.`, ['retry']);
+  }
+}
+
+export const POLL_MS = 3000;
+/** Poll only while a sync is current (queued or in flight); an idle card never polls. */
+export const pollInterval = (s: ShopeeSyncStatus | null): number | null => (s && !s.mock && s.currentJob ? POLL_MS : null);
+
+export interface Step {
+  label: string;
+  state: 'done' | 'now' | 'todo' | 'bad';
+}
+/** The little progress list under the status: Requested, Exporting, (Verify on the Mac), Importing, Done. */
+export function stepsFor(j: SyncJobView): Step[] {
+  const verify = j.status === 'awaiting_verification';
+  const names = ['Requested', 'Exporting from Shopee', ...(verify ? ['Verify on the Mac'] : []), 'Importing orders', 'Done'];
+  const imp = names.indexOf('Importing orders');
+  const exp = 1;
+  const failedAt = Object.keys(j.progress).length > 0 ? imp : exp;
+  const at: Record<JobStatus, number> = {queued: 0, running: exp, awaiting_verification: 2, importing: imp, review: imp, done: names.length, failed: failedAt, expired: 0};
+  const cur = at[j.status];
+  return names.map((label, i) => ({label, state: j.status === 'failed' && i === cur ? 'bad' : i < cur ? 'done' : i === cur ? 'now' : 'todo'}));
+}

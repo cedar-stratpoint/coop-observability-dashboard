@@ -1,5 +1,6 @@
 // The rules of the sync as plain functions over SyncStore: press Sync, cancel, enrol a Mac, revoke a Mac, and the stale-job sweep.
 // The server actions (src/shopee-sync-actions.ts) and the worker routes (api.ts) are thin shells around these; authentication is theirs.
+import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
 import {missingClosedDays} from './missing-days';
 import {canAddWorker, sameEmail} from './routing';
@@ -57,6 +58,23 @@ export async function cancelSync(d: SyncDeps, who: Actor, jobId: string): Promis
   if (job.status !== 'queued' && !isActive(job.status)) return fail('That sync has already finished.');
   const done = await d.store.transitionJob(jobId, [job.status], {status: 'failed', error: `Cancelled by ${who.email.trim().toLowerCase()}`, finishedAt: d.now().toISOString()});
   return done ? {ok: true} : fail('That sync changed while you were cancelling it. Refresh and try again.');
+}
+
+/** The person confirms a job that ended in review: its staged imports are applied as they were planned (the same step as the import API's apply). */
+export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Actor, jobId: string): Promise<{ok: true} | Fail> {
+  const job = await d.store.getJob(jobId);
+  if (!job) return fail('That sync no longer exists.');
+  if (!who.isAdmin && !sameEmail(job.requestedBy, who.email)) return fail('Only the person who started a sync can confirm it.');
+  if (job.status !== 'review') return fail('That sync is not waiting for review.');
+  for (const id of job.importIds) {
+    const run = await imports.getRun(id);
+    if (run?.status === 'accepted') continue; // already applied
+    if (!run || run.status !== 'staged') return fail('One of the imports was replaced or removed since this sync ran. Run Sync again.');
+    const r = await applyRun(imports, id);
+    if (!r.ok) return fail(r.message);
+  }
+  const ended = await d.store.transitionJob(jobId, ['review'], {status: 'done', error: null});
+  return ended ? {ok: true} : fail('That sync changed while you were confirming it. Refresh and try again.');
 }
 
 const NAME_MAX = 60;

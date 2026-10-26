@@ -7,7 +7,7 @@
 // figures (label-matched) — interim until the batch emits a normalized summary.
 import {useMemo, useState} from 'react';
 import Link from 'next/link';
-import {ArrowLeft, Check, Globe, Search, Store} from 'lucide-react';
+import {AlertTriangle, ArrowLeft, Check, Globe, Search, Store} from 'lucide-react';
 import type {DigestArchiveRow, DigestFigure, DigestRec} from '../../src/types';
 import type {AnalystBrief} from '../../src/salesSignals';
 import {cn} from '@/lib/utils';
@@ -15,6 +15,10 @@ import {metricValueClass} from './metric';
 import {Card, CardContent} from '@/components/ui/card';
 import {Sparkles} from 'lucide-react';
 import {ShopeeIcon, LazadaIcon} from './brand-icons';
+import {ShopeeSyncCard} from './shopee-sync-card';
+import {useShopeeSyncStatus} from './use-shopee-sync-status';
+import {behindTag, cardVisible} from '../../src/shopee-sync/card-model';
+import type {ShopeeSyncStatus} from '../../src/shopee-sync/status';
 import {usePlaybook, usePlaybookProgress, recAction, recSteps, recIsComplete} from './playbook';
 import {InfoTip} from './info-tip';
 import {fmtRange, hasNoSalesData} from '../../src/week';
@@ -538,7 +542,8 @@ function ChannelDetail({channel, row}: {channel: Channel; row: DigestArchiveRow}
 }
 
 // ── the unified overview ─────────────────────────────────────────────────────────
-export function ChannelOverview({row, priorRow, initialChannels, offline, custom}: {brief: AnalystBrief; row: DigestArchiveRow; priorRow?: DigestArchiveRow | null; initialChannels: Channel[]; offline?: ChannelMetrics | null; custom?: CustomView | null}) {
+export function ChannelOverview({row, priorRow, initialChannels, offline, custom, shopeeSync}: {brief: AnalystBrief; row: DigestArchiveRow; priorRow?: DigestArchiveRow | null; initialChannels: Channel[]; offline?: ChannelMetrics | null; custom?: CustomView | null; shopeeSync?: {status: ShopeeSyncStatus | null; at: string}}) {
+  const sync = useShopeeSyncStatus(shopeeSync?.status ?? null, shopeeSync?.at ?? new Date(0).toISOString());
   const [selected, setSelected] = useState<Channel[]>(initialChannels.length ? initialChannels : ['shopee', 'lazada', 'website']);
   // Default to Revenue (not Ad spend) so every channel — including offline, which
   // has no ad spend — shows a bar on first paint.
@@ -634,6 +639,12 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
               >
                 <Icon className="size-4" style={{color: on ? c.accent : undefined}} />
                 {c.label}
+                {c.key === 'shopee' && behindTag(sync.status) && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--amber-bg)] px-1.5 py-0.5 text-[10.5px] font-semibold text-[color-mix(in_oklab,var(--amber-fg)_55%,var(--foreground))]" title="Shopee is missing finished days. Sync them from the card below.">
+                    <AlertTriangle className="size-2.5" aria-hidden />
+                    Behind
+                  </span>
+                )}
                 {on ? (
                   <Check className="size-3.5 text-primary" />
                 ) : (
@@ -648,6 +659,8 @@ export function ChannelOverview({row, priorRow, initialChannels, offline, custom
           <CombinedKpis metrics={metrics} priorMetrics={priorMetrics} priorRange={priorRange} channels={selected} />
         </div>
       </div>
+
+      {selected.includes('shopee') && sync.status && cardVisible(sync.status, sync.now) && <ShopeeSyncCard status={sync.status} now={sync.now} refresh={sync.refresh} />}
 
       {single ? (
         /* single channel — full-width detail, no compact comparison layout */
