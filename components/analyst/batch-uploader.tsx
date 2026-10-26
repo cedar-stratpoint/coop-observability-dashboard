@@ -5,10 +5,10 @@ import Link from 'next/link';
 import {AlertTriangle, ArrowRight, Check, ChevronRight, CloudUpload, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, itemLabel, itemPercent, summarize} from '@/components/analyst/upload-queue-format';
-import {batchCoverage, FORM_PAGES, MAX_BATCH_FILES} from '@/src/upload-batch';
+import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
-import type {StoreOption} from '@/src/goldline-data';
+import type {SplitForm, StoreOption} from '@/src/goldline-data';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
@@ -47,6 +47,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const startedAt = Math.min(...q.items.map((i) => i.startedAt ?? Infinity));
   const left = busy ? eta(Number.isFinite(startedAt) ? startedAt : null, s.percent, now) : null;
   const canReview = !busy && Boolean(q.batch.id) && s.readyForReview > 0;
+  // Page numbers restarting (…5, 1…) mean the scan holds several stores' forms; they're
+  // split into one batch each once every page is read (q.forms).
+  const manyForms = Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1;
 
   const pick = (files: FileList | null | undefined) => {
     if (!files?.length || disabled) return;
@@ -87,13 +90,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{hasItems ? 'This store’s form' : 'Add files'}</h2>
+            <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
               {hasItems
                 ? busy
                   ? `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
                   : `${s.done} of ${s.total} read${s.failed ? ` · ${s.failed} failed` : ''}.`
-                : `One store’s pages at a time: a PDF per page or one PDF with every page. Up to ${MAX_BATCH_FILES} files, 25 MB each.`}
+                : `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per file.`}
             </p>
           </div>
           {hasItems && !busy && (
@@ -175,6 +178,10 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               </div>
             )}
 
+            {manyForms ? (
+              <FormsPanel forms={q.forms} splitting={q.splitting} busy={busy} stores={stores} />
+            ) : (
+            <>
             {/* Store + period, once for every page. */}
             <fieldset className="flex flex-col gap-2 rounded-xl border border-border p-3.5" disabled={disabled}>
               <legend className="px-1 text-xs font-medium">
@@ -243,10 +250,12 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 )}
               </div>
             )}
+            </>
+            )}
 
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Files in this batch">
               {q.items.map((i) => (
-                <FileRow key={i.id} i={i} batchId={q.batch.id ?? null} now={now} onRetry={() => q.retry(i.id)} onCancel={() => q.cancel(i.id)} onRemove={() => q.remove(i.id)} />
+                <FileRow key={i.id} i={i} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} onRetry={() => q.retry(i.id)} onCancel={() => q.cancel(i.id)} onRemove={() => q.remove(i.id)} />
               ))}
             </ul>
 
@@ -255,7 +264,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 {q.preparing ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
                 {q.preparing ? 'Preparing pages…' : 'Add more files'}
               </Button>
-              {q.batch.id && s.readyForReview > 0 && (
+              {q.batch.id && s.readyForReview > 0 && !manyForms && (
                 <Link
                   href={`/uploads/batch/${q.batch.id}`}
                   aria-disabled={!canReview}
@@ -338,5 +347,58 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
         )}
       </div>
     </li>
+  );
+}
+
+const pageList = (pages: number[]) => {
+  const sorted = [...new Set(pages)].sort((a, b) => a - b);
+  if (!sorted.length) return 'pages not numbered';
+  const run = sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1);
+  return run && sorted.length > 1 ? `pages ${sorted[0]} to ${sorted.at(-1)}` : `${sorted.length === 1 ? 'page' : 'pages'} ${sorted.join(', ')}`;
+};
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDay = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}` : iso);
+
+/** Several stores in one scan: each form found, its own batch to review. */
+function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null; splitting: boolean; busy: boolean; stores: StoreOption[]}) {
+  if (!forms) {
+    return (
+      <p className="flex items-center gap-2 rounded-xl border border-border px-3.5 py-3 text-sm text-muted-foreground">
+        {splitting && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />}
+        {busy
+          ? 'This scan holds more than one store’s form. Coop splits it into one form per store once every page is read.'
+          : 'Splitting the scan into one form per store…'}
+      </p>
+    );
+  }
+  const nameOf = new Map(stores.map((s) => [s.code, s.name]));
+  const blank = forms.filter((f) => !f.storeCode).length;
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">
+        Each form is its own review. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
+      </p>
+      <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Forms in this scan">
+        {forms.map((f, n) => (
+          <li key={f.batchId}>
+            <Link href={`/uploads/batch/${f.batchId}`} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/50">
+              <span className="flex min-w-0 flex-col">
+                <span className="font-medium">
+                  Form {n + 1} · {f.storeCode ? (nameOf.get(f.storeCode) ?? `Store ${f.storeCode}`) : 'store not on the form'}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {pageList(f.pages)}
+                  {f.periodStart && f.periodEnd ? ` · ${fmtDay(f.periodStart)} to ${fmtDay(f.periodEnd)}` : ''}
+                  {f.consultant ? ` · BA ${f.consultant}` : ''}
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
+                Review <ChevronRight className="size-3.5" aria-hidden />
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

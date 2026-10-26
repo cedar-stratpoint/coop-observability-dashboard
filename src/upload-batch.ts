@@ -3,7 +3,10 @@
 // review ("Commit all pages" readiness).
 
 export const FORM_PAGES = [1, 2, 3, 4, 5] as const;
-export const MAX_BATCH_FILES = 20;
+// Pages per drop. One store's form is 5 pages, but Justin may scan many stores into one
+// PDF (Q25, Oct 26: "whatever is easiest"); those are split into one form each after
+// reading (groupForms), so a drop can hold about 50 forms.
+export const MAX_BATCH_FILES = 250;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 export type BatchPageInfo = {uploadId: string; page: number | null; flagged: number; resolved: number; status: string};
@@ -55,4 +58,52 @@ export function batchReadiness(input: {
 export function splitName(original: string, index: number, total: number): string {
   const dot = original.toLowerCase().endsWith('.pdf') ? original.length - 4 : original.length;
   return `${original.slice(0, dot)} (page ${index + 1} of ${total}).pdf`;
+}
+
+// ── Many stores in one scan ─────────────────────────────────────────────────────────
+
+/** Where a split page sat in its scan: "stack (page 7 of 25).pdf" → {source: "stack", index: 7}. */
+export function scanPosition(filename: string): {source: string; index: number} | null {
+  const m = /^(.*) \(page (\d+) of \d+\)\.pdf$/i.exec(filename);
+  return m ? {source: m[1], index: Number(m[2])} : null;
+}
+
+/**
+ * Scan order for a batch's pages: pages split from the same PDF by their position in
+ * it, files in the order they were uploaded otherwise.
+ */
+export function scanOrder<T extends {filename: string; created_at: string}>(pages: T[]): T[] {
+  const firstSeen = new Map<string, string>();
+  for (const p of pages) {
+    const key = scanPosition(p.filename)?.source ?? `\u0000${p.filename}|${p.created_at}`;
+    const prev = firstSeen.get(key);
+    if (!prev || p.created_at < prev) firstSeen.set(key, p.created_at);
+  }
+  const keyOf = (p: T) => scanPosition(p.filename)?.source ?? `\u0000${p.filename}|${p.created_at}`;
+  return [...pages].sort((a, b) => {
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    if (ka !== kb) return firstSeen.get(ka)!.localeCompare(firstSeen.get(kb)!) || ka.localeCompare(kb);
+    return (scanPosition(a.filename)?.index ?? 0) - (scanPosition(b.filename)?.index ?? 0) || a.created_at.localeCompare(b.created_at);
+  });
+}
+
+/**
+ * Split pages (in scan order) into forms: a new form starts whenever the form's page
+ * number drops (…4, 5, 1, 2…). A page scanned twice in a row stays in its form, where
+ * the review asks to remove the copy. Pages the reader couldn't number stay with the
+ * form they sit in.
+ */
+export function groupForms<T extends {page: number | null}>(ordered: T[]): T[][] {
+  const forms: T[][] = [];
+  let last: number | null = null;
+  for (const p of ordered) {
+    if (!forms.length || (p.page != null && last != null && p.page < last)) {
+      forms.push([]);
+      last = null;
+    }
+    forms[forms.length - 1].push(p);
+    if (p.page != null) last = p.page;
+  }
+  return forms;
 }
