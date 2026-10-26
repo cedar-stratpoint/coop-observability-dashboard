@@ -98,18 +98,17 @@ export function allowedGap(posSold: number, s: CheckSettings = DEFAULT_SETTINGS)
 }
 
 /**
- * Row math, only when an ending is written and at least one part is. The form doesn't
- * settle whether the ending includes the delivery column, so a row passes when it adds
- * up either way; it's flagged only when it matches neither.
+ * Row math, only when an ending is written and at least one part is. The ending
+ * (column 5) is stockroom + drawer + selling area; the delivery column (4) is not
+ * part of it (Justin, Q23, answered Oct 27).
  */
-export function rowMathOff(r: CountRow): {written: number; counted: number; withDelivery: number} | null {
+export function rowMathOff(r: CountRow): {written: number; counted: number} | null {
   if (r.ending_on_hand == null) return null;
   const parts = [r.stockroom, r.drawer, r.selling_area];
-  if (parts.every((p) => p == null) && r.delivery == null) return null;
+  if (parts.every((p) => p == null)) return null;
   const counted = parts.reduce<number>((a, p) => a + (p ?? 0), 0);
-  const withDelivery = counted + (r.delivery ?? 0);
-  if (r.ending_on_hand === counted || r.ending_on_hand === withDelivery) return null;
-  return {written: r.ending_on_hand, counted, withDelivery};
+  if (r.ending_on_hand === counted) return null;
+  return {written: r.ending_on_hand, counted};
 }
 
 /** Row-level findings for every committed count (unreadable first, then math, then zero). */

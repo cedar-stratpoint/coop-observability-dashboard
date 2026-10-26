@@ -109,7 +109,7 @@ export function BatchReview({
   const [periodStart, setPeriodStart] = useState(defaults.periodStart);
   const [periodEnd, setPeriodEnd] = useState(defaults.periodEnd);
   // The BA written on the form (page 1's header). Left blank, the save uses the store's
-  // BA from the BA list, so the flags still count against someone.
+  // BA learned from its earlier forms, so the flags still count against someone.
   const [ba, setBa] = useState(defaults.consultant ?? '');
   const storeBa = bas?.byStore[storeCode] ?? null;
   const [tabId, setTabId] = useState<string | null>((pages.find((p) => p.upload.id === initialPageId) ?? pages[0])?.upload.id ?? null);
@@ -364,10 +364,10 @@ export function BatchReview({
             </div>
             <p className="text-xs text-muted-foreground">
               {ba.trim()
-                ? 'Saved with this BA. A shortened name is completed from the BA list.'
+                ? 'Saved with this BA. A BA Coop already knows is recognised, even shortened (“Liza M.”); a new name is added as a new BA and becomes this store’s BA from this cycle.'
                 : storeBa
-                  ? `Blank on the form: saved under ${storeBa}, this store’s BA on the BA list.`
-                  : 'Blank on the form and this store has no BA on the list yet. Type the name, or set it on the BAs page; flags count against the BA.'}
+                  ? `Blank on the form: saved under ${storeBa}, this store’s BA from its earlier forms.`
+                  : 'Blank on the form and Coop hasn’t seen a BA for this store yet. Type the name from the form; flags count against the BA.'}
             </p>
           </fieldset>
           {(coverage.missing.length > 0 && coverage.missing.length < 5) || coverage.duplicates.length > 0 ? (

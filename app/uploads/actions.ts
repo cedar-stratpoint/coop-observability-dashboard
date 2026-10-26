@@ -2,7 +2,7 @@
 
 import {revalidatePath} from 'next/cache';
 import {runChecks} from '@/src/goldline-checks-data';
-import {resolveFormBa} from '@/src/goldline-ba-data';
+import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {auth} from '@/auth';
@@ -170,19 +170,22 @@ export async function commitReview(input: {
   }
 
   try {
+    const consultant = await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant);
     const committed = await commitInventory({
       companyId: ctx.companyId,
       uploadId: input.uploadId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant),
+      consultant,
       rows,
     });
+    await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/${input.uploadId}`);
     revalidatePath('/flags');
+    revalidatePath('/bas');
     return {ok: true, committed};
   } catch (e) {
     // Don't leak Postgres/schema detail to the browser; log it server-side.
@@ -309,20 +312,23 @@ export async function commitBatchAction(input: {
   if (!pages.some((p) => p.rows.length)) return {ok: false, error: 'No valid rows to commit.'};
 
   try {
+    const consultant = await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant);
     const {committed} = await commitBatch({
       companyId: ctx.companyId,
       batchId: input.batchId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant),
+      consultant,
       pages,
     });
+    await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/batch/${input.batchId}`);
     revalidatePath('/stock');
     revalidatePath('/flags');
+    revalidatePath('/bas');
     return {ok: true, committed};
   } catch (e) {
     if (e instanceof BatchConflictError) {

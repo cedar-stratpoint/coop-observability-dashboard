@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline BAs learned from the forms; the ending excludes delivery (Q23)
+Two answers from the Oct 27 review of the audit pack.
+- **BAs come from the forms, not a typed list.** Saving a form with a "Beauty Consultant" name now recognises a BA Coop already knows (the store's own BAs first, then every BA, so a BA who moved stores is the same person; full name, or with any word shortened to its initial like "Maria Luisa R."; never a first name alone across stores), adds a new BA when there's no match, and records them as the store's BA from that cycle (`learnFormBa`). An older form uploaded late never takes over a store's current BA. A form with no name still gets the store's BA from its earlier forms. The paste-a-list box on `/bas` and `importBas` are removed; `/bas` keeps the per-store correction.
+- **Ending inventory (column 5) is stockroom + drawer + selling area; delivery (column 4) is not part of it.** The Incorrect total check now uses that one rule (before, a row passed if it added up with or without delivery), and the scan reader's prompt says so. A row whose ending includes the delivery is now flagged. Existing flags refresh on the next check run.
+- Verified live on Nichido Staging: a new BA at store 2, the same BA written "zz learn t." at store 1 recognised and recorded there, an older form kept off the directory, a blank form at store 1 resolved to that BA. Test rows removed.
+
 ## 2026-10-27 — Goldline SKU links screen removed from the app
 Decided Oct 27: the Watsons SKU link review lives only in the plan page's SKU link matrix (with remarks for whoever reviews it), not in Coop Nichido.
 - Removed `/stock/skus` (page, actions, `components/analyst/goldline-sku-links.tsx`, `src/goldline-sku-links-data.ts`) and the "SKU links" nav item (rail and mobile More sheet). Inventory owns all of `/stock` again.
