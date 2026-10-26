@@ -4,6 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlStores} from './goldline-ref-data';
 import {runChecks} from './goldline-checks-data';
 import {cleanName, normName, parseBaLines, resolveBa, type StoreBa} from './goldline-ba';
+import {baScores, baTags, type BaScore, type FlagCause} from './goldline-checks';
 
 // The BA directory (A1): who covers which store from when (store_bas), read when a
 // form is saved without a BA name and written from /bas. Assigning a BA also fills in
@@ -198,4 +199,42 @@ export async function importBas(
   }
   if (touched.size) await runChecks(companyId, [...touched]).catch((e) => console.error('runChecks after importBas', e));
   return {assigned, filled, errors};
+}
+
+// ── BA scorecard (F8) ───────────────────────────────────────────────────────────────
+
+export type BaScoreRow = BaScore & {storeNames: string[]};
+export type BaScorecard = {
+  months: string[]; // newest first
+  scores: BaScoreRow[];
+  noBa: Record<string, number>; // month → flags on forms with no BA name
+};
+
+/**
+ * Per BA and month: points, causes, tag and category, from every flag (resolved ones
+ * too: every flag counts, Oct 26) and every saved form (so a clean BA shows as Clear).
+ */
+export async function getBaScorecard(companyId: string, scope: string[] | null): Promise<BaScorecard> {
+  if (!nichidoConfigured()) return {months: [], scores: [], noBa: {}};
+  const supa = db();
+  const [stores, flags, forms] = await Promise.all([
+    getGlStores(companyId),
+    fetchAllRows('flags', (from, to) => {
+      let q = supa.from('flags').select('store_code,period_end,consultant,cause').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      if (scope) q = q.in('store_code', scope);
+      return q.order('id').range(from, to);
+    }) as unknown as Promise<Array<{store_code: string; period_end: string; consultant: string | null; cause: FlagCause}>>,
+    fetchAllRows('inventory_snapshots', (from, to) => {
+      let q = supa.from('inventory_snapshots').select('store_code,period_end,consultant').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      if (scope) q = q.in('store_code', scope);
+      return q.order('store_code').order('period_end').range(from, to);
+    }) as unknown as Promise<Array<{store_code: string; period_end: string; consultant: string | null}>>,
+  ]);
+  const tiles = baTags(flags, forms.map((f) => ({store_code: f.store_code, month: f.period_end.slice(0, 7), consultant: f.consultant})));
+  const nameOf = new Map(stores.map((s) => [s.store_code, s.name]));
+  const noBa: Record<string, number> = {};
+  for (const t of tiles) if (!t.ba && t.points) noBa[t.month] = (noBa[t.month] ?? 0) + t.points;
+  const scores = baScores(tiles).map((r) => ({...r, storeNames: r.stores.map((c) => nameOf.get(c) ?? `Store ${c}`)}));
+  const months = [...new Set(tiles.map((t) => t.month))].sort().reverse();
+  return {months, scores, noBa};
 }

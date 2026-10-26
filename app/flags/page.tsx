@@ -6,7 +6,8 @@ import {GoldlineFlags} from '@/components/analyst/goldline-flags';
 export const dynamic = 'force-dynamic';
 
 // Flag queue and adjustments (Goldline · F7, F5). Store-scoped roles see their stores only.
-export default async function Page() {
+export default async function Page(props: {searchParams: Promise<{open?: string; month?: string}>}) {
+  const sp = await props.searchParams;
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
     return (
@@ -18,5 +19,8 @@ export default async function Page() {
   }
   const scope = Array.isArray(ctx.storeScope) ? ctx.storeScope : null;
   const data = await getFlagsData(ctx.companyId, scope);
-  return <GoldlineFlags company={ctx.companyId} data={data} canEdit={canEditData(ctx.role)} />;
+  // Deep link from the BA scorecard: ?open=<store|YYYY-MM|BA> opens that tile.
+  const open = typeof sp.open === 'string' && data.tiles.some((t) => t.key === sp.open) ? sp.open : null;
+  const month = typeof sp.month === 'string' && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : (open?.split('|')[1] ?? null);
+  return <GoldlineFlags company={ctx.companyId} data={data} canEdit={canEditData(ctx.role)} initialOpen={open} initialMonth={month} />;
 }
