@@ -131,3 +131,13 @@ export function greetingFor(hour: number): string {
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
 }
+
+/** The 12 first-of-month dates ending at `iso`'s month, oldest first. */
+export function last12Months(iso: string): string[] {
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7)) - 1;
+  return Array.from({length: 12}, (_, i) => {
+    const d = new Date(Date.UTC(y, m - 11 + i, 1));
+    return d.toISOString().slice(0, 10);
+  });
+}
