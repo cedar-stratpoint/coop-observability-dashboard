@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — SKU linking: calmer, scannable table with the form page and rows per page
+Oct 27 review: the page read as cluttered. Rebuilt with Hick's Law in mind (design skills: impeccable distill):
+- **Fewer choices at a glance:** one row of tabs (Check Coop's match · Choose the item · Linked · Form items without a SKU) instead of five large cards; only the chosen tab's tag and explanation show. "Rejected" appears only when something is rejected. The tag no longer repeats on every row.
+- **Aligned columns:** Watsons SKU · Units sold · Our item · **Form page** (new: page and row where the item is printed on the inventory form, from the form manifests) · Watsons / our price (ours turns amber when they differ by more than 15%) · decision.
+- **One obvious action per row:** Approve / Reject, Choose item, or "Remark or unlink" for linked rows. The remark box, item picker and unlink open in a panel under the row; the last decision shows there.
+- **Rows per page:** 5, 10, 20 or 100 (remembered in the browser), with "1 to 20 of 41" and numbered pages. On phones each row stacks with units, form page and price on one line.
+
 ## 2026-10-27 — SKU linking back in Coop, with Approve / Reject, remarks and plain-language tags
 The SKU links page was moved to the plan artifact only (morning of Oct 27); it's back in Coop for Nichido as **SKU linking** (`/stock/skus`, nav after Inventory) so Justin and his dad can decide links themselves.
 - **Approve / Reject** on Coop's suggested matches only (decided: links Coop already made stay as they are and can still be unlinked). Reject checks the suggestion the person saw is still the current one, then Coop looks for the next best.

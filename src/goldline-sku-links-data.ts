@@ -4,6 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
 import type {MatchTier} from './goldline-sku-match';
+import {formSpots, type FormSpot} from './goldline-sku-tags';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
 // lives on products.sku_code (every sales reader joins on it); chain_skus holds the
@@ -16,7 +17,7 @@ const CHAIN = 'watsons';
 const db = nichidoDb;
 
 export type LinkSource = 'code' | 'match' | 'admin';
-export type SkuLinkItem = {itemCode: string; productLine: string | null; variant: string | null; price: number | null};
+export type SkuLinkItem = {itemCode: string; productLine: string | null; variant: string | null; price: number | null; formSpot: FormSpot | null};
 export type ReviewAction = 'approved' | 'rejected' | 'linked' | 'unlinked';
 export type SkuReview = {
   action: ReviewAction | null;
@@ -48,11 +49,15 @@ type ProductRow = {item_code: string; product_line: string | null; variant: stri
 type ReviewRow = {sku_code: string; action: ReviewAction | null; item_code: string | null; action_by: string | null; action_at: string | null; remark: string | null; remark_by: string | null; remark_at: string | null};
 type ChainRow = {sku_code: string; name: string; subclass: string | null; last_month: string | null; suggested_item_code: string | null; match_tier: MatchTier | null; match_score: unknown};
 
+// Printed order of the inventory form (fixed template), so each item shows its page and row.
+const SPOTS = formSpots();
+
 const item = (p: ProductRow): SkuLinkItem => ({
   itemCode: p.item_code,
   productLine: p.product_line,
   variant: p.variant,
   price: p.unit_price == null ? null : Number(p.unit_price),
+  formSpot: SPOTS.get(p.item_code) ?? null,
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
