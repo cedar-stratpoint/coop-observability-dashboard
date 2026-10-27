@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — SKU linking: second calm-down pass (fewer columns, quieter rows)
+Oct 27 review: still busy for long reading. With Hick's Law and eye strain in mind:
+- **Four columns:** Watsons SKU · Our item (its code and the "Page · row" link underneath) · Price · decision. The separate form page column is gone.
+- **Readable Watsons names:** title case without the "NICHIDO" every name starts with; codes like ELB160 stay in capitals; the raw name shows on hover (`watsonsName`, tested). No monospace or category under each name, just the SKU code.
+- **One price** when Watsons' average and ours agree; both only when they differ (ours in amber past 15%).
+- **Less repeated text:** "Not sure" appears only on Coop's weak matches; how a link was made moved into the row's panel; linked rows show a quiet "⋯" instead of "Remark or unlink" on every line.
+- **Header and controls:** a compact progress block beside the title ("87.7% of units linked · +9% waiting"); rows per page moved down beside the pager; more padding and row hover.
+
 ## 2026-10-27 — SKU linking: "Page 2 · row 17" opens the form page; no units column
 - **Form page on screen:** the "Page · row" on each SKU (and on form items without a SKU) is a link. It opens that page of the inventory form in a dialog, drawn from the printed template in the paper's order and grouped by product line, with the item's row highlighted and scrolled into view. Pages 1 to 5 can be flipped; each line shows the Watsons SKU it is linked to. The five count columns are drawn blank on wider screens so it reads like the sheet (hidden on phones). Decided: a digital page, not a scan, because only the template's row order is known exactly.
 - **Units sold column removed** from the table (rows are still ordered biggest sellers first).

@@ -2,10 +2,10 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, ChevronDown, Link2, MessageSquare, Search, Unlink, X} from 'lucide-react';
+import {Check, Link2, MessageSquare, MoreHorizontal, Search, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
-import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, sureness, type SkuStatus, type Tone} from '@/src/goldline-sku-tags';
+import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
@@ -14,7 +14,10 @@ import {GL_PAGE, GL_SCROLL_ROW_MOBILE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 import {itemDisplayName} from '@/src/goldline-item-name';
 
-// SKU linking (Oct 27): which Watsons SKU code is which Nichido item.
+// SKU linking (Oct 27): which Watsons SKU code is which Nichido item. Second calm-down
+// pass: four columns (SKU · our item with its form page · price · decision), Watsons names
+// in title case without the repeated "NICHIDO", one price unless the two differ, a quiet
+// "⋯" on linked rows, and rows per page moved down beside the pager.
 // Kept calm on purpose (Hick's Law): one row of tabs instead of five cards, only the
 // chosen tab's explanation, one obvious action per row, and the remark box and
 // secondary actions (unlink, remark only) open on demand. Each item shows where it is
@@ -34,8 +37,8 @@ const TAB: Record<SkuStatus, string> = {
   formOnly: 'Form items without a SKU',
 };
 // One column template for the header and every row, so the columns line up.
-const COLS = 'lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.3fr)_7.5rem_8.5rem_minmax(13rem,15rem)]';
-const ITEM_COLS = 'md:grid-cols-[8rem_minmax(0,1fr)_minmax(0,14rem)_7.5rem_6rem]';
+const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
+const ITEM_COLS = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]';
 
 const n = (v: number) => Math.round(v).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -157,34 +160,26 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
   return (
     <div className={GL_PAGE}>
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="font-heading text-xl font-semibold tracking-tight">SKU linking</h1>
-          <p className="text-sm text-muted-foreground">Match each Watsons SKU to our item. Its Watsons sales count for the item only once linked.</p>
+      <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex max-w-2xl flex-col gap-1.5">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">SKU linking</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">Match each Watsons SKU to our item. A SKU&apos;s Watsons sales count for the item only once it is linked.</p>
         </div>
-        <div className="flex max-w-3xl flex-col gap-2">
-          <p className="text-sm">
-            <span className="font-heading text-lg font-semibold tabular-nums">{linkedPct}%</span>{' '}
-            <span className="text-muted-foreground">of Watsons units are on linked SKUs · {suggestedPct}% more if Coop&apos;s matches are approved</span>
-          </p>
+        <div className="flex w-full flex-col gap-2 lg:w-80">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-heading text-2xl font-semibold text-foreground tabular-nums">{linkedPct}%</span> of units linked
+            </p>
+            <p className="text-xs text-muted-foreground tabular-nums">+{suggestedPct}% waiting</p>
+          </div>
           <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div
-              style={{
-                width: `${linkedPct}%`,
-                background: 'var(--status-good)',
-              }}
-            />
-            <div
-              style={{
-                width: `${suggestedPct}%`,
-                background: 'var(--status-warn)',
-              }}
-            />
+            <div style={{width: `${linkedPct}%`, background: 'var(--status-good)'}} />
+            <div style={{width: `${suggestedPct}%`, background: 'var(--status-warn)'}} />
           </div>
         </div>
       </header>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
         <div className={cn('border-b', GL_SCROLL_ROW_MOBILE)}>
           <div role="tablist" aria-label="Show" className="-mb-px flex gap-1">
             {tabs.map((s) => {
@@ -209,7 +204,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             })}
           </div>
         </div>
-        <p className="text-sm">
+        <p className="pt-1 text-sm leading-relaxed">
           <span className="font-medium">{tag.label}.</span> <span className="text-muted-foreground">{tag.help}</span>
         </p>
       </div>
@@ -228,7 +223,12 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             className="h-9 w-72 rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 max-md:w-full"
           />
         </div>
-        <RowsPerPage value={size} onChange={changeSize} />
+        {total > 0 && (
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {n(total)} {filter === 'formOnly' ? 'items' : 'Watsons SKUs'}
+            {filter !== 'formOnly' ? ', biggest sellers first' : ''}
+          </p>
+        )}
       </div>
 
       {notice && (
@@ -241,22 +241,25 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         <p className="rounded-xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">{query ? 'Nothing matches that search.' : EMPTY[filter]}</p>
       ) : filter === 'formOnly' ? (
         <div className="overflow-hidden rounded-xl border">
-          <div className={cn('hidden gap-6 border-b bg-muted/40 px-5 py-2.5 text-xs font-medium text-muted-foreground md:grid', ITEM_COLS)}>
-            <span>Item code</span>
-            <span>Item</span>
+          <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground md:grid', ITEM_COLS)}>
+            <span>Item on our form</span>
             <span>Product line</span>
-            <span>Form page</span>
             <span className="text-right">Price</span>
           </div>
           <ul className="divide-y">
             {slice(shownItems).map((i) => (
-              <li key={i.itemCode} className={cn('grid gap-1 px-5 py-3 md:items-center md:gap-6', ITEM_COLS)}>
-                <span className="font-mono text-xs text-muted-foreground">{i.itemCode}</span>
-                <span className="truncate text-sm" title={itemText(i)}>
-                  {itemText(i)}
-                </span>
+              <li key={i.itemCode} className={cn('grid gap-1.5 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 md:items-center md:gap-8', ITEM_COLS)}>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className="truncate text-sm" title={itemText(i)}>
+                    {itemText(i)}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="tabular-nums">{i.itemCode}</span>
+                    <span aria-hidden>·</span>
+                    <FormSpotLink spot={i.formSpot} onClick={() => showForm(i.itemCode, i.formSpot)} />
+                  </p>
+                </div>
                 <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
-                <FormSpotLink spot={i.formSpot} onClick={() => showForm(i.itemCode, i.formSpot)} />
                 <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
               </li>
             ))}
@@ -264,11 +267,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border">
-          <div className={cn('hidden gap-5 border-b bg-muted/40 px-5 py-2.5 text-xs font-medium text-muted-foreground lg:grid', COLS)}>
+          <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground lg:grid', COLS)}>
             <span>Watsons SKU</span>
             <span>Our item</span>
-            <span>Form page</span>
-            <span className="text-right whitespace-nowrap">Watsons / our price</span>
+            <span className="text-right">Price</span>
             <span>{canEdit ? 'Your decision' : 'Decision'}</span>
           </div>
           <ul className="divide-y">
@@ -281,10 +283,12 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground tabular-nums">
-            {n(from + 1)} to {n(Math.min(total, from + size))} of {n(total)}
-            {filter !== 'formOnly' ? ' · biggest sellers first' : ''}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {n(from + 1)} to {n(Math.min(total, from + size))} of {n(total)}
+            </p>
+            <RowsPerPage value={size} onChange={changeSize} />
+          </div>
           <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="SKU pages" />
         </div>
       )}
@@ -305,8 +309,8 @@ const EMPTY: Record<SkuStatus, string> = {
 function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize) => void}) {
   return (
     <div role="group" aria-label="Rows per page" className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span>Rows per page</span>
-      <div className="flex rounded-md border p-0.5">
+      <span>Rows</span>
+      <div className="flex rounded-md bg-muted/60 p-0.5">
         {PAGE_SIZES.map((s) => (
           <button
             key={s}
@@ -314,8 +318,8 @@ function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize
             aria-pressed={value === s}
             onClick={() => onChange(s)}
             className={cn(
-              'h-7 min-w-9 rounded px-2 tabular-nums transition-colors duration-150',
-              value === s ? 'bg-foreground font-medium text-background' : 'hover:text-foreground',
+              'h-6 min-w-8 rounded px-2 tabular-nums transition-colors duration-150',
+              value === s ? 'bg-background font-medium text-foreground shadow-sm' : 'hover:text-foreground',
             )}
           >
             {s}
@@ -361,56 +365,62 @@ function SkuRow({
   };
   const priceOff = shown?.price != null && r.avgPrice != null && shown.price > 0 && Math.abs(r.avgPrice / shown.price - 1) > 0.15;
   const note = r.review?.remark;
-  const formSpot = shown ? <FormSpotLink spot={shown.formSpot} onClick={() => onShowForm(shown.itemCode, shown.formSpot)} /> : '—';
-  const priceTitle = priceOff ? 'Prices differ by more than 15%. Check it is the same product.' : undefined;
-  const price = (
-    <>
-      {r.avgPrice != null ? `₱${n(r.avgPrice)}` : '—'}
-      <span className="text-muted-foreground"> / </span>
-      <span style={priceOff ? {color: 'var(--status-warn)'} : undefined}>{shown?.price != null ? `₱${n(shown.price)}` : '—'}</span>
-    </>
-  );
+  const ours = shown?.price ?? null;
+  const theirs = r.avgPrice;
+  const samePrice = ours != null && theirs != null && Math.round(ours) === Math.round(theirs);
 
   return (
     <li>
-      <div className={cn('grid gap-x-5 gap-y-2 px-5 py-3.5 lg:items-center', COLS)}>
-        <div className="flex min-w-0 flex-col gap-0.5">
+      <div className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}>
+        <div className="flex min-w-0 flex-col gap-1">
           <p className="truncate text-sm font-medium" title={r.name}>
-            {r.name}
+            {watsonsName(r.name)}
           </p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {sku}
-            {r.subclass ? ` · ${r.subclass.toLowerCase()}` : ''}
-          </p>
+          <p className="text-xs text-muted-foreground tabular-nums">{sku}</p>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-col gap-1">
           {shown ? (
             <>
-              <p className="truncate text-sm" title={itemText(shown)}>
-                {itemText(shown)}
+              <p className="flex min-w-0 items-center gap-2 text-sm">
+                <span className="truncate" title={itemText(shown)}>
+                  {itemText(shown)}
+                </span>
+                {!r.linked && r.suggestion?.tier === 'low' && (
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{color: 'var(--status-warn)', background: 'color-mix(in oklab, var(--status-warn) 14%, transparent)'}}>
+                    Not sure
+                  </span>
+                )}
               </p>
-              <p className="truncate text-xs text-muted-foreground">
-                <span className="font-mono">{shown.itemCode}</span> · {r.linked ? linkedHow(r) : r.suggestion ? sureness(r.suggestion.tier) : ''}
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="tabular-nums">{shown.itemCode}</span>
+                <span aria-hidden>·</span>
+                <FormSpotLink spot={shown.formSpot} onClick={() => onShowForm(shown.itemCode, shown.formSpot)} />
               </p>
             </>
           ) : status === 'rejected' && r.review?.itemCode ? (
-            <p className="text-xs text-muted-foreground">
-              Rejected <span className="font-mono">{r.review.itemCode}</span>. Coop has no other match.
+            <p className="text-sm text-muted-foreground">
+              Rejected {r.review.itemCode}. No other match.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">No item yet</p>
           )}
         </div>
 
-        <div className="text-sm tabular-nums max-lg:hidden">{formSpot}</div>
-        <p className="text-sm tabular-nums max-lg:hidden lg:text-right" title={priceTitle}>
-          {price}
-        </p>
-        {/* Phones: units, form page and price on one line under the item. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground tabular-nums lg:hidden" title={priceTitle}>
-          <span>Form {formSpot}</span>
-          <span>Watsons / ours {price}</span>
+        <div className="flex flex-col gap-0.5 text-sm tabular-nums lg:items-end" title={priceOff ? 'Prices differ by more than 15%. Check it is the same product.' : undefined}>
+          {samePrice || theirs == null || ours == null ? (
+            <span>
+              <span className="text-xs text-muted-foreground lg:hidden">Price </span>
+              {ours != null ? `₱${n(ours)}` : theirs != null ? `₱${n(theirs)}` : '—'}
+            </span>
+          ) : (
+            <>
+              <span style={priceOff ? {color: 'var(--status-warn)'} : undefined}>
+                <span className="text-xs text-muted-foreground lg:hidden">Ours </span>₱{n(ours)}
+              </span>
+              <span className="text-xs text-muted-foreground">Watsons ₱{n(theirs)}</span>
+            </>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -476,8 +486,16 @@ function SkuRow({
             </Button>
           )}
           {canEdit && status === 'linked' && (
-            <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={`Remark or unlink ${sku}`} className="text-muted-foreground">
-              Remark or unlink <ChevronDown className={cn('size-3.5 transition-transform duration-150', open && 'rotate-180')} />
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              aria-label={`Remark or unlink ${sku}`}
+              title="Remark or unlink"
+              className="text-muted-foreground"
+            >
+              <MoreHorizontal className="size-4" />
             </Button>
           )}
           {note && !open && (
@@ -490,8 +508,9 @@ function SkuRow({
       </div>
 
       {open && canEdit && (
-        <div className="flex flex-col gap-4 border-t bg-muted/30 px-5 py-4 lg:flex-row lg:items-start lg:gap-8">
+        <div className="flex flex-col gap-4 bg-muted/30 px-6 pt-1 pb-5 lg:flex-row lg:items-start lg:gap-8">
           <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+            {r.linked && <p className="text-xs text-muted-foreground">How it was linked: {linkedHow(r)}.</p>}
             {choosing && (
               <NativeSelect aria-label={`Item for ${sku}`} value={item} onChange={(e) => setItem(e.target.value)} wrapperClassName="min-w-0 max-w-xl">
                 <option value="">Choose our item…</option>
