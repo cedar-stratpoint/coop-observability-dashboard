@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — Goldline Overview: modern look and a 12-month trend
+Oct 28 review, same language as BAs and Inventory:
+- Full width (was a centred 5xl column); the gradient bar and monospace date line are gone. The window reads "Watsons sales for September 2026" when it's a whole month; stores live is a quiet pill.
+- KPI tiles: icon, big value, the change as a green or red pill, and what it's compared with ("vs ₱21.7M the period before"). Two up on phones.
+- New **Units sold, last 12 months** chart beside Top categories: one bar a month, the latest highlighted, peak and monthly average in the header, a missing month drawn dashed. From `forecast_months()` (units only, nothing to decrypt); left out where that function isn't deployed yet (`last12Months` in `src/goldline-overview.ts`, tested).
+- Top categories: rank numbers, plain figures with each line's share of the period's net sales, thicker bars, "View all" in the footer.
+
 ## 2026-10-28 — Goldline BAs, Inventory and Uploads: a more modern, calmer look
 Oct 28 review (aesthetic-usability: a page that looks considered is trusted to work). Same visual language as SKU linking:
 - **BAs:** a stat strip by the title (stores, BAs known, need a BA); the yellow sentence became a soft banner with one action ("Show them" filters the list); underline tabs with one help line; the BA list is one bordered list with column headers (Store · BA · Last form), store monograms, BA initials avatars, store names in title case, a "No BA yet" pill, and a labelled edit panel under the row; scorecard tag tiles with icon, count and the rule; store links as small chips; empty states with an icon.
