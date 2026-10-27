@@ -6,12 +6,14 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {manilaDate} from '@/src/goldline-supply';
 import {glTags} from '@/src/goldline-ref-data';
+import {MAX_WINDOW_MONTHS} from '@/src/goldline-forecast';
 import {
   cancelShipment,
   existingItems,
   existingLines,
   existingStores,
   recordShipment,
+  saveForecastSettings,
   saveSupplySettings,
   setHidden,
   setRetired,
@@ -44,7 +46,7 @@ async function editorContext(company: string | null) {
 const intIn = (v: unknown, min: number, max: number) => (Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : null);
 
 /** Expire the cached reference data this write changed (next load is fresh), then the pages. */
-function refresh(companyId: string, changed: Array<'catalog' | 'supply'>) {
+function refresh(companyId: string, changed: Array<'catalog' | 'supply' | 'forecast'>) {
   for (const c of changed) revalidateTag(glTags[c](companyId), {expire: 0});
   revalidatePath('/stock', 'layout');
   revalidatePath('/action-feed');
@@ -193,5 +195,23 @@ export async function saveSupplySettingsAction(input: {
     revalidateTag(glTags.supply(e.companyId), {expire: 0});
     console.error('saveSupplySettingsAction', err);
     return {ok: false, error: 'Could not save the settings. Please try again.'};
+  }
+}
+
+export async function saveForecastSettingsAction(input: {company: string | null; windowMonths: number; safetyMonths: number}): Promise<ActionResult> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (e.ctx.storeScope) return {ok: false, error: 'Only company-wide roles can change the restock window.'};
+  const windowMonths = intIn(input.windowMonths, 1, MAX_WINDOW_MONTHS);
+  if (windowMonths == null) return {ok: false, error: `Cover 1 to ${MAX_WINDOW_MONTHS} months.`};
+  const safetyMonths = intIn(input.safetyMonths, 0, windowMonths);
+  if (safetyMonths == null) return {ok: false, error: `Safety stock is 0 to ${windowMonths} months (it can’t be longer than the window).`};
+  try {
+    await saveForecastSettings(e.companyId, {windowMonths, safetyMonths}, e.by);
+    refresh(e.companyId, ['forecast']);
+    return {ok: true};
+  } catch (err) {
+    console.error('saveForecastSettingsAction', err);
+    return {ok: false, error: 'Could not save the restock settings. Please try again.'};
   }
 }
