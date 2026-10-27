@@ -16,6 +16,9 @@
 // storage paths, so uploads.storage_path stays valid. Nothing is ever deleted on
 // either side. Schema must already exist (supabase/nichido/goldline_schema.sql); after
 // --apply, run supabase/nichido/goldline_post_copy.sql to move the id sequences on.
+// Run it before supabase/nichido/s1_sales_encryption.sql / s2_sales_drop_plaintext.sql:
+// it copies gl_sales' plain gross_retail / net_of_vat, which no longer exist on a
+// Nichido project after s2 (the sales copy then fails rather than storing plain figures).
 import {createHash} from 'node:crypto';
 import {createClient, type SupabaseClient} from '@supabase/supabase-js';
 import {fetchAllRows} from '../../src/pos-fetch-paginate';

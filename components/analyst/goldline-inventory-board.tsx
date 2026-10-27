@@ -9,7 +9,7 @@ import {useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
-import {Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronsUpDown, Eye, EyeOff, FileText, Info, MoreHorizontal, Package, Pencil, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
+import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronsUpDown, Eye, EyeOff, FileText, Info, MoreHorizontal, Package, Pencil, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
 import type {BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
 import {lastsLabel, sortRank} from '@/src/goldline-supply';
 import {Metric} from '@/components/analyst/metric';
@@ -215,6 +215,9 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link href={store ? `/stock/restock?store=${encodeURIComponent(store)}` : '/stock/restock'} className={buttonVariants({variant: 'outline', size: 'sm'})}>
+              <CalendarRange className="size-4" /> Restock
+            </Link>
             <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} disabled={!data.canEdit}>
               <Settings2 className="size-4" /> Supply settings
             </Button>

@@ -2,6 +2,7 @@ import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
+import {clampSettings, DEFAULT_FORECAST_SETTINGS, type ForecastSettings} from './goldline-forecast';
 
 // Cached Goldline reference data — the small, rarely-changing tables nearly every
 // Goldline page reads: the catalog, the store list, and the supply side (settings,
@@ -20,6 +21,7 @@ export const glTags = {
   catalog: (companyId: string) => `gl-catalog:${companyId}`,
   stores: (companyId: string) => `gl-stores:${companyId}`,
   supply: (companyId: string) => `gl-supply:${companyId}`,
+  forecast: (companyId: string) => `gl-forecast:${companyId}`,
 };
 
 export type GlProduct = {
@@ -99,6 +101,21 @@ export function getGlSupplyRef(companyId: string): Promise<GlSupplyRef> {
     },
     ['gl-supply', companyId],
     {tags: [glTags.supply(companyId)], revalidate: REVALIDATE_SECONDS},
+  )();
+}
+
+/** Restock window and safety months (F10). Defaults (3 + 1) when unset or Nichido is off. */
+export function getForecastSettings(companyId: string): Promise<ForecastSettings> {
+  if (!configured()) return Promise.resolve(DEFAULT_FORECAST_SETTINGS);
+  return unstable_cache(
+    async (): Promise<ForecastSettings> => {
+      // pagination-ok: one row by primary key (company_id).
+      const {data, error} = await db().from('forecast_settings').select('window_months,safety_months').eq('company_id', companyId).maybeSingle();
+      if (error) throw new Error(`forecast_settings read failed: ${error.message}`);
+      return clampSettings(data ? {windowMonths: data.window_months, safetyMonths: data.safety_months} : null);
+    },
+    ['gl-forecast-settings', companyId],
+    {tags: [glTags.forecast(companyId)], revalidate: REVALIDATE_SECONDS},
   )();
 }
 
