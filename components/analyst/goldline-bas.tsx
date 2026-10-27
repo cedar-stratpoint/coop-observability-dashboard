@@ -3,16 +3,15 @@
 import {useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
 import Link from 'next/link';
-import {CircleAlert} from 'lucide-react';
+import {ArrowUpRight, CircleAlert, Search, Store, UserRound, UsersRound} from 'lucide-react';
 import type {BaDirectory, BaScorecard, BaScoreRow, BaStoreRow} from '@/src/goldline-ba-data';
 import {FLAG_CAUSES, type BaTag} from '@/src/goldline-checks';
 import {CAUSE, TAG, tint, toneVar} from '@/components/analyst/goldline-flags';
 import {NativeSelect} from '@/components/ui/native-select';
 import {assignBaAction, type BaActionResult} from '@/app/bas/actions';
-import {Card, CardContent} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
-import {GL_PAGE, GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE, GL_SCROLL_ROW_MOBILE, titleName} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 
 // BAs: the scorecard (F8) and the BA list (A1). The scorecard is each BA's month across
@@ -22,6 +21,9 @@ import {cn} from '@/lib/utils';
 // on uploaded forms (Oct 27: no list is typed in). A form with no name counts against
 // the store's BA, and "Liza M." resolves to "Liza Mendoza". Admins can correct a
 // store's BA here. Stores whose saved forms have no BA come first. Full names only.
+// Oct 28 look: same language as SKU linking (underline tabs, one quiet list with column
+// headers, generous padding), a stat strip by the title, a soft banner with one action,
+// initials avatars for BAs and monograms for stores.
 
 const PAGE_SIZE = 20;
 const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -31,7 +33,19 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const fmtDay = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}, ${iso.slice(0, 4)}`;
 const monthStart = () => `${new Date().toISOString().slice(0, 7)}-01`;
 const field =
-  'h-8 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
+  'h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
+const LIST_COLS = 'md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_9rem_7rem]';
+const TAB_HELP: Record<Tab, string> = {
+  scorecard: 'Each BA’s month: flags count as points, and the points set the tag.',
+  list: 'Coop learns each BA from the name written on the forms. Change a store’s BA here only to correct it.',
+};
+
+/** Two letters for an avatar: first and last word ("Liza Mendoza" → LM, "Cubao" → CU). */
+const initials = (name: string) => {
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  if (!w.length) return '?';
+  return (w.length === 1 ? w[0].slice(0, 2) : w[0][0] + w[w.length - 1][0]).toUpperCase();
+};
 
 export function GoldlineBas({company, data, scorecard, canEdit}: {company: string; data: BaDirectory; scorecard: BaScorecard; canEdit: boolean}) {
   const router = useRouter();
@@ -39,6 +53,7 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
   const [notice, setNotice] = useState<{kind: 'ok' | 'err'; text: string} | null>(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  const [onlyMissing, setOnlyMissing] = useState(false);
 
   function act(fn: () => Promise<BaActionResult>, after?: () => void) {
     setNotice(null);
@@ -52,103 +67,169 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
     });
   }
 
+  const needsBa = (s: BaStoreRow) => !s.ba && s.formsNoBa > 0;
+  const missing = data.stores.filter(needsBa).length;
   const needle = q.trim().toLowerCase();
-  const list = data.stores.filter((s) => !needle || `${s.code} ${s.name} ${s.ba ?? ''}`.toLowerCase().includes(needle));
+  const list = data.stores.filter((s) => (!onlyMissing || needsBa(s)) && (!needle || `${s.code} ${s.name} ${s.ba ?? ''}`.toLowerCase().includes(needle)));
   const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const rows = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const missing = data.stores.filter((s) => !s.ba && s.formsNoBa > 0).length;
   // Open on the list while forms are landing with no BA and nothing is scored yet.
   const [tab, setTab] = useState<Tab>(scorecard.scores.length || !missing ? 'scorecard' : 'list');
+  const showMissing = () => {
+    setTab('list');
+    setOnlyMissing(true);
+    setQ('');
+    setPage(1);
+  };
 
   return (
-    <div className={cn(GL_PAGE, GL_TILES_MOBILE)}>
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold tracking-tight">BAs</h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Each BA’s month at a glance, and which BA covers each store. Every flag counts against the BA on the form; a blank form uses the store’s BA from the list.
-        </p>
+    <div className={GL_PAGE}>
+      <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex max-w-2xl flex-col gap-1.5">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">BAs</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">Each BA’s month at a glance, and who covers each store. Every flag counts against the BA on the form; a form with no name uses the store’s BA.</p>
+        </div>
+        <dl className="flex gap-8">
+          <Stat label="Stores" value={data.stores.length} />
+          <Stat label="BAs known" value={data.bas.length} />
+          <Stat label="Need a BA" value={missing} tone={missing ? 'warn' : undefined} />
+        </dl>
       </header>
 
       {missing > 0 && (
-        <p className="flex items-start gap-2 text-sm" style={{color: 'var(--status-warn)'}}>
-          <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-          <span>
-            {missing} {missing === 1 ? 'store has' : 'stores have'} saved forms with no BA name and no BA on the list. Their flags count against nobody until a BA is set.
-          </span>
-        </p>
+        <div className="flex flex-col gap-3 rounded-xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between" style={{borderColor: tint('warn', 35), background: tint('warn', 7)}}>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full" style={{background: tint('warn', 16), color: toneVar('warn')}}>
+              <CircleAlert aria-hidden className="size-4" />
+            </span>
+            <div className="flex flex-col gap-0.5">
+              <p className="text-sm font-medium">
+                {missing} {missing === 1 ? 'store needs' : 'stores need'} a BA
+              </p>
+              <p className="text-sm text-muted-foreground">Their saved forms have no BA name, so their flags count against nobody until a BA is set.</p>
+            </div>
+          </div>
+          <Button size="sm" variant="outline" onClick={showMissing} className="shrink-0 self-start sm:self-auto">
+            Show {missing === 1 ? 'it' : 'them'}
+          </Button>
+        </div>
       )}
 
       {notice && (
-        <p role="status" className={cn('text-sm', notice.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive')}>
+        <p role="status" className={cn('-my-2 text-sm', notice.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive')}>
           {notice.text}
         </p>
       )}
 
-      <div className={GL_SCROLL_ROW_MOBILE}>
-        <div role="group" aria-label="Show" className="flex gap-2">
-          {(
-            [
-              ['scorecard', 'Scorecard', scorecard.scores.length],
-              ['list', 'BA list', data.stores.length],
-            ] as Array<[Tab, string, number]>
-          ).map(([v, label, c]) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={tab === v}
-              onClick={() => setTab(v)}
-              className={cn(
-                'inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
-                tab === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-foreground/30',
-              )}
-            >
-              {label} <span className="tabular-nums opacity-80">{c}</span>
-            </button>
-          ))}
+      <div className="flex flex-col gap-4">
+        <div className={cn('border-b', GL_SCROLL_ROW_MOBILE)}>
+          <div role="tablist" aria-label="Show" className="-mb-px flex gap-1">
+            {(
+              [
+                ['scorecard', 'Scorecard', scorecard.scores.length],
+                ['list', 'BA list', data.stores.length],
+              ] as Array<[Tab, string, number]>
+            ).map(([v, label, c]) => {
+              const on = tab === v;
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setTab(v)}
+                  className={cn(
+                    'inline-flex h-10 items-center gap-2 border-b-2 px-3 text-sm whitespace-nowrap transition-colors duration-150',
+                    on ? 'border-foreground font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {label}
+                  <span className={cn('rounded-full px-1.5 text-xs tabular-nums', on ? 'bg-foreground/10' : 'bg-muted')}>{c}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
+        <p className="pt-1 text-sm leading-relaxed text-muted-foreground">{TAB_HELP[tab]}</p>
       </div>
 
       {tab === 'scorecard' ? (
-        <Scorecard data={scorecard} onList={() => setTab('list')} />
+        <Scorecard data={scorecard} onList={showMissing} />
       ) : (
-      <>
-      <p className="text-xs text-muted-foreground">Coop learns each BA from the name written on the forms: a known BA is recognised, a new one is added, and they become the store’s BA from that cycle. Change a store’s BA here only to correct it.</p>
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 max-md:w-full">
+              <div className="relative max-md:w-full">
+                <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="search"
+                  aria-label="Search stores or BAs"
+                  placeholder="Search store or BA…"
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    setPage(1);
+                  }}
+                  className={cn(field, 'pl-8 md:w-72')}
+                />
+              </div>
+              {missing > 0 && (
+                <div role="group" aria-label="Filter" className="flex rounded-md bg-muted/60 p-0.5 text-xs">
+                  {(
+                    [
+                      [false, 'All'],
+                      [true, 'Needs a BA'],
+                    ] as Array<[boolean, string]>
+                  ).map(([v, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-pressed={onlyMissing === v}
+                      onClick={() => {
+                        setOnlyMissing(v);
+                        setPage(1);
+                      }}
+                      className={cn(
+                        'h-7 rounded px-3 transition-colors duration-150',
+                        onlyMissing === v ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {list.length} {list.length === 1 ? 'store' : 'stores'}
+              {missing > 0 && !onlyMissing ? ', the ones needing a BA first' : ''}
+            </p>
+          </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-medium">
-          Stores <span className="font-normal text-muted-foreground tabular-nums">{data.stores.length}</span>
-        </p>
-        <input
-          type="search"
-          aria-label="Search stores or BAs"
-          placeholder="Search store or BA"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setPage(1);
-          }}
-          className={cn(field, 'w-full sm:w-64')}
-        />
-      </div>
-
-      {rows.length === 0 ? (
-        <Card>
-          <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-            {data.stores.length ? 'No stores match.' : 'No store has sent a form yet. BAs appear here as forms are uploaded.'}
-          </CardContent>
-        </Card>
-      ) : (
-        <ul className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-3">
-          {rows.map((s) => (
-            <li key={s.code}>
-              <StoreLine s={s} company={company} canEdit={canEdit} pending={pending} act={act} />
-            </li>
-          ))}
-        </ul>
-      )}
-      <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Store pages" />
-      </>
+          {rows.length === 0 ? (
+            <Empty
+              Icon={Store}
+              title={data.stores.length ? 'No stores match' : 'No stores yet'}
+              text={data.stores.length ? 'Try another name or code.' : 'Stores and their BAs appear here as forms are uploaded.'}
+            />
+          ) : (
+            <div className="overflow-hidden rounded-xl border">
+              <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground md:grid', LIST_COLS)}>
+                <span>Store</span>
+                <span>BA</span>
+                <span>Last form</span>
+                <span className="sr-only">Action</span>
+              </div>
+              <ul className="divide-y">
+                {rows.map((s) => (
+                  <StoreLine key={s.code} s={s} company={company} canEdit={canEdit} pending={pending} act={act} />
+                ))}
+              </ul>
+            </div>
+          )}
+          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Store pages" />
+        </>
       )}
 
       <datalist id="ba-directory-names">
@@ -160,6 +241,46 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
   );
 }
 
+function Stat({label, value, tone}: {label: string; value: number; tone?: 'warn'}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="font-heading text-2xl font-semibold tabular-nums" style={tone ? {color: toneVar(tone)} : undefined}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function Empty({Icon, title, text}: {Icon: typeof Store; title: string; text: string}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-14 text-center">
+      <span className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
+        <Icon aria-hidden className="size-5" />
+      </span>
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function Avatar({name, round = true, muted = false}: {name: string; round?: boolean; muted?: boolean}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'grid size-9 shrink-0 place-items-center text-xs font-semibold tracking-wide',
+        round ? 'rounded-full' : 'rounded-lg',
+        muted ? 'bg-muted text-muted-foreground' : 'bg-primary/15 text-primary',
+      )}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
 type Act = (fn: () => Promise<BaActionResult>, after?: () => void) => void;
 
 function StoreLine({s, company, canEdit, pending, act}: {s: BaStoreRow; company: string; canEdit: boolean; pending: boolean; act: Act}) {
@@ -167,64 +288,96 @@ function StoreLine({s, company, canEdit, pending, act}: {s: BaStoreRow; company:
   const [name, setName] = useState(s.ba ?? '');
   const [from, setFrom] = useState(s.since ?? monthStart());
   const noBa = !s.ba && s.formsNoBa > 0;
+  const storeName = titleName(s.name);
   return (
-    <Card className="h-full py-0">
-      <CardContent className="flex flex-col gap-2.5 px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+    <li>
+      <div className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 md:items-center', LIST_COLS, editing && 'bg-muted/30')}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={storeName} round={false} muted />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <p className="text-sm font-medium">{s.name}</p>
-            <p className="text-xs text-muted-foreground">
-              Store {s.code}
-              {s.lastForm ? ` · last form ${fmtDay(s.lastForm)}` : ' · no form yet'}
-              {s.formsNoBa > 0 ? ` · ${s.formsNoBa} ${s.formsNoBa === 1 ? 'form' : 'forms'} with no BA name` : ''}
+            <p className="truncate text-sm font-medium" title={s.name}>
+              {storeName}
             </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <p className="text-right text-sm">
-              {s.ba ? (
-                <>
-                  <span className="font-medium">{s.ba}</span>
-                  {s.since && <span className="block text-xs text-muted-foreground">since {fmtDay(s.since)}</span>}
-                </>
-              ) : (
-                <span style={{color: noBa ? 'var(--status-warn)' : undefined}} className={noBa ? '' : 'text-muted-foreground'}>
-                  No BA set
-                </span>
-              )}
-            </p>
-            {canEdit && !editing && (
-              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                {s.ba ? 'Change' : 'Set BA'}
-              </Button>
-            )}
+            <p className="text-xs text-muted-foreground tabular-nums">Store {s.code}</p>
           </div>
         </div>
-        {editing && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3">
-            <input
-              aria-label="BA full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              list="ba-directory-names"
-              maxLength={80}
-              placeholder="Full name"
-              autoComplete="off"
-              className={cn(field, 'min-w-48 flex-1')}
-            />
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              from <input type="date" aria-label="From" value={from} onChange={(e) => setFrom(e.target.value)} className={field} />
+
+        <div className="flex min-w-0 items-center gap-3">
+          {s.ba ? (
+            <>
+              <Avatar name={s.ba} />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <p className="truncate text-sm">{s.ba}</p>
+                {s.since && <p className="text-xs text-muted-foreground">since {fmtDay(s.since)}</p>}
+              </div>
+            </>
+          ) : (
+            <div className="flex min-w-0 flex-col items-start gap-1">
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={noBa ? {color: toneVar('warn'), background: tint('warn', 14)} : undefined}
+              >
+                <span className="size-1.5 rounded-full" style={{background: noBa ? toneVar('warn') : 'var(--muted-foreground)'}} aria-hidden />
+                <span className={noBa ? '' : 'text-muted-foreground'}>No BA yet</span>
+              </span>
+              {s.formsNoBa > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {s.formsNoBa} {s.formsNoBa === 1 ? 'form' : 'forms'} with no BA name
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <p className="text-sm tabular-nums">
+          <span className="text-xs text-muted-foreground md:hidden">Last form </span>
+          {s.lastForm ? fmtDay(s.lastForm) : <span className="text-muted-foreground">No form yet</span>}
+        </p>
+
+        <div className="md:text-right">
+          {canEdit && !editing && (
+            <Button size="sm" variant={noBa ? 'default' : 'outline'} onClick={() => setEditing(true)}>
+              {s.ba ? 'Change' : 'Set BA'}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <div className="flex flex-col gap-4 bg-muted/30 px-6 pt-1 pb-5">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,22rem)_11rem]">
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+              BA’s full name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                list="ba-directory-names"
+                maxLength={80}
+                placeholder="e.g. Liza Mendoza"
+                autoComplete="off"
+                autoFocus
+                className={field}
+              />
             </label>
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+              Covers the store from
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={field} />
+            </label>
+          </div>
+          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+            Forms from this date with no BA name are saved under this BA, and their flags count against them. Names written on a form stay as written.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={pending || name.trim().length < 2 || !from} onClick={() => act(() => assignBaAction({company, store: s.code, name, from}), () => setEditing(false))}>
+              {pending ? 'Saving…' : 'Save'}
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
               Cancel
             </Button>
-            <Button size="sm" disabled={pending || name.trim().length < 2 || !from} onClick={() => act(() => assignBaAction({company, store: s.code, name, from}), () => setEditing(false))}>
-              Save
-            </Button>
-            <p className="w-full text-xs text-muted-foreground">Forms from this date with no BA name are saved under this BA, and their flags count against them. Names written on a form stay as written.</p>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -237,6 +390,13 @@ function remarkOf(r: BaScoreRow): string {
     .map((c, i) => `${i === 0 ? CAUSE[c].label : CAUSE[c].label.toLowerCase()} ${plural(r.byCause[c], 'time')}`)
     .join(', ');
 }
+
+const TAG_RULE: Record<BaTag, string> = {
+  delinquent: '3 or more flags, or any padding',
+  at_risk: '1 to 2 flags',
+  clear: 'No flags this month',
+};
+const SCORE_COLS = 'lg:grid-cols-[minmax(0,1fr)_8rem_4rem_minmax(0,1.2fr)_6rem_minmax(0,1fr)]';
 
 function Scorecard({data, onList}: {data: BaScorecard; onList: () => void}) {
   const [month, setMonth] = useState(data.months[0] ?? '');
@@ -252,14 +412,10 @@ function Scorecard({data, onList}: {data: BaScorecard; onList: () => void}) {
   const max = Math.max(1, ...data.scores.map((r) => r.points));
 
   if (!data.months.length) {
-    return (
-      <Card>
-        <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">No saved forms yet. Each BA shows here once their store’s form is saved.</CardContent>
-      </Card>
-    );
+    return <Empty Icon={UsersRound} title="No scores yet" text="Each BA gets a monthly score once their store’s form is saved. The BA list shows who covers each store." />;
   }
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <NativeSelect aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
           {data.months.map((m) => (
@@ -268,150 +424,134 @@ function Scorecard({data, onList}: {data: BaScorecard; onList: () => void}) {
             </option>
           ))}
         </NativeSelect>
-        <p className="text-xs text-muted-foreground">Clear with no flags · At risk with 1 to 2 · Delinquent with 3 or more, or any padding</p>
+        {tag !== 'all' && (
+          <button type="button" onClick={() => setTag('all')} className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+            Show every tag
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         {(['delinquent', 'at_risk', 'clear'] as BaTag[]).map((t) => {
           const {label, tone, Icon} = TAG[t];
+          const on = tag === t;
           return (
             <button
               key={t}
               type="button"
-              aria-pressed={tag === t}
-              onClick={() => setTag(tag === t ? 'all' : t)}
+              aria-pressed={on}
+              onClick={() => setTag(on ? 'all' : t)}
               className={cn(
-                'flex items-center justify-between gap-2 rounded-xl border bg-card px-4 py-3 text-left transition-[border-color,transform] duration-150 ease-out active:scale-[0.98] max-sm:flex-col-reverse max-sm:items-start max-sm:gap-0.5 max-sm:px-3 max-sm:py-2.5',
-                tag === t ? 'border-foreground/40' : 'border-border hover:border-foreground/25',
+                'flex items-center gap-4 rounded-xl border bg-card px-5 py-4 text-left transition-[border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.99]',
+                on ? 'ring-1' : 'hover:border-foreground/25',
               )}
+              style={on ? {borderColor: toneVar(tone), boxShadow: `0 0 0 1px ${toneVar(tone)}`} : undefined}
             >
-              <span className="inline-flex items-center gap-1.5 text-sm font-medium" style={{color: toneVar(tone)}}>
-                <Icon aria-hidden className="size-4" /> {label}
+              <span className="grid size-10 shrink-0 place-items-center rounded-full" style={{background: tint(tone, 16), color: toneVar(tone)}}>
+                <Icon aria-hidden className="size-5" />
               </span>
-              <span className="font-heading text-xl font-semibold tabular-nums">{counts[t]}</span>
+              <span className="flex min-w-0 flex-col">
+                <span className="flex items-baseline gap-2">
+                  <span className="font-heading text-2xl font-semibold tabular-nums">{counts[t]}</span>
+                  <span className="text-sm font-medium">{label}</span>
+                </span>
+                <span className="truncate text-xs text-muted-foreground">{TAG_RULE[t]}</span>
+              </span>
             </button>
           );
         })}
       </div>
 
       {noBa > 0 && (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" style={{color: 'var(--status-warn)'}}>
-          <CircleAlert aria-hidden className="size-4 shrink-0" />
-          {plural(noBa, 'flag')} in {fmtMonth(month)} {noBa === 1 ? 'is' : 'are'} on forms with no BA name, so {noBa === 1 ? 'it counts' : 'they count'} against nobody yet.
-          <button type="button" onClick={onList} className="font-medium underline underline-offset-4">
-            Set BAs on the list
-          </button>
-        </p>
+        <div className="flex flex-col gap-2 rounded-xl border px-5 py-3.5 text-sm sm:flex-row sm:items-center sm:justify-between" style={{borderColor: tint('warn', 35), background: tint('warn', 7)}}>
+          <p className="flex items-start gap-2">
+            <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" style={{color: toneVar('warn')}} />
+            <span>
+              {plural(noBa, 'flag')} in {fmtMonth(month)} {noBa === 1 ? 'is' : 'are'} on forms with no BA name, so {noBa === 1 ? 'it counts' : 'they count'} against nobody yet.
+            </span>
+          </p>
+          <Button size="sm" variant="outline" onClick={onList} className="shrink-0 self-start sm:self-auto">
+            Set BAs
+          </Button>
+        </div>
       )}
 
       {rows.length === 0 ? (
-        <Card>
-          <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
-            {inMonth.length ? 'No BAs match.' : `No BA is named on ${fmtMonth(month)}’s forms yet. BAs are read from the forms as they’re uploaded.`}
-          </CardContent>
-        </Card>
+        <Empty
+          Icon={UserRound}
+          title={inMonth.length ? 'No BAs with this tag' : 'No BA named yet'}
+          text={inMonth.length ? 'Pick another tag, or show every tag.' : `No BA is named on ${fmtMonth(month)}’s forms yet. BAs are read from the forms as they’re uploaded.`}
+        />
       ) : (
-        <>
-        {/* Phones: one card per BA. */}
-        <ul className="flex flex-col gap-2 sm:hidden">
-          {rows.map((r) => {
-            const t = TAG[r.tag];
-            return (
-              <li key={`${r.ba}|${r.month}`}>
-                <Card className="py-0">
-                  <CardContent className="flex flex-col gap-1.5 px-3.5 py-3">
-                    <p className="flex items-start justify-between gap-3">
-                      <span className="font-medium">{r.ba}</span>
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{color: toneVar(t.tone), background: tint(t.tone, 14)}}>
-                        <t.Icon aria-hidden className="size-3.5" />
-                        {t.label} · {plural(r.points, 'point')}
-                      </span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">{r.points ? remarkOf(r) : 'No flags'}</p>
+        <div className="overflow-hidden rounded-xl border">
+          <div className={cn('hidden gap-6 border-b px-6 py-3 text-xs font-medium text-muted-foreground lg:grid', SCORE_COLS)}>
+            <span>BA</span>
+            <span>Tag</span>
+            <span className="text-right">Points</span>
+            <span>Remarks</span>
+            <span>{window.length > 1 ? `Last ${window.length} months` : 'This month'}</span>
+            <span>Stores</span>
+          </div>
+          <ul className="divide-y">
+            {rows.map((r) => {
+              const t = TAG[r.tag];
+              return (
+                <li key={`${r.ba}|${r.month}`} className={cn('grid gap-x-6 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', SCORE_COLS)}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar name={r.ba} />
+                    <p className="truncate text-sm font-medium">{r.ba}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap" style={{color: toneVar(t.tone), background: tint(t.tone, 14)}}>
+                      <t.Icon aria-hidden className="size-3.5" />
+                      {t.label}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums lg:hidden">{plural(r.points, 'point')}</span>
+                  </div>
+                  <p className="text-right text-sm tabular-nums max-lg:hidden">{r.points}</p>
+                  <div className="min-w-0 text-xs leading-relaxed">
+                    {r.points ? (
+                      <>
+                        {r.category && r.points > 1 && <span className="block font-medium">Mostly {CAUSE[r.category].label.toLowerCase()}</span>}
+                        <span className="text-muted-foreground">{remarkOf(r)}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">No flags</span>
+                    )}
+                  </div>
+                  <span className="flex h-7 items-end gap-1 max-lg:hidden" role="img" aria-label={window.map((m) => `${fmtMonth(m)}: ${pointsOf.get(`${r.ba}|${m}`)?.points ?? 'no form'}`).join(', ')}>
+                    {window.map((m) => {
+                      const s = pointsOf.get(`${r.ba}|${m}`);
+                      return (
+                        <i
+                          key={m}
+                          className="block w-2.5 rounded-sm"
+                          style={{
+                            height: s ? `${Math.max(14, (s.points / max) * 100)}%` : '14%',
+                            background: s ? toneVar(TAG[s.tag].tone) : 'var(--border)',
+                            opacity: m === month ? 1 : 0.5,
+                          }}
+                        />
+                      );
+                    })}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
                     {r.stores.map((code, i) => (
-                      <Link key={code} href={`/flags?open=${encodeURIComponent(`${code}|${r.month}|${r.ba}`)}`} className="text-xs font-medium underline-offset-4 hover:underline">
-                        {r.storeNames[i]} · open form
+                      <Link
+                        key={code}
+                        href={`/flags?open=${encodeURIComponent(`${code}|${r.month}|${r.ba}`)}`}
+                        className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:border-foreground/30 hover:bg-muted/40"
+                      >
+                        {titleName(r.storeNames[i])}
+                        <ArrowUpRight aria-hidden className="size-3 text-muted-foreground" />
                       </Link>
                     ))}
-                  </CardContent>
-                </Card>
-              </li>
-            );
-          })}
-        </ul>
-        <Card className="py-0 max-sm:hidden">
-          <CardContent className="px-0 py-0">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-2.5 font-medium">BA</th>
-                    <th className="px-2 py-2.5 font-medium">Tag</th>
-                    <th className="px-2 py-2.5 text-right font-medium">Points</th>
-                    <th className="px-3 py-2.5 font-medium">Remarks</th>
-                    <th className="px-2 py-2.5 font-medium">{window.length > 1 ? `Last ${window.length} months` : 'This month'}</th>
-                    <th className="px-4 py-2.5 font-medium">Stores</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const t = TAG[r.tag];
-                    return (
-                      <tr key={`${r.ba}|${r.month}`} className="border-b border-border/60 align-top last:border-0">
-                        <td className="px-4 py-3 font-medium">{r.ba}</td>
-                        <td className="px-2 py-3">
-                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap" style={{color: toneVar(t.tone), background: tint(t.tone, 14)}}>
-                            <t.Icon aria-hidden className="size-3.5" />
-                            {t.label}
-                          </span>
-                        </td>
-                        <td className="px-2 py-3 text-right font-mono tabular-nums">{r.points}</td>
-                        <td className="px-3 py-3 text-xs">
-                          {r.points ? (
-                            <>
-                              {r.category && r.points > 1 && <span className="block font-medium">Mostly {CAUSE[r.category].label.toLowerCase()}</span>}
-                              <span className="text-muted-foreground">{remarkOf(r)}</span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">No flags</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-3">
-                          <span className="flex h-6 items-end gap-1" role="img" aria-label={window.map((m) => `${fmtMonth(m)}: ${pointsOf.get(`${r.ba}|${m}`)?.points ?? 'no form'}`).join(', ')}>
-                            {window.map((m) => {
-                              const s = pointsOf.get(`${r.ba}|${m}`);
-                              return (
-                                <i
-                                  key={m}
-                                  className="block w-2.5 rounded-sm"
-                                  style={{
-                                    height: s ? `${Math.max(12, (s.points / max) * 100)}%` : '12%',
-                                    background: s ? toneVar(TAG[s.tag].tone) : 'var(--border)',
-                                    opacity: m === month ? 1 : 0.55,
-                                  }}
-                                />
-                              );
-                            })}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs">
-                          <span className="flex flex-col gap-0.5">
-                            {r.stores.map((code, i) => (
-                              <Link key={code} href={`/flags?open=${encodeURIComponent(`${code}|${r.month}|${r.ba}`)}`} className="underline-offset-4 hover:underline">
-                                {r.storeNames[i]} <span className="text-muted-foreground">· open form</span>
-                              </Link>
-                            ))}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-        </>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );

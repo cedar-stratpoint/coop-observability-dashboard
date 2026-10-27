@@ -9,10 +9,10 @@ import {useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
-import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronsUpDown, Eye, EyeOff, FileText, Info, MoreHorizontal, Package, Pencil, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
+import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronsUpDown, Eye, EyeOff, Factory, FileText, Info, MoreHorizontal, Package, PackageX, Pencil, RefreshCw, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
 import type {BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
 import {lastsLabel, sortRank} from '@/src/goldline-supply';
-import {Metric} from '@/components/analyst/metric';
+import {tint, toneVar} from '@/components/analyst/goldline-flags';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {Pagination} from '@/components/analyst/pagination';
 import {NativeSelect} from '@/components/ui/native-select';
@@ -22,7 +22,7 @@ import {fmtDay, MOVEMENT_STATUS, peso, StorePicker, ToneChip} from '@/components
 import {NumberDialog, priceSubmit, ShipmentDialog, SupplySettingsDialog, warehouseSubmit, type ShipTarget} from '@/components/analyst/goldline-supply-dialogs';
 import {cancelShipmentAction, setHiddenAction, setRetiredAction} from '@/app/stock/actions';
 import {cn} from '@/lib/utils';
-import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE, GL_SCROLL_ROW_MOBILE} from '@/src/goldline-ui';
 
 export type BoardViewData = {
   company: string | null;
@@ -192,108 +192,127 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
   const empty = data.stores.length === 0 || rows.length === 0;
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
-      <header className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-2">
+    <div className={GL_PAGE}>
+      <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
             <h1 className="font-heading text-2xl font-semibold tracking-tight">Inventory</h1>
-            <div className="flex flex-wrap items-center gap-2">
-              {data.stores.length > 0 && <StorePicker stores={data.stores} value={store} allLabel={data.stores.length > 1 ? `All stores (${data.stores.length})` : undefined} />}
-              <span className="font-mono text-xs text-muted-foreground">
-                {data.count?.latestEnd
-                  ? [`latest count ${fmtDay(data.count.latestEnd)}`, data.count.consultant && `by ${data.count.consultant}`].filter(Boolean).join(' · ')
-                  : store
-                    ? 'no count yet'
-                    : `${data.stores.length} stores · latest counts`}
-              </span>
+            <p className="text-sm text-muted-foreground">
+              {data.count?.latestEnd
+                ? [`Latest count ${fmtDay(data.count.latestEnd)}`, data.count.consultant && `by ${data.count.consultant}`].filter(Boolean).join(' · ')
+                : store
+                  ? 'No count yet for this store'
+                  : `${data.stores.length} stores · each store's latest count`}
               {store && (
-                <span className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground">
-                  <Truck className="size-3.5" aria-hidden /> {transitDays} {transitDays === 1 ? 'day' : 'days'} from the warehouse · sent today arrives ~
-                  {fmtDay(addDaysIso(today, transitDays))}
+                <span>
+                  {' · '}
+                  {transitDays} {transitDays === 1 ? 'day' : 'days'} from the warehouse, sent today arrives ~{fmtDay(addDaysIso(today, transitDays))}
                 </span>
               )}
-            </div>
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link href={store ? `/stock/restock?store=${encodeURIComponent(store)}` : '/stock/restock'} className={buttonVariants({variant: 'outline', size: 'sm'})}>
-              <CalendarRange className="size-4" /> Restock
-            </Link>
-            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} disabled={!data.canEdit}>
-              <Settings2 className="size-4" /> Supply settings
-            </Button>
-            {data.canEdit && (
-              <Button size="sm" onClick={() => setShip({store, item: null})} disabled={empty}>
-                <Truck className="size-4" /> Record shipment
-              </Button>
-            )}
-          </div>
+          {data.stores.length > 0 && <StorePicker stores={data.stores} value={store} allLabel={data.stores.length > 1 ? `All stores (${data.stores.length})` : undefined} />}
         </div>
-        <div className="h-0.5 w-24 rounded-full bg-gradient-to-r from-primary to-transparent" aria-hidden />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={store ? `/stock/restock?store=${encodeURIComponent(store)}` : '/stock/restock'} className={buttonVariants({variant: 'outline', size: 'sm'})}>
+            <CalendarRange className="size-4" /> Restock
+          </Link>
+          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} disabled={!data.canEdit}>
+            <Settings2 className="size-4" /> Supply settings
+          </Button>
+          {data.canEdit && (
+            <Button size="sm" onClick={() => setShip({store, item: null})} disabled={empty}>
+              <Truck className="size-4" /> Record shipment
+            </Button>
+          )}
+        </div>
       </header>
 
-      {data.pendingReview > 0 && (
-        <Link href="/uploads?status=needs_review" className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted/50">
-          <Upload className="size-4 text-muted-foreground" aria-hidden />
-          <span>
-            <span className="font-medium">{data.pendingReview} {data.pendingReview === 1 ? 'scan is' : 'scans are'} waiting for review</span>
-            <span className="text-muted-foreground">. They&apos;ll update these numbers once committed.</span>
-          </span>
-        </Link>
-      )}
-
-      {config.isSample && (
-        <p className="flex items-start gap-2 rounded-lg border border-dashed px-3 py-2.5 text-sm">
-          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span>
-            <span className="font-medium">Warehouse stock and lead times are sample values</span>{' '}
-            <span className="text-muted-foreground">
-              until the real figures are gathered. Edit them in{' '}
-              <button type="button" onClick={() => setSettingsOpen(true)} className="font-medium text-foreground underline-offset-4 hover:underline">
-                Supply settings
-              </button>{' '}
-              or a product&apos;s ⋯ menu.
-            </span>
-          </span>
-        </p>
+      {(data.pendingReview > 0 || config.isSample) && (
+        <div className="flex flex-col gap-3">
+          {data.pendingReview > 0 && (
+            <div className="flex flex-col gap-3 rounded-xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between" style={{borderColor: tint('info', 30), background: tint('info', 6)}}>
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full" style={{background: tint('info', 16), color: toneVar('info')}}>
+                  <Upload aria-hidden className="size-4" />
+                </span>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-sm font-medium">
+                    {data.pendingReview} {data.pendingReview === 1 ? 'scan is' : 'scans are'} waiting for review
+                  </p>
+                  <p className="text-sm text-muted-foreground">The numbers below update once they&apos;re committed.</p>
+                </div>
+              </div>
+              <Link href="/uploads?status=needs_review" className={cn(buttonVariants({variant: 'outline', size: 'sm'}), 'shrink-0 self-start sm:self-auto')}>
+                Review scans
+              </Link>
+            </div>
+          )}
+          {config.isSample && (
+            <p className="flex items-start gap-2.5 px-1 text-sm text-muted-foreground">
+              <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span>
+                <span className="font-medium text-foreground">Warehouse stock and lead times are sample values</span> until the real figures are gathered. Edit them in{' '}
+                <button type="button" onClick={() => setSettingsOpen(true)} className="font-medium text-foreground underline underline-offset-4 decoration-border hover:decoration-foreground">
+                  Supply settings
+                </button>{' '}
+                or a product&apos;s ⋯ menu.
+              </span>
+            </p>
+          )}
+        </div>
       )}
 
       {empty ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-            <Package className="size-6 text-muted-foreground" aria-hidden />
-            <h2 className="font-heading text-base font-semibold">No counts yet</h2>
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-14 text-center">
+          <span className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
+            <Package className="size-5" aria-hidden />
+          </span>
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-medium">No counts yet</h2>
             <p className="max-w-md text-sm text-muted-foreground">Upload a store&apos;s inventory form and commit it. Each product then shows its stock, sales pace and when to ship.</p>
-            {data.canEdit && (
-              <Link href="/uploads" className={cn(buttonVariants({size: 'sm'}), 'mt-1')}>
-                <Upload className="size-4" /> Upload a scan
-              </Link>
-            )}
-          </CardContent>
-        </Card>
+          </div>
+          {data.canEdit && (
+            <Link href="/uploads" className={cn(buttonVariants({size: 'sm'}), 'mt-1')}>
+              <Upload className="size-4" /> Upload a scan
+            </Link>
+          )}
+        </div>
       ) : (
         <>
-          <section aria-label="Summary" className={cn("grid grid-cols-2 gap-4 lg:grid-cols-4", GL_TILES_MOBILE)}>
-            <Metric label="Reorder now" value={String(summary.reorder)} sub={`${summary.out} out · rest under ~10 days`} valueClassName={summary.reorder ? 'text-[var(--status-warn)]' : undefined} />
-            <Metric label="Ship now" value={String(summary.shipNow)} sub="won't arrive in time if sent later" valueClassName={summary.shipNow ? 'text-[var(--status-crit)]' : undefined} />
+          <section aria-label="Summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <SummaryTile Icon={RefreshCw} tone="warn" value={summary.reorder} label="Reorder now" sub={`${summary.out} out, the rest under ~10 days`} />
+            <SummaryTile Icon={Truck} tone="crit" value={summary.shipNow} label="Ship now" sub="Won't arrive in time if sent later" />
             {showWarehouse ? (
               <>
-                <Metric label="Warehouse short" value={String(summary.warehouseShort)} sub="stores need more than it holds" valueClassName={summary.warehouseShort ? 'text-[var(--status-crit)]' : undefined} />
-                <Metric label="Produce soon" value={String(summary.produceSoon)} sub="start within 2 weeks to keep up" valueClassName={summary.produceSoon ? 'text-[var(--status-warn)]' : undefined} />
+                <SummaryTile Icon={Warehouse} tone="crit" value={summary.warehouseShort} label="Warehouse short" sub="Stores need more than it holds" />
+                <SummaryTile Icon={Factory} tone="warn" value={summary.produceSoon} label="Produce soon" sub="Start within 2 weeks to keep up" />
               </>
             ) : (
               <>
-                <Metric label="Out of stock" value={String(summary.out)} sub="deliver first" valueClassName={summary.out ? 'text-[var(--status-crit)]' : undefined} />
-                <Metric label="On the way" value={String(data.shipments.length)} sub="shipments not yet counted" />
+                <SummaryTile Icon={PackageX} tone="crit" value={summary.out} label="Out of stock" sub="Deliver first" />
+                <SummaryTile Icon={Truck} tone="info" value={data.shipments.length} label="On the way" sub="Shipments not yet counted" />
               </>
             )}
           </section>
 
-          <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground tabular-nums">₱{Math.round(summary.stockValue).toLocaleString('en-US')}</span> stock on hand ·{' '}
-            <span className="font-medium text-foreground tabular-nums">₱{Math.round(summary.deliveredValue).toLocaleString('en-US')}</span> delivered in the latest count (
-            <span className="tabular-nums">{summary.deliveredUnits.toLocaleString('en-US')}</span> units) · at selling price
-            {summary.unpriced ? ` · ${summary.unpriced} counted item${summary.unpriced === 1 ? '' : 's'} without a price left out` : ''}
-          </p>
+          <dl className="flex flex-wrap gap-x-10 gap-y-3 rounded-xl bg-muted/40 px-5 py-4">
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-xs text-muted-foreground">Stock on hand</dt>
+              <dd className="font-heading text-lg font-semibold tabular-nums">₱{Math.round(summary.stockValue).toLocaleString('en-US')}</dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-xs text-muted-foreground">Delivered in the latest count</dt>
+              <dd className="font-heading text-lg font-semibold tabular-nums">
+                ₱{Math.round(summary.deliveredValue).toLocaleString('en-US')}{' '}
+                <span className="font-sans text-sm font-normal text-muted-foreground">{summary.deliveredUnits.toLocaleString('en-US')} units</span>
+              </dd>
+            </div>
+            <p className="self-end text-xs text-muted-foreground sm:ml-auto">
+              At selling price
+              {summary.unpriced ? ` · ${summary.unpriced} counted item${summary.unpriced === 1 ? '' : 's'} without a price left out` : ''}
+            </p>
+          </dl>
 
           {data.count && (data.count.sources.length > 0 || data.count.missingPages.length > 0) && (
             <section aria-label="Source scans" className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
@@ -625,6 +644,30 @@ function Th({k, sort, onSort, children, right, className, title}: {k: SortKey; s
         <Icon className={cn('size-3', !active && 'opacity-50')} aria-hidden />
       </button>
     </th>
+  );
+}
+
+/** A summary tile: tinted icon, big number, plain label. Colour only when there's something to do. */
+function SummaryTile({Icon, tone, value, label, sub}: {Icon: typeof Truck; tone: 'warn' | 'crit' | 'info'; value: number; label: string; sub: string}) {
+  const live = value > 0;
+  return (
+    <div className="flex items-center gap-4 rounded-xl border bg-card px-5 py-4">
+      <span
+        className="grid size-10 shrink-0 place-items-center rounded-full"
+        style={live ? {background: tint(tone, 16), color: toneVar(tone)} : {background: 'var(--muted)', color: 'var(--muted-foreground)'}}
+      >
+        <Icon aria-hidden className="size-5" />
+      </span>
+      <div className="flex min-w-0 flex-col">
+        <p className="flex items-baseline gap-2">
+          <span className="font-heading text-2xl font-semibold tabular-nums" style={live ? {color: toneVar(tone)} : undefined}>
+            {value}
+          </span>
+          <span className="text-sm font-medium">{label}</span>
+        </p>
+        <p className="truncate text-xs text-muted-foreground">{sub}</p>
+      </div>
+    </div>
   );
 }
 
