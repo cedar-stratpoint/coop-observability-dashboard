@@ -168,6 +168,16 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
               )}
             </>
           ) : (
+            status.missingDays.length === 0 ? (
+              <>
+                <Pill tone="warn" icon={ShieldAlert}>
+                  Needs sign-in
+                </Pill>
+                <h2 className="font-serif text-[1.5rem] font-normal leading-tight text-foreground max-md:text-[1.35rem]">Shopee needs an admin to sign in</h2>
+                <p className="max-w-[60ch] text-sm text-muted-foreground">Nothing is behind in this view, but Sync is switched off for everyone until an admin signs in to Shopee. The weekly import is unaffected.</p>
+                {showRemote && <RemoteBrowser status={status} />}
+              </>
+            ) : (
             <>
               <Pill tone="warn" icon={CalendarClock}>
                 Behind by {status.missingDays.length}
@@ -179,6 +189,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
               </p>
               {showRemote && <RemoteBrowser status={status} />}
             </>
+            )
           )}
           {error && (
             <p role="alert" className="text-[13px] font-medium text-destructive">

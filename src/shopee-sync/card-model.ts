@@ -188,7 +188,7 @@ export function loginLine(s: ShopeeSyncStatus, now: Date): LoginLine {
     case 'signed_out':
       return {state: 'signed_out', label: 'Signed out', tone: 'crit', text: `Last known: signed out, checked ${age}`};
     default:
-      return {state: 'unknown', label: 'Not checked', tone: 'neutral', text: 'Waiting for the first login check'};
+      return {state: 'unknown', label: 'Not checked', tone: 'neutral', text: 'No check has run yet'};
   }
 }
 
@@ -200,5 +200,6 @@ export function serverLine(s: ShopeeSyncStatus, now: Date): {kind: 'online' | 'a
   if (s.workerOnline) return {kind: 'online', text: `Server online, ${seen}.`};
   if (w.state === 'offline') return {kind: 'offline', text: `The server did not wake, ${seen}. Admins have been told.`};
   if (s.currentJob?.status === 'queued') return {kind: 'waking', text: 'Waking the server, about 1 to 4 minutes.'};
-  return {kind: 'asleep', text: `Server asleep. Sync will wake it, about 1 to 4 minutes (${seen}).`};
+  // Sync wakes it only when the login is Ready; otherwise Sync is off and promising a wake would contradict the button.
+  return {kind: 'asleep', text: s.login.state === 'ready' ? `Server asleep. Sync will wake it, about 1 to 4 minutes (${seen}).` : `Server asleep, ${seen}.`};
 }

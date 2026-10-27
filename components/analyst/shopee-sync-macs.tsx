@@ -167,7 +167,7 @@ export function ShopeeSyncMacs({status, at}: {status: ShopeeSyncStatus; at: stri
   return (
     <div className="flex flex-col gap-6">
       <section aria-label="Sync worker" className="flex flex-col gap-3">
-        <h2 className="font-serif text-xl font-normal text-foreground">Sync worker</h2>
+        <h2 className="font-serif text-xl font-normal text-foreground">Cloud worker</h2>
         <p className="max-w-[62ch] text-[13px] text-muted-foreground">
           One cloud worker, on demand: it sleeps when idle and wakes for a sync, about 1 to 4 minutes. An admin signs in to Shopee on it when it asks. Admins can revoke it.
         </p>

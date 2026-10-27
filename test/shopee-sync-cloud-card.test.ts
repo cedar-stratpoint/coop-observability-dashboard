@@ -78,7 +78,7 @@ describe('loginLine', () => {
   it('names the other states, never colour alone', () => {
     expect(loginLine(st({state: 'needs_password', checkedAt: ago(10800), ageSeconds: 10800}), now)).toMatchObject({label: 'Needs password', tone: 'warn'});
     expect(loginLine(st({state: 'signed_out', checkedAt: ago(60), ageSeconds: 60}), now)).toMatchObject({label: 'Signed out', tone: 'crit'});
-    expect(loginLine(st({state: 'unknown', checkedAt: null, ageSeconds: null}), now)).toMatchObject({label: 'Not checked', text: 'Waiting for the first login check'});
+    expect(loginLine(st({state: 'unknown', checkedAt: null, ageSeconds: null}), now)).toMatchObject({label: 'Not checked', text: 'No check has run yet'});
   });
 });
 
@@ -88,6 +88,9 @@ describe('serverLine', () => {
   });
   it('asleep: Sync will wake it', () => {
     expect(serverLine(build(), now)).toMatchObject({kind: 'asleep', text: expect.stringContaining('Server asleep. Sync will wake it, about 1 to 4 minutes')});
+  });
+  it('asleep with a login that is not Ready does not promise that Sync will wake it', () => {
+    expect(serverLine(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'})]}), now)?.text).toBe('Server asleep, last seen 2 hours ago.');
   });
   it('waking: a queued job and nobody online', () => {
     expect(serverLine(build({jobs: [job()]}), now)).toEqual({kind: 'waking', text: 'Waking the server, about 1 to 4 minutes.'});
