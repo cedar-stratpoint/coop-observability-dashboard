@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — SKU linking: "Page 2 · row 17" opens the form page; no units column
+- **Form page on screen:** the "Page · row" on each SKU (and on form items without a SKU) is a link. It opens that page of the inventory form in a dialog, drawn from the printed template in the paper's order and grouped by product line, with the item's row highlighted and scrolled into view. Pages 1 to 5 can be flipped; each line shows the Watsons SKU it is linked to. The five count columns are drawn blank on wider screens so it reads like the sheet (hidden on phones). Decided: a digital page, not a scan, because only the template's row order is known exactly.
+- **Units sold column removed** from the table (rows are still ordered biggest sellers first).
+
 ## 2026-10-27 — Nichido Data Audit PDF: answers come back into Coop by script
 The SKU linking audit PDF for Justin and the owner (`Nichido_Data_Audit.pdf`, made outside the repo) is a fillable worksheet: Correct / Wrong on Coop's matches, our item code for unmatched Watsons SKUs, Sold / Not sold for form items without a code, and "Looks wrong" on existing links. Decided: their answers are imported, not retyped.
 - `scripts/nichido/import-audit-answers.ts <filled.pdf> --by "<name>"` reads the form fields and prints a plan; `--apply` makes the changes with the same functions as the SKU linking page (approve, reject, link, remark), so each decision lands in `sku_link_reviews` as "<name> (audit PDF)". Then the form vs. sales checks re-run. Production needs `--prod`.
