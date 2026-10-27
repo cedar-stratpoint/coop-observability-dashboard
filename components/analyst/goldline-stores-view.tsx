@@ -2,7 +2,7 @@
 
 import {useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {ArrowDown, ArrowUp, Search, Store} from 'lucide-react';
+import {ArrowDown, ArrowUp, Search} from 'lucide-react';
 import type {SalesSummary, StoreRollup} from '@/src/goldline-analytics';
 import type {StoreScope} from '@/src/goldline-ref-data';
 import {setStoreScopeAction} from '@/app/stores/actions';
@@ -10,19 +10,18 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Pagination} from '@/components/analyst/pagination';
 import {cn} from '@/lib/utils';
-import {GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE, GL_TILES_MOBILE, titleName} from '@/src/goldline-ui';
 
 // Store leaderboard for the active company: sales rolled up per store (from sales),
 // searchable and sortable, with each store's scope (F2, S2): in scope when it sold in
 // the latest 3 loaded months, unless an admin switches it always in or always out.
 // The restock (P3) only suggests for stores in scope.
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 25;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtMonth = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
 type ScopeFilter = 'all' | 'in' | 'out';
 const peso = (n: number) => `₱${Math.round(n).toLocaleString()}`;
-
 type SortKey = 'gross' | 'units' | 'net' | 'name';
 
 export function GoldlineStoresView({
@@ -85,8 +84,12 @@ export function GoldlineStoresView({
     setPage(1);
   }
 
+  const showRegion = stores.some((s) => s.region);
+  const rankOf = useMemo(() => new Map([...stores].sort((a, b) => b.gross - a.gross).map((s, i) => [s.store_code, i + 1])), [stores]);
+  const topGross = Math.max(1, ...stores.map((s) => s.gross));
+
   const Th = ({label, k, right}: {label: string; k: SortKey; right?: boolean}) => (
-    <th className={cn('py-2 font-medium', right ? 'pl-3 text-right' : 'pr-3 text-left')}>
+    <th aria-sort={sort === k ? (asc ? 'ascending' : 'descending') : undefined} className={cn('h-10 px-3 font-medium', right ? 'text-right' : 'text-left')}>
       <button
         type="button"
         onClick={() => toggleSort(k)}
@@ -99,7 +102,7 @@ export function GoldlineStoresView({
   );
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6">
+    <div className={GL_PAGE}>
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight">Stores</h1>
         <p className="text-sm text-muted-foreground">
@@ -174,41 +177,56 @@ export function GoldlineStoresView({
               No stores yet. Upload a POS sales CSV to populate this.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
+            <div className="-mx-(--card-spacing) overflow-x-auto">
+              <table className="w-full min-w-[46rem] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground">
+                  <tr className="border-y border-border/70 bg-muted/30 text-xs text-muted-foreground">
+                    <th className="h-10 w-12 pr-1 pl-(--card-spacing) text-right font-medium" title="Rank by gross sales">
+                      #
+                    </th>
                     <Th label="Store" k="name" />
-                    <th className="py-2 pr-3 text-left font-medium">Region</th>
+                    {showRegion && <th className="h-10 px-3 text-left font-medium">Region</th>}
                     <Th label="Units" k="units" right />
                     <Th label="Gross" k="gross" right />
                     <Th label="Net of VAT" k="net" right />
-                    <th className="py-2 pl-3 text-right font-medium">SKUs</th>
-                    {scope.length > 0 && <th className="py-2 pl-3 text-left font-medium">Scope</th>}
+                    <th className="h-10 px-3 text-right font-medium">SKUs</th>
+                    {scope.length > 0 && <th className="h-10 pr-(--card-spacing) pl-3 text-left font-medium">Scope</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.map((s) => (
-                    <tr key={s.store_code} className="border-b border-border/60">
-                      <td className="py-2.5 pr-3">
-                        <span className="inline-flex items-center gap-2">
-                          <Store className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="font-medium">{s.name}</span>
-                          <span className="font-mono text-xs text-muted-foreground">#{s.store_code}</span>
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-3 text-xs text-muted-foreground">{s.region ?? '—'}</td>
-                      <td className="py-2.5 pl-3 text-right tabular-nums">{s.units.toLocaleString()}</td>
-                      <td className="py-2.5 pl-3 text-right tabular-nums">{peso(s.gross)}</td>
-                      <td className="py-2.5 pl-3 text-right tabular-nums">{peso(s.net)}</td>
-                      <td className="py-2.5 pl-3 text-right tabular-nums text-muted-foreground">{s.skuCount}</td>
-                      {scope.length > 0 && (
-                        <td className="py-2 pl-3">
-                          <ScopeCell sc={scopeOf.get(s.store_code)} canEdit={canEditScope} pending={pending} onChange={(v) => changeScope(s.store_code, v)} />
+                  {pageRows.map((s) => {
+                    const sc = scopeOf.get(s.store_code);
+                    const out = scope.length > 0 && sc != null && !sc.in_scope;
+                    return (
+                      <tr key={s.store_code} className={cn('border-b border-border/40 transition-colors duration-150 last:border-0 hover:bg-muted/30', out && 'text-muted-foreground')}>
+                        <td className="py-2.5 pr-1 pl-(--card-spacing) text-right font-mono text-xs tabular-nums text-muted-foreground">{rankOf.get(s.store_code)}</td>
+                        <td className="max-w-[22rem] px-3 py-2.5">
+                          <span className="flex min-w-0 items-baseline gap-2" title={s.name}>
+                            <span className={cn('truncate', !out && 'text-foreground')}>{titleName(s.name)}</span>
+                            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{s.store_code}</span>
+                          </span>
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        {showRegion && <td className="px-3 py-2.5 text-xs text-muted-foreground">{s.region ?? '—'}</td>}
+                        <td className="px-3 py-2.5 text-right tabular-nums">{s.units.toLocaleString()}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          {/* The bar is the store's gross against the top store's: rank at a glance. */}
+                          <span className="inline-flex flex-col items-end gap-1">
+                            <span className={cn('font-medium tabular-nums', !out && 'text-foreground')}>{peso(s.gross)}</span>
+                            <span aria-hidden className="h-[3px] w-20 overflow-hidden rounded-full bg-muted">
+                              <span className="block h-full rounded-full bg-primary/55" style={{width: `${Math.max(2, (s.gross / topGross) * 100)}%`}} />
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{peso(s.net)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{s.skuCount}</td>
+                        {scope.length > 0 && (
+                          <td className="py-2 pr-(--card-spacing) pl-3">
+                            <ScopeCell sc={sc} canEdit={canEditScope} pending={pending} onChange={(v) => changeScope(s.store_code, v)} />
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -233,23 +251,28 @@ function Stat({label, value}: {label: string; value: string}) {
 
 function ScopeCell({sc, canEdit, pending, onChange}: {sc: StoreScope | undefined; canEdit: boolean; pending: boolean; onChange: (v: 'auto' | 'in' | 'out') => void}) {
   if (!sc) return <span className="text-xs text-muted-foreground">—</span>;
-  const why = sc.override != null ? 'set by an admin' : sc.sold_recently ? 'sold in the last 3 months' : sc.last_sale_month ? `no sales since ${fmtMonth(sc.last_sale_month)}` : 'no sales on file';
-  const label = (
-    <span className="flex flex-col">
-      <span className={cn('text-xs font-medium', sc.in_scope ? 'text-foreground' : 'text-muted-foreground')}>{sc.in_scope ? 'In scope' : 'Out of scope'}</span>
-      <span className="text-[11px] text-muted-foreground">{why}</span>
+  // Only say why when it isn't the usual case (in scope, automatic): 300 rows of
+  // "sold in the last 3 months" is noise.
+  const why = sc.override != null ? 'set by an admin' : sc.sold_recently ? null : sc.last_sale_month ? `no sales since ${fmtMonth(sc.last_sale_month)}` : 'no sales on file';
+  const status = (
+    <span className="flex min-w-0 flex-col">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{background: sc.in_scope ? 'var(--status-good)' : 'var(--muted-foreground)'}} />
+        <span className={sc.in_scope ? 'text-foreground' : 'text-muted-foreground'}>{sc.in_scope ? 'In scope' : 'Out of scope'}</span>
+      </span>
+      {why && <span className="pl-3 text-[11px] whitespace-nowrap text-muted-foreground">{why}</span>}
     </span>
   );
-  if (!canEdit) return label;
+  if (!canEdit) return status;
   return (
-    <span className="flex items-center gap-2">
-      {label}
+    <span className="flex items-center justify-between gap-3">
+      {status}
       <NativeSelect
         aria-label="Scope setting"
         value={sc.override == null ? 'auto' : sc.override ? 'in' : 'out'}
         disabled={pending}
         onChange={(e) => onChange(e.target.value as 'auto' | 'in' | 'out')}
-        className="h-7 text-xs"
+        className="h-7 w-[7.5rem] border-transparent bg-transparent text-xs text-muted-foreground shadow-none hover:border-border hover:text-foreground focus-visible:text-foreground"
       >
         <option value="auto">Automatic</option>
         <option value="in">Always in</option>
