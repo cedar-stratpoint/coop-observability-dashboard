@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — Goldline BAs, Inventory and Uploads: a more modern, calmer look
+Oct 28 review (aesthetic-usability: a page that looks considered is trusted to work). Same visual language as SKU linking:
+- **BAs:** a stat strip by the title (stores, BAs known, need a BA); the yellow sentence became a soft banner with one action ("Show them" filters the list); underline tabs with one help line; the BA list is one bordered list with column headers (Store · BA · Last form), store monograms, BA initials avatars, store names in title case, a "No BA yet" pill, and a labelled edit panel under the row; scorecard tag tiles with icon, count and the rule; store links as small chips; empty states with an icon.
+- **Inventory:** full width like the other Goldline pages (was a centred 7xl column); the gradient bar and monospace context line are gone; "scans waiting" is a soft banner with "Review scans"; the four tiles are icon tiles in sentence case, coloured only when there's something to do; stock value is a small labelled stat row.
+- **Uploads:** the drop zone shows an illustration of the three files Coop takes (inventory form in front, POS export and Watsons workbook behind, in the file badges' colours). The sheets fan out while files are dragged over (transform only, off under reduced motion).
+
 ## 2026-10-27 — SKU linking: second calm-down pass (fewer columns, quieter rows)
 Oct 27 review: still busy for long reading. With Hick's Law and eye strain in mind:
 - **Four columns:** Watsons SKU · Our item (its code and the "Page · row" link underneath) · Price · decision. The separate form page column is gone.
