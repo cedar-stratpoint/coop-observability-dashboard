@@ -14,7 +14,7 @@ export const AWAITING_EXPIRY_MS = 60 * 60_000;
 export const QUIET_START_MIN = 8 * 60 + 30;
 export const QUIET_END_MIN = 11 * 60;
 
-export type JobLike = Pick<Job, 'id' | 'status' | 'createdAt' | 'heartbeatAt'> & {awaitingSince?: string | null};
+export type JobLike = Pick<Job, 'id' | 'status' | 'createdAt' | 'heartbeatAt'> & {awaitingSince?: string | null; claimedAt?: string | null};
 
 export function inQuietWindow(now: Date): boolean {
   const ph = new Date(now.getTime() + 8 * 3_600_000);
@@ -45,7 +45,7 @@ export function staleSweep(now: Date, jobs: readonly JobLike[]): Sweep[] {
   const out: Sweep[] = [];
   for (const j of jobs) {
     if (isActive(j.status) && now.getTime() - Date.parse(j.heartbeatAt ?? j.createdAt) > HEARTBEAT_STALE_MS) out.push({id: j.id, from: j.status, to: 'failed', error: 'worker lost'});
-    else if (j.status === 'awaiting_verification' && now.getTime() - Date.parse(j.awaitingSince ?? j.heartbeatAt ?? j.createdAt) > AWAITING_EXPIRY_MS) out.push({id: j.id, from: j.status, to: 'expired', error: `Nobody signed in to Shopee within ${AWAITING_EXPIRY_MS / 60_000} minutes`});
+    else if (j.status === 'awaiting_verification' && now.getTime() - Date.parse(j.awaitingSince ?? j.claimedAt ?? j.createdAt) > AWAITING_EXPIRY_MS) out.push({id: j.id, from: j.status, to: 'expired', error: `Nobody signed in to Shopee within ${AWAITING_EXPIRY_MS / 60_000} minutes`});
     else if (j.status === 'queued' && now.getTime() - Date.parse(j.createdAt) > QUEUE_EXPIRY_MS) out.push({id: j.id, from: 'queued', to: 'expired', error: 'worker offline'});
   }
   return out;

@@ -67,3 +67,13 @@ describe('isOnline', () => {
     expect(isOnline(null, now)).toBe(false);
   });
 });
+
+describe('staleSweep for a job waiting on a sign-in with no awaiting_since', () => {
+  it('counts from claimedAt, not the heartbeat that polling keeps fresh, so it still expires after 60 minutes', () => {
+    const now = new Date('2026-10-27T06:00:00Z');
+    const ago = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();
+    const waiting = (claimedAt: string) => job({id: 'w', status: 'awaiting_verification', claimedAt, awaitingSince: null, heartbeatAt: ago(1)});
+    expect(staleSweep(now, [waiting(ago(61))])).toEqual([expect.objectContaining({id: 'w', to: 'expired'})]);
+    expect(staleSweep(now, [waiting(ago(59))])).toEqual([]);
+  });
+});
