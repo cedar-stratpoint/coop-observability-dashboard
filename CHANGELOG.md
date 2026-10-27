@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — SKU linking back in Coop, with Approve / Reject, remarks and plain-language tags
+The SKU links page was moved to the plan artifact only (morning of Oct 27); it's back in Coop for Nichido as **SKU linking** (`/stock/skus`, nav after Inventory) so Justin and his dad can decide links themselves.
+- **Approve / Reject** on Coop's suggested matches only (decided: links Coop already made stay as they are and can still be unlinked). Reject checks the suggestion the person saw is still the current one, then Coop looks for the next best.
+- **Remarks:** optional on every decision (approve, reject, link by hand, unlink) and can be saved on their own. Only the latest decision and the latest remark per SKU are kept (decided: no history), with who and when. New table `sku_link_reviews` (`supabase/nichido/f2b_sku_link_reviews.sql`, applied on Nichido Staging).
+- **Tags say what to do** (decided: "Needs a pick" was unclear): "Coop found a likely match: check it", "No match found: choose the item", "Rejected: choose the right item", "Linked" (with how: our item code is in the Watsons name / Matched by Coop / Coop's match, approved / Linked by hand), "On our forms, not in Watsons sales". The five tags are also the filters, each with a one-line explanation. Pure logic in `src/goldline-sku-tags.ts`, tested.
+- Full-width page, three columns (Watsons SKU · our item · decision), 25 per page.
+
 ## 2026-10-27 — Stores: "scope" renamed to what it does (restock on or paused)
 "In scope / Out of scope" and "Automatic / Always in / Always out" read as jargon. The Stores page now says it plainly:
 - A short panel above the stats: "301 get restock · 25 paused", and one sentence on the rule with the actual months ("at least one sale in the last 3 months of Watsons data (Jul to Sep 2026)") and when to override it.
