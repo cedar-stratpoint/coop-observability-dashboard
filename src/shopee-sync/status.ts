@@ -69,7 +69,7 @@ export interface ShopeeSyncStatus {
   cloudWorkers: CloudWorkerView[];
   /** The last known Shopee login of the cloud worker, kept while the server sleeps. */
   login: LoginView;
-  /** Any worker (cloud or Mac) was seen within 2 minutes. */
+  /** The cloud worker was seen within 2 minutes (any worker, when there is no cloud worker). */
   workerOnline: boolean;
   /** The cloud worker's remote browser is up. */
   remoteReady: boolean;
@@ -130,7 +130,8 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     mock: false,
     cloudWorkers: cloudViews,
     login: {state: cl.state, checkedAt: cl.checkedAt, ageSeconds: cl.checkedAt ? Math.max(0, Math.floor((i.now.getTime() - Date.parse(cl.checkedAt)) / 1000)) : null, stale: cl.stale},
-    workerOnline: live.some((w) => isOnline(w.lastSeen, i.now)),
+    // with a cloud worker, 'online' is the box (a person's Mac being awake does not make the server awake); without one, any worker
+    workerOnline: (cloud.length > 0 ? cloud : live).some((w) => isOnline(w.lastSeen, i.now)),
     remoteReady: cloud.some((w) => w.remoteReady),
     remoteUrl: isSyncAdmin ? (cloud.find((w) => w.remoteUrl)?.remoteUrl ?? null) : null,
     workers: live

@@ -131,6 +131,15 @@ describe('POST /api/shopee/sync/wake', () => {
     await store.revokeWorker(cloud.workerId, clock);
     expect((await (await wake(WAKE)).json()).wake).toBe(true);
   });
+  it('someone else\'s Mac being online does not suppress the wake: only the cloud worker counts', async () => {
+    const cloud = await enrolCloud();
+    await handleClaim(post('claim', ready, cloud.token), api());
+    const mac = await enrol('bea@x.com', 'Bea Mac');
+    expect((await requestSync(sd(), 'user@x.com')).ok).toBe(true);
+    clock = new Date(clock.getTime() + 5 * 60_000); // the box has been quiet for 5 minutes
+    await handleClaim(post('claim', {sessionState: 'signed_out'}, mac.token), api()); // Bea's Mac polls just now
+    expect((await (await wake(WAKE)).json()).wake).toBe(true);
+  });
   it('a queued job nobody can claim for 30 minutes expires, so it no longer wakes anything', async () => {
     const cloud = await enrolCloud();
     await handleClaim(post('claim', ready, cloud.token), api());

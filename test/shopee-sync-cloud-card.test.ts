@@ -38,6 +38,14 @@ describe('login on the status', () => {
   });
 });
 
+describe('workerOnline follows the box', () => {
+  it('a Mac being awake does not make the server online', () => {
+    const mac = cloud({id: 'm1', ownerEmail: 'bea@x.com', isCloud: false, lastSeen: ago(5), loginState: null, loginCheckedAt: null});
+    expect(build({workers: [cloud(), mac]}).workerOnline).toBe(false);
+    expect(build({workers: [mac], }).workerOnline).toBe(true); // no cloud worker at all: any worker
+  });
+});
+
 describe('the remote browser address is for admins only', () => {
   it('is null for a regular user, in every field', () => {
     const s = build();

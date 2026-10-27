@@ -154,6 +154,7 @@ export async function handleWake(req: Request, d: SyncApiDeps): Promise<Response
   const now = d.now();
   const [jobs, workers] = await Promise.all([sweepJobs(d.store, now), d.store.listWorkers()]);
   const queued = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-  const online = workers.some((w) => !w.revokedAt && isOnline(w.lastSeen, now));
+  // only the cloud worker counts: a person's Mac being awake says nothing about whether the box is
+  const online = workers.some((w) => !w.revokedAt && isCloudWorker(w) && isOnline(w.lastSeen, now));
   return queued && !online ? reply({wake: true, jobId: queued.id}) : reply({wake: false});
 }
