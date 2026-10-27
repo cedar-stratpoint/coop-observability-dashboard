@@ -158,6 +158,12 @@ One product side by side across offline (POS), Shopee and the website, over whol
 - **Decision:** the website SKU is **unverified** as equal to the POS code until one stored order is read, so the website maps only through confirmed aliases and its label says so. The Shopee variant SKU equals the POS code (verified), but only counts once seeded as an auto alias. Shopee variation rows replace their product row so nothing is counted twice.
 - Data catalog updated (`product_channel_alias`, the CRM `products/sales` row); it also names the unprefixed Nichido Goldline tables that the catalog check already flagged on `develop`. The alias table is documented without a table heading on purpose, so `catalog.json` and the Explore prompt (14,396 of 14,400) are unchanged.
 
+## 2026-10-15 — Goldline reads its own Anthropic key (`GOLDLINE_ANTHROPIC_API_KEY`)
+- Goldline PDF extraction now reads **`GOLDLINE_ANTHROPIC_API_KEY`**, not `ANTHROPIC_API_KEY` (Ask Coop's). **No fallback.** Without it, a PDF is stored for manual review instead of being read.
+- *Why:* Ask Coop and Goldline are billed on separate Anthropic keys; reading the shared variable put Goldline usage on Ask Coop's key.
+- *Action:* set `GOLDLINE_ANTHROPIC_API_KEY` on the **Staging** Vercel project (and prod, with the v1.7.0 release), or Staging PDF uploads stop being read once this lands.
+- Same change shipped to prod in the v1.7.0 release (#200). Test: `src/goldline-extract-run.test.ts`.
+
 ## 2026-10-26 — Spin-the-wheel leads show the full name
 - **Why:** the booth form now asks for the furparent's full name and no longer asks whether the pet is a picky eater.
 - **What:** Event lead contacts gain a **Name** column after Contact. **Picky eater** stays, so older leads keep their answers; each column shows only when some lead has a value, and a lead without one shows "—".
