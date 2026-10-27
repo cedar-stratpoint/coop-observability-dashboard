@@ -14,12 +14,22 @@ import {GL_PAGE, GL_TILES_MOBILE, titleName} from '@/src/goldline-ui';
 
 // Store leaderboard for the active company: sales rolled up per store (from sales),
 // searchable and sortable, with each store's scope (F2, S2): in scope when it sold in
+// (shown as "Restock: on / paused", Oct 27: "scope" read as jargon)
 // the latest 3 loaded months, unless an admin switches it always in or always out.
 // The restock (P3) only suggests for stores in scope.
 
 const PAGE_SIZE = 25;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtMonth = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+/** The 3 months the rule looks at, from the latest loaded month: "Jul to Sep 2026". */
+const windowOf = (end: string | null) => {
+  if (!end) return null;
+  const y = Number(end.slice(0, 4));
+  const m = Number(end.slice(5, 7)) - 1;
+  const sm = (m + 10) % 12;
+  const sy = m >= 2 ? y : y - 1;
+  return sy === y ? `${MONTHS[sm]} to ${MONTHS[m]} ${y}` : `${MONTHS[sm]} ${sy} to ${MONTHS[m]} ${y}`;
+};
 type ScopeFilter = 'all' | 'in' | 'out';
 const peso = (n: number) => `₱${Math.round(n).toLocaleString()}`;
 type SortKey = 'gross' | 'units' | 'net' | 'name';
@@ -66,7 +76,7 @@ export function GoldlineStoresView({
     setNotice(null);
     start(async () => {
       const res = await setStoreScopeAction({company: company ?? null, store, scope: value});
-      setNotice(res.ok ? {ok: true, text: value === 'auto' ? 'Back to automatic.' : value === 'in' ? 'Always in scope.' : 'Always out of scope.'} : {ok: false, text: res.error});
+      setNotice(res.ok ? {ok: true, text: value === 'auto' ? 'Restock follows sales again.' : value === 'in' ? 'This store always gets restock.' : 'This store never gets restock.'} : {ok: false, text: res.error});
       router.refresh();
     });
   }
@@ -106,14 +116,32 @@ export function GoldlineStoresView({
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight">Stores</h1>
         <p className="text-sm text-muted-foreground">
-          Sales by location for the current period
-          {summary.periodStart && summary.periodEnd ? ` (${summary.periodStart} to ${summary.periodEnd})` : ''}.
-          {scope.length > 0 && ' A store is in scope when it sold anything in the last 3 months of POS Sales Data; restock only suggests for stores in scope.'}
+          Sales by store for the current period
+          {summary.periodStart && summary.periodEnd ? ` (${fmtMonth(summary.periodStart)} to ${fmtMonth(summary.periodEnd)})` : ''}.
         </p>
       </header>
 
+      {scope.length > 0 && (
+        <section aria-label="Which stores get restock" className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-sm sm:flex-row sm:items-center sm:gap-6">
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 font-medium">
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden className="size-2 rounded-full" style={{background: 'var(--status-good)'}} />
+              {inCount.toLocaleString()} get restock
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <span aria-hidden className="size-2 rounded-full bg-muted-foreground/60" />
+              {(scope.length - inCount).toLocaleString()} paused
+            </span>
+          </p>
+          <p className="text-muted-foreground">
+            Coop only suggests restock for stores that are still selling: at least one sale in the last 3 months of Watsons data
+            {windowOf(summary.periodEnd) ? ` (${windowOf(summary.periodEnd)})` : ''}. A store with no sales then is paused. If you know better (a paused store is open again, or a selling store is closing), set it by hand in the Restock column.
+          </p>
+        </section>
+      )}
+
       <div className={cn("grid grid-cols-2 gap-4 sm:grid-cols-4", GL_TILES_MOBILE)}>
-        <Stat label={scope.length ? 'In scope' : 'Stores'} value={scope.length ? `${inCount.toLocaleString()} of ${scope.length.toLocaleString()}` : stores.length.toLocaleString()} />
+        <Stat label="Stores" value={stores.length.toLocaleString()} />
         <Stat label="Gross sales" value={peso(summary.gross)} />
         <Stat label="Units" value={summary.units.toLocaleString()} />
         <Stat label="Net of VAT" value={peso(summary.net)} />
@@ -125,12 +153,12 @@ export function GoldlineStoresView({
             <CardTitle>Leaderboard</CardTitle>
             <div className="flex flex-wrap items-center gap-2">
             {scope.length > 0 && (
-              <div role="group" aria-label="Scope" className="flex gap-1.5">
+              <div role="group" aria-label="Restock" className="flex gap-1.5">
                 {(
                   [
                     ['all', 'All'],
-                    ['in', 'In scope'],
-                    ['out', 'Out of scope'],
+                    ['in', `Get restock ${inCount}`],
+                    ['out', `Paused ${scope.length - inCount}`],
                   ] as Array<[ScopeFilter, string]>
                 ).map(([v, label]) => (
                   <button
@@ -190,7 +218,7 @@ export function GoldlineStoresView({
                     <Th label="Gross" k="gross" right />
                     <Th label="Net of VAT" k="net" right />
                     <th className="h-10 px-3 text-right font-medium">SKUs</th>
-                    {scope.length > 0 && <th className="h-10 pr-(--card-spacing) pl-3 text-left font-medium">Scope</th>}
+                    {scope.length > 0 && <th className="h-10 pr-(--card-spacing) pl-3 text-left font-medium">Restock</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -251,14 +279,13 @@ function Stat({label, value}: {label: string; value: string}) {
 
 function ScopeCell({sc, canEdit, pending, onChange}: {sc: StoreScope | undefined; canEdit: boolean; pending: boolean; onChange: (v: 'auto' | 'in' | 'out') => void}) {
   if (!sc) return <span className="text-xs text-muted-foreground">—</span>;
-  // Only say why when it isn't the usual case (in scope, automatic): 300 rows of
-  // "sold in the last 3 months" is noise.
-  const why = sc.override != null ? 'set by an admin' : sc.sold_recently ? null : sc.last_sale_month ? `no sales since ${fmtMonth(sc.last_sale_month)}` : 'no sales on file';
+  // Say why only when it isn't the usual case (on, following sales).
+  const why = sc.override != null ? 'set by hand' : sc.sold_recently ? null : sc.last_sale_month ? `no sales since ${fmtMonth(sc.last_sale_month)}` : 'no sales on file';
   const status = (
     <span className="flex min-w-0 flex-col">
       <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
         <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{background: sc.in_scope ? 'var(--status-good)' : 'var(--muted-foreground)'}} />
-        <span className={sc.in_scope ? 'text-foreground' : 'text-muted-foreground'}>{sc.in_scope ? 'In scope' : 'Out of scope'}</span>
+        <span className={sc.in_scope ? 'text-foreground' : 'text-muted-foreground'}>{sc.in_scope ? 'On' : 'Paused'}</span>
       </span>
       {why && <span className="pl-3 text-[11px] whitespace-nowrap text-muted-foreground">{why}</span>}
     </span>
@@ -268,15 +295,16 @@ function ScopeCell({sc, canEdit, pending, onChange}: {sc: StoreScope | undefined
     <span className="flex items-center justify-between gap-3">
       {status}
       <NativeSelect
-        aria-label="Scope setting"
+        aria-label="Restock setting"
+        title="Follow sales: on when the store sold in the last 3 months. Always on or never: your choice overrides the sales."
         value={sc.override == null ? 'auto' : sc.override ? 'in' : 'out'}
         disabled={pending}
         onChange={(e) => onChange(e.target.value as 'auto' | 'in' | 'out')}
-        className="h-7 w-[7.5rem] border-transparent bg-transparent text-xs text-muted-foreground shadow-none hover:border-border hover:text-foreground focus-visible:text-foreground"
+        className="h-7 w-[8.5rem] border-transparent bg-transparent text-xs text-muted-foreground shadow-none hover:border-border hover:text-foreground focus-visible:text-foreground"
       >
-        <option value="auto">Automatic</option>
-        <option value="in">Always in</option>
-        <option value="out">Always out</option>
+        <option value="auto">Follow sales</option>
+        <option value="in">Always on</option>
+        <option value="out">Never</option>
       </NativeSelect>
     </span>
   );
