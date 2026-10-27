@@ -5,6 +5,7 @@ import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
 import type {MatchTier} from './goldline-sku-match';
 import {formSpots, type FormSpot} from './goldline-sku-tags';
+import {MANIFESTS} from './goldline-extract';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
 // lives on products.sku_code (every sales reader joins on it); chain_skus holds the
@@ -39,9 +40,14 @@ export type SkuLinkRow = {
   suggestion: (SkuLinkItem & {tier: MatchTier; score: number}) | null;
   review: SkuReview | null;
 };
+/** One printed line of the inventory form, with the Watsons SKU it is linked to (if any). */
+export type FormLine = {row: number; itemCode: string; productLine: string | null; name: string; sku: string | null};
+export type FormPage = {page: number; lines: FormLine[]};
+
 export type SkuLinkData = {
   rows: SkuLinkRow[];
   unlinkedItems: SkuLinkItem[]; // catalog items with no Watsons SKU yet (for the manual picker)
+  formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
 
@@ -61,7 +67,7 @@ const item = (p: ProductRow): SkuLinkItem => ({
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
   const [products, chain, rollup, reviews] = await Promise.all([
@@ -134,6 +140,16 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
+    // The form in printed order (fixed template), named from the catalog where it can be.
+    formPages: Object.entries(MANIFESTS)
+      .map(([page, items]) => ({
+        page: Number(page),
+        lines: items.map((it, i) => {
+          const p = byItem.get(it.code);
+          return {row: i + 1, itemCode: it.code, productLine: p?.product_line ?? null, name: p?.variant?.trim() || it.product, sku: p?.sku_code?.trim() || null};
+        }),
+      }))
+      .sort((a, b) => a.page - b.page),
     totals: {
       units,
       linkedUnits: rows.reduce((a, r) => a + (r.linked ? r.units : 0), 0),
