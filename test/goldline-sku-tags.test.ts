@@ -30,3 +30,15 @@ describe('SKU linking tags', () => {
     }
   });
 });
+
+describe('form spots', () => {
+  it('places items by printed page and row', async () => {
+    const {formSpots, formSpotText} = await import('../src/goldline-sku-tags');
+    const s = formSpots();
+    expect(s.get('FBPP01')).toEqual({page: 1, row: 1});
+    expect(s.get('FBPP02')).toEqual({page: 1, row: 2});
+    expect(formSpotText(s.get('FBPP01'))).toBe('Page 1 · row 1');
+    expect(formSpotText(null)).toBe('Not on the form');
+    expect([...s.values()].every((v) => v.page >= 1 && v.page <= 5)).toBe(true);
+  });
+});
