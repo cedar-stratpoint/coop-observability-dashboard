@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking header: coverage panel and a tinted help strip
+Same look as the Overview and BAs: the coverage is a small panel ("87.7% of Watsons units linked") with a three-part bar and a legend (Linked · Waiting on a decision · Not matched); the explanation under the tabs is a soft strip tinted in the tab's colour with an icon.
+
 ## 2026-10-28 — Goldline Overview: modern look and a 12-month trend
 Oct 28 review, same language as BAs and Inventory:
 - Full width (was a centred 5xl column); the gradient bar and monospace date line are gone. The window reads "Watsons sales for September 2026" when it's a whole month; stores live is a quiet pill.

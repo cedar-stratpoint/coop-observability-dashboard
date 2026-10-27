@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, Link2, MessageSquare, MoreHorizontal, Search, Unlink, X} from 'lucide-react';
+import {Check, CircleCheck, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
@@ -54,6 +54,9 @@ const day = (iso: string | null) =>
 const itemText = (i: SkuLinkItem) => itemDisplayName(i.productLine, i.variant, i.itemCode);
 // 'info' has no status token: it uses the muted text colour.
 const toneVar = (t: Tone) => (t === 'info' ? 'var(--muted-foreground)' : `var(--status-${t})`);
+const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
+// One icon per tab for the help strip under the tabs.
+const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, formOnly: FileQuestion};
 
 type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
 
@@ -157,25 +160,36 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     setPage(1);
   };
   const tag = SKU_TAGS[filter];
+  const TabIcon = TAB_ICON[filter];
 
   return (
     <div className={GL_PAGE}>
-      <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex max-w-2xl flex-col gap-1.5">
+      <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex max-w-2xl flex-col gap-1.5 lg:pt-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">SKU linking</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">Match each Watsons SKU to our item. A SKU&apos;s Watsons sales count for the item only once it is linked.</p>
         </div>
-        <div className="flex w-full flex-col gap-2 lg:w-80">
+        <div className="flex w-full shrink-0 flex-col gap-3 rounded-xl border bg-card px-5 py-4 lg:w-[30rem]">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-sm text-muted-foreground">
-              <span className="font-heading text-2xl font-semibold text-foreground tabular-nums">{linkedPct}%</span> of units linked
+              <span className="font-heading text-2xl font-semibold text-foreground tabular-nums">{linkedPct}%</span> of Watsons units linked
             </p>
-            <p className="text-xs text-muted-foreground tabular-nums">+{suggestedPct}% waiting</p>
           </div>
-          <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div style={{width: `${linkedPct}%`, background: 'var(--status-good)'}} />
-            <div style={{width: `${suggestedPct}%`, background: 'var(--status-warn)'}} />
+          <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+            <div className="rounded-full" style={{width: `${linkedPct}%`, background: 'var(--status-good)'}} />
+            <div className="rounded-full" style={{width: `${suggestedPct}%`, background: 'var(--status-warn)'}} />
           </div>
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
+            <li className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full" style={{background: 'var(--status-good)'}} aria-hidden /> Linked {linkedPct}%
+            </li>
+            <li className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full" style={{background: 'var(--status-warn)'}} aria-hidden /> Waiting on a decision {suggestedPct}%
+            </li>
+            <li className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden /> Not matched {Math.max(0, Math.round((100 - linkedPct - suggestedPct) * 10) / 10)}%
+            </li>
+          </ul>
         </div>
       </header>
 
@@ -204,9 +218,14 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             })}
           </div>
         </div>
-        <p className="pt-1 text-sm leading-relaxed">
-          <span className="font-medium">{tag.label}.</span> <span className="text-muted-foreground">{tag.help}</span>
-        </p>
+        <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
+            <TabIcon aria-hidden className="size-3.5" />
+          </span>
+          <p className="text-sm leading-relaxed">
+            <span className="font-medium">{tag.label}.</span> <span className="text-muted-foreground">{tag.help}</span>
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
