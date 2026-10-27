@@ -29,7 +29,7 @@ describe('login on the status', () => {
     for (const loginState of ['needs_password', 'signed_out'] as const) {
       const s = build({workers: [cloud({loginState, sessionState: 'signed_out'})]});
       expect(s.canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
-      expect(syncButton(s)).toMatchObject({disabled: true, reason: 'Shopee needs an admin to sign in. Admins have been told.'});
+      expect(syncButton(s)).toMatchObject({disabled: true, reason: 'Shopee needs an admin to sign in. Please ask an admin.'});
     }
   });
   it('is online when any worker was seen within 2 minutes', () => {

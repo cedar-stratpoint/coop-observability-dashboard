@@ -114,7 +114,7 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean; workerOnline?
         const minutes = Math.round(AWAITING_EXPIRY_MS / 60_000);
         return who.isAdmin
           ? m('Needs your sign-in', 'warn', 'Shopee needs your sign-in', `Open the remote browser and type the Shopee password in the worker's Chrome, not in Coop. The sync continues by itself. It expires after about ${minutes} minutes.`, ['cancel'])
-          : m('Waiting for an admin', 'warn', 'Waiting for an admin', `Shopee asked for the password. Admins have been told. The sync resumes by itself after an admin signs in, and expires after about ${minutes} minutes.`, ['cancel']);
+          : m('Waiting for an admin', 'warn', 'Waiting for an admin', `Shopee asked for the password. Please ask an admin. The sync resumes by itself after an admin signs in, and expires after about ${minutes} minutes.`, ['cancel']);
       }
       return m(j.mine ? 'Needs your password' : 'Waiting for a password', 'warn', j.mine ? 'Shopee needs you to verify' : `Waiting for ${mac} to verify`, j.mine ? `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.` : `Someone has to type the Shopee password on ${mac}. Your sync can start after theirs.`, ['cancel']);
     }
@@ -198,7 +198,7 @@ export function serverLine(s: ShopeeSyncStatus, now: Date): {kind: 'online' | 'a
   if (!w) return null;
   const seen = w.lastSeen ? `last seen ${agoText(w.lastSeen, now)}` : 'never seen yet';
   if (s.workerOnline) return {kind: 'online', text: `Server online, ${seen}.`};
-  if (w.state === 'offline') return {kind: 'offline', text: `The server did not wake, ${seen}. Admins have been told.`};
+  if (w.state === 'offline') return {kind: 'offline', text: `The server did not wake, ${seen}. Please ask an admin.`};
   if (s.currentJob?.status === 'queued') return {kind: 'waking', text: 'Waking the server, about 1 to 4 minutes.'};
   // Sync wakes it only when the login is Ready; otherwise Sync is off and promising a wake would contradict the button.
   return {kind: 'asleep', text: s.login.state === 'ready' ? `Server asleep. Sync will wake it, about 1 to 4 minutes (${seen}).` : `Server asleep, ${seen}.`};

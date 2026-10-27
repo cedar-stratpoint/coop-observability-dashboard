@@ -36,7 +36,7 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 }
 
 /** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
-export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Admins have been told.';
+export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
 export const FIRST_CHECK = 'Waiting for the first login check';
 
 export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]; admins?: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
