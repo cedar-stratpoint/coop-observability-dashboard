@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline sales money encrypted at rest (Nichido), key in Supabase Vault
+Nichido is an external brand, so its peso figures should not be readable by anyone who can open the database (Table Editor, SQL editor, a dump).
+- **What is encrypted:** `sales.gross_retail` and `sales.net_of_vat`, together in one column `sales.amounts_enc` (AES-256-CBC, random IV per row). **Units, store/SKU codes and periods stay plain**, decided for now: units feed the checks, forecast, store scope and three paged app reads, and carry no peso figures. Encrypting them is a possible phase 2.
+- **The key** is 32 random bytes made inside the database and kept in Supabase Vault (`goldline_sales_key`), one per environment. It is in no env var, file or table, and a dump holds only Vault's ciphertext of it. Only `SECURITY DEFINER` functions read it: `upsert_sales` (writes), `sales_rollup` and `sales_by_sku` (same output as before). Helpers sit in a `private` schema no API role can use. Never delete the secret; the source CSVs can rebuild the figures if it is lost.
+- **Why raw AES and not `pgp_sym_encrypt`:** pgp measured ~17 µs a value on Staging, which would put the Stores rollup at ~14 s, over the API's 8 s statement timeout. With one ciphertext per row the rollup takes ~2.3 s (was ~0.5 s); one period of `sales_by_sku` ~0.2 s.
+- **Not changed, on purpose:** Supabase's own grant lets `service_role` read Vault and `postgres` cannot revoke it. The key stays off the API because the `vault` schema is not exposed; keep it out of Settings → API.
+- **App:** `upsertSales` calls the `upsert_sales` RPC instead of upserting into `sales` (`test/goldline-sales-upsert.test.ts`).
+- **Rollout:** `supabase/nichido/s1_sales_encryption.sql` (applied on Nichido Staging: 392,235 rows encrypted; per-store and per-SKU totals identical to the plain columns) → deploy → `s2_sales_drop_plaintext.sql` (drops the plain columns, then `vacuum full`). Until s2, a trigger encrypts plain values an older deployment still writes. PROD not done.
+- **Still plain elsewhere:** Nichido backups / PITR from before the change, the archive's read-only `gl_sales` copy, and the original CSVs in `goldline-uploads`.
+
 ## 2026-10-27 — SKU linking: calmer, scannable table with the form page and rows per page
 Oct 27 review: the page read as cluttered. Rebuilt with Hick's Law in mind (design skills: impeccable distill):
 - **Fewer choices at a glance:** one row of tabs (Check Coop's match · Choose the item · Linked · Form items without a SKU) instead of five large cards; only the chosen tab's tag and explanation show. "Rejected" appears only when something is rejected. The tag no longer repeats on every row.
