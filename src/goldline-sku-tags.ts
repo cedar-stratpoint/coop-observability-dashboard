@@ -1,3 +1,5 @@
+import {MANIFESTS} from './goldline-extract';
+
 // Plain-language tags for SKU linking (Oct 27). Justin and his dad read these, so
 // each tag says what happened and what to do next, instead of short labels like
 // "Needs a pick". Pure, so the page and the tests share it.
@@ -72,3 +74,18 @@ export const ACTION_WORD: Record<'approved' | 'rejected' | 'linked' | 'unlinked'
   linked: 'Linked by hand',
   unlinked: 'Unlinked',
 };
+
+export type FormSpot = {page: number; row: number};
+
+/** Where an item is printed on the inventory form: page and row (1-based, printed order). */
+export function formSpots(): Map<string, FormSpot> {
+  const out = new Map<string, FormSpot>();
+  for (const [page, items] of Object.entries(MANIFESTS)) {
+    items.forEach((it, i) => {
+      if (!out.has(it.code)) out.set(it.code, {page: Number(page), row: i + 1});
+    });
+  }
+  return out;
+}
+
+export const formSpotText = (s: FormSpot | null | undefined) => (s ? `Page ${s.page} · row ${s.row}` : 'Not on the form');
