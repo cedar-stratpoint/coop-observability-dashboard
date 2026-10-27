@@ -8,11 +8,13 @@ export const DAILY_CAP = 6;
 export const HEARTBEAT_STALE_MS = 10 * 60_000;
 export const QUEUE_EXPIRY_MS = 30 * 60_000;
 export const ONLINE_WITHIN_MS = 2 * 60_000;
+/** A sync paused for an admin to sign in to Shopee ends after this long (it expires; the Monday import still fills the gap). */
+export const AWAITING_EXPIRY_MS = 60 * 60_000;
 // The coworker's weekly Shopee export runs on Mondays about 09:00 PHT with the same Seller Centre login; two sessions risk a forced sign-out.
 export const QUIET_START_MIN = 8 * 60 + 30;
 export const QUIET_END_MIN = 11 * 60;
 
-export type JobLike = Pick<Job, 'id' | 'status' | 'createdAt' | 'heartbeatAt'>;
+export type JobLike = Pick<Job, 'id' | 'status' | 'createdAt' | 'heartbeatAt'> & {awaitingSince?: string | null};
 
 export function inQuietWindow(now: Date): boolean {
   const ph = new Date(now.getTime() + 8 * 3_600_000);
@@ -38,11 +40,12 @@ export interface Sweep {
   to: 'failed' | 'expired';
   error: string;
 }
-/** Jobs that went quiet: in flight with no heartbeat for 10 minutes (worker lost), or queued and unclaimed for 30 minutes (worker offline). */
+/** Jobs that went quiet: in flight with no heartbeat for 10 minutes (worker lost), paused for a sign-in for over an hour, or queued and unclaimed for 30 minutes (worker offline). */
 export function staleSweep(now: Date, jobs: readonly JobLike[]): Sweep[] {
   const out: Sweep[] = [];
   for (const j of jobs) {
     if (isActive(j.status) && now.getTime() - Date.parse(j.heartbeatAt ?? j.createdAt) > HEARTBEAT_STALE_MS) out.push({id: j.id, from: j.status, to: 'failed', error: 'worker lost'});
+    else if (j.status === 'awaiting_verification' && now.getTime() - Date.parse(j.awaitingSince ?? j.heartbeatAt ?? j.createdAt) > AWAITING_EXPIRY_MS) out.push({id: j.id, from: j.status, to: 'expired', error: `Nobody signed in to Shopee within ${AWAITING_EXPIRY_MS / 60_000} minutes`});
     else if (j.status === 'queued' && now.getTime() - Date.parse(j.createdAt) > QUEUE_EXPIRY_MS) out.push({id: j.id, from: 'queued', to: 'expired', error: 'worker offline'});
   }
   return out;

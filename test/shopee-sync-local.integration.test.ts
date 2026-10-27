@@ -36,8 +36,8 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
     const now = new Date();
     const w1 = await store.createWorker({ownerEmail: owner, name: 'one', tokenHash: hashSecret(newWorkerToken())}, now);
     const w2 = await store.createWorker({ownerEmail: owner, name: 'two', tokenHash: hashSecret(newWorkerToken())}, now);
-    await store.touchWorker(w1.id, 'ready', now);
-    await store.touchWorker(w2.id, 'ready', now);
+    await store.touchWorker(w1.id, {sessionState: 'ready'}, now);
+    await store.touchWorker(w2.id, {sessionState: 'ready'}, now);
     const job = await store.createJob({requestedBy: owner, days: ['2026-10-19', '2026-10-20']}, now);
     if (job === 'conflict') throw new Error('conflict');
     const [a, b] = await Promise.all([store.claimJob(job.id, w1.id, now), store.claimJob(job.id, w2.id, now)]);
@@ -52,10 +52,10 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
   it('refuses a second queued job, a claim by a signed-out, revoked or foreign worker, and a second in-flight sync', async () => {
     const now = new Date();
     const ready = await store.createWorker({ownerEmail: owner, name: 'ready', tokenHash: hashSecret(newWorkerToken())}, now);
-    await store.touchWorker(ready.id, 'ready', now);
+    await store.touchWorker(ready.id, {sessionState: 'ready'}, now);
     const signedOut = await store.createWorker({ownerEmail: owner, name: 'so', tokenHash: hashSecret(newWorkerToken())}, now);
     const foreign = await store.createWorker({ownerEmail: `race-other-${randomUUID()}@example.com`, name: 'f', tokenHash: hashSecret(newWorkerToken())}, now);
-    await store.touchWorker(foreign.id, 'ready', now);
+    await store.touchWorker(foreign.id, {sessionState: 'ready'}, now);
     const j1 = await store.createJob({requestedBy: owner, days: ['2026-10-21']}, now);
     if (j1 === 'conflict') throw new Error('conflict');
     expect(await store.createJob({requestedBy: owner, days: ['2026-10-22']}, now)).toBe('conflict');

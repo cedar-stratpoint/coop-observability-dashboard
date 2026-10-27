@@ -5,8 +5,8 @@ import type {Job, Worker} from '../src/shopee-sync/types';
 const now = new Date('2026-10-27T06:00:00Z'); // PH Tuesday 14:00
 const LOADED = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
 const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
-const worker = (o: Partial<Worker> = {}): Worker => ({id: 'w1', ownerEmail: 'a@x.com', name: 'Dave Mac', tokenHash: 'h', lastSeen: ago(10), sessionState: 'ready', createdAt: ago(9999), revokedAt: null, ...o});
-const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'a@x.com', days: ['2026-10-19'], status: 'done', claimedBy: 'w1', claimedAt: ago(5000), heartbeatAt: null, importIds: [], error: null, createdAt: ago(5000), finishedAt: ago(4000), progress: {}, ...o});
+const worker = (o: Partial<Worker> = {}): Worker => ({id: 'w1', ownerEmail: 'a@x.com', name: 'Dave Mac', tokenHash: 'h', lastSeen: ago(10), sessionState: 'ready', createdAt: ago(9999), revokedAt: null, loginState: null, loginCheckedAt: null, remoteReady: false, remoteUrl: null, ...o});
+const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'a@x.com', days: ['2026-10-19'], status: 'done', claimedBy: 'w1', claimedAt: ago(5000), heartbeatAt: null, importIds: [], error: null, createdAt: ago(5000), finishedAt: ago(4000), progress: {}, awaitingSince: null, ...o});
 const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'a@x.com', isAdmin: false}, now, workers: [worker()], jobs: [], loadedDays: LOADED, ...o});
 
 describe('buildSyncStatus', () => {

@@ -11,7 +11,7 @@ let loaded: string[];
 const deps = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => loaded});
 const addWorker = async (owner: string, state: 'ready' | 'signed_out' = 'ready') => {
   const w = await store.createWorker({ownerEmail: owner, name: `${owner}-mac`, tokenHash: hashSecret(newWorkerToken())}, clock);
-  await store.touchWorker(w.id, state, clock);
+  await store.touchWorker(w.id, {sessionState: state}, clock);
   return w;
 };
 

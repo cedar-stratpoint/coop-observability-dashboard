@@ -9,6 +9,16 @@ export const isActive = (s: JobStatus): boolean => (ACTIVE_STATUSES as readonly 
 export type SessionState = 'signed_out' | 'ready' | 'expired';
 export const SESSION_STATES: readonly SessionState[] = ['signed_out', 'ready', 'expired'];
 
+/** What the cloud worker's login checker last saw at Seller Centre. 'needs_password' and 'signed_out' both need an admin to sign in. */
+export type LoginState = 'ready' | 'needs_password' | 'signed_out';
+export const LOGIN_STATES: readonly LoginState[] = ['ready', 'needs_password', 'signed_out'];
+/** A worker's report of its Shopee login, and whether its remote browser is up. Both optional in a poll: old workers send neither. */
+export interface WorkerReport {
+  sessionState?: SessionState;
+  login?: {state: LoginState; checkedAt: string};
+  remoteReady?: boolean;
+}
+
 export interface Worker {
   id: string;
   ownerEmail: string;
@@ -18,6 +28,13 @@ export interface Worker {
   sessionState: SessionState;
   createdAt: string;
   revokedAt: string | null;
+  /** Last known Shopee login (null until the worker has reported one). Survives the server sleeping. */
+  loginState: LoginState | null;
+  loginCheckedAt: string | null;
+  /** The worker's remote browser (noVNC) is up. */
+  remoteReady: boolean;
+  /** Admin-set address of the protected remote browser; never sent to a non-admin. */
+  remoteUrl: string | null;
 }
 export interface Enrolment {
   codeHash: string;
@@ -46,4 +63,6 @@ export interface Job {
   createdAt: string;
   finishedAt: string | null;
   progress: Record<string, DayResult>;
+  /** When the job last paused for a person to sign in to Shopee (null otherwise). Drives the 60-minute expiry. */
+  awaitingSince: string | null;
 }

@@ -2,15 +2,15 @@
 // Token and code columns are only ever compared and stored as hashes; nothing here reads or writes a Shopee password.
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {JobPatch, SyncStore} from './store';
-import type {DayResult, Enrolment, Job, JobStatus, SessionState, Worker} from './types';
+import type {DayResult, Enrolment, Job, JobStatus, LoginState, SessionState, Worker} from './types';
 
-type WorkerRow = {id: string; owner_email: string; name: string; token_hash: string; last_seen: string | null; session_state: SessionState; created_at: string; revoked_at: string | null};
-type JobRow = {id: string; requested_by: string; days: string[]; status: JobStatus; claimed_by: string | null; claimed_at: string | null; heartbeat_at: string | null; import_ids: string[] | null; error: string | null; created_at: string; finished_at: string | null; progress: Record<string, DayResult> | null};
+type WorkerRow = {id: string; owner_email: string; name: string; token_hash: string; last_seen: string | null; session_state: SessionState; created_at: string; revoked_at: string | null; login_state: LoginState | null; login_checked_at: string | null; remote_ready: boolean | null; remote_url: string | null};
+type JobRow = {id: string; requested_by: string; days: string[]; status: JobStatus; claimed_by: string | null; claimed_at: string | null; heartbeat_at: string | null; import_ids: string[] | null; error: string | null; created_at: string; finished_at: string | null; progress: Record<string, DayResult> | null; awaiting_since: string | null};
 
-const WORKER_COLS = 'id,owner_email,name,token_hash,last_seen,session_state,created_at,revoked_at';
-const JOB_COLS = 'id,requested_by,days,status,claimed_by,claimed_at,heartbeat_at,import_ids,error,created_at,finished_at,progress';
-const toWorker = (r: WorkerRow): Worker => ({id: r.id, ownerEmail: r.owner_email, name: r.name, tokenHash: r.token_hash, lastSeen: r.last_seen, sessionState: r.session_state, createdAt: r.created_at, revokedAt: r.revoked_at});
-const toJob = (r: JobRow): Job => ({id: r.id, requestedBy: r.requested_by, days: r.days, status: r.status, claimedBy: r.claimed_by, claimedAt: r.claimed_at, heartbeatAt: r.heartbeat_at, importIds: r.import_ids ?? [], error: r.error, createdAt: r.created_at, finishedAt: r.finished_at, progress: r.progress ?? {}});
+const WORKER_COLS = 'id,owner_email,name,token_hash,last_seen,session_state,created_at,revoked_at,login_state,login_checked_at,remote_ready,remote_url';
+const JOB_COLS = 'id,requested_by,days,status,claimed_by,claimed_at,heartbeat_at,import_ids,error,created_at,finished_at,progress,awaiting_since';
+const toWorker = (r: WorkerRow): Worker => ({id: r.id, ownerEmail: r.owner_email, name: r.name, tokenHash: r.token_hash, lastSeen: r.last_seen, sessionState: r.session_state, createdAt: r.created_at, revokedAt: r.revoked_at, loginState: r.login_state ?? null, loginCheckedAt: r.login_checked_at ?? null, remoteReady: r.remote_ready ?? false, remoteUrl: r.remote_url ?? null});
+const toJob = (r: JobRow): Job => ({id: r.id, requestedBy: r.requested_by, days: r.days, status: r.status, claimedBy: r.claimed_by, claimedAt: r.claimed_at, heartbeatAt: r.heartbeat_at, importIds: r.import_ids ?? [], error: r.error, createdAt: r.created_at, finishedAt: r.finished_at, progress: r.progress ?? {}, awaitingSince: r.awaiting_since ?? null});
 const UNIQUE_VIOLATION = '23505';
 
 function fail(what: string, error: {message: string} | null): void {
@@ -34,9 +34,15 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       fail('adding the worker', error);
       return toWorker(data as WorkerRow);
     },
-    async touchWorker(id, sessionState, now) {
-      const {error} = await sb.from('shopee_sync_workers').update({last_seen: now.toISOString(), session_state: sessionState}).eq('id', id); // pagination-ok: one primary key
+    async touchWorker(id, r, now) {
+      const change = {last_seen: now.toISOString(), ...(r.sessionState && {session_state: r.sessionState}), ...(r.login && {login_state: r.login.state, login_checked_at: r.login.checkedAt}), ...(r.remoteReady !== undefined && {remote_ready: r.remoteReady})};
+      const {error} = await sb.from('shopee_sync_workers').update(change).eq('id', id); // pagination-ok: one primary key
       fail('recording the poll', error);
+    },
+    async setRemoteUrl(id, url) {
+      const {data, error} = await sb.from('shopee_sync_workers').update({remote_url: url}).eq('id', id).is('revoked_at', null).select('id'); // pagination-ok: one primary key
+      fail('saving the remote browser address', error);
+      return (data ?? []).length === 1;
     },
     async revokeWorker(id, now) {
       const {data, error} = await sb.from('shopee_sync_workers').update({revoked_at: now.toISOString()}).eq('id', id).is('revoked_at', null).select('id'); // pagination-ok: one primary key
@@ -72,9 +78,10 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       fail('creating the sync job', error);
       return toJob(data as JobRow);
     },
-    async claimJob(jobId, workerId) {
-      // One SQL statement (supabase/shopee_sync.sql): queued -> running, and only for a ready, non-revoked worker owned by the presser.
-      const {data, error} = await sb.rpc('claim_shopee_sync_job', {p_job: jobId, p_worker: workerId});
+    async claimJob(jobId, workerId, _now, opts) {
+      // One SQL statement (supabase/shopee_sync.sql, function claim_shopee_sync_job_shared in shopee_sync_login.sql): queued -> running, and only for a ready, non-revoked worker
+      // owned by the presser, unless it is the shared cloud worker (the app decides that from SHOPEE_SYNC_ADMINS and passes p_any_owner).
+      const {data, error} = await sb.rpc('claim_shopee_sync_job_shared', {p_job: jobId, p_worker: workerId, p_any_owner: opts?.anyOwner === true});
       if (error?.code === UNIQUE_VIOLATION) return null; // another sync is already in flight (unique index)
       fail('claiming the sync job', error);
       const row = (Array.isArray(data) ? data[0] : data) as JobRow | undefined;
@@ -88,6 +95,7 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       if (patch.progress !== undefined) change.progress = patch.progress;
       if (patch.heartbeatAt !== undefined) change.heartbeat_at = patch.heartbeatAt;
       if (patch.finishedAt !== undefined) change.finished_at = patch.finishedAt;
+      if (patch.awaitingSince !== undefined) change.awaiting_since = patch.awaitingSince;
       const {data, error} = await sb.from('shopee_sync_jobs').update(change).eq('id', id).in('status', [...from]).select(JOB_COLS); // pagination-ok: one primary key
       if (error?.code === UNIQUE_VIOLATION) return null;
       fail('changing the sync job', error);

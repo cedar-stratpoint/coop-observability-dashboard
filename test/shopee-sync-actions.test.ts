@@ -22,7 +22,7 @@ import {getShopeeSyncStatus} from '../src/shopee-sync-data';
 let store: FakeSyncStore;
 const readyWorker = async (owner: string) => {
   const w = await store.createWorker({ownerEmail: owner, name: 'm', tokenHash: `h-${owner}-${Math.random()}`}, new Date());
-  await store.touchWorker(w.id, 'ready', new Date('2026-10-27T05:59:50Z'));
+  await store.touchWorker(w.id, {sessionState: 'ready'}, new Date('2026-10-27T05:59:50Z'));
   return w;
 };
 

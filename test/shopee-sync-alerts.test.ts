@@ -4,7 +4,7 @@ import type {Job} from '../src/shopee-sync/types';
 
 const now = new Date('2026-10-27T06:00:00Z');
 const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
-const job = (o: Partial<Job> = {}): Job => ({id: 'job-1', requestedBy: 'a@x.com', days: ['2026-10-19', '2026-10-20'], status: 'failed', claimedBy: 'w', claimedAt: ago(9e5), heartbeatAt: ago(6e5), importIds: [], error: 'worker lost', createdAt: ago(1e6), finishedAt: ago(1e5), progress: {}, ...o});
+const job = (o: Partial<Job> = {}): Job => ({id: 'job-1', requestedBy: 'a@x.com', days: ['2026-10-19', '2026-10-20'], status: 'failed', claimedBy: 'w', claimedAt: ago(9e5), heartbeatAt: ago(6e5), importIds: [], error: 'worker lost', createdAt: ago(1e6), finishedAt: ago(1e5), progress: {}, awaitingSince: null, ...o});
 
 describe('alertsDue', () => {
   it('alerts on a failed job and on one stuck awaiting verification past the timeout', () => {

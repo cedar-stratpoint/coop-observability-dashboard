@@ -20,7 +20,7 @@ async function setup(opts: {days?: string[] | null; status?: Job['status']} = {}
   const store = new FakeStore();
   const days = opts.days === undefined ? WEEK : opts.days;
   if (days) {
-    await sync.touchWorker(w.id, 'ready', NOW);
+    await sync.touchWorker(w.id, {sessionState: 'ready'}, NOW);
     const job = (await sync.createJob({requestedBy: 'a@x.com', days}, NOW)) as Job;
     await sync.claimJob(job.id, w.id, NOW);
     if (opts.status && opts.status !== 'running') await sync.transitionJob(job.id, ['running'], {status: opts.status});

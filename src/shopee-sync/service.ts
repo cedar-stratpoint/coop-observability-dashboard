@@ -4,7 +4,7 @@ import {periodWithin, syncStamp} from '../shopee-import/api';
 import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
 import {missingClosedDays} from './missing-days';
-import {canAddWorker, sameEmail} from './routing';
+import {canAddWorker, cloudLogin, sameEmail} from './routing';
 import {startBlock, staleSweep} from './rules';
 import {ENROL_TTL_MS, hashSecret, newEnrolmentCode} from './tokens';
 import {isActive, type Job, type Worker} from './types';
@@ -14,6 +14,8 @@ export interface SyncDeps {
   now: () => Date;
   /** Days that have figures in the archive (the same list the import coverage uses). */
   loadLoadedDays: () => Promise<string[]>;
+  /** SHOPEE_SYNC_ADMINS, lower-cased. A worker enrolled by one of them is the shared cloud worker. */
+  admins?: readonly string[];
 }
 export type Fail = {ok: false; error: string};
 export interface Actor {
@@ -33,10 +35,20 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 }
 
 /** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
-export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
+export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Admins have been told.';
+export const FIRST_CHECK = 'Waiting for the first login check';
+
+export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]; admins?: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
   const {days, more} = missingClosedDays(i.loadedDays, i.now);
   if (days.length === 0) return fail('Shopee is up to date');
-  if (!i.workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who))) return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
+  // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping), or one of the person's own ready Macs.
+  const login = cloudLogin(i.workers, i.admins ?? []);
+  const ownReady = i.workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who));
+  if (login.state !== 'ready' && !ownReady) {
+    if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
+    if (login.hasCloud) return fail(FIRST_CHECK);
+    return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
+  }
   const blocked = startBlock(i.now, i.jobs);
   return blocked ? fail(blocked) : {ok: true, days, more};
 }
@@ -45,7 +57,7 @@ export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true
   const who = email.trim().toLowerCase();
   const now = d.now();
   const jobs = await sweepJobs(d.store, now);
-  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays()});
+  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays(), admins: d.admins});
   if (!gate.ok) return gate;
   const job = await d.store.createJob({requestedBy: who, days: gate.days}, now);
   return job === 'conflict' ? fail('A Shopee sync is already queued or running. Wait for it to finish.') : {ok: true, job};
