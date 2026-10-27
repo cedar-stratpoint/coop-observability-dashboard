@@ -2,6 +2,7 @@
 // The card is a thin view over this. Nothing here asks for, or has room for, a Shopee password: the person types it in the Shopee browser on their Mac.
 import type {JobStatus} from './types';
 import type {ShopeeSyncStatus, SyncJobView} from './status';
+import {AWAITING_EXPIRY_MS} from './rules';
 
 const DAY_MS = 86_400_000;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -34,10 +35,14 @@ export function rangeText(days: readonly string[]): string {
   return first === last ? `${dayLabel(first)}, ${count}` : `${dayLabel(first)} to ${dayLabel(last)}, ${count}`;
 }
 
+/** The cloud worker's last known login needs an admin to sign in to Shopee. */
+export const needsSignIn = (s: ShopeeSyncStatus): boolean => s.login.state === 'needs_password' || s.login.state === 'signed_out';
+
 /** The card shows only when Shopee is behind or a sync is current or finished within the last day. */
 export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
   if (!s || s.mock) return false;
   if (s.missingDays.length > 0 || s.currentJob) return true;
+  if (s.isAdmin && needsSignIn(s)) return true; // an admin is told on the card even when nothing is behind
   const fin = s.lastJob?.finishedAt;
   return Boolean(fin && now.getTime() - Date.parse(fin) < DAY_MS);
 }
@@ -90,19 +95,29 @@ export interface StatusMeta {
 const sentence = (t: string): string => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
 const loadedDays = (j: SyncJobView): string[] => j.days.filter((d) => j.progress[d]?.state === 'loaded').sort();
 
-export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: false}): StatusMeta {
+/** `cloud`: the job runs on the shared cloud worker. `workerOnline`: some worker was seen in the last 2 minutes (a queued job then is being picked up, not waiting for the server to wake). */
+export function statusMeta(j: SyncJobView, who: {isAdmin: boolean; workerOnline?: boolean} = {isAdmin: false}): StatusMeta {
   // Another person's Mac is not named to you: their sync is theirs to babysit.
-  const mac = macOf(j);
+  const mac = j.cloud ? (j.workerName ?? 'The worker') : macOf(j);
   const total = j.days.length;
   const done = loadedDays(j).length;
   const m = (label: string, tone: Tone, title: string, body: string, actions: JobAction[]): StatusMeta => ({status: j.status, label, tone, title, body, actions: j.mine || who.isAdmin ? actions : []});
   switch (j.status) {
     case 'queued':
+      if (j.cloud && who.workerOnline === false) return m('Waking the server', 'info', 'Waking the server', 'About 1 to 4 minutes. The server was asleep, so it is being started. A sync nobody picks up ends after 30 minutes.', ['cancel']);
+      if (j.cloud) return m('Queued', 'neutral', 'Sync requested', `Waiting for ${plural(total, 'day')} to be picked up by the worker. A sync nobody picks up ends after 30 minutes.`, ['cancel']);
       return m('Queued', 'neutral', 'Sync requested', `Waiting for ${plural(total, 'day')} to be picked up by your Mac. A sync nobody picks up ends after 30 minutes.`, ['cancel']);
     case 'running':
       return m('Running', 'info', 'Exporting from Shopee', `${mac} is in Seller Centre: ${done} of ${plural(total, 'day')} done. This can take a few minutes, one day a minute at most.`, ['cancel']);
-    case 'awaiting_verification':
+    case 'awaiting_verification': {
+      if (j.cloud) {
+        const minutes = Math.round(AWAITING_EXPIRY_MS / 60_000);
+        return who.isAdmin
+          ? m('Needs your sign-in', 'warn', 'Shopee needs your sign-in', `Open the remote browser and type the Shopee password in the worker's Chrome, not in Coop. The sync continues by itself. It expires after about ${minutes} minutes.`, ['cancel'])
+          : m('Waiting for an admin', 'warn', 'Waiting for an admin', `Shopee asked for the password. Admins have been told. The sync resumes by itself after an admin signs in, and expires after about ${minutes} minutes.`, ['cancel']);
+      }
       return m(j.mine ? 'Needs your password' : 'Waiting for a password', 'warn', j.mine ? 'Shopee needs you to verify' : `Waiting for ${mac} to verify`, j.mine ? `Open the Shopee browser on ${mac} and type the password there. The sync continues by itself. Coop never sees the password.` : `Someone has to type the Shopee password on ${mac}. Your sync can start after theirs.`, ['cancel']);
+    }
     case 'importing':
       return m('Importing', 'info', 'Importing orders', `${done} of ${plural(total, 'day')} received. Checking dates and totals before anything is saved.`, ['cancel']);
     case 'done': {
@@ -114,6 +129,7 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean} = {isAdmin: f
     case 'review':
       return m('Review', 'warn', 'Needs your review', 'The totals differ from what is loaded by more than the sync allows on its own. Nothing is applied until you confirm.', ['confirm']);
     case 'expired':
+      if (j.cloud && j.error === 'worker offline') return m('Server did not wake', 'crit', 'The server did not wake', 'Nothing picked the sync up in time. Nothing was changed, and the Monday import is unaffected. Try again.', ['retry']);
       return m('Expired', 'neutral', 'Sync expired', `${sentence(j.error ?? 'Nobody picked it up in time')} Nothing was loaded.`, ['retry']);
   }
 }
@@ -129,7 +145,7 @@ export interface Step {
 /** The little progress list under the status: Requested, Exporting, (Verify on the Mac), Importing, Done. */
 export function stepsFor(j: SyncJobView): Step[] {
   const verify = j.status === 'awaiting_verification';
-  const names = ['Requested', 'Exporting from Shopee', ...(verify ? ['Verify on the Mac'] : []), 'Importing orders', 'Done'];
+  const names = ['Requested', 'Exporting from Shopee', ...(verify ? [j.cloud ? 'Admin signs in' : 'Verify on the Mac'] : []), 'Importing orders', 'Done'];
   const imp = names.indexOf('Importing orders');
   const exp = 1;
   const failedAt = Object.keys(j.progress).length > 0 ? imp : exp;
@@ -154,3 +170,35 @@ export const SESSION_LABEL = {ready: 'Signed in to Seller Centre', signed_out: '
 
 /** The server leaves the dashboard address as a placeholder; the browser knows it. The worker image stays a placeholder until one is published. */
 export const enrolCommand = (command: string, origin: string): string => command.replace('<DASHBOARD_ADDRESS>', origin);
+
+export interface LoginLine {
+  state: ShopeeSyncStatus['login']['state'];
+  label: string;
+  tone: Tone;
+  text: string;
+}
+/** The Shopee login as the card shows it: the last known state and how old that check is. It is kept while the server sleeps. */
+export function loginLine(s: ShopeeSyncStatus, now: Date): LoginLine {
+  const age = agoText(s.login.checkedAt, now);
+  switch (s.login.state) {
+    case 'ready':
+      return {state: 'ready', label: 'Ready', tone: 'good', text: `Signed in, checked ${age}`};
+    case 'needs_password':
+      return {state: 'needs_password', label: 'Needs password', tone: 'warn', text: `Last known: needs the password, checked ${age}`};
+    case 'signed_out':
+      return {state: 'signed_out', label: 'Signed out', tone: 'crit', text: `Last known: signed out, checked ${age}`};
+    default:
+      return {state: 'unknown', label: 'Not checked', tone: 'neutral', text: 'Waiting for the first login check'};
+  }
+}
+
+/** The cloud server: asleep (a Sync wakes it), waking (a job is queued and nobody is awake), online, or offline (it did not wake). Null when there is no cloud worker. */
+export function serverLine(s: ShopeeSyncStatus, now: Date): {kind: 'online' | 'asleep' | 'waking' | 'offline'; text: string} | null {
+  const w = [...s.cloudWorkers].sort((a, b) => (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''))[0];
+  if (!w) return null;
+  const seen = w.lastSeen ? `last seen ${agoText(w.lastSeen, now)}` : 'never seen yet';
+  if (s.workerOnline) return {kind: 'online', text: `Server online, ${seen}.`};
+  if (w.state === 'offline') return {kind: 'offline', text: `The server did not wake, ${seen}. Admins have been told.`};
+  if (s.currentJob?.status === 'queued') return {kind: 'waking', text: 'Waking the server, about 1 to 4 minutes.'};
+  return {kind: 'asleep', text: `Server asleep. Sync will wake it, about 1 to 4 minutes (${seen}).`};
+}

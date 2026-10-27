@@ -5,8 +5,8 @@ import type {ShopeeSyncStatus, SyncJobView, SyncWorkerView} from '../src/shopee-
 const now = new Date('2026-10-27T06:00:00Z');
 const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
 const worker = (o: Partial<SyncWorkerView> = {}): SyncWorkerView => ({id: 'w1', name: 'Dave MacBook', ownerEmail: 'a@x.com', own: true, online: true, sessionState: 'ready', lastSeen: ago(12), createdAt: ago(9999), lastSyncAt: null, ...o});
-const job = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'a@x.com', mine: true, days: ['2026-10-19', '2026-10-20'], status: 'running', error: null, progress: {}, createdAt: ago(60), finishedAt: null, workerName: 'Dave MacBook', ...o});
-const status = (o: Partial<ShopeeSyncStatus> = {}): ShopeeSyncStatus => ({signedInAs: 'a@x.com', isAdmin: false, mock: false, workers: [worker()], currentJob: null, lastJob: null, missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 0, canSync: {ok: true, days: 3}, canAddMac: {ok: true}, ...o});
+const job = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'a@x.com', mine: true, days: ['2026-10-19', '2026-10-20'], status: 'running', error: null, progress: {}, createdAt: ago(60), finishedAt: null, workerName: 'Dave MacBook', awaitingSince: null, cloud: false, ...o});
+const status = (o: Partial<ShopeeSyncStatus> = {}): ShopeeSyncStatus => ({signedInAs: 'a@x.com', isAdmin: false, mock: false, workers: [worker()], cloudWorkers: [], login: {state: 'unknown', checkedAt: null, ageSeconds: null}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 0, canSync: {ok: true, days: 3}, canAddMac: {ok: true}, ...o});
 
 describe('agoText', () => {
   it('speaks in seconds, minutes, hours, days', () => {
