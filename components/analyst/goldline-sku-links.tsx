@@ -5,10 +5,11 @@ import {useRouter} from 'next/navigation';
 import {Check, ChevronDown, Link2, MessageSquare, Search, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
-import {ACTION_WORD, formSpotText, linkedHow, SKU_TAGS, skuStatus, sureness, type SkuStatus, type Tone} from '@/src/goldline-sku-tags';
+import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, sureness, type SkuStatus, type Tone} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
+import {FormPageDialog} from '@/components/analyst/goldline-form-page';
 import {GL_PAGE, GL_SCROLL_ROW_MOBILE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 import {itemDisplayName} from '@/src/goldline-item-name';
@@ -33,7 +34,7 @@ const TAB: Record<SkuStatus, string> = {
   formOnly: 'Form items without a SKU',
 };
 // One column template for the header and every row, so the columns line up.
-const COLS = 'lg:grid-cols-[minmax(0,1.25fr)_5rem_minmax(0,1.25fr)_7.5rem_8.5rem_minmax(13rem,15rem)]';
+const COLS = 'lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.3fr)_7.5rem_8.5rem_minmax(13rem,15rem)]';
 const ITEM_COLS = 'md:grid-cols-[8rem_minmax(0,1fr)_minmax(0,14rem)_7.5rem_6rem]';
 
 const n = (v: number) => Math.round(v).toLocaleString('en-US');
@@ -64,6 +65,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
+  const [formAt, setFormAt] = useState<{page: number; itemCode: string} | null>(null);
+  const showForm = (itemCode: string, spot: FormSpot | null) => spot && setFormAt({page: spot.page, itemCode});
 
   // Rows per page is a per-viewer convenience: remembered in this browser only.
   useEffect(() => {
@@ -253,7 +256,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
                   {itemText(i)}
                 </span>
                 <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
-                <span className="text-sm tabular-nums">{formSpotText(i.formSpot)}</span>
+                <FormSpotLink spot={i.formSpot} onClick={() => showForm(i.itemCode, i.formSpot)} />
                 <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
               </li>
             ))}
@@ -263,7 +266,6 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         <div className="overflow-hidden rounded-xl border">
           <div className={cn('hidden gap-5 border-b bg-muted/40 px-5 py-2.5 text-xs font-medium text-muted-foreground lg:grid', COLS)}>
             <span>Watsons SKU</span>
-            <span className="text-right">Units sold</span>
             <span>Our item</span>
             <span>Form page</span>
             <span className="text-right whitespace-nowrap">Watsons / our price</span>
@@ -271,7 +273,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} groups={groups} disabled={pending} busy={busy === r.skuCode} act={act} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} groups={groups} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} />
             ))}
           </ul>
         </div>
@@ -286,6 +288,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="SKU pages" />
         </div>
       )}
+
+      {formAt && data.formPages.length > 0 && <FormPageDialog pages={data.formPages} at={formAt} onClosed={() => setFormAt(null)} />}
     </div>
   );
 }
@@ -330,6 +334,7 @@ function SkuRow({
   disabled,
   busy,
   act,
+  onShowForm,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -338,6 +343,7 @@ function SkuRow({
   disabled: boolean;
   busy: boolean;
   act: Act;
+  onShowForm: (itemCode: string, spot: FormSpot | null) => void;
 }) {
   const status = skuStatus(r);
   const [remark, setRemark] = useState('');
@@ -355,7 +361,7 @@ function SkuRow({
   };
   const priceOff = shown?.price != null && r.avgPrice != null && shown.price > 0 && Math.abs(r.avgPrice / shown.price - 1) > 0.15;
   const note = r.review?.remark;
-  const formSpot = shown ? formSpotText(shown.formSpot) : '—';
+  const formSpot = shown ? <FormSpotLink spot={shown.formSpot} onClick={() => onShowForm(shown.itemCode, shown.formSpot)} /> : '—';
   const priceTitle = priceOff ? 'Prices differ by more than 15%. Check it is the same product.' : undefined;
   const price = (
     <>
@@ -378,8 +384,6 @@ function SkuRow({
           </p>
         </div>
 
-        <p className="text-sm tabular-nums max-lg:hidden lg:text-right">{n(r.units)}</p>
-
         <div className="flex min-w-0 flex-col gap-0.5">
           {shown ? (
             <>
@@ -399,16 +403,15 @@ function SkuRow({
           )}
         </div>
 
-        <p className="text-sm tabular-nums max-lg:hidden">{formSpot}</p>
+        <div className="text-sm tabular-nums max-lg:hidden">{formSpot}</div>
         <p className="text-sm tabular-nums max-lg:hidden lg:text-right" title={priceTitle}>
           {price}
         </p>
         {/* Phones: units, form page and price on one line under the item. */}
-        <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground tabular-nums lg:hidden" title={priceTitle}>
-          <span>{n(r.units)} sold</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground tabular-nums lg:hidden" title={priceTitle}>
           <span>Form {formSpot}</span>
           <span>Watsons / ours {price}</span>
-        </p>
+        </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {canEdit && status === 'check' && r.suggestion && (
@@ -584,5 +587,20 @@ function ReviewNote({r}: {r: SkuLinkRow}) {
         </p>
       )}
     </div>
+  );
+}
+
+/** "Page 2 · row 17", as a link that opens that page of the form with the item pinpointed. */
+function FormSpotLink({spot, onClick}: {spot: FormSpot | null; onClick: () => void}) {
+  if (!spot) return <span className="text-muted-foreground">{formSpotText(spot)}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Show this row on the inventory form"
+      className="rounded-sm text-left tabular-nums underline decoration-border decoration-dotted underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      {formSpotText(spot)}
+    </button>
   );
 }
