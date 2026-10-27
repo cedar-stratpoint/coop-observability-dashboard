@@ -46,8 +46,15 @@ describe('the remote browser address is for admins only', () => {
     expect(JSON.stringify(s)).not.toContain('browser.example.com');
     expect(s.remoteReady).toBe(true);
   });
-  it('is given to an admin', () => {
+  it('is withheld from a Coop Admin who is not in SHOPEE_SYNC_ADMINS', () => {
+    const s = build({viewer: {email: 'coop-admin@x.com', isAdmin: true}});
+    expect(s.isSyncAdmin).toBe(false);
+    expect(s.remoteUrl).toBeNull();
+    expect(JSON.stringify(s)).not.toContain('browser.example.com');
+  });
+  it('is given to a listed admin', () => {
     const s = build({viewer: {email: ADMIN, isAdmin: true}});
+    expect(s.isSyncAdmin).toBe(true);
     expect(s.remoteUrl).toBe('https://browser.example.com');
     expect(s.cloudWorkers[0].remoteUrl).toBe('https://browser.example.com');
   });
@@ -110,7 +117,7 @@ describe('awaiting verification on the cloud worker', () => {
     expect(m.body).not.toMatch(/type/i);
   });
   it('tells an admin to open the remote browser and type it there, not in Coop', () => {
-    const m = statusMeta(view({mine: false}), {isAdmin: true});
+    const m = statusMeta(view({mine: false}), {isAdmin: true, isSyncAdmin: true});
     expect(m).toMatchObject({label: 'Needs your sign-in', title: 'Shopee needs your sign-in'});
     expect(m.body).toMatch(/remote browser/);
     expect(m.body).toMatch(/not in Coop/);
@@ -136,6 +143,7 @@ describe('cardVisible for an admin', () => {
     const w = [cloud({loginState: 'needs_password', sessionState: 'signed_out'})];
     const done = {loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]};
     expect(cardVisible(build({workers: w, viewer: {email: ADMIN, isAdmin: true}, ...done}), now)).toBe(true);
+    expect(cardVisible(build({workers: w, viewer: {email: 'coop-admin@x.com', isAdmin: true}, ...done}), now)).toBe(false);
     expect(cardVisible(build({workers: w, ...done}), now)).toBe(false);
   });
 });

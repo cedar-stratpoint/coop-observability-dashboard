@@ -42,7 +42,7 @@ export const needsSignIn = (s: ShopeeSyncStatus): boolean => s.login.state === '
 export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
   if (!s || s.mock) return false;
   if (s.missingDays.length > 0 || s.currentJob) return true;
-  if (s.isAdmin && needsSignIn(s)) return true; // an admin is told on the card even when nothing is behind
+  if (s.isSyncAdmin && needsSignIn(s)) return true; // an admin is told on the card even when nothing is behind
   const fin = s.lastJob?.finishedAt;
   return Boolean(fin && now.getTime() - Date.parse(fin) < DAY_MS);
 }
@@ -96,7 +96,7 @@ const sentence = (t: string): string => (/[.!?]$/.test(t.trim()) ? t.trim() : `$
 const loadedDays = (j: SyncJobView): string[] => j.days.filter((d) => j.progress[d]?.state === 'loaded').sort();
 
 /** `cloud`: the job runs on the shared cloud worker. `workerOnline`: some worker was seen in the last 2 minutes (a queued job then is being picked up, not waiting for the server to wake). */
-export function statusMeta(j: SyncJobView, who: {isAdmin: boolean; workerOnline?: boolean} = {isAdmin: false}): StatusMeta {
+export function statusMeta(j: SyncJobView, who: {isAdmin: boolean; isSyncAdmin?: boolean; workerOnline?: boolean} = {isAdmin: false}): StatusMeta {
   // Another person's Mac is not named to you: their sync is theirs to babysit.
   const mac = j.cloud ? (j.workerName ?? 'The worker') : macOf(j);
   const total = j.days.length;
@@ -112,7 +112,7 @@ export function statusMeta(j: SyncJobView, who: {isAdmin: boolean; workerOnline?
     case 'awaiting_verification': {
       if (j.cloud) {
         const minutes = Math.round(AWAITING_EXPIRY_MS / 60_000);
-        return who.isAdmin
+        return who.isSyncAdmin
           ? m('Needs your sign-in', 'warn', 'Shopee needs your sign-in', `Open the remote browser and type the Shopee password in the worker's Chrome, not in Coop. The sync continues by itself. It expires after about ${minutes} minutes.`, ['cancel'])
           : m('Waiting for an admin', 'warn', 'Waiting for an admin', `Shopee asked for the password. Please ask an admin. The sync resumes by itself after an admin signs in, and expires after about ${minutes} minutes.`, ['cancel']);
       }

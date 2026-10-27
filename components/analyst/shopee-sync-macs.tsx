@@ -174,8 +174,8 @@ export function ShopeeSyncMacs({status, at}: {status: ShopeeSyncStatus; at: stri
         {status.cloudWorkers.length === 0 ? (
           <div className="flex flex-col items-start gap-2 rounded-[var(--radius)] border border-border bg-card p-4 md:p-5">
             <p className="text-sm font-medium text-foreground">No cloud worker yet</p>
-            <p className="max-w-[55ch] text-sm text-muted-foreground">{status.isAdmin ? 'Add it here once the server is ready. It is enrolled by an admin and serves everyone who presses Sync.' : 'An admin adds it. Until then, Sync works only on a Mac you add below.'}</p>
-            {status.isAdmin && (
+            <p className="max-w-[55ch] text-sm text-muted-foreground">{status.isSyncAdmin ? 'Add it here once the server is ready. It is enrolled by an admin and serves everyone who presses Sync.' : 'An admin adds it. Until then, Sync works only on a Mac you add below.'}</p>
+            {status.isSyncAdmin && (
               <Button
                 type="button"
                 disabled={!cap.ok}
@@ -235,7 +235,7 @@ export function ShopeeSyncMacs({status, at}: {status: ShopeeSyncStatus; at: stri
         )}
       </section>
 
-      {status.isAdmin && status.cloudWorkers[0] && <RemoteUrlField key={status.cloudWorkers[0].remoteUrl ?? ''} worker={status.cloudWorkers[0]} onSaved={() => router.refresh()} />}
+      {status.isSyncAdmin && status.cloudWorkers[0] && <RemoteUrlField key={status.cloudWorkers[0].remoteUrl ?? ''} worker={status.cloudWorkers[0]} onSaved={() => router.refresh()} />}
 
       <div className="mt-2 flex flex-col gap-1 border-t border-border pt-6">
         <h2 className="font-serif text-xl font-normal text-foreground">My sync Macs</h2>

@@ -106,14 +106,14 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const job = status.currentJob ?? status.lastJob;
-  const meta = job ? statusMeta(job, {isAdmin: status.isAdmin, workerOnline: status.workerOnline}) : null;
+  const meta = job ? statusMeta(job, {isAdmin: status.isAdmin, isSyncAdmin: status.isSyncAdmin, workerOnline: status.workerOnline}) : null;
   const btn = syncButton(status);
   const worker = workerLine(status, now);
   const server = serverLine(status, now);
   const login = loginLine(status, now);
   const LoginIcon = LOGIN_ICON[login.state];
   const awaitingCloud = job?.status === 'awaiting_verification' && job.cloud;
-  const showRemote = status.isAdmin && (awaitingCloud || (needsSignIn(status) && !status.currentJob));
+  const showRemote = status.isSyncAdmin && (awaitingCloud || (needsSignIn(status) && !status.currentJob));
   const retryJob = !status.currentJob && meta && (meta.status === 'failed' || meta.status === 'expired');
   const showMainButton = !status.currentJob && status.missingDays.length > 0 && !retryJob && meta?.status !== 'review';
 

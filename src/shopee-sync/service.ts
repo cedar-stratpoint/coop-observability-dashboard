@@ -17,6 +17,8 @@ export interface SyncDeps {
   loadLoadedDays: () => Promise<string[]>;
   /** SHOPEE_SYNC_ADMINS, lower-cased. A worker enrolled by one of them is the shared cloud worker. */
   admins?: readonly string[];
+  /** SHOPEE_SYNC_REMOTE_HOSTS, lower-cased. Empty or unset: any https host. */
+  remoteHosts?: readonly string[];
 }
 export type Fail = {ok: false; error: string};
 export interface Actor {
@@ -136,8 +138,9 @@ export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string)
 
 /** An admin sets or clears the address of the cloud worker's protected remote browser. Only the cloud worker has one; the address is never shown to anyone else. */
 export async function setRemoteUrlFor(d: SyncDeps, who: Actor, workerId: string, raw: string): Promise<{ok: true} | Fail> {
-  if (!who.isAdmin) return fail('Only an admin can set the remote browser address.');
-  const parsed = normaliseRemoteUrl(String(raw ?? ''));
+  // The SHOPEE_SYNC_ADMINS list decides, not the Coop Admin role: this link is where a listed admin types the Shopee password.
+  if (!(d.admins ?? []).some((a) => sameEmail(a, who.email))) return fail('Only an admin can set the remote browser address.');
+  const parsed = normaliseRemoteUrl(String(raw ?? ''), d.remoteHosts ?? []);
   if (!parsed.ok) return fail(parsed.error);
   const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
   if (!worker || !isCloudWorker(worker, d.admins ?? [])) return fail('That is not the cloud worker.');

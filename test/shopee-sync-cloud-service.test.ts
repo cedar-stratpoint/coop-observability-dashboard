@@ -41,6 +41,19 @@ describe('setRemoteUrlFor', () => {
     expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, w.id, '')).toEqual({ok: true});
     expect(store.workers[0].remoteUrl).toBeNull();
   });
+  it('refuses a Coop Admin who is not in SHOPEE_SYNC_ADMINS: the list, not the role, decides who may point the link', async () => {
+    const w = await cloudWorker();
+    expect(await setRemoteUrlFor(sd(), {email: 'coop-admin@x.com', isAdmin: true}, w.id, 'https://lookalike.example.com')).toEqual({ok: false, error: 'Only an admin can set the remote browser address.'});
+    expect(store.workers[0].remoteUrl).toBeNull();
+  });
+  it('refuses http, and a host outside SHOPEE_SYNC_REMOTE_HOSTS when that is set', async () => {
+    const w = await cloudWorker();
+    const asAdmin = {email: ADMIN, isAdmin: true};
+    expect(await setRemoteUrlFor(sd(), asAdmin, w.id, 'http://browser.example.com')).toMatchObject({ok: false});
+    const d = {...sd(), remoteHosts: ['browser.example.com']};
+    expect(await setRemoteUrlFor(d, asAdmin, w.id, 'https://lookalike.example.com')).toMatchObject({ok: false});
+    expect(await setRemoteUrlFor(d, asAdmin, w.id, 'https://browser.example.com')).toEqual({ok: true});
+  });
   it('refuses a non-admin, a bad address, a Mac that is not the cloud worker and a revoked worker', async () => {
     const w = await cloudWorker();
     const mac = await store.createWorker({ownerEmail: 'u@x.com', name: 'Mac', tokenHash: 'h2'}, now);
