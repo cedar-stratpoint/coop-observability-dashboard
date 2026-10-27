@@ -90,4 +90,27 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
     expect(await store.redeemEnrolment(held, hashSecret(newWorkerToken()), now, {perPerson: 1, perTeam: 1000})).toEqual({status: 'capped', ownerEmail: who});
     expect((await store.redeemEnrolment(held, hashSecret(newWorkerToken()), now, big)).status).toBe('ok');
   });
+
+  it('stores the login report and remote address, and the shared claim lets the cloud worker take another person\'s job (only when told to)', async () => {
+    const now = new Date();
+    const cloud = await store.createWorker({ownerEmail: `race-admin-${randomUUID()}@example.com`, name: 'cloud', tokenHash: hashSecret(newWorkerToken())}, now);
+    await store.touchWorker(cloud.id, {sessionState: 'ready', login: {state: 'ready', checkedAt: now.toISOString()}, remoteReady: true}, now);
+    expect(await store.setRemoteUrl(cloud.id, 'https://browser.example.com')).toBe(true);
+    const back = (await store.listWorkers()).find((w) => w.id === cloud.id);
+    expect(back).toMatchObject({loginState: 'ready', remoteReady: true, remoteUrl: 'https://browser.example.com', sessionState: 'ready'});
+    expect(Date.parse(back?.loginCheckedAt as string)).toBe(now.getTime());
+    await store.touchWorker(cloud.id, {}, now); // a poll that reports nothing keeps what was known
+    expect((await store.listWorkers()).find((w) => w.id === cloud.id)).toMatchObject({loginState: 'ready', remoteReady: true});
+    const job = await store.createJob({requestedBy: `race-user-${randomUUID()}@example.com`, days: ['2026-10-23']}, now);
+    if (job === 'conflict') throw new Error('conflict');
+    expect(await store.claimJob(job.id, cloud.id, now)).toBeNull(); // not the presser's worker
+    const got = await store.claimJob(job.id, cloud.id, now, {anyOwner: true});
+    expect(got).toMatchObject({status: 'running', claimedBy: cloud.id});
+    const waiting = await store.transitionJob(job.id, ['running'], {status: 'awaiting_verification', awaitingSince: now.toISOString()});
+    expect(Date.parse(waiting?.awaitingSince as string)).toBe(now.getTime());
+    await store.transitionJob(job.id, ['awaiting_verification'], {status: 'expired', error: 'x', finishedAt: now.toISOString()});
+    expect(await store.setRemoteUrl(cloud.id, null)).toBe(true);
+    await store.revokeWorker(cloud.id, now);
+    expect(await store.setRemoteUrl(cloud.id, 'https://x.example.com')).toBe(false);
+  });
 });
