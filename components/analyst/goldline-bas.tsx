@@ -12,7 +12,7 @@ import {assignBaAction, type BaActionResult} from '@/app/bas/actions';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
-import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE, GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 
 // BAs: the scorecard (F8) and the BA list (A1). The scorecard is each BA's month across
@@ -62,7 +62,7 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
   const [tab, setTab] = useState<Tab>(scorecard.scores.length || !missing ? 'scorecard' : 'list');
 
   return (
-    <div className={cn('mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6', GL_TILES_MOBILE)}>
+    <div className={cn(GL_PAGE, GL_TILES_MOBILE)}>
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight">BAs</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
@@ -139,7 +139,7 @@ export function GoldlineBas({company, data, scorecard, canEdit}: {company: strin
           </CardContent>
         </Card>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="grid gap-2 lg:grid-cols-2 2xl:grid-cols-3">
           {rows.map((s) => (
             <li key={s.code}>
               <StoreLine s={s} company={company} canEdit={canEdit} pending={pending} act={act} />
@@ -168,7 +168,7 @@ function StoreLine({s, company, canEdit, pending, act}: {s: BaStoreRow; company:
   const [from, setFrom] = useState(s.since ?? monthStart());
   const noBa = !s.ba && s.formsNoBa > 0;
   return (
-    <Card className="py-0" style={noBa ? {boxShadow: 'inset 3px 0 0 var(--status-warn)'} : undefined}>
+    <Card className="h-full py-0">
       <CardContent className="flex flex-col gap-2.5 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -318,7 +318,7 @@ function Scorecard({data, onList}: {data: BaScorecard; onList: () => void}) {
             const t = TAG[r.tag];
             return (
               <li key={`${r.ba}|${r.month}`}>
-                <Card className="py-0" style={{boxShadow: `inset 3px 0 0 ${toneVar(t.tone)}`}}>
+                <Card className="py-0">
                   <CardContent className="flex flex-col gap-1.5 px-3.5 py-3">
                     <p className="flex items-start justify-between gap-3">
                       <span className="font-medium">{r.ba}</span>

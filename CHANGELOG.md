@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline pages: full width, no coloured edge accents, Action feed table, calmer Stores table
+UI pass from the Oct 27 review (design skills: impeccable).
+- **Full width:** Stores, Uploads, Flags, BAs and the Action feed use the whole content area (`GL_PAGE`, capped at 112rem on very wide screens) instead of a narrow centred column. Tile grids gain columns as the page widens.
+- **No coloured left edge** on Flags tiles, flag notes, BA rows or scorecard cards: the tag pill already says the state, in words and an icon. Flags tiles now put the tag top right, the points and causes in one line, and "Open form" with an arrow.
+- **Action feed:** Tiles / Table switch (remembered per browser); the table lists action, item, store, why and the next step. The decorative gradient line is gone.
+- **Stores leaderboard:** rank column; store names in title case (Watsons sends capitals; SM and DS stay capitals, the original is the tooltip); store code muted after the name; a thin bar under Gross shows each store against the top one; Net of VAT and SKUs quieter; Region only when any store has one; scope as a dot and a word, with the reason only when it isn't the usual (out of scope or set by an admin); the scope switch is a quiet inline select. 25 stores a page.
+
 ## 2026-10-27 — Goldline SKU matcher: wrong suggestions from the Oct 26 hand check fixed
 The matcher (`matchSkus`, run on every Watsons upload) kept offering pairs the Oct 26 hand check had turned down. Measured against the 194 links on Nichido Staging (50 by an admin, 37 from item codes, 107 matched), a fresh run went from 9 wrong suggestions to 0, and 13 more pairs now reach the confidence to link on their own (all checked by name and price).
 - **Numbers inside words:** "84331BR" now reads as lash 84331, so the Glamour Lashes no longer shift one row. Item codes still count only as a whole word ("FP01202" Final Powder is not "TSP01202" Translucent Setting Powder).
