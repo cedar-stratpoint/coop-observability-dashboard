@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Stores: "scope" renamed to what it does (restock on or paused)
+"In scope / Out of scope" and "Automatic / Always in / Always out" read as jargon. The Stores page now says it plainly:
+- A short panel above the stats: "301 get restock · 25 paused", and one sentence on the rule with the actual months ("at least one sale in the last 3 months of Watsons data (Jul to Sep 2026)") and when to override it.
+- Filters: All · Get restock 301 · Paused 25. Column "Restock": On, or Paused with the reason ("no sales since Jan 2026", "set by hand").
+- The switch: Follow sales · Always on · Never (with a tooltip). The rule and data (`stores.in_scope`, `store_scope()`) are unchanged.
+- The first stat is now the store count; the period reads "Oct 2025 to Sep 2026" instead of ISO dates.
+
 ## 2026-10-27 — Goldline pages: full width, no coloured edge accents, Action feed table, calmer Stores table
 UI pass from the Oct 27 review (design skills: impeccable).
 - **Full width:** Stores, Uploads, Flags, BAs and the Action feed use the whole content area (`GL_PAGE`, capped at 112rem on very wide screens) instead of a narrow centred column. Tile grids gain columns as the page widens.
