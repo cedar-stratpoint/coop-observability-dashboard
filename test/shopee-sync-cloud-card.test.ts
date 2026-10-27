@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {cardVisible, loginLine, serverLine, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
 import {buildSyncStatus, type ShopeeSyncStatus, type SyncJobView} from '../src/shopee-sync/status';
-import {FIRST_CHECK, NEEDS_ADMIN} from '../src/shopee-sync/service';
+import {FIRST_CHECK, FRESH_CHECK, NEEDS_ADMIN} from '../src/shopee-sync/service';
 import type {Job, Worker} from '../src/shopee-sync/types';
 
 // The card on the one cloud worker: login state first, then the server (asleep, waking, online), and an admin-only way in.
@@ -16,13 +16,13 @@ const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildS
 describe('login on the status', () => {
   it('carries the last known login with its check time and age, and keeps it while the server sleeps', () => {
     const s = build();
-    expect(s.login).toEqual({state: 'ready', checkedAt: ago(7200), ageSeconds: 7200});
+    expect(s.login).toEqual({state: 'ready', checkedAt: ago(7200), ageSeconds: 7200, stale: false});
     expect(s.workerOnline).toBe(false);
     expect(s.canSync).toMatchObject({ok: true});
   });
   it('is unknown before the first check, and Sync waits for it', () => {
     const s = build({workers: [cloud({loginState: null, loginCheckedAt: null, lastSeen: null, sessionState: 'signed_out'})]});
-    expect(s.login).toEqual({state: 'unknown', checkedAt: null, ageSeconds: null});
+    expect(s.login).toEqual({state: 'unknown', checkedAt: null, ageSeconds: null, stale: false});
     expect(s.canSync).toEqual({ok: false, reason: FIRST_CHECK});
   });
   it('disables Sync and says an admin must sign in for needs_password and signed_out', () => {
@@ -78,7 +78,7 @@ describe('the cloud worker is shown once, apart from the Macs', () => {
 });
 
 describe('loginLine', () => {
-  const st = (login: ShopeeSyncStatus['login']) => ({...build(), login});
+  const st = (login: Omit<ShopeeSyncStatus['login'], 'stale'> & {stale?: boolean}) => ({...build(), login: {stale: false, ...login}});
   it('says Signed in with the age of the check', () => {
     expect(loginLine(st({state: 'ready', checkedAt: ago(7200), ageSeconds: 7200}), now)).toMatchObject({label: 'Ready', tone: 'good', text: 'Signed in, checked 2 hours ago'});
   });
@@ -156,5 +156,40 @@ describe('only the worker flagged is_cloud is the box', () => {
     expect(s.cloudWorkers.map((w) => w.id)).toEqual(['c1']);
     expect(s.workers.map((w) => w.id)).toEqual([]); // not the viewer's Mac (the viewer is u@x.com)
     expect(build({workers: [adminMac]}).cloudWorkers).toEqual([]);
+  });
+});
+
+describe('a stored Ready login does not last forever', () => {
+  const H = 3600;
+  it('older than 24 hours it is unknown: Sync waits for a fresh check, and the card keeps the age', () => {
+    const stale = build({workers: [cloud({loginCheckedAt: ago(24 * H + 60)})]});
+    expect(stale.login).toEqual({state: 'unknown', checkedAt: ago(24 * H + 60), ageSeconds: 24 * H + 60, stale: true});
+    expect(stale.canSync).toEqual({ok: false, reason: FRESH_CHECK});
+    const fresh = build({workers: [cloud({loginCheckedAt: ago(24 * H - 60)})]});
+    expect(fresh.login).toMatchObject({state: 'ready', stale: false});
+    expect(fresh.canSync).toMatchObject({ok: true});
+  });
+  it('says so on the card without pretending it was never checked', () => {
+    const s = build({workers: [cloud({loginCheckedAt: ago(30 * H)})]});
+    expect(loginLine(s, now)).toMatchObject({label: 'Check is old', tone: 'neutral', text: 'Last check was 1 day ago'});
+  });
+  it('a bad login is not made stale: needs_password stays needs_password', () => {
+    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out', loginCheckedAt: ago(30 * H)})]}).login.state).toBe('needs_password');
+  });
+});
+
+describe('a person\'s own worker and the cloud login', () => {
+  it('the cloud worker owned by the presser is not "their own Mac": a bad or stale cloud login still disables Sync for them', () => {
+    const asOwner = {viewer: {email: ADMIN, isAdmin: true}};
+    expect(build({...asOwner, workers: [cloud({loginState: 'needs_password', sessionState: 'ready'})]}).canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
+    expect(build({...asOwner, workers: [cloud({loginCheckedAt: ago(30 * 3600), sessionState: 'ready'})]}).canSync).toEqual({ok: false, reason: FRESH_CHECK});
+  });
+  it('their own ready Mac can serve their own job, so it still allows Sync while the cloud login is bad', () => {
+    const mac = cloud({id: 'm1', ownerEmail: 'u@x.com', name: 'My Mac', isCloud: false, loginState: null, loginCheckedAt: null, sessionState: 'ready'});
+    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'}), mac]}).canSync).toMatchObject({ok: true});
+  });
+  it('another person\'s Mac never allows it', () => {
+    const mac = cloud({id: 'm1', ownerEmail: 'bea@x.com', isCloud: false, loginState: null, loginCheckedAt: null, sessionState: 'ready'});
+    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'}), mac]}).canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
   });
 });

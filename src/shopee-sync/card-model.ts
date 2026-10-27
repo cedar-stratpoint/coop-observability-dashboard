@@ -188,6 +188,7 @@ export function loginLine(s: ShopeeSyncStatus, now: Date): LoginLine {
     case 'signed_out':
       return {state: 'signed_out', label: 'Signed out', tone: 'crit', text: `Last known: signed out, checked ${age}`};
     default:
+      if (s.login.stale) return {state: 'unknown', label: 'Check is old', tone: 'neutral', text: `Last check was ${age}`};
       return {state: 'unknown', label: 'Not checked', tone: 'neutral', text: 'No check has run yet'};
   }
 }

@@ -8,6 +8,8 @@ export const DAILY_CAP = 6;
 export const HEARTBEAT_STALE_MS = 10 * 60_000;
 export const QUEUE_EXPIRY_MS = 30 * 60_000;
 export const ONLINE_WITHIN_MS = 2 * 60_000;
+/** A stored Ready login older than this is not trusted: the checker may have died long ago, so Sync waits for a fresh one. */
+export const LOGIN_MAX_AGE_MS = 24 * 3_600_000;
 /** A sync paused for an admin to sign in to Shopee ends after this long (it expires; the Monday import still fills the gap). */
 export const AWAITING_EXPIRY_MS = 60 * 60_000;
 // The coworker's weekly Shopee export runs on Mondays about 09:00 PHT with the same Seller Centre login; two sessions risk a forced sign-out.

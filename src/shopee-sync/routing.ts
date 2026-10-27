@@ -1,5 +1,6 @@
 // Who may run a job and how many Macs may exist. A sync runs only on a READY, non-revoked worker owned by the person who pressed Sync,
 // so the person who pressed it is the person who types the Shopee password, on their own Mac.
+import {LOGIN_MAX_AGE_MS} from './rules';
 import type {LoginState, SessionState} from './types';
 
 export const MAX_PER_PERSON = 2;
@@ -39,10 +40,13 @@ export interface CloudLogin {
   /** The newest login check across live cloud workers, or 'unknown' when none has reported one yet. */
   state: LoginState | 'unknown';
   checkedAt: string | null;
+  /** A Ready older than LOGIN_MAX_AGE_MS: reported as 'unknown' with its checkedAt kept. */
+  stale: boolean;
 }
 /** The last known Shopee login of the cloud worker(s): the newest check wins. Survives the server sleeping, because it is stored on the worker row. */
-export function cloudLogin(workers: readonly (WorkerLike & {isCloud: boolean; loginState: LoginState | null; loginCheckedAt: string | null})[]): CloudLogin {
+export function cloudLogin(workers: readonly (WorkerLike & {isCloud: boolean; loginState: LoginState | null; loginCheckedAt: string | null})[], now: Date): CloudLogin {
   const cloud = live(workers).filter(isCloudWorker);
   const checked = cloud.filter((w) => w.loginState && w.loginCheckedAt).sort((a, b) => (b.loginCheckedAt as string).localeCompare(a.loginCheckedAt as string))[0];
-  return {hasCloud: cloud.length > 0, state: checked?.loginState ?? 'unknown', checkedAt: checked?.loginCheckedAt ?? null};
+  const stale = checked?.loginState === 'ready' && now.getTime() - Date.parse(checked.loginCheckedAt as string) > LOGIN_MAX_AGE_MS;
+  return {hasCloud: cloud.length > 0, state: stale ? 'unknown' : (checked?.loginState ?? 'unknown'), checkedAt: checked?.loginCheckedAt ?? null, stale};
 }

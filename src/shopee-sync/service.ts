@@ -40,16 +40,18 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 /** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
 export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
 export const FIRST_CHECK = 'Waiting for the first login check';
+export const FRESH_CHECK = 'Waiting for a fresh login check';
 
 export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
   const {days, more} = missingClosedDays(i.loadedDays, i.now);
   if (days.length === 0) return fail('Shopee is up to date');
   // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping), or one of the person's own ready Macs.
-  const login = cloudLogin(i.workers);
-  const ownReady = i.workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who));
+  const login = cloudLogin(i.workers, i.now);
+  // Only the person's own MAC counts (it serves its owner's jobs). The cloud worker is judged by its login, even when the presser owns it.
+  const ownReady = i.workers.some((w) => !w.revokedAt && !w.isCloud && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who));
   if (login.state !== 'ready' && !ownReady) {
     if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
-    if (login.hasCloud) return fail(FIRST_CHECK);
+    if (login.hasCloud) return fail(login.stale ? FRESH_CHECK : FIRST_CHECK);
     return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
   }
   const blocked = startBlock(i.now, i.jobs);

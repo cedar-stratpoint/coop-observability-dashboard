@@ -38,6 +38,8 @@ export interface LoginView {
   state: LoginState | 'unknown';
   checkedAt: string | null;
   ageSeconds: number | null;
+  /** A Ready check older than 24 hours: shown as unknown, so Sync waits for a fresh one. */
+  stale: boolean;
 }
 export interface SyncJobView {
   id: string;
@@ -112,7 +114,7 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
   const admins = i.admins ?? [];
   const isSyncAdmin = admins.some((a) => sameEmail(a, me));
   const gate = syncGate({who: me, now: i.now, jobs, workers: i.workers, loadedDays: i.loadedDays});
-  const cl = cloudLogin(i.workers);
+  const cl = cloudLogin(i.workers, i.now);
   const stateOf = (w: Worker): CloudState => {
     if (isOnline(w.lastSeen, i.now)) return 'online';
     const waited = jobs.some((j) => (j.status === 'queued' && i.now.getTime() - Date.parse(j.createdAt) > WAKE_GRACE_MS) || (j.status === 'expired' && j.error === 'worker offline' && i.now.getTime() - Date.parse(j.finishedAt ?? j.createdAt) < 3_600_000));
@@ -127,7 +129,7 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     isSyncAdmin,
     mock: false,
     cloudWorkers: cloudViews,
-    login: {state: cl.state, checkedAt: cl.checkedAt, ageSeconds: cl.checkedAt ? Math.max(0, Math.floor((i.now.getTime() - Date.parse(cl.checkedAt)) / 1000)) : null},
+    login: {state: cl.state, checkedAt: cl.checkedAt, ageSeconds: cl.checkedAt ? Math.max(0, Math.floor((i.now.getTime() - Date.parse(cl.checkedAt)) / 1000)) : null, stale: cl.stale},
     workerOnline: live.some((w) => isOnline(w.lastSeen, i.now)),
     remoteReady: cloud.some((w) => w.remoteReady),
     remoteUrl: isSyncAdmin ? (cloud.find((w) => w.remoteUrl)?.remoteUrl ?? null) : null,
