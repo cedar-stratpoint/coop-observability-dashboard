@@ -11,8 +11,6 @@ import {isActive, LOGIN_STATES, SESSION_STATES, type DayResult, type DayState, t
 export interface SyncApiDeps {
   store: SyncStore;
   now: () => Date;
-  /** SHOPEE_SYNC_ADMINS, lower-cased: a worker enrolled by one of them is the shared cloud worker. */
-  admins?: readonly string[];
   /** SHOPEE_SYNC_WAKE_TOKEN (env only), for the wake route. Null or unset: the route answers 401 to everyone. */
   wakeToken?: string | null;
 }
@@ -86,7 +84,7 @@ export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Respons
     return reply({job: null, activeJobId: mine.id});
   }
   if (jobs.some((j) => isActive(j.status)) || inQuietWindow(now)) return reply({job: null});
-  const anyOwner = isCloudWorker(worker, d.admins ?? []);
+  const anyOwner = isCloudWorker(worker);
   const pick = chooseJob({...worker, sessionState: state}, jobs.filter((j) => j.status === 'queued'), anyOwner);
   const claimed = pick ? await d.store.claimJob(pick.id, worker.id, now, {anyOwner}) : null;
   return reply({job: claimed ? toWire(claimed) : null});

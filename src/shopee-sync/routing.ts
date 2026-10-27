@@ -14,8 +14,8 @@ export interface WorkerLike {
 export const sameEmail = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 const live = <W extends Pick<WorkerLike, 'revokedAt'>>(ws: readonly W[]): W[] => ws.filter((w) => !w.revokedAt);
 
-/** The one cloud worker is enrolled by a sync admin (SHOPEE_SYNC_ADMINS) and serves whoever pressed Sync; a Mac serves only its owner. */
-export const isCloudWorker = (w: {ownerEmail: string}, admins: readonly string[]): boolean => admins.some((a) => sameEmail(a, w.ownerEmail));
+/** The one cloud worker is the one flagged at enrolment (by a SHOPEE_SYNC_ADMINS member); it serves whoever pressed Sync. A Mac, even an admin's, serves only its owner. */
+export const isCloudWorker = (w: {isCloud: boolean}): boolean => w.isCloud;
 
 /** `anyOwner`: the worker is the shared cloud worker, so the presser need not be its owner. */
 export const canClaim = (w: WorkerLike, job: {requestedBy: string}, anyOwner = false): boolean => !w.revokedAt && w.sessionState === 'ready' && (anyOwner || sameEmail(w.ownerEmail, job.requestedBy));
@@ -41,8 +41,8 @@ export interface CloudLogin {
   checkedAt: string | null;
 }
 /** The last known Shopee login of the cloud worker(s): the newest check wins. Survives the server sleeping, because it is stored on the worker row. */
-export function cloudLogin(workers: readonly (WorkerLike & {loginState: LoginState | null; loginCheckedAt: string | null})[], admins: readonly string[]): CloudLogin {
-  const cloud = live(workers).filter((w) => isCloudWorker(w, admins));
+export function cloudLogin(workers: readonly (WorkerLike & {isCloud: boolean; loginState: LoginState | null; loginCheckedAt: string | null})[]): CloudLogin {
+  const cloud = live(workers).filter(isCloudWorker);
   const checked = cloud.filter((w) => w.loginState && w.loginCheckedAt).sort((a, b) => (b.loginCheckedAt as string).localeCompare(a.loginCheckedAt as string))[0];
   return {hasCloud: cloud.length > 0, state: checked?.loginState ?? 'unknown', checkedAt: checked?.loginCheckedAt ?? null};
 }

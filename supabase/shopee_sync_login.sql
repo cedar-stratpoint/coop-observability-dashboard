@@ -19,7 +19,7 @@ alter table public.shopee_sync_workers add column if not exists remote_url text;
 alter table public.shopee_sync_jobs add column if not exists awaiting_since timestamptz;
 
 -- The claim for the shared cloud worker: the same single atomic statement as claim_shopee_sync_job, except that when p_any_owner is true the worker
--- need not be owned by the person who pressed Sync. The app passes true only for a worker enrolled by a SHOPEE_SYNC_ADMINS email.
+-- need not be owned by the person who pressed Sync. The app passes true only for a worker flagged is_cloud.
 create or replace function public.claim_shopee_sync_job_shared(p_job uuid, p_worker uuid, p_any_owner boolean default false)
 returns setof public.shopee_sync_jobs
 language sql
@@ -37,3 +37,38 @@ as $$
 $$;
 revoke all on function public.claim_shopee_sync_job_shared(uuid, uuid, boolean) from public, anon, authenticated;
 grant execute on function public.claim_shopee_sync_job_shared(uuid, uuid, boolean) to service_role;
+
+-- Which worker is THE cloud worker is stored, not guessed from the owner's email: an admin's own laptop must never become a shared worker or speak for
+-- the box's Shopee login. The flag is set once, at enrolment, and only for the cloud variant made by a SHOPEE_SYNC_ADMINS member (the app checks that).
+alter table public.shopee_sync_enrolments add column if not exists is_cloud boolean not null default false;
+alter table public.shopee_sync_workers add column if not exists is_cloud boolean not null default false;
+
+-- Redeem an enrolment code (as redeem_shopee_sync_enrolment in shopee_sync.sql) and carry the enrolment's is_cloud to the worker, in the same transaction.
+create or replace function public.redeem_shopee_sync_enrolment_v2(p_code_hash text, p_token_hash text, p_now timestamptz, p_per_person int, p_per_team int)
+returns table (outcome text, owner_email text, id uuid, name text, token_hash text, last_seen timestamptz, session_state text, created_at timestamptz, revoked_at timestamptz, is_cloud boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  e public.shopee_sync_enrolments%rowtype;
+  w public.shopee_sync_workers%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtext('shopee_sync_enrol'));
+  select * into e from public.shopee_sync_enrolments x where x.code_hash = p_code_hash and x.used_at is null and x.expires_at > p_now for update;
+  if not found then
+    return query select 'invalid'::text, null::text, null::uuid, null::text, null::text, null::timestamptz, null::text, null::timestamptz, null::timestamptz, null::boolean;
+    return;
+  end if;
+  if (select count(*) from public.shopee_sync_workers k where k.revoked_at is null) >= p_per_team
+     or (select count(*) from public.shopee_sync_workers k where k.revoked_at is null and lower(k.owner_email) = lower(e.owner_email)) >= p_per_person then
+    return query select 'capped'::text, e.owner_email, null::uuid, null::text, null::text, null::timestamptz, null::text, null::timestamptz, null::timestamptz, null::boolean;
+    return;
+  end if;
+  update public.shopee_sync_enrolments set used_at = p_now where code_hash = p_code_hash;
+  insert into public.shopee_sync_workers (owner_email, name, token_hash, created_at, is_cloud) values (e.owner_email, e.worker_name, p_token_hash, p_now, e.is_cloud) returning * into w;
+  return query select 'ok'::text, w.owner_email, w.id, w.name, w.token_hash, w.last_seen, w.session_state, w.created_at, w.revoked_at, w.is_cloud;
+end;
+$$;
+revoke all on function public.redeem_shopee_sync_enrolment_v2(text, text, timestamptz, int, int) from public, anon, authenticated;
+grant execute on function public.redeem_shopee_sync_enrolment_v2(text, text, timestamptz, int, int) to service_role;

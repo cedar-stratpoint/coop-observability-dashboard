@@ -13,11 +13,12 @@ const WAKE = 'wake-token-for-tests';
 let store: FakeSyncStore;
 let clock: Date;
 const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED, admins: [ADMIN]});
-const api = (): SyncApiDeps => ({store, now: () => clock, admins: [ADMIN], wakeToken: WAKE});
+const api = (): SyncApiDeps => ({store, now: () => clock, wakeToken: WAKE});
+const enrolCloud = () => enrol(ADMIN, 'cloud', 'cloud');
 const post = (path: string, body: unknown, token?: string) =>
   new Request(`https://coop.example/api/shopee/sync/${path}`, {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...(token ? {authorization: `Bearer ${token}`} : {})}});
-async function enrol(owner: string, name = 'cloud'): Promise<{token: string; workerId: string}> {
-  const e = await beginEnrolment(sd(), owner, name);
+async function enrol(owner: string, name = 'cloud', variant: 'mac' | 'cloud' = 'mac'): Promise<{token: string; workerId: string}> {
+  const e = await beginEnrolment(sd(), owner, name, variant);
   if (!e.ok) throw new Error(e.error);
   const b = await (await handleEnrol(post('enrol', {code: e.code}), api())).json();
   return {token: b.token, workerId: b.workerId};
@@ -31,19 +32,19 @@ beforeEach(() => {
 
 describe('a worker reports its Shopee login and remote browser on a poll', () => {
   it('stores them, and a ready login makes the session ready without a separate sessionState', async () => {
-    const w = await enrol(ADMIN);
+    const w = await enrolCloud();
     expect((await handleClaim(post('claim', ready, w.token), api())).status).toBe(200);
     expect(store.workers[0]).toMatchObject({loginState: 'ready', loginCheckedAt: at('2026-10-27T13:59:00').toISOString(), remoteReady: true, sessionState: 'ready'});
   });
   it('needs_password and signed_out keep the worker from claiming', async () => {
-    const w = await enrol(ADMIN);
+    const w = await enrolCloud();
     await handleClaim(post('claim', {login: {state: 'needs_password', checkedAt: clock.toISOString()}}, w.token), api());
     expect(store.workers[0]).toMatchObject({loginState: 'needs_password', sessionState: 'signed_out'});
     await handleClaim(post('claim', {login: {state: 'signed_out', checkedAt: clock.toISOString()}}, w.token), api());
     expect(store.workers[0]).toMatchObject({loginState: 'signed_out', sessionState: 'signed_out'});
   });
   it('an old worker that sends neither field changes nothing about the login; bad values are ignored, a future time is clamped to now', async () => {
-    const w = await enrol(ADMIN);
+    const w = await enrolCloud();
     await handleClaim(post('claim', ready, w.token), api());
     await handleClaim(post('claim', {sessionState: 'ready'}, w.token), api());
     expect(store.workers[0]).toMatchObject({loginState: 'ready', remoteReady: true});
@@ -55,7 +56,7 @@ describe('a worker reports its Shopee login and remote browser on a poll', () =>
     expect(store.workers[0].loginCheckedAt).toBe(clock.toISOString());
   });
   it('the progress route takes the same report', async () => {
-    const w = await enrol(ADMIN);
+    const w = await enrolCloud();
     await handleClaim(post('claim', ready, w.token), api());
     expect((await requestSync(sd(), 'user@x.com')).ok).toBe(true);
     const claim = await (await handleClaim(post('claim', ready, w.token), api())).json();
@@ -69,7 +70,7 @@ describe('a worker reports its Shopee login and remote browser on a poll', () =>
 
 describe('the cloud worker serves whoever pressed Sync', () => {
   it('a worker owned by an admin claims another person\'s job; a Mac owned by someone else still does not', async () => {
-    const cloud = await enrol(ADMIN);
+    const cloud = await enrolCloud();
     const mac = await enrol('bea@x.com', 'Bea Mac');
     await handleClaim(post('claim', ready, cloud.token), api());
     await handleClaim(post('claim', {sessionState: 'ready'}, mac.token), api());
@@ -79,10 +80,18 @@ describe('the cloud worker serves whoever pressed Sync', () => {
     expect(got.job).toMatchObject({status: 'running'});
     expect(store.jobs[0].claimedBy).toBe(cloud.workerId);
   });
-  it('is an owner-only worker when no admin list is configured', async () => {
-    const cloud = await enrol(ADMIN);
-    await handleClaim(post('claim', ready, cloud.token), {...api(), admins: []});
-    expect((await requestSync({...sd(), admins: []}, 'user@x.com')).ok).toBe(false); // nothing of the user's own is ready
+  it('an admin\'s own Mac (enrolled as a Mac) is not shared: it serves only its owner, and its login report never stands in for the box', async () => {
+    const mac = await enrol(ADMIN, 'Owner Mac');
+    expect(store.workers[0].isCloud).toBe(false);
+    await handleClaim(post('claim', ready, mac.token), api());
+    expect((await requestSync(sd(), 'user@x.com')).ok).toBe(false); // the Mac's ready login does not unlock Sync for someone else
+    expect((await requestSync(sd(), ADMIN)).ok).toBe(true); // it can serve its own owner
+    expect((await (await handleClaim(post('claim', ready, mac.token), api())).json()).job).toMatchObject({status: 'running'});
+  });
+  it('the cloud flag is set at enrolment, only for the cloud variant', async () => {
+    await enrol(ADMIN, 'box', 'cloud');
+    await enrol('bea@x.com', 'Bea Mac');
+    expect(store.workers.map((w) => w.isCloud)).toEqual([true, false]);
   });
 });
 
@@ -98,7 +107,7 @@ describe('POST /api/shopee/sync/wake', () => {
     expect(await (await wake(WAKE)).json()).toEqual({wake: false});
   });
   it('wake is true with a queued job and no worker online, and names the job', async () => {
-    const cloud = await enrol(ADMIN);
+    const cloud = await enrolCloud();
     await handleClaim(post('claim', ready, cloud.token), api());
     clock = new Date(clock.getTime() + 5 * 60_000); // the server went quiet
     const job = await requestSync(sd(), 'user@x.com');
@@ -108,7 +117,7 @@ describe('POST /api/shopee/sync/wake', () => {
     expect(JSON.stringify(b)).not.toMatch(/@/);
   });
   it('wake is false while any worker was seen within 2 minutes, and a revoked worker does not count as online', async () => {
-    const cloud = await enrol(ADMIN);
+    const cloud = await enrolCloud();
     await handleClaim(post('claim', ready, cloud.token), api());
     expect((await requestSync(sd(), 'user@x.com')).ok).toBe(true);
     await handleClaim(post('claim', {login: {state: 'needs_password', checkedAt: clock.toISOString()}}, cloud.token), api()); // seen, but cannot claim
@@ -123,7 +132,7 @@ describe('POST /api/shopee/sync/wake', () => {
     expect((await (await wake(WAKE)).json()).wake).toBe(true);
   });
   it('a queued job nobody can claim for 30 minutes expires, so it no longer wakes anything', async () => {
-    const cloud = await enrol(ADMIN);
+    const cloud = await enrolCloud();
     await handleClaim(post('claim', ready, cloud.token), api());
     expect((await requestSync(sd(), 'user@x.com')).ok).toBe(true);
     clock = new Date(clock.getTime() + 31 * 60_000);
@@ -134,7 +143,7 @@ describe('POST /api/shopee/sync/wake', () => {
 describe('a job waiting for an admin to sign in expires after 60 minutes', () => {
   it('is 60 minutes, fails the job cleanly and frees the team to sync again', async () => {
     expect(AWAITING_EXPIRY_MS).toBe(60 * 60_000);
-    const cloud = await enrol(ADMIN);
+    const cloud = await enrolCloud();
     await handleClaim(post('claim', ready, cloud.token), api());
     await requestSync(sd(), 'user@x.com');
     const claim = await (await handleClaim(post('claim', ready, cloud.token), api())).json();

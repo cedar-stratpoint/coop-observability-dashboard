@@ -6,7 +6,7 @@ const ADMIN = 'owner@x.com';
 let store: FakeSyncStore;
 const now = new Date('2026-10-27T06:00:00Z');
 const sd = (): SyncDeps => ({store, now: () => now, loadLoadedDays: async () => [], admins: [ADMIN]});
-const cloudWorker = async () => store.createWorker({ownerEmail: ADMIN, name: 'Cloud worker', tokenHash: 'h1'}, now);
+const cloudWorker = async () => store.createWorker({ownerEmail: ADMIN, name: 'Cloud worker', tokenHash: 'h1', isCloud: true}, now);
 
 beforeEach(() => {
   store = new FakeSyncStore();
@@ -57,9 +57,11 @@ describe('setRemoteUrlFor', () => {
   it('refuses a non-admin, a bad address, a Mac that is not the cloud worker and a revoked worker', async () => {
     const w = await cloudWorker();
     const mac = await store.createWorker({ownerEmail: 'u@x.com', name: 'Mac', tokenHash: 'h2'}, now);
+    const adminMac = await store.createWorker({ownerEmail: ADMIN, name: 'Admin Mac', tokenHash: 'h3'}, now);
     expect(await setRemoteUrlFor(sd(), {email: 'u@x.com', isAdmin: false}, w.id, 'https://browser.example.com')).toMatchObject({ok: false});
     expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, w.id, 'javascript:alert(1)')).toMatchObject({ok: false});
     expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, mac.id, 'https://browser.example.com')).toMatchObject({ok: false});
+    expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, adminMac.id, 'https://browser.example.com')).toMatchObject({ok: false}); // an admin's own Mac is not the cloud worker
     await store.revokeWorker(w.id, now);
     expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, w.id, 'https://browser.example.com')).toMatchObject({ok: false});
     expect(store.workers.every((x) => x.remoteUrl === null)).toBe(true);

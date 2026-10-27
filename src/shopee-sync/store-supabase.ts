@@ -4,12 +4,12 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import type {JobPatch, SyncStore} from './store';
 import type {DayResult, Enrolment, Job, JobStatus, LoginState, SessionState, Worker} from './types';
 
-type WorkerRow = {id: string; owner_email: string; name: string; token_hash: string; last_seen: string | null; session_state: SessionState; created_at: string; revoked_at: string | null; login_state: LoginState | null; login_checked_at: string | null; remote_ready: boolean | null; remote_url: string | null};
+type WorkerRow = {id: string; owner_email: string; name: string; token_hash: string; last_seen: string | null; session_state: SessionState; created_at: string; revoked_at: string | null; login_state: LoginState | null; login_checked_at: string | null; remote_ready: boolean | null; remote_url: string | null; is_cloud: boolean | null};
 type JobRow = {id: string; requested_by: string; days: string[]; status: JobStatus; claimed_by: string | null; claimed_at: string | null; heartbeat_at: string | null; import_ids: string[] | null; error: string | null; created_at: string; finished_at: string | null; progress: Record<string, DayResult> | null; awaiting_since: string | null};
 
-const WORKER_COLS = 'id,owner_email,name,token_hash,last_seen,session_state,created_at,revoked_at,login_state,login_checked_at,remote_ready,remote_url';
+const WORKER_COLS = 'id,owner_email,name,token_hash,last_seen,session_state,created_at,revoked_at,login_state,login_checked_at,remote_ready,remote_url,is_cloud';
 const JOB_COLS = 'id,requested_by,days,status,claimed_by,claimed_at,heartbeat_at,import_ids,error,created_at,finished_at,progress,awaiting_since';
-const toWorker = (r: WorkerRow): Worker => ({id: r.id, ownerEmail: r.owner_email, name: r.name, tokenHash: r.token_hash, lastSeen: r.last_seen, sessionState: r.session_state, createdAt: r.created_at, revokedAt: r.revoked_at, loginState: r.login_state ?? null, loginCheckedAt: r.login_checked_at ?? null, remoteReady: r.remote_ready ?? false, remoteUrl: r.remote_url ?? null});
+const toWorker = (r: WorkerRow): Worker => ({id: r.id, ownerEmail: r.owner_email, name: r.name, tokenHash: r.token_hash, lastSeen: r.last_seen, sessionState: r.session_state, createdAt: r.created_at, revokedAt: r.revoked_at, loginState: r.login_state ?? null, loginCheckedAt: r.login_checked_at ?? null, remoteReady: r.remote_ready ?? false, remoteUrl: r.remote_url ?? null, isCloud: r.is_cloud ?? false});
 const toJob = (r: JobRow): Job => ({id: r.id, requestedBy: r.requested_by, days: r.days, status: r.status, claimedBy: r.claimed_by, claimedAt: r.claimed_at, heartbeatAt: r.heartbeat_at, importIds: r.import_ids ?? [], error: r.error, createdAt: r.created_at, finishedAt: r.finished_at, progress: r.progress ?? {}, awaitingSince: r.awaiting_since ?? null});
 const UNIQUE_VIOLATION = '23505';
 
@@ -30,7 +30,7 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       return data?.[0] ? toWorker(data[0] as WorkerRow) : null;
     },
     async createWorker(w, now) {
-      const {data, error} = await sb.from('shopee_sync_workers').insert({owner_email: w.ownerEmail, name: w.name, token_hash: w.tokenHash, created_at: now.toISOString()}).select(WORKER_COLS).single();
+      const {data, error} = await sb.from('shopee_sync_workers').insert({owner_email: w.ownerEmail, name: w.name, token_hash: w.tokenHash, created_at: now.toISOString(), is_cloud: w.isCloud ?? false}).select(WORKER_COLS).single();
       fail('adding the worker', error);
       return toWorker(data as WorkerRow);
     },
@@ -50,12 +50,12 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
       return (data ?? []).length === 1;
     },
     async createEnrolment(e) {
-      const {error} = await sb.from('shopee_sync_enrolments').insert({code_hash: e.codeHash, owner_email: e.ownerEmail, worker_name: e.workerName, expires_at: e.expiresAt});
+      const {error} = await sb.from('shopee_sync_enrolments').insert({code_hash: e.codeHash, owner_email: e.ownerEmail, worker_name: e.workerName, expires_at: e.expiresAt, is_cloud: e.isCloud});
       fail('making the enrolment code', error);
     },
     async redeemEnrolment(codeHash, tokenHash, now, caps) {
-      // One SQL function (supabase/shopee_sync.sql): consume the code, check both caps and add the worker in a single transaction.
-      const {data, error} = await sb.rpc('redeem_shopee_sync_enrolment', {p_code_hash: codeHash, p_token_hash: tokenHash, p_now: now.toISOString(), p_per_person: caps.perPerson, p_per_team: caps.perTeam});
+      // One SQL function (redeem_shopee_sync_enrolment_v2 in supabase/shopee_sync_login.sql, which also carries is_cloud to the worker): consume the code, check both caps and add the worker in a single transaction.
+      const {data, error} = await sb.rpc('redeem_shopee_sync_enrolment_v2', {p_code_hash: codeHash, p_token_hash: tokenHash, p_now: now.toISOString(), p_per_person: caps.perPerson, p_per_team: caps.perTeam});
       fail('redeeming the enrolment code', error);
       const row = (Array.isArray(data) ? data[0] : data) as ({outcome: 'ok' | 'capped' | 'invalid'; owner_email: string | null} & Partial<WorkerRow>) | undefined;
       if (!row || row.outcome === 'invalid') return {status: 'invalid'};

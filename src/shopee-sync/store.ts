@@ -18,7 +18,7 @@ export interface SyncStore {
   /** Every worker, revoked ones included (the caps and the screens filter). */
   listWorkers(): Promise<Worker[]>;
   findWorkerByTokenHash(tokenHash: string): Promise<Worker | null>;
-  createWorker(w: {ownerEmail: string; name: string; tokenHash: string}, now: Date): Promise<Worker>;
+  createWorker(w: {ownerEmail: string; name: string; tokenHash: string; isCloud?: boolean}, now: Date): Promise<Worker>;
   /** A poll: records last_seen and what the worker reports (session state, Shopee login check, remote browser). Fields it leaves out are kept. */
   touchWorker(id: string, report: WorkerReport, now: Date): Promise<void>;
   /** Admin sets or clears (null) the remote browser address. False when the worker is revoked or does not exist. */

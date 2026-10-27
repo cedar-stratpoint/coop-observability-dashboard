@@ -76,7 +76,7 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
     const who = `race-enrol-${randomUUID()}@example.com`;
     const mk = async (expiresInMs = 60_000) => {
       const codeHash = hashSecret(`zse_${randomUUID()}`);
-      await store.createEnrolment({codeHash, ownerEmail: who, workerName: 'm', expiresAt: new Date(now.getTime() + expiresInMs).toISOString(), usedAt: null});
+      await store.createEnrolment({codeHash, ownerEmail: who, workerName: 'm', expiresAt: new Date(now.getTime() + expiresInMs).toISOString(), usedAt: null, isCloud: false});
       return codeHash;
     };
     const big = {perPerson: 100, perTeam: 1000};
@@ -112,5 +112,19 @@ describe.skipIf(!local)('shopee sync store on the local stack', () => {
     expect(await store.setRemoteUrl(cloud.id, null)).toBe(true);
     await store.revokeWorker(cloud.id, now);
     expect(await store.setRemoteUrl(cloud.id, 'https://x.example.com')).toBe(false);
+  });
+
+  it('redeeming a cloud enrolment flags the worker is_cloud; a Mac enrolment does not', async () => {
+    const now = new Date();
+    const who = `race-flag-${randomUUID()}@example.com`;
+    const make = async (isCloud: boolean) => {
+      const codeHash = hashSecret(`zse_${randomUUID()}`);
+      await store.createEnrolment({codeHash, ownerEmail: who, workerName: isCloud ? 'box' : 'mac', expiresAt: new Date(now.getTime() + 60_000).toISOString(), usedAt: null, isCloud});
+      return store.redeemEnrolment(codeHash, hashSecret(newWorkerToken()), now, {perPerson: 5, perTeam: 50});
+    };
+    const box = await make(true);
+    const mac = await make(false);
+    expect(box.status === 'ok' && box.worker.isCloud).toBe(true);
+    expect(mac.status === 'ok' && mac.worker.isCloud).toBe(false);
   });
 });

@@ -103,7 +103,7 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     return s ? {...j, status: s.to, error: s.error, finishedAt: j.finishedAt ?? i.now.toISOString()} : j;
   });
   const live = i.workers.filter((w) => !w.revokedAt);
-  const cloud = live.filter((w) => isCloudWorker(w, i.admins ?? []));
+  const cloud = live.filter((w) => isCloudWorker(w));
   const workerName = (id: string | null) => i.workers.find((w) => w.id === id)?.name ?? null;
   const view = (j: Job): SyncJobView => ({id: j.id, requestedBy: j.requestedBy, mine: sameEmail(j.requestedBy, me), days: j.days, status: j.status, error: j.error, progress: j.progress, createdAt: j.createdAt, finishedAt: j.finishedAt, workerName: workerName(j.claimedBy), awaitingSince: j.awaitingSince, cloud: j.claimedBy ? cloud.some((w) => w.id === j.claimedBy) : cloud.length > 0});
   const sorted = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -111,8 +111,8 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
   const last = sorted.find((j) => j.status !== 'queued' && !isActive(j.status));
   const admins = i.admins ?? [];
   const isSyncAdmin = admins.some((a) => sameEmail(a, me));
-  const gate = syncGate({who: me, now: i.now, jobs, workers: i.workers, loadedDays: i.loadedDays, admins});
-  const cl = cloudLogin(i.workers, admins);
+  const gate = syncGate({who: me, now: i.now, jobs, workers: i.workers, loadedDays: i.loadedDays});
+  const cl = cloudLogin(i.workers);
   const stateOf = (w: Worker): CloudState => {
     if (isOnline(w.lastSeen, i.now)) return 'online';
     const waited = jobs.some((j) => (j.status === 'queued' && i.now.getTime() - Date.parse(j.createdAt) > WAKE_GRACE_MS) || (j.status === 'expired' && j.error === 'worker offline' && i.now.getTime() - Date.parse(j.finishedAt ?? j.createdAt) < 3_600_000));
@@ -132,7 +132,7 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     remoteReady: cloud.some((w) => w.remoteReady),
     remoteUrl: isSyncAdmin ? (cloud.find((w) => w.remoteUrl)?.remoteUrl ?? null) : null,
     workers: live
-      .filter((w) => !isCloudWorker(w, admins))
+      .filter((w) => !isCloudWorker(w))
       .filter((w) => i.viewer.isAdmin || sameEmail(w.ownerEmail, me))
       .map((w) => ({id: w.id, name: w.name, ownerEmail: w.ownerEmail, own: sameEmail(w.ownerEmail, me), online: isOnline(w.lastSeen, i.now), sessionState: w.sessionState, lastSeen: w.lastSeen, createdAt: w.createdAt, lastSyncAt: sorted.find((j) => j.claimedBy === w.id)?.claimedAt ?? null})),
     currentJob: current ? view(current) : null,

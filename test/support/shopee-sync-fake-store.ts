@@ -16,8 +16,8 @@ export class FakeSyncStore implements SyncStore {
     const w = this.workers.find((x) => x.tokenHash === h);
     return w ? {...w} : null;
   }
-  async createWorker(w: {ownerEmail: string; name: string; tokenHash: string}, now: Date) {
-    const row: Worker = {id: randomUUID(), ownerEmail: w.ownerEmail, name: w.name, tokenHash: w.tokenHash, lastSeen: null, sessionState: 'signed_out', createdAt: now.toISOString(), revokedAt: null, loginState: null, loginCheckedAt: null, remoteReady: false, remoteUrl: null};
+  async createWorker(w: {ownerEmail: string; name: string; tokenHash: string; isCloud?: boolean}, now: Date) {
+    const row: Worker = {id: randomUUID(), ownerEmail: w.ownerEmail, name: w.name, tokenHash: w.tokenHash, lastSeen: null, sessionState: 'signed_out', createdAt: now.toISOString(), revokedAt: null, loginState: null, loginCheckedAt: null, remoteReady: false, remoteUrl: null, isCloud: w.isCloud ?? false};
     this.workers.push(row);
     return {...row};
   }
@@ -45,7 +45,7 @@ export class FakeSyncStore implements SyncStore {
     const live = this.workers.filter((w) => !w.revokedAt);
     if (live.length >= caps.perTeam || live.filter((w) => w.ownerEmail.toLowerCase() === e.ownerEmail.toLowerCase()).length >= caps.perPerson) return {status: 'capped' as const, ownerEmail: e.ownerEmail};
     e.usedAt = now.toISOString();
-    return {status: 'ok' as const, worker: await this.createWorker({ownerEmail: e.ownerEmail, name: e.workerName, tokenHash}, now)};
+    return {status: 'ok' as const, worker: await this.createWorker({ownerEmail: e.ownerEmail, name: e.workerName, tokenHash, isCloud: e.isCloud}, now)};
   }
   async recentJobs(limit: number) {
     return [...this.jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((j) => ({...j}));

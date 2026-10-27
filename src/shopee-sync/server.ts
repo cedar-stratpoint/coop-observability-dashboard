@@ -10,7 +10,7 @@ import {supabaseSyncStore} from './store-supabase';
 
 /** The worker routes' dependencies, or null when the archive database is not configured (mock mode): the routes then answer 503. */
 export function shopeeSyncApiDeps(): SyncApiDeps | null {
-  return usingPosMock() ? null : {store: supabaseSyncStore(posClient()), now: () => new Date(), admins: parseAdmins(process.env.SHOPEE_SYNC_ADMINS), wakeToken: process.env.SHOPEE_SYNC_WAKE_TOKEN?.trim() || null};
+  return usingPosMock() ? null : {store: supabaseSyncStore(posClient()), now: () => new Date(), wakeToken: process.env.SHOPEE_SYNC_WAKE_TOKEN?.trim() || null};
 }
 
 /** The server actions' dependencies. The loaded days are the same list the import coverage reads. */

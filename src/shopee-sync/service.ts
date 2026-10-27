@@ -41,11 +41,11 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
 export const FIRST_CHECK = 'Waiting for the first login check';
 
-export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]; admins?: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
+export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
   const {days, more} = missingClosedDays(i.loadedDays, i.now);
   if (days.length === 0) return fail('Shopee is up to date');
   // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping), or one of the person's own ready Macs.
-  const login = cloudLogin(i.workers, i.admins ?? []);
+  const login = cloudLogin(i.workers);
   const ownReady = i.workers.some((w) => !w.revokedAt && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who));
   if (login.state !== 'ready' && !ownReady) {
     if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
@@ -60,7 +60,7 @@ export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true
   const who = email.trim().toLowerCase();
   const now = d.now();
   const jobs = await sweepJobs(d.store, now);
-  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays(), admins: d.admins});
+  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays()});
   if (!gate.ok) return gate;
   const job = await d.store.createJob({requestedBy: who, days: gate.days}, now);
   return job === 'conflict' ? fail('A Shopee sync is already queued or running. Wait for it to finish.') : {ok: true, job};
@@ -115,12 +115,12 @@ export async function beginEnrolment(d: SyncDeps, email: string, name: string, v
   // eslint-disable-next-line no-control-regex
   if (!clean || clean.length > NAME_MAX || /[\u0000-\u001f]/.test(clean)) return fail(`Give the Mac a name of 1 to ${NAME_MAX} characters.`);
   // The cloud worker is the one enrolled by an admin (SHOPEE_SYNC_ADMINS): that is what makes it serve everyone.
-  if (variant === 'cloud' && !isCloudWorker({ownerEmail: who}, d.admins ?? [])) return fail('Only an admin can add the cloud worker.');
+  if (variant === 'cloud' && !(d.admins ?? []).some((a) => sameEmail(a, who))) return fail('Only an admin can add the cloud worker.');
   const capped = canAddWorker(await d.store.listWorkers(), who);
   if (capped) return fail(capped);
   const code = newEnrolmentCode();
   const expiresAt = new Date(d.now().getTime() + ENROL_TTL_MS).toISOString();
-  await d.store.createEnrolment({codeHash: hashSecret(code), ownerEmail: who, workerName: clean, expiresAt, usedAt: null});
+  await d.store.createEnrolment({codeHash: hashSecret(code), ownerEmail: who, workerName: clean, expiresAt, usedAt: null, isCloud: variant === 'cloud'});
   return {ok: true, code, command: dockerCommand(code, variant), expiresAt};
 }
 
@@ -143,6 +143,6 @@ export async function setRemoteUrlFor(d: SyncDeps, who: Actor, workerId: string,
   const parsed = normaliseRemoteUrl(String(raw ?? ''), d.remoteHosts ?? []);
   if (!parsed.ok) return fail(parsed.error);
   const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
-  if (!worker || !isCloudWorker(worker, d.admins ?? [])) return fail('That is not the cloud worker.');
+  if (!worker || !isCloudWorker(worker)) return fail('That is not the cloud worker.');
   return (await d.store.setRemoteUrl(workerId, parsed.url)) ? {ok: true} : fail('That worker is not enrolled.');
 }
