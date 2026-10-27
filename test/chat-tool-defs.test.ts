@@ -15,9 +15,9 @@ describe('CHAT_TOOLS', () => {
     expect(CHAT_TOOLS.map((t) => t.name)).toEqual(['describe_data', 'query_metric', 'get_digest', 'get_channel_report', 'lookup_product', 'ask_owner', 'render_kpi', 'render_chart', 'render_table', 'set_report_filters', 'remove_block', 'set_report_title']);
   });
 
-  it('with Explore and the CRM on, only the three list_crm_* tools, ask_owner, get_digest and lookup_product are not strict (the API grammar cap), and no more than 20 are strict', () => {
-    const all = chatTools({explore: true, crm: true});
-    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'get_digest', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'lookup_product']);
+  it('with Explore and the CRM on, only crm_query, shopify_query, compare_sku, the three list_crm_* tools, ask_owner, get_digest and lookup_product are not strict (the API grammar cap), and no more than 20 are strict', () => {
+    const all = chatTools({explore: true, crm: true, sku: true});
+    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'compare_sku', 'crm_query', 'get_digest', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'lookup_product', 'shopify_query']);
     expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20);
   });
 
@@ -213,5 +213,17 @@ describe('exploreTools (spec 3.1)', () => {
     for (const v of Object.values(p)) for (const b of ['maxLength', 'pattern', 'minLength']) expect(v).not.toHaveProperty(b);
     expect(exploreTools().length).toBeLessThanOrEqual(20);
     assertRequestShape({tools: exploreTools(), system: [], messages: []} as never, SINK);
+  });
+});
+
+describe('crm_query, shopify_query, compare_sku and the compiled-grammar cap (knowledge/lessons/strict-tool-grammar-cap.md)', () => {
+  it('adds no strict tool and no strict byte: 13 strict tools, 8,099 bytes of strict schema with everything on; the three flexible tools are not strict', () => {
+    const all = chatTools({explore: true, crm: true, contacts: true, sku: true});
+    const strict = all.filter((t) => t.strict);
+    expect(strict).toHaveLength(13);
+    expect(JSON.stringify(strict.map((t) => t.input_schema)).length).toBe(8099); // the last size that ran on PROD (10,375 broke it)
+    for (const name of ['crm_query', 'shopify_query', 'compare_sku']) expect(all.find((t) => t.name === name)?.strict, name).toBe(false);
+    expect(all).toHaveLength(23);
+    expect(all.length).toBeLessThanOrEqual(24); // our own sanity ceiling on the total, not Anthropic's
   });
 });
