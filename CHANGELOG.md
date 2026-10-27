@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Goldline SKU matcher: wrong suggestions from the Oct 26 hand check fixed
+The matcher (`matchSkus`, run on every Watsons upload) kept offering pairs the Oct 26 hand check had turned down. Measured against the 194 links on Nichido Staging (50 by an admin, 37 from item codes, 107 matched), a fresh run went from 9 wrong suggestions to 0, and 13 more pairs now reach the confidence to link on their own (all checked by name and price).
+- **Numbers inside words:** "84331BR" now reads as lash 84331, so the Glamour Lashes no longer shift one row. Item codes still count only as a whole word ("FP01202" Final Powder is not "TSP01202" Translucent Setting Powder).
+- **Shade initials:** a lone letter ("ALUMINUM P" / "S") counts weakly toward the shade it starts, so the Pink and Silver lip brushes stop swapping.
+- **Price is graded:** within 10% of the catalog price scores more than within 20%; under 65% or over 115% is penalised. The ₱150 matte two way cake now beats the ₱185 one, and the ₱88 blushes are no longer offered the ₱160 items.
+- Nothing re-ran on Staging: the next Watsons upload (or a "Not this") refreshes the links and suggestions.
+
 ## 2026-10-27 — Goldline BAs learned from the forms; the ending excludes delivery (Q23)
 Two answers from the Oct 27 review of the audit pack.
 - **BAs come from the forms, not a typed list.** Saving a form with a "Beauty Consultant" name now recognises a BA Coop already knows (the store's own BAs first, then every BA, so a BA who moved stores is the same person; full name, or with any word shortened to its initial like "Maria Luisa R."; never a first name alone across stores), adds a new BA when there's no match, and records them as the store's BA from that cycle (`learnFormBa`). An older form uploaded late never takes over a store's current BA. A form with no name still gets the store's BA from its earlier forms. The paste-a-list box on `/bas` and `importBas` are removed; `/bas` keeps the per-store correction.
