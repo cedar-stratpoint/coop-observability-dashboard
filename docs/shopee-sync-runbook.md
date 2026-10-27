@@ -7,12 +7,36 @@ The Overview shows when Shopee is behind (finished days with no figures). Pressi
 
 ## Rules the server enforces (so you do not have to remember them)
 - One sync in flight for the whole team, and one queued. Cooldown 10 minutes, 6 syncs per Manila day.
-- A sync runs only on a ready Mac owned by the person who pressed Sync, so the person who types the Shopee password is the person who asked.
+- A sync runs on the cloud worker (any presser) or on a ready Mac owned by the person who pressed Sync; a Mac, even an admin's, never serves anyone else.
 - Monday 08:30 to 11:00 Manila time: nothing new starts or is claimed (the weekly export uses the same Seller Centre login). A sync already running is allowed to finish.
 - A worker can only plan and apply plain sales_overview files for the days of its own running job, only runs that job planned, and never a plan with flags.
 - At most 2 Macs per person and 3 per team.
 
-## Adding a Mac
+## The cloud worker (the primary path)
+One on-demand cloud server runs the worker. It sleeps when idle and wakes for a sync, about 1 to 4 minutes. Users never type the Shopee password anywhere. When Shopee asks, an admin types it in the worker's own Chrome through the remote browser link.
+
+**Environment (server-only, Vercel; redeploy after changing):**
+- `SHOPEE_SYNC_ADMINS`: comma-separated emails (case-insensitive). The only people who may enrol the cloud worker, set or see the remote browser address, and get the alerts. A Coop Admin who is not on this list gets none of that. Empty means nobody.
+- `SHOPEE_SYNC_REMOTE_HOSTS` (optional): comma-separated hosts the remote address may use. When set, any other host is refused, so a look-alike page cannot be put where an admin types the password. The address is https only either way.
+- `SHOPEE_SYNC_WAKE_TOKEN`: the bearer token the AWS Lambda sends. Unset means the wake route answers 401 to everyone.
+
+**Setting it up (admin):**
+1. Settings, **Sync worker**, **Add the cloud worker**. Run the one-time command on the server (replace the `<WORKER_IMAGE_TAG>` placeholder). The worker is flagged `is_cloud` at enrolment; an admin's own Mac enrolled the normal way is never the cloud worker.
+2. Save the **Remote browser link** (https, behind Cloudflare Access) in the same screen.
+3. Apply `supabase/shopee_sync_login.sql` after `shopee_sync.sql` (local Docker first, staging with the owner, PROD with the co-worker's OK).
+
+**The wake route:** `POST /api/shopee/sync/wake` with `Authorization: Bearer <SHOPEE_SYNC_WAKE_TOKEN>`. It answers `{wake, jobId?}`: `wake` is true only when a job is queued and the cloud worker (not anyone's Mac) was not seen in the last 2 minutes. The Lambda polls it and starts the server when it is true. The response has no email or other personal data.
+
+**What the card shows:** the last known Shopee login with its age (Ready, Needs password, Signed out, or Not checked). Sync is off unless it is Ready; a Ready check older than 24 hours counts as unknown ("Waiting for a fresh login check") until the worker checks again. The server reads Asleep, Waking, Online or Offline.
+
+**When Shopee needs the password (admin flow):**
+1. Admins see the banner "Shopee needs your sign-in" on the card (also when nothing is behind). Everyone else sees "Waiting for an admin" or "Shopee needs an admin to sign in. Please ask an admin."
+2. Press **Open remote browser** (a new tab, Google sign-in through Cloudflare Access), type the Shopee password in the worker's Chrome, and close the tab. The worker re-checks the login and the sync resumes by itself. Coop never sees the password.
+3. A sync waiting for a sign-in expires after 60 minutes (it ends as expired; the Monday import still fills the gap).
+
+**Alerts are not sent yet.** The sender is still a TODO (`TODO(SYN-06 wiring)` in `src/shopee-sync/alerts.ts`; Resend is not wired). The message builders and recipient list (`SHOPEE_SYNC_ADMINS`) exist, so until the sender is wired nobody is emailed and the card says "Please ask an admin" instead of claiming anyone was told. Admins have to look at the card.
+
+## Adding a Mac (secondary path)
 1. Settings, **My sync Macs**, name the Mac, **Add a Mac**. You get a one-time code (valid 15 minutes) and a `docker run` command. The code is shown once.
 2. Run the command on that Mac. The web desktop on the Mac is on `http://127.0.0.1:6080` only (loopback), so it is reachable from that Mac and nowhere else on the network.
 3. Sign in to Seller Centre as the shop account in that browser. The Mac then shows **Online** and **Signed in**.
@@ -20,7 +44,7 @@ The worker image name in the command is a placeholder until an image is publishe
 
 ## Pressing Sync
 Press **Sync N missing days** on the Overview card. Watch the steps: Requested, Exporting from Shopee, (Verify on the Mac), Importing orders, Done.
-- **Needs your password:** open the Shopee browser on your Mac and type the Shopee password there. It continues by itself. The password never goes through Coop, and nothing in the dashboard asks for it. If nobody verifies by the end of the day the sync stops cleanly.
+- **Needs your password (a Mac job only):** open the Shopee browser on your Mac and type the Shopee password there. It continues by itself. The password never goes through Coop, and nothing in the dashboard asks for it. If nobody verifies by the end of the day the sync stops cleanly.
 - **Needs your review:** the totals differ from what is loaded by more than the sync allows on its own. Read the flags, then **Confirm and apply** (applies only this job's runs, all or none) or leave it and let the Monday import decide.
 - **Failed:** days already loaded are kept. **Retry** loads the rest.
 
