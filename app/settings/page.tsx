@@ -31,8 +31,8 @@ export default async function Page() {
     <Link href="/settings/shopee-sync" className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-foreground/25">
       <Laptop className="size-4 text-muted-foreground" aria-hidden />
       <span className="flex flex-col">
-        <span className="text-sm font-medium text-foreground">My sync Macs</span>
-        <span className="text-[13px] text-muted-foreground">Add or remove the Macs that load Shopee days for you.</span>
+        <span className="text-sm font-medium text-foreground">Sync worker</span>
+        <span className="text-[13px] text-muted-foreground">The cloud worker that loads Shopee days, and the Macs you add (My sync Macs).</span>
       </span>
     </Link>
   );
