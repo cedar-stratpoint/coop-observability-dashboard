@@ -13,6 +13,7 @@ import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
 import {cn} from '@/lib/utils';
+import {GL_PAGE} from '@/src/goldline-ui';
 
 // The Uploads inbox for one company: add a POS .csv, a Watsons POS Sales Data .xlsx
 // (one month, every store) or a scanned inventory .pdf
@@ -109,7 +110,7 @@ export function UploadsView({
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6">
+    <div className={GL_PAGE}>
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
         <p className="text-sm text-muted-foreground">
