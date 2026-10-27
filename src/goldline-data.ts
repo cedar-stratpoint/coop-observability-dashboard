@@ -204,7 +204,10 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
   return true;
 }
 
-/** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key). */
+/** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
+ *  Goes through the upsert_sales RPC, which encrypts the peso figures into
+ *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql);
+ *  the plain gross_retail / net_of_vat never reach the table. */
 export async function upsertSales(
   companyId: string,
   rows: PosSaleRow[],
@@ -214,7 +217,6 @@ export async function upsertSales(
   if (!rows.length) return 0;
   const supa = db();
   const payload = rows.map((r) => ({
-    company_id: companyId,
     store_code: r.storeCode,
     sku_code: r.skuCode,
     period_start: period.start,
@@ -226,9 +228,7 @@ export async function upsertSales(
   }));
   // A Watsons month is ~40k rows: send it in chunks so no single request is huge.
   for (let i = 0; i < payload.length; i += SALES_CHUNK) {
-    const res = await supa
-      .from('sales')
-      .upsert(payload.slice(i, i + SALES_CHUNK), {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
+    const res = await supa.rpc('upsert_sales', {p_company: companyId, p_rows: payload.slice(i, i + SALES_CHUNK)});
     if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
   }
   return payload.length;
