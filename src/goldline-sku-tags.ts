@@ -89,3 +89,21 @@ export function formSpots(): Map<string, FormSpot> {
 }
 
 export const formSpotText = (s: FormSpot | null | undefined) => (s ? `Page ${s.page} · row ${s.row}` : 'Not on the form');
+
+/**
+ * A Watsons name, easier to read: drops the leading "NICHIDO" every name carries, title
+ * cases the rest, and keeps codes (words with letters and digits, like ELB160) in capitals.
+ * The raw name stays available as a tooltip; Watsons cuts names short, so "Penci" stays.
+ */
+export function watsonsName(raw: string): string {
+  const rest = raw.replace(/^\s*NICHIDO\s+/i, '').trim() || raw.trim();
+  if (/[a-z]/.test(rest)) return rest;
+  return rest
+    .toLowerCase()
+    .replace(/[a-z0-9#/&'+-]+/g, (w, i: number) => {
+      if (/\d/.test(w) && /[a-z]/.test(w)) return w.toUpperCase(); // codes: ELB160, CS0164, 5G
+      if (i > 0 && SMALL_WORDS.has(w)) return w;
+      return w[0].toUpperCase() + w.slice(1);
+    });
+}
+const SMALL_WORDS = new Set(['and', 'or', 'of', 'the', 'with', 'w', 'n', 'for', 'in', 'to']);

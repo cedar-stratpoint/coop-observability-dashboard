@@ -42,3 +42,15 @@ describe('form spots', () => {
     expect([...s.values()].every((v) => v.page >= 1 && v.page <= 5)).toBe(true);
   });
 });
+
+describe('watsonsName', () => {
+  it('reads like a product name, keeping codes', async () => {
+    const {watsonsName} = await import('../src/goldline-sku-tags');
+    expect(watsonsName('NICHIDO EYEBROW SHAVER ELB160')).toBe('Eyebrow Shaver ELB160');
+    expect(watsonsName('NICHIDO RETRACTABLE BLUSHER BRUSH #525')).toBe('Retractable Blusher Brush #525');
+    expect(watsonsName('NICHIDO LIP N CHK TNT PRABEN FRBEACHGLOW')).toBe('Lip n Chk Tnt Praben Frbeachglow');
+    expect(watsonsName('NCHDOMNRL PWDR MTT LS W CLLGN LVE ON FRE')).toBe('Nchdomnrl Pwdr Mtt Ls w Cllgn Lve On Fre');
+    expect(watsonsName('NICHIDO TRUECOLORS PWDRBLSH TOMATO 3 5G')).toBe('Truecolors Pwdrblsh Tomato 3 5G');
+    expect(watsonsName('NICHIDO')).toBe('Nichido');
+  });
+});
