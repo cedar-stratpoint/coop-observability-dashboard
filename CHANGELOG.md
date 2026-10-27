@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27 — Nichido Data Audit PDF: answers come back into Coop by script
+The SKU linking audit PDF for Justin and the owner (`Nichido_Data_Audit.pdf`, made outside the repo) is a fillable worksheet: Correct / Wrong on Coop's matches, our item code for unmatched Watsons SKUs, Sold / Not sold for form items without a code, and "Looks wrong" on existing links. Decided: their answers are imported, not retyped.
+- `scripts/nichido/import-audit-answers.ts <filled.pdf> --by "<name>"` reads the form fields and prints a plan; `--apply` makes the changes with the same functions as the SKU linking page (approve, reject, link, remark), so each decision lands in `sku_link_reviews` as "<name> (audit PDF)". Then the form vs. sales checks re-run. Production needs `--prod`.
+- Safe by design: an answer is skipped (with the reason) when Coop's suggestion changed after the PDF was made (the expected item is in the field name), the item or SKU is already linked, or a code is unknown. "Looks wrong" and "Not sold at Watsons" are listed for a person; nothing is unlinked automatically.
+- Planning logic is pure and tested (`src/goldline-audit-answers.ts`). Tried end to end on Nichido Staging with a filled copy (approve, reject, hand link, "not ours"), then restored.
+
 ## 2026-10-27 — Goldline sales money encrypted at rest (Nichido), key in Supabase Vault
 Nichido is an external brand, so its peso figures should not be readable by anyone who can open the database (Table Editor, SQL editor, a dump).
 - **What is encrypted:** `sales.gross_retail` and `sales.net_of_vat`, together in one column `sales.amounts_enc` (AES-256-CBC, random IV per row). **Units, store/SKU codes and periods stay plain**, decided for now: units feed the checks, forecast, store scope and three paged app reads, and carry no peso figures. Encrypting them is a possible phase 2.
