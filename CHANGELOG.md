@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-27
+
+### Shopee same-day sync, slice 4: the one on-demand cloud worker (SYN-04, SYN-05, SYN-08 dashboard side)
+Owner decision: one cloud worker that sleeps when idle, a pre-check of the Shopee login before Sync is pressed, users never type a password, admins can (in the worker's own Chrome, through a protected remote link). Dashboard side only; the worker side is another branch. Contract is additive: old Mac workers keep working.
+- **Login state before Sync.** A worker adds optional `login: {state: ready|needs_password|signed_out, checkedAt}` and `remote: {ready}` to its claim and progress calls; they are stored on `shopee_sync_workers` (`supabase/shopee_sync_login.sql`, additive, applied to local Docker only) and survive the server sleeping. Sync is disabled unless the last known login is Ready (or the person has an own ready Mac). The card says "Shopee needs an admin to sign in. Admins have been told.", "Waiting for the first login check", "Server asleep. Sync will wake it, about 1 to 4 minutes" with "Signed in, checked X ago", and "Waking the server" for a queued job with nobody online.
+- **Admins** come from `SHOPEE_SYNC_ADMINS` (env, case-insensitive) and are exposed as `viewer.isAdmin` (union with the existing Coop Admin role, so cancel, confirm and revoke powers are unchanged). Only admins get the remote address, the "Open remote browser" link (`remoteUrl` + `/vnc.html#autoconnect=1&reconnect=1&resize=remote`, new tab, `noopener noreferrer`), the Settings field to set it (with Copy) and the alerts. A worker enrolled by an admin is the shared cloud worker and serves whoever pressed Sync (`claim_shopee_sync_job_shared`, owner check relaxed only for it); a Mac still serves only its owner.
+- **Wake route.** `POST /api/shopee/sync/wake`, bearer `SHOPEE_SYNC_WAKE_TOKEN` (env only, sha256 constant-time compare, 401 otherwise), answers `{wake, jobId?}`: true iff a job is queued and no worker was seen in 2 minutes. Called by an AWS Lambda; Vercel holds no AWS keys and the response carries no PII.
+- **Waiting for an admin.** A job awaiting verification reads "Waiting for an admin" to everyone else and shows admins the banner and the link. It expires after 60 minutes (`AWAITING_EXPIRY_MS`, counted from the new `shopee_sync_jobs.awaiting_since`, because polling keeps the heartbeat fresh). There is no password or code input anywhere.
+- **Alerts** (`alerts.ts`, still no sender wired, Resend not touched): failures, a login that needs an admin, and a stuck sign-in all carry the admin list as `to`. The stuck nudge moved from 2 hours to 15 minutes since the job now expires at 60.
+- **Settings** leads with "Sync worker": the cloud worker (Asleep, Online or Offline, last seen, last login check, Revoke for admins) and the admin-only remote address; "My sync Macs" stays as a muted secondary path, and the enrol command has a cloud variant (placeholder image tag, no published port, no secrets).
+- Decisions: a login check is one state per cloud worker, newest wins; the server is Offline only when a job waited past 10 minutes (or expired as "worker offline" in the last hour), otherwise Asleep. Apply `shopee_sync_login.sql` by hand after `shopee_sync.sql` (local Docker only so far; staging with the owner, PROD with the co-worker's OK).
+
 ## 2026-10-26
 
 ### Shopee same-day sync, slice 3: review fixes, alert seam, pilot check and runbook (SYN-04, SYN-06 dashboard side)
