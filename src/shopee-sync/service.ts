@@ -4,7 +4,8 @@ import {periodWithin, syncStamp} from '../shopee-import/api';
 import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
 import {missingClosedDays} from './missing-days';
-import {canAddWorker, cloudLogin, sameEmail} from './routing';
+import {canAddWorker, cloudLogin, isCloudWorker, sameEmail} from './routing';
+import {normaliseRemoteUrl} from './remote';
 import {startBlock, staleSweep} from './rules';
 import {ENROL_TTL_MS, hashSecret, newEnrolmentCode} from './tokens';
 import {isActive, type Job, type Worker} from './types';
@@ -98,21 +99,27 @@ export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Acto
 }
 
 const NAME_MAX = 60;
-export const dockerCommand = (code: string): string =>
-  `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -p 127.0.0.1:6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
+export type EnrolVariant = 'mac' | 'cloud';
+/** The one command a person runs. `cloud` is for the shared server: no published port (the admin reaches its browser through the protected remote link) and a worker image tag to fill in. */
+export const dockerCommand = (code: string, variant: EnrolVariant = 'mac'): string =>
+  variant === 'cloud'
+    ? `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE_TAG>`
+    : `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -p 127.0.0.1:6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
 
 /** Makes a one-time enrolment code for one of the person's own Macs. The code is shown once and stored only as a hash. */
-export async function beginEnrolment(d: SyncDeps, email: string, name: string): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {
+export async function beginEnrolment(d: SyncDeps, email: string, name: string, variant: EnrolVariant = 'mac'): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {
   const who = email.trim().toLowerCase();
   const clean = (name ?? '').replace(/\s+/g, ' ').trim();
   // eslint-disable-next-line no-control-regex
   if (!clean || clean.length > NAME_MAX || /[\u0000-\u001f]/.test(clean)) return fail(`Give the Mac a name of 1 to ${NAME_MAX} characters.`);
+  // The cloud worker is the one enrolled by an admin (SHOPEE_SYNC_ADMINS): that is what makes it serve everyone.
+  if (variant === 'cloud' && !isCloudWorker({ownerEmail: who}, d.admins ?? [])) return fail('Only an admin can add the cloud worker.');
   const capped = canAddWorker(await d.store.listWorkers(), who);
   if (capped) return fail(capped);
   const code = newEnrolmentCode();
   const expiresAt = new Date(d.now().getTime() + ENROL_TTL_MS).toISOString();
   await d.store.createEnrolment({codeHash: hashSecret(code), ownerEmail: who, workerName: clean, expiresAt, usedAt: null});
-  return {ok: true, code, command: dockerCommand(code), expiresAt};
+  return {ok: true, code, command: dockerCommand(code, variant), expiresAt};
 }
 
 export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string): Promise<{ok: true} | Fail> {
@@ -125,4 +132,14 @@ export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string)
     if (j.claimedBy === workerId && isActive(j.status)) await d.store.transitionJob(j.id, [j.status], {status: 'failed', error: 'The Mac was removed during the sync', finishedAt: d.now().toISOString()});
   }
   return {ok: true};
+}
+
+/** An admin sets or clears the address of the cloud worker's protected remote browser. Only the cloud worker has one; the address is never shown to anyone else. */
+export async function setRemoteUrlFor(d: SyncDeps, who: Actor, workerId: string, raw: string): Promise<{ok: true} | Fail> {
+  if (!who.isAdmin) return fail('Only an admin can set the remote browser address.');
+  const parsed = normaliseRemoteUrl(String(raw ?? ''));
+  if (!parsed.ok) return fail(parsed.error);
+  const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
+  if (!worker || !isCloudWorker(worker, d.admins ?? [])) return fail('That is not the cloud worker.');
+  return (await d.store.setRemoteUrl(workerId, parsed.url)) ? {ok: true} : fail('That worker is not enrolled.');
 }

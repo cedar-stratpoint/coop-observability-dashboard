@@ -2,7 +2,7 @@
 
 import {posClient, usingPosMock} from './pos-data';
 import {supabaseImportStore} from './shopee-import/store-supabase';
-import {beginEnrolment, cancelSync, confirmReview, requestSync, revokeWorkerFor, type Actor, type SyncDeps} from './shopee-sync/service';
+import {beginEnrolment, cancelSync, confirmReview, requestSync, revokeWorkerFor, setRemoteUrlFor, type Actor, type EnrolVariant, type SyncDeps} from './shopee-sync/service';
 import {revalidateDigestArchive, shopeeSyncDeps} from './shopee-sync/server';
 import {syncViewer} from './shopee-sync/viewer';
 
@@ -48,12 +48,12 @@ export async function cancelSyncJob(jobId: string): Promise<ActionResult> {
   }
 }
 
-/** Add a Mac: returns the one-time code (shown once, valid 15 minutes) and the docker command with placeholders for the dashboard address and image. */
-export async function startEnrolment(name: string): Promise<{ok: true; code: string; command: string; expiresAt: string} | {ok: false; error: string}> {
+/** Add a Mac (or, for an admin, the cloud worker): returns the one-time code (shown once, valid 15 minutes) and the docker command with placeholders for the dashboard address and image. */
+export async function startEnrolment(name: string, variant: EnrolVariant = 'mac'): Promise<{ok: true; code: string; command: string; expiresAt: string} | {ok: false; error: string}> {
   const c = await ctx();
   if (!c.ok) return c;
   try {
-    return await beginEnrolment(c.deps, c.viewer.email, String(name ?? ''));
+    return await beginEnrolment(c.deps, c.viewer.email, String(name ?? ''), variant === 'cloud' ? 'cloud' : 'mac');
   } catch (e) {
     console.error('startEnrolment failed', e);
     return {ok: false, error: 'Could not make an enrolment code. Try again in a moment.'};
@@ -83,5 +83,17 @@ export async function confirmSyncReview(jobId: string): Promise<ActionResult> {
   } catch (e) {
     console.error('confirmSyncReview failed', e);
     return {ok: false, error: 'Could not confirm the sync. Try again in a moment.'};
+  }
+}
+
+/** An admin sets (or clears with an empty string) the cloud worker's remote browser address. */
+export async function setRemoteBrowserUrl(workerId: string, url: string): Promise<ActionResult> {
+  const c = await ctx();
+  if (!c.ok) return c;
+  try {
+    return await setRemoteUrlFor(c.deps, c.viewer, String(workerId), String(url ?? ''));
+  } catch (e) {
+    console.error('setRemoteBrowserUrl failed', e);
+    return {ok: false, error: 'Could not save the address. Try again in a moment.'};
   }
 }
