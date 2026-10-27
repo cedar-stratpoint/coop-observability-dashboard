@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {alertsDue, alertMessage, AWAITING_ALERT_MS, dispatchAlerts, type AlertMessage} from '../src/shopee-sync/alerts';
+import {alertsDue, alertMessage, AWAITING_ALERT_MS, dispatchAlerts, loginAlertDue, loginAlertMessage, type AlertMessage} from '../src/shopee-sync/alerts';
 import type {Job} from '../src/shopee-sync/types';
 
 const now = new Date('2026-10-27T06:00:00Z');
@@ -73,5 +73,36 @@ describe('dispatchAlerts', () => {
     });
     const sent = await dispatchAlerts({jobs: [job(), job({id: 'job-2'})], now, alreadySent: new Set(), send});
     expect(sent).toEqual(['job-2:failed']);
+  });
+});
+
+describe('alerts for the cloud worker go to the admins', () => {
+  it('a login that needs an admin alerts once per state until it is ready again', () => {
+    expect(loginAlertDue('needs_password', new Set())).toEqual({key: 'login:needs_password', state: 'needs_password'});
+    expect(loginAlertDue('signed_out', new Set())).toEqual({key: 'login:signed_out', state: 'signed_out'});
+    expect(loginAlertDue('needs_password', new Set(['login:needs_password']))).toBeNull();
+    expect(loginAlertDue('ready', new Set())).toBeNull();
+    expect(loginAlertDue('unknown', new Set())).toBeNull();
+  });
+  it('words the sign-in alert for an admin: remote browser, never in Coop, no link or address in the text', () => {
+    const m = loginAlertMessage('needs_password');
+    expect(m.subject).toMatch(/admin/i);
+    expect(m.text).toMatch(/Open remote browser/);
+    expect(m.text).toMatch(/never in Coop/);
+    expect(m.text).not.toMatch(/https?:|@/);
+  });
+  it('dispatch hands the admins to the injected sender for failures and for the login alert, and sends nothing when all is well', async () => {
+    const send = vi.fn(async (_m: AlertMessage, _to: readonly string[]) => {});
+    const sent = await dispatchAlerts({jobs: [job()], now, alreadySent: new Set(), send, to: ['owner@x.com'], login: 'needs_password'});
+    expect(sent).toEqual(['job-1:failed', 'login:needs_password']);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls.every((c) => c[1].join() === 'owner@x.com')).toBe(true);
+    send.mockClear();
+    expect(await dispatchAlerts({jobs: [], now, alreadySent: new Set(), send, to: ['owner@x.com'], login: 'ready'})).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('nudges from when the job began waiting for the sign-in, not when it was claimed', () => {
+    const waiting = job({status: 'awaiting_verification', error: null, finishedAt: null, claimedAt: ago(5 * 3_600_000), awaitingSince: ago(AWAITING_ALERT_MS - 1000)});
+    expect(alertsDue([waiting], now, new Set())).toEqual([]);
   });
 });
