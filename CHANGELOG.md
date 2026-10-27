@@ -20,6 +20,41 @@ Nichido is an external brand, so its peso figures should not be readable by anyo
 - **Rollout:** `supabase/nichido/s1_sales_encryption.sql` (applied on Nichido Staging: 392,235 rows encrypted; per-store and per-SKU totals identical to the plain columns) → deploy → `s2_sales_drop_plaintext.sql` (drops the plain columns, then `vacuum full`). Until s2, a trigger encrypts plain values an older deployment still writes. PROD not done.
 - **Still plain elsewhere:** Nichido backups / PITR from before the change, the archive's read-only `gl_sales` copy, and the original CSVs in `goldline-uploads`.
 
+## 2026-10-27 — SKU linking: calmer, scannable table with the form page and rows per page
+Oct 27 review: the page read as cluttered. Rebuilt with Hick's Law in mind (design skills: impeccable distill):
+- **Fewer choices at a glance:** one row of tabs (Check Coop's match · Choose the item · Linked · Form items without a SKU) instead of five large cards; only the chosen tab's tag and explanation show. "Rejected" appears only when something is rejected. The tag no longer repeats on every row.
+- **Aligned columns:** Watsons SKU · Units sold · Our item · **Form page** (new: page and row where the item is printed on the inventory form, from the form manifests) · Watsons / our price (ours turns amber when they differ by more than 15%) · decision.
+- **One obvious action per row:** Approve / Reject, Choose item, or "Remark or unlink" for linked rows. The remark box, item picker and unlink open in a panel under the row; the last decision shows there.
+- **Rows per page:** 5, 10, 20 or 100 (remembered in the browser), with "1 to 20 of 41" and numbered pages. On phones each row stacks with units, form page and price on one line.
+
+## 2026-10-27 — SKU linking back in Coop, with Approve / Reject, remarks and plain-language tags
+The SKU links page was moved to the plan artifact only (morning of Oct 27); it's back in Coop for Nichido as **SKU linking** (`/stock/skus`, nav after Inventory) so Justin and his dad can decide links themselves.
+- **Approve / Reject** on Coop's suggested matches only (decided: links Coop already made stay as they are and can still be unlinked). Reject checks the suggestion the person saw is still the current one, then Coop looks for the next best.
+- **Remarks:** optional on every decision (approve, reject, link by hand, unlink) and can be saved on their own. Only the latest decision and the latest remark per SKU are kept (decided: no history), with who and when. New table `sku_link_reviews` (`supabase/nichido/f2b_sku_link_reviews.sql`, applied on Nichido Staging).
+- **Tags say what to do** (decided: "Needs a pick" was unclear): "Coop found a likely match: check it", "No match found: choose the item", "Rejected: choose the right item", "Linked" (with how: our item code is in the Watsons name / Matched by Coop / Coop's match, approved / Linked by hand), "On our forms, not in Watsons sales". The five tags are also the filters, each with a one-line explanation. Pure logic in `src/goldline-sku-tags.ts`, tested.
+- Full-width page, three columns (Watsons SKU · our item · decision), 25 per page.
+
+## 2026-10-27 — Stores: "scope" renamed to what it does (restock on or paused)
+"In scope / Out of scope" and "Automatic / Always in / Always out" read as jargon. The Stores page now says it plainly:
+- A short panel above the stats: "301 get restock · 25 paused", and one sentence on the rule with the actual months ("at least one sale in the last 3 months of Watsons data (Jul to Sep 2026)") and when to override it.
+- Filters: All · Get restock 301 · Paused 25. Column "Restock": On, or Paused with the reason ("no sales since Jan 2026", "set by hand").
+- The switch: Follow sales · Always on · Never (with a tooltip). The rule and data (`stores.in_scope`, `store_scope()`) are unchanged.
+- The first stat is now the store count; the period reads "Oct 2025 to Sep 2026" instead of ISO dates.
+
+## 2026-10-27 — Goldline pages: full width, no coloured edge accents, Action feed table, calmer Stores table
+UI pass from the Oct 27 review (design skills: impeccable).
+- **Full width:** Stores, Uploads, Flags, BAs and the Action feed use the whole content area (`GL_PAGE`, capped at 112rem on very wide screens) instead of a narrow centred column. Tile grids gain columns as the page widens.
+- **No coloured left edge** on Flags tiles, flag notes, BA rows or scorecard cards: the tag pill already says the state, in words and an icon. Flags tiles now put the tag top right, the points and causes in one line, and "Open form" with an arrow.
+- **Action feed:** Tiles / Table switch (remembered per browser); the table lists action, item, store, why and the next step. The decorative gradient line is gone.
+- **Stores leaderboard:** rank column; store names in title case (Watsons sends capitals; SM and DS stay capitals, the original is the tooltip); store code muted after the name; a thin bar under Gross shows each store against the top one; Net of VAT and SKUs quieter; Region only when any store has one; scope as a dot and a word, with the reason only when it isn't the usual (out of scope or set by an admin); the scope switch is a quiet inline select. 25 stores a page.
+
+## 2026-10-27 — Goldline SKU matcher: wrong suggestions from the Oct 26 hand check fixed
+The matcher (`matchSkus`, run on every Watsons upload) kept offering pairs the Oct 26 hand check had turned down. Measured against the 194 links on Nichido Staging (50 by an admin, 37 from item codes, 107 matched), a fresh run went from 9 wrong suggestions to 0, and 13 more pairs now reach the confidence to link on their own (all checked by name and price).
+- **Numbers inside words:** "84331BR" now reads as lash 84331, so the Glamour Lashes no longer shift one row. Item codes still count only as a whole word ("FP01202" Final Powder is not "TSP01202" Translucent Setting Powder).
+- **Shade initials:** a lone letter ("ALUMINUM P" / "S") counts weakly toward the shade it starts, so the Pink and Silver lip brushes stop swapping.
+- **Price is graded:** within 10% of the catalog price scores more than within 20%; under 65% or over 115% is penalised. The ₱150 matte two way cake now beats the ₱185 one, and the ₱88 blushes are no longer offered the ₱160 items.
+- Nothing re-ran on Staging: the next Watsons upload (or a "Not this") refreshes the links and suggestions.
+
 ## 2026-10-27 — Goldline BAs learned from the forms; the ending excludes delivery (Q23)
 Two answers from the Oct 27 review of the audit pack.
 - **BAs come from the forms, not a typed list.** Saving a form with a "Beauty Consultant" name now recognises a BA Coop already knows (the store's own BAs first, then every BA, so a BA who moved stores is the same person; full name, or with any word shortened to its initial like "Maria Luisa R."; never a first name alone across stores), adds a new BA when there's no match, and records them as the store's BA from that cycle (`learnFormBa`). An older form uploaded late never takes over a store's current BA. A form with no name still gets the store's BA from its earlier forms. The paste-a-list box on `/bas` and `importBas` are removed; `/bas` keeps the per-store correction.

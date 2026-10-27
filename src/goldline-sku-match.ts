@@ -48,6 +48,8 @@ export function tokens(s: string, expand = false): string[] {
 export function abbreviates(a: string, b: string): number {
   if (a === b) return 1;
   if (a.length >= 3 && b.startsWith(a)) return 0.9;
+  // A lone initial for a shade ("ALUMINUM P" for Pink): weak, but it splits siblings.
+  if (a.length === 1 && b.length > 1 && b.startsWith(a)) return 0.5;
   if (a.length >= 2 && a[0] === b[0]) {
     let i = 0;
     for (const c of b) if (c === a[i]) i++;
@@ -72,7 +74,10 @@ function cover(catalog: string[], watsons: string[]): number | null {
   return s / catalog.length;
 }
 
-const numbersOf = (ts: string[]) => new Set(ts.filter(hasDigit).map((t) => t.replace(/^#/, '')));
+// Numbers in names: the digit runs inside words ("84331BR" → 84331, "#525" → 525),
+// plus the whole word. Item codes count only whole ("FP01202" is not "TSP01202": the
+// digits repeat across product families).
+const numbersOf = (ts: string[]) => new Set(ts.filter(hasDigit).flatMap((t) => [t.replace(/^#/, ''), ...(t.match(/\d+/g) ?? [])]));
 
 /** Score one Watsons SKU against one catalog item. Higher is better; ~1 is a strong match. */
 export function scorePair(sku: ChainSkuStat, item: CatalogItem): number {
@@ -83,19 +88,22 @@ export function scorePair(sku: ChainSkuStat, item: CatalogItem): number {
   const variant = tokens(item.variant ?? '').filter((t) => !line.includes(t));
   const lineWords = line.filter((t) => !hasDigit(t));
   const shadeWords = variant.filter((t) => !hasDigit(t));
-  const itemNums = new Set([...numbersOf([...line, ...variant]), ...numbersOf([item.item_code.toUpperCase()])]);
+  const itemNums = new Set([...numbersOf([...line, ...variant]), item.item_code.toUpperCase()]);
 
   const lc = cover(lineWords, wt);
   const sc = cover(shadeWords, wt);
   // Shade words decide between siblings of one line, so they weigh more.
   let s = 0.4 * (lc ?? 0.5) + 0.6 * (sc ?? lc ?? 0);
   if (wn.size && itemNums.size) s += [...wn].some((n) => itemNums.has(n)) ? 0.3 : -0.3;
-  // Price: Watsons' average includes discounts, so being lower is normal; higher is not.
+  // Price: Watsons' average includes discounts, so a little lower is normal; higher is
+  // not. Sibling items often differ only in price (the ₱150 matte cake vs the ₱185 one,
+  // the old ₱88 blushes vs the ₱160 3.5G ones), so closeness is graded.
   const price = sku.units > 0 ? sku.gross / sku.units : null;
   if (price != null && item.unit_price) {
     const r = price / item.unit_price;
-    if (r >= 0.7 && r <= 1.05) s += 0.1;
-    else if (r > 1.15 || r < 0.5) s -= 0.3;
+    if (r >= 0.9 && r <= 1.05) s += 0.2;
+    else if (r >= 0.8 && r < 0.9) s += 0.1;
+    else if (r > 1.15 || r < 0.65) s -= 0.3;
   }
   return s;
 }
