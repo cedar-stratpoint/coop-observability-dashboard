@@ -250,16 +250,34 @@ export function buildBoard(input: {
   return rows;
 }
 
+/** The summary tiles double as table filters; one predicate per tile keeps a tile's count and its filtered rows in step. */
+export type BoardFocus = 'reorder' | 'out' | 'shipNow' | 'warehouseShort' | 'produceSoon';
+
+export function inFocus(r: BoardRow, focus: BoardFocus, today: string): boolean {
+  switch (focus) {
+    case 'reorder':
+      return r.status === 'out' || r.status === 'reorder';
+    case 'out':
+      return r.status === 'out';
+    case 'shipNow':
+      return r.shipBy?.kind === 'now' && r.need > 0;
+    case 'warehouseShort':
+      return r.warehouseShort;
+    case 'produceSoon':
+      return r.produceBy?.kind === 'now' || (r.produceBy?.kind === 'date' && r.produceBy.date <= addDays(today, PRODUCE_SOON_DAYS));
+  }
+}
+
 export function boardSummary(rows: BoardRow[], today: string): BoardSummary {
   const visible = rows.filter((r) => !r.hidden);
-  const soon = addDays(today, PRODUCE_SOON_DAYS);
+  const count = (f: BoardFocus) => visible.filter((r) => inFocus(r, f, today)).length;
   return {
     rows: visible.length,
-    reorder: visible.filter((r) => r.status === 'out' || r.status === 'reorder').length,
-    out: visible.filter((r) => r.status === 'out').length,
-    shipNow: visible.filter((r) => r.shipBy?.kind === 'now' && r.need > 0).length,
-    warehouseShort: visible.filter((r) => r.warehouseShort).length,
-    produceSoon: visible.filter((r) => r.produceBy?.kind === 'now' || (r.produceBy?.kind === 'date' && r.produceBy.date <= soon)).length,
+    reorder: count('reorder'),
+    out: count('out'),
+    shipNow: count('shipNow'),
+    warehouseShort: count('warehouseShort'),
+    produceSoon: count('produceSoon'),
     stockValue: visible.reduce((a, r) => a + (r.price != null && r.onHand != null && r.onHand > 0 ? r.onHand * r.price : 0), 0),
     deliveredValue: visible.reduce((a, r) => a + (r.price != null && r.delivered ? r.delivered * r.price : 0), 0),
     deliveredUnits: visible.reduce((a, r) => a + (r.delivered ?? 0), 0),
