@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.17.1 (2026-10-29): SKU linking "Add note" on our form items (prod release)
+Ships "Add note" (below) to prod so Justin can mark an item to check, or note anything about it, while going through SKU linking on prod. The `item_notes` table (`f2d_item_notes.sql`) was applied on Nichido prod (`pfwrkqsjmetibslltmok`) first, since the page reads it. Code only otherwise; nothing else from staging.
+
 ## 2026-10-29 — SKU linking: "Add note" on our form items, separate from decommissioning
 Each item under "Sold at Watsons?" (and Decommissioned) now has "Add note" next to "Mark as decommissioned", for marking it to check later or writing anything about it ("check with Justin", "maybe the Watsons name LIP PNCL"). The note shows under the item on an amber band with who and when; "Edit note" changes it and "Remove note" clears it. Only the latest note is kept, in a new `item_notes` table (`f2d_item_notes.sql`, additive, applied on Nichido Staging, cutover step 12). It changes nothing else: a noted item stays in the list, and decommissioning or bringing back an item keeps its note. Tried end to end on Staging (note, decommission, bring back, remove note).
 
