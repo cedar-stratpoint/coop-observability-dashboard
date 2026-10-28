@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.16.0 (2026-10-28): Offline Sales transactions list shows a revenue subtotal
+**Selective release** of the revenue-subtotal change from `staging` (cherry-pick of PR #332 / #333) and nothing else; the Goldline Nichido work on `staging` is not in it. Code only: no SQL file, no environment variable, no backfill script.
+- **What:** `/offline-sales/orders` now shows a peso subtotal next to the count ("524 transactions match these filters · ₱214,320"), so the page reconciles against the POS Transactions screen in one place instead of needing the Sales range view. The subtotal is completed revenue (voided excluded) across the whole filtered set, not just the visible page: `getPosOrdersRevenue(filter)` runs the same filter predicates as the list, adds a hard `status != voided`, and sums `total` server-side (paged by PK via `fetchAllRows`). Set Status = Completed to match the POS count; the default All status counts voided too but the subtotal still excludes them (a Voided-only view totals ₱0).
+- **Deploy:** nothing to run first. Verified: typecheck, 4098 tests, pagination guard.
+
 ## v1.15.0 (2026-10-26): Event lead contacts show the full name
 **Selective release** of the spin-the-wheel name work from `develop` (PR #262) and nothing else; the Goldline Nichido work on `staging` is not in it. One SQL file, no environment variable, no backfill script.
 - **Before deploy:** `supabase/spin_wheel_leads_name.sql` has run on PROD (`qkxb…wipi`, 2026-10-26), and zoomy-crm with `name` on `GET /api/spin-leads` is live.
