@@ -40,8 +40,8 @@ export const SKU_TAGS: Record<SkuStatus, {label: string; help: string; tone: Ton
     tone: 'info',
   },
   formOnly: {
-    label: 'On our forms, not in Watsons sales',
-    help: 'Items on the inventory forms with no Watsons SKU yet. They get one when it is chosen for a SKU above.',
+    label: 'Sold at Watsons?',
+    help: 'On our inventory forms, but no Watsons SKU is linked and Coop found no likely match. Some may be under “Choose our item” with a shortened Watsons name; picking one there links it.',
     tone: 'info',
   },
 };
