@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {ArrowDown, ArrowUp, Check, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import {ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
@@ -27,6 +27,7 @@ import {itemDisplayName} from '@/src/goldline-item-name';
 const PAGE_SIZES = [5, 10, 20, 100] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 const SIZE_KEY = 'coop.skus.perPage';
+const NUMBERS_KEY = 'coop.skus.numbersOpen';
 const REMARK_MAX = 500;
 // One column template for the header and every row, so the columns line up.
 const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
@@ -431,48 +432,73 @@ type NumbersRow = {view: SkuStatus; tone: Tone; name: string; means: string; wat
  * Coop's suggestions) read as the same pairs, not extra items. A row filters the table.
  */
 function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRow[]; totals: {watsons: number; ours: number}; filter: SkuStatus; onPick: (s: SkuStatus) => void; footnote: React.ReactNode}) {
+  // Open by default; folding it keeps just the totals. Remembered per browser.
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(NUMBERS_KEY) === '0') setOpen(false);
+    } catch {}
+  }, []);
+  const toggle = () =>
+    setOpen((v) => {
+      try {
+        localStorage.setItem(NUMBERS_KEY, v ? '0' : '1');
+      } catch {}
+      return !v;
+    });
   const cell = (v: number | null) => (v == null ? <span className="text-muted-foreground/60">—</span> : n(v));
+  const GRID = 'grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 px-4 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6';
   return (
     <section aria-label="How the numbers fit" className="overflow-hidden rounded-xl border">
-      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-end gap-x-4 border-b bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6">
-        <span>How the numbers fit</span>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls="numbers-rows"
+        className={cn(GRID, 'w-full bg-muted/40 py-3 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset', open && 'border-b')}
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none', !open && '-rotate-90')} />
+          How the numbers fit
+          {!open && <span className="font-normal">· {rows.length} groups</span>}
+        </span>
         <span className="text-right">Watsons SKUs</span>
         <span className="text-right">Our items</span>
-      </div>
-      <ul className="divide-y">
-        {rows.map((r) => {
-          const on = filter === r.view;
-          return (
-            <li key={r.view}>
-              <button
-                type="button"
-                onClick={() => onPick(r.view)}
-                aria-pressed={on}
-                className={cn(
-                  'grid w-full grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 px-4 py-3 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6',
-                  on && 'bg-muted/50',
-                )}
-              >
-                <span className="flex min-w-0 items-start gap-2.5">
-                  <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{background: toneVar(r.tone)}} aria-hidden />
-                  <span className="flex min-w-0 flex-col">
-                    <span className={cn('text-sm', on ? 'font-semibold' : 'font-medium')}>{r.name}</span>
-                    <span className="text-xs leading-relaxed text-muted-foreground">{r.means}</span>
+      </button>
+      <div id="numbers-rows" className={cn('grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+        <ul className="min-h-0 divide-y overflow-hidden" aria-hidden={!open}>
+          {rows.map((r) => {
+            const on = filter === r.view;
+            return (
+              <li key={r.view}>
+                <button
+                  type="button"
+                  onClick={() => onPick(r.view)}
+                  aria-pressed={on}
+                  tabIndex={open ? undefined : -1}
+                  className={cn(GRID, 'w-full py-3 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:bg-muted/40', on && 'bg-muted/50')}
+                >
+                  <span className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{background: toneVar(r.tone)}} aria-hidden />
+                    <span className="flex min-w-0 flex-col">
+                      <span className={cn('text-sm', on ? 'font-semibold' : 'font-medium')}>{r.name}</span>
+                      <span className="text-xs leading-relaxed text-muted-foreground">{r.means}</span>
+                    </span>
                   </span>
-                </span>
-                <span className="text-right text-sm tabular-nums">{cell(r.watsons)}</span>
-                <span className="text-right text-sm tabular-nums">{cell(r.ours)}</span>
-              </button>
-            </li>
-          );
-        })}
-        <li className="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 bg-muted/40 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6">
-          <span className="pl-[18px] text-sm font-semibold">Total</span>
-          <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.watsons)}</span>
-          <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.ours)}</span>
-        </li>
-      </ul>
-      <p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground sm:px-6">{footnote}</p>
+                  <span className="text-right text-sm tabular-nums">{cell(r.watsons)}</span>
+                  <span className="text-right text-sm tabular-nums">{cell(r.ours)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div className={cn(GRID, 'py-3', open && 'border-t')}>
+        <span className="pl-[18px] text-sm font-semibold">Total</span>
+        <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.watsons)}</span>
+        <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.ours)}</span>
+      </div>
+      {open && <p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground sm:px-6">{footnote}</p>}
     </section>
   );
 }
