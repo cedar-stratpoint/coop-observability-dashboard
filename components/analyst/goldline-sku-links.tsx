@@ -1,6 +1,6 @@
 'use client';
 
-import {useEffect, useMemo, useState, useTransition} from 'react';
+import {Fragment, useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
 import {Check, CircleCheck, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
@@ -147,6 +147,12 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   // whole window (listed by Watsons, never sold) have nothing to decide and aren't in a tab.
   const allSkus = data.rows.length;
   const noSales = allSkus - counts.check - counts.choose - counts.rejected - counts.linked;
+  // Our side is a second list, so it gets its own total: every form item is either linked
+  // (the same 210 pairs) or has no Watsons code yet. Many of those are the items Coop
+  // suggested for "to check" SKUs, which is why the tab counts can't simply be added up.
+  const formItems = counts.linked + counts.formOnly;
+  const suggestedItems = useMemo(() => new Set(lists.check.map((r) => r.suggestion?.itemCode).filter(Boolean)), [lists.check]);
+  const formOnlySuggested = data.unlinkedItems.filter((i) => suggestedItems.has(i.itemCode)).length;
   const linkedPct = pct(t.linkedUnits, t.units);
   const suggestedPct = pct(t.suggestedUnits, t.units);
   const pick = (s: SkuStatus) => {
@@ -184,7 +190,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
               <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden /> Not matched {Math.max(0, Math.round((100 - linkedPct - suggestedPct) * 10) / 10)}%
             </li>
           </ul>
-          <div className="flex flex-col gap-1 border-t pt-3">
+          <div className="flex flex-col gap-3 border-t pt-3">
+            <div className="flex flex-col gap-1">
             <p className="text-sm">
               <span className="font-semibold tabular-nums">{n(allSkus)}</span> <span className="text-muted-foreground">Watsons SKUs in all</span>
             </p>
@@ -199,6 +206,16 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
                 .filter(Boolean)
                 .join(' · ')}
             </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-sm">
+                <span className="font-semibold tabular-nums">{n(formItems)}</span> <span className="text-muted-foreground">items on our forms</span>
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground tabular-nums">
+                {n(counts.linked)} linked (the same pairs) · {n(counts.formOnly)} without a Watsons SKU
+                {formOnlySuggested > 0 ? `, ${n(formOnlySuggested)} of them Coop's matches to check` : ''}
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -209,8 +226,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             {tabs.map((s) => {
               const on = filter === s;
               return (
+                <Fragment key={s}>
+                {/* The last tab lists our items, not Watsons SKUs: set apart so its count isn't read as part of the others. */}
+                {s === 'formOnly' && <span aria-hidden className="mx-2 my-2.5 w-px shrink-0 bg-border" />}
                 <button
-                  key={s}
                   type="button"
                   role="tab"
                   aria-selected={on}
@@ -224,6 +243,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
                   {TAB[s]}
                   <span className={cn('rounded-full px-1.5 text-xs tabular-nums', on ? 'bg-foreground/10' : 'bg-muted')}>{counts[s]}</span>
                 </button>
+                </Fragment>
               );
             })}
           </div>
