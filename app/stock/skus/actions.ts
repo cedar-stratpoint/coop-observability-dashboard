@@ -6,7 +6,7 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
-import {dismissSuggestion, linkSku, LinkError, saveReview, setDecommissioned, unlinkSku} from '@/src/goldline-sku-links-data';
+import {dismissSuggestion, linkSku, LinkError, saveItemNote, saveReview, setDecommissioned, unlinkSku} from '@/src/goldline-sku-links-data';
 
 // Actions behind the Watsons SKU links screen. Links decide which sales count for which
 // item across every store, so only a role that sees every store may change them. Every
@@ -124,5 +124,21 @@ export async function setDecommissionedAction(input: {company: string | null; it
     if (err instanceof LinkError) return {ok: false, error: err.message};
     console.error('setDecommissionedAction', err);
     return {ok: false, error: 'Could not update the item. Please try again.'};
+  }
+}
+
+/** Save the latest note on one of our items (empty removes it). Kept separate from decommissioning. */
+export async function saveItemNoteAction(input: {company: string | null; item: string; note: string | null}): Promise<LinkActionResult> {
+  const c = await linkerContext(input.company);
+  if ('error' in c) return {ok: false, error: c.error as string};
+  if (!ITEM.test(input.item ?? '')) return {ok: false, error: 'Item not found.'};
+  try {
+    await saveItemNote(c.companyId, input.item, remarkOf(input.note), await actor());
+    refresh(c.companyId);
+    return {ok: true};
+  } catch (err) {
+    if (err instanceof LinkError) return {ok: false, error: err.message};
+    console.error('saveItemNoteAction', err);
+    return {ok: false, error: 'Could not save the note. Please try again.'};
   }
 }

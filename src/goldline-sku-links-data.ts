@@ -44,6 +44,9 @@ export type SkuLinkRow = {
 export type FormLine = {row: number; itemCode: string; productLine: string | null; name: string; sku: string | null};
 export type FormPage = {page: number; lines: FormLine[]};
 
+/** The latest note on one of our form items (f2d): what, who and when. */
+export type ItemNote = {text: string; by: string | null; at: string};
+
 /** One of our form items marked as no longer made or sold, with who did it and why. */
 export type DecommissionedItem = SkuLinkItem & {at: string | null; by: string | null; remark: string | null};
 
@@ -51,6 +54,7 @@ export type SkuLinkData = {
   rows: SkuLinkRow[];
   unlinkedItems: SkuLinkItem[]; // catalog items with no Watsons SKU yet (for the manual picker)
   decommissioned: DecommissionedItem[]; // retired items with no Watsons SKU (f2c)
+  notes: Record<string, ItemNote>; // latest note per item code (f2d)
   formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
@@ -71,10 +75,10 @@ const item = (p: ProductRow): SkuLinkItem => ({
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
-  const [products, chain, rollup, reviews] = await Promise.all([
+  const [products, chain, rollup, reviews, notes] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
@@ -102,6 +106,9 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
         .order('sku_code')
         .range(from, to),
     ) as unknown as Promise<ReviewRow[]>,
+    fetchAllRows('item_notes', (from, to) =>
+      supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to),
+    ) as unknown as Promise<Array<{item_code: string; note: string; note_by: string | null; note_at: string}>>,
   ]);
   const reviewBySku = new Map(
     reviews.map((r) => [
@@ -144,6 +151,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
+    notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
     decommissioned: products
       .filter((p) => !p.sku_code?.trim() && p.retired_at)
       .map((p) => ({...item(p), at: p.retired_at, by: p.retired_by ?? null, remark: p.retired_remark ?? null}))
@@ -243,6 +251,20 @@ export async function setDecommissioned(companyId: string, itemCode: string, on:
     .eq('company_id', companyId)
     .eq('item_code', itemCode);
   if (res.error) throw new Error(`decommission failed: ${res.error.message}`);
+}
+
+/** Keep the latest note on one of our items, or remove it (empty text). Separate from decommissioning. */
+export async function saveItemNote(companyId: string, itemCode: string, text: string | null, by: string | null): Promise<void> {
+  const supa = db();
+  // pagination-ok: one row by primary key (company_id, item_code).
+  const p = await supa.from('products').select('item_code').eq('company_id', companyId).eq('item_code', itemCode).maybeSingle();
+  if (p.error) throw new Error(p.error.message);
+  if (!p.data) throw new LinkError(`Item ${itemCode} isn’t in the catalog.`);
+  const note = text?.trim();
+  const res = note
+    ? await supa.from('item_notes').upsert({company_id: companyId, item_code: itemCode, note, note_by: by, note_at: new Date().toISOString()}, {onConflict: 'company_id,item_code'})
+    : await supa.from('item_notes').delete().eq('company_id', companyId).eq('item_code', itemCode);
+  if (res.error) throw new Error(`note save failed: ${res.error.message}`);
 }
 
 /** Undo a link. The pair is remembered as turned down so matching won't redo it. */
