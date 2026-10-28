@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.17.2 (2026-10-29): SKU linking responds instantly (prod release)
+Ships the two instant-feedback changes below to prod for Justin's walkthrough: notes appear the moment they are saved ("Saving…", then "Saved"), and Approve, Reject, Link, Unlink and remarks swap their buttons for a saving chip that turns into a confirmation while the page reloads. Code only; no database change.
+
 ## 2026-10-29 — SKU linking: Approve, Reject, Link, Unlink and remarks show instantly
 Same idea as notes: deciding on a Watsons SKU felt slow because the action reloads the page and every row stayed disabled until it finished. Now the buttons give way at once (about 40 ms) to a chip: "Approving…", "Rejecting…", "Linking to ELDF03…", "Unlinking…" or "Saving remark…" with a spinner, then "Approved · linked to PEP092", "Rejected PEP092", "Linked to ELDF03" and so on with a check when the server confirms (about 0.3 to 2 s); the row is tinted, a link shows the chosen item right away, and a remark shows as typed. The row then moves to its new list when the reloaded page arrives. A failure brings the buttons back with the error. Other rows stay clickable meanwhile.
 
