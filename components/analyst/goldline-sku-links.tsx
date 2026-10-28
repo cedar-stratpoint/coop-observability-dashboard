@@ -2,9 +2,11 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Archive, ArchiveRestore, Loader2, NotebookPen, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import {Archive, ArchiveRestore, Loader2, NotebookPen, RotateCcw, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
-import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, undoDecisionAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import type {DecisionInfo} from '@/src/goldline-sku-undo';
+import {decisionLabel, UndoDialog} from '@/components/analyst/goldline-undo-dialog';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
@@ -285,6 +287,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
                 key={i.itemCode}
                 i={i}
                 note={data.notes[i.itemCode] ?? null}
+                decision={data.decisions[`item:${i.itemCode}`]}
                 decommissioned={filter === 'decommissioned'}
                 company={company}
                 canEdit={canEdit}
@@ -306,7 +309,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} />
             ))}
           </ul>
         </div>
@@ -392,6 +395,21 @@ function SortHead({label, k, sort, onSort, right = false}: {label: string; k: So
       {label}
       <Icon aria-hidden className={cn('size-3 shrink-0', on ? 'opacity-100' : 'opacity-40 group-hover:opacity-80')} />
     </button>
+  );
+}
+
+/** The record that a decision was undone: what, who decided it, who undid it and when. */
+function UndoneLine({decision}: {decision: DecisionInfo}) {
+  return (
+    <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={`${decisionLabel(decision)} by ${decision.by ?? 'someone'}, undone by ${decision.undoneBy ?? 'someone'}`}>
+      <RotateCcw className="size-3 shrink-0" aria-hidden />
+      <span className="truncate">
+        Undone: {decisionLabel(decision)}
+        {decision.by ? ` by ${decision.by}` : ''}
+        {decision.undoneBy ? ` · undone by ${decision.undoneBy}` : ''}
+        {decision.undoneAt ? `, ${day(decision.undoneAt)}` : ''}
+      </span>
+    </p>
   );
 }
 
@@ -520,6 +538,7 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
 function ItemRow({
   i,
   note,
+  decision,
   decommissioned,
   company,
   canEdit,
@@ -530,6 +549,7 @@ function ItemRow({
 }: {
   i: SkuLinkItem | DecommissionedItem;
   note: ItemNote | null;
+  decision?: DecisionInfo;
   decommissioned: boolean;
   company: string;
   canEdit: boolean;
@@ -546,6 +566,28 @@ function ItemRow({
   // "Saved" when the server confirms) while the page reloads behind it; if it fails, the
   // note is taken back and the panel reopens. `removed` hides a note being removed.
   const [optimistic, setOptimistic] = useState<ItemNote | 'removed' | null>(null);
+  const [undoOpen, setUndoOpen] = useState(false);
+  const [undoing, setUndoing] = useState<'saving' | 'saved' | null>(null);
+  const decisionKey = `${decision?.id ?? ''}|${decision?.undoneAt ?? ''}`;
+  const [seenDecision, setSeenDecision] = useState(decisionKey);
+  if (decisionKey !== seenDecision) {
+    // The reloaded page shows the undo: drop the "Undoing…" state.
+    setSeenDecision(decisionKey);
+    if (undoing === 'saved') setUndoing(null);
+  }
+  // On Decommissioned, "Bring back" already undoes a decommission; no second button.
+  const canUndo = Boolean(decision && !decision.undoneAt && !(decommissioned && decision.action === 'decommissioned'));
+  const undo = () => {
+    if (!decision) return;
+    setUndoing('saving');
+    act(
+      i.itemCode,
+      () => undoDecisionAction({company, id: decision.id}),
+      `Undone: ${decisionLabel(decision)}.`,
+      () => setUndoing((u) => (u ? 'saved' : u)),
+      () => setUndoing(null),
+    );
+  };
   const [saving, setSaving] = useState<'saving' | 'saved' | null>(null);
   useEffect(() => {
     // The reloaded page has caught up: drop the stand-in.
@@ -637,7 +679,13 @@ function ItemRow({
         </div>
         <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
         <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
-        {canEdit && (
+        {canEdit && undoing && (
+          <span role="status" className="inline-flex items-center gap-1.5 justify-self-start rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {undoing === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="size-3.5" aria-hidden />}
+            {undoing === 'saving' ? 'Undoing…' : 'Undone'}
+          </span>
+        )}
+        {canEdit && !undoing && (
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant={panel === 'note' ? 'secondary' : 'ghost'} onClick={openNote} aria-expanded={panel === 'note'} disabled={saving === 'saving'}>
               <NotebookPen className="size-3.5" /> {shown ? 'Edit note' : 'Add note'}
@@ -656,9 +704,22 @@ function ItemRow({
                 <Archive className="size-3.5" /> Mark as decommissioned
               </Button>
             )}
+            {canUndo && decision && (
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setUndoOpen(true)} title={`Undo: ${decisionLabel(decision)}`}>
+                <RotateCcw className="size-3.5" /> Undo
+              </Button>
+            )}
           </div>
         )}
       </div>
+      {decision?.undoneAt && !undoing && (
+        <div className="px-6 pb-3 -mt-2">
+          <UndoneLine decision={decision} />
+        </div>
+      )}
+      {undoOpen && decision && (
+        <UndoDialog decision={decision} subject={`${itemText(i)} · ${i.itemCode}`} onConfirm={undo} onClosed={() => setUndoOpen(false)} />
+      )}
       {panel === 'note' && canEdit && (
         <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
           <p className="text-xs text-muted-foreground">A note for this item, for example to check it later. It doesn’t change anything else; only the latest note is kept.</p>
@@ -778,6 +839,7 @@ function SkuRow({
   act,
   onShowForm,
   quiet = false,
+  decision,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -789,8 +851,11 @@ function SkuRow({
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
   /** Nothing to decide here (no units sold), so the action is offered, not pushed. */
   quiet?: boolean;
+  /** The latest decision on this SKU, for Undo (or the record that it was undone). */
+  decision?: DecisionInfo;
 }) {
   const status = skuStatus(r);
+  const [undoOpen, setUndoOpen] = useState(false);
   const [remark, setRemark] = useState('');
   const [item, setItem] = useState('');
   const [open, setOpen] = useState(false);
@@ -964,6 +1029,12 @@ function SkuRow({
               <MoreHorizontal className="size-4" />
             </Button>
           )}
+          {!outcome && canEdit && decision && !decision.undoneAt && (
+            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setUndoOpen(true)} title={`Undo: ${decisionLabel(decision)}`}>
+              <RotateCcw className="size-3.5" /> Undo
+            </Button>
+          )}
+          {!outcome && decision?.undoneAt && <UndoneLine decision={decision} />}
           {(outcome?.remark?.trim() || note) && !open && (
             <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={outcome?.remark?.trim() || note || undefined}>
               <MessageSquare className="size-3 shrink-0" />
@@ -1029,6 +1100,14 @@ function SkuRow({
           </div>
           <ReviewNote r={r} />
         </div>
+      )}
+      {undoOpen && decision && (
+        <UndoDialog
+          decision={decision}
+          subject={`Watsons SKU ${sku} · ${watsonsName(r.name)}`}
+          onConfirm={() => decide(() => undoDecisionAction({company, id: decision.id}), `Undone: ${decisionLabel(decision)}.`, {doing: 'Undoing…', done: 'Undone', tone: 'info'})}
+          onClosed={() => setUndoOpen(false)}
+        />
       )}
     </li>
   );
