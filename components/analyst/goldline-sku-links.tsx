@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import {ArrowDown, ArrowUp, Check, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
@@ -108,18 +108,28 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   };
   const [filter, setFilter] = useState<SkuStatus>(lists.check.length ? 'check' : lists.choose.length ? 'choose' : 'linked');
 
+  // Column sorting. "Biggest sellers first" is the default and the third click on a column
+  // goes back to it, so there's never a sort the page can't get out of.
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const sortBy = (key: SortKey) => {
+    setPage(1);
+    setSort((s) => (s.key !== key ? {key, dir: 1} : s.dir === 1 ? {key, dir: -1} : DEFAULT_SORT));
+  };
+
   const q = query.trim().toLowerCase();
   const shownSkus = useMemo(() => {
     if (filter === 'formOnly') return [];
-    return lists[filter].filter((r) => {
+    const rows = lists[filter].filter((r) => {
       const it = r.linked ?? r.suggestion;
       return !q || r.name.toLowerCase().includes(q) || r.skuCode.includes(q) || (it ? `${it.itemCode} ${itemText(it)}`.toLowerCase().includes(q) : false);
     });
-  }, [lists, filter, q]);
-  const shownItems = useMemo(
-    () => (filter === 'formOnly' ? noMatchItems.filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q)) : []),
-    [noMatchItems, filter, q],
-  );
+    return sort.key === 'sales' ? rows : sortRows(rows, (r) => skuSortValue(r, sort.key), sort.dir);
+  }, [lists, filter, q, sort]);
+  const shownItems = useMemo(() => {
+    if (filter !== 'formOnly') return [];
+    const items = noMatchItems.filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q));
+    return sort.key === 'sales' ? items : sortRows(items, (i) => itemSortValue(i, sort.key), sort.dir);
+  }, [noMatchItems, filter, q, sort]);
   const total = filter === 'formOnly' ? shownItems.length : shownSkus.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
@@ -154,6 +164,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const pick = (s: SkuStatus) => {
     setFilter(s);
     setPage(1);
+    setSort(DEFAULT_SORT);
   };
   const tag = SKU_TAGS[filter];
   const TabIcon = TAB_ICON[filter];
@@ -233,7 +244,21 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         {total > 0 && (
           <p className="text-xs text-muted-foreground tabular-nums">
             {n(total)} {filter === 'formOnly' ? 'items' : 'Watsons SKUs'}
-            {filter !== 'formOnly' && filter !== 'noSales' ? ', biggest sellers first' : ''}
+            {sort.key !== 'sales' ? (
+              <>
+                , {sortText(sort, filter)}
+                {' · '}
+                <button type="button" onClick={() => setSort(DEFAULT_SORT)} className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground">
+                  {filter === 'formOnly' ? 'form order' : 'biggest sellers first'}
+                </button>
+              </>
+            ) : filter === 'formOnly' ? (
+              ', in form order'
+            ) : filter !== 'noSales' ? (
+              ', biggest sellers first'
+            ) : (
+              ''
+            )}
           </p>
         )}
       </div>
@@ -249,9 +274,9 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
       ) : filter === 'formOnly' ? (
         <div className="overflow-hidden rounded-xl border">
           <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground md:grid', ITEM_COLS)}>
-            <span>Item on our form</span>
-            <span>Product line</span>
-            <span className="text-right">Price</span>
+            <SortHead label="Item on our form" k="item" sort={sort} onSort={sortBy} />
+            <SortHead label="Product line" k="line" sort={sort} onSort={sortBy} />
+            <SortHead label="Price" k="price" sort={sort} onSort={sortBy} right />
           </div>
           <ul className="divide-y">
             {slice(shownItems).map((i) => (
@@ -275,10 +300,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
       ) : (
         <div className="overflow-hidden rounded-xl border">
           <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground lg:grid', COLS)}>
-            <span>Watsons SKU</span>
-            <span>Our item</span>
-            <span className="text-right">Price</span>
-            <span>{canEdit ? 'Your decision' : 'Decision'}</span>
+            <SortHead label="Watsons SKU" k="sku" sort={sort} onSort={sortBy} />
+            <SortHead label="Our item" k="item" sort={sort} onSort={sortBy} />
+            <SortHead label="Price" k="price" sort={sort} onSort={sortBy} right />
+            <SortHead label={canEdit ? 'Your decision' : 'Decision'} k="decision" sort={sort} onSort={sortBy} />
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
@@ -302,6 +327,72 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {formAt && data.formPages.length > 0 && <FormPageDialog pages={data.formPages} at={formAt} onClosed={() => setFormAt(null)} />}
     </div>
+  );
+}
+
+type SortKey = 'sales' | 'sku' | 'item' | 'price' | 'decision' | 'line';
+type Sort = {key: SortKey; dir: 1 | -1};
+const DEFAULT_SORT: Sort = {key: 'sales', dir: -1};
+const SORT_LABEL: Record<SortKey, string> = {sales: 'sales', sku: 'Watsons name', item: 'our item', price: 'price', decision: 'decision', line: 'product line'};
+/** "by price, low to high" and so on, for the line above the table. */
+function sortText({key, dir}: Sort, view: SkuStatus): string {
+  if (key === 'price') return `by price, ${dir === 1 ? 'low to high' : 'high to low'}`;
+  if (key === 'decision') {
+    const first = view === 'check' ? 'least sure match first' : 'latest decision first';
+    return dir === 1 ? first : `by decision, ${view === 'check' ? 'surest match first' : 'oldest decision first'}`;
+  }
+  return `by ${SORT_LABEL[key]}, ${dir === 1 ? 'A to Z' : 'Z to A'}`;
+}
+const TIER_RANK = {low: 0, medium: 1, high: 2} as const;
+
+type SortValue = string | number | null;
+/** Sort by one value; empty values (no item, no price) always go last, whichever the direction. */
+function sortRows<T>(xs: T[], val: (x: T) => SortValue, dir: 1 | -1): T[] {
+  return [...xs].sort((a, b) => {
+    const x = val(a);
+    const y = val(b);
+    if (x == null || y == null) return x == null && y == null ? 0 : x == null ? 1 : -1;
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
+  });
+}
+function skuSortValue(r: SkuLinkRow, key: SortKey): SortValue {
+  const it = r.linked ?? r.suggestion;
+  switch (key) {
+    case 'sku':
+      return watsonsName(r.name).toLowerCase();
+    case 'item':
+      return it ? itemText(it).toLowerCase() : null;
+    case 'price':
+      return r.avgPrice;
+    case 'decision':
+      // Coop's suggestions: "not sure" first. Everything else: the latest decision first.
+      return r.suggestion ? TIER_RANK[r.suggestion.tier] : r.review?.actionAt ? -Date.parse(r.review.actionAt) : null;
+    default:
+      return null;
+  }
+}
+function itemSortValue(i: SkuLinkItem, key: SortKey): SortValue {
+  return key === 'price' ? i.price : key === 'line' ? (i.productLine ?? 'Other').toLowerCase() : key === 'item' ? itemText(i).toLowerCase() : null;
+}
+
+/** A sortable column header: click for ascending, again for descending, a third time back to the default. */
+function SortHead({label, k, sort, onSort, right = false}: {label: string; k: SortKey; sort: Sort; onSort: (k: SortKey) => void; right?: boolean}) {
+  const on = sort.key === k;
+  const Icon = !on ? ChevronsUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(k)}
+      aria-label={`Sort by ${label}${on ? (sort.dir === 1 ? ', ascending' : ', descending') : ''}`}
+      className={cn(
+        'group inline-flex items-center gap-1 rounded-sm text-left outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+        right && 'justify-self-end',
+        on && 'text-foreground',
+      )}
+    >
+      {label}
+      <Icon aria-hidden className={cn('size-3 shrink-0', on ? 'opacity-100' : 'opacity-40 group-hover:opacity-80')} />
+    </button>
   );
 }
 

@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: sortable columns
+Every column header on SKU linking sorts the table: Watsons SKU (name), Our item (name; rows with no item last), Price (Watsons' average; no price last) and Your decision (Coop's least sure match first on Check Coop's match, the latest decision first elsewhere); on Sold at Watsons?: item, product line and price. Click once for ascending, again for descending, a third time back to the default (biggest sellers first; form order for our items). The line above the table names the current sort with a "biggest sellers first" link to reset, and picking another card or count resets it too.
+
 ## 2026-10-28 — SKU linking: action cards and "For your records", like the audit PDF cover
 The page now opens the way the audit PDF's cover does (Hick's Law: three jobs, one card each). Three cards (42 Check Coop's match · 58 Choose our item · 11 Sold at Watsons?) filter the table below; the pressed card is outlined in its colour. The tab row is gone. A quiet "For your records" panel shows the two totals as bars (315 Watsons SKUs: linked · to check · to choose · rejected when any · with no units sold; 263 items on our forms: linked, the same pairs · Coop's matches · no Watsons SKU), and every count in it filters the table too, so linked, rejected and no-units-sold are one click away without their own tabs; then the units line (87.7% linked, approving Coop's matches adds 9%). "Sold at Watsons?" now means what the PDF's Section C means: our items with no Watsons SKU and no Coop suggestion (11), not all 53 without a SKU (the other 42 are answered under Check Coop's match); its help line says some may be under Choose our item with a shortened Watsons name.
 
