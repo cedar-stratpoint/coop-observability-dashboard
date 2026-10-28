@@ -1,4 +1,4 @@
-import {getPosOrdersPage, getPosOrdersPriceBounds} from '@/src/pos-sales';
+import {getPosOrdersPage, getPosOrdersRevenue, getPosOrdersPriceBounds} from '@/src/pos-sales';
 import {getPosProducts, getPosBundles, usingPosMock} from '@/src/pos-data';
 import {parseOrdersFilter, parsePage} from '@/src/pos-sales-compute';
 import {OfflineOrdersView} from '@/components/analyst/offline-orders';
@@ -12,8 +12,9 @@ type SearchParams = {page?: string; method?: string; range?: string; min?: strin
 export default async function Page(props: {searchParams: Promise<SearchParams>}) {
   const searchParams = await props.searchParams;
   const filter = parseOrdersFilter(searchParams);
-  const [{orders, pageInfo}, bounds, products, bundleRows, prizeOrderUuids] = await Promise.all([
+  const [{orders, pageInfo}, revenue, bounds, products, bundleRows, prizeOrderUuids] = await Promise.all([
     getPosOrdersPage(parsePage(searchParams.page), filter),
+    getPosOrdersRevenue(filter),
     getPosOrdersPriceBounds(),
     getPosProducts(),
     getPosBundles(),
@@ -35,6 +36,7 @@ export default async function Page(props: {searchParams: Promise<SearchParams>})
     <OfflineOrdersView
       orders={orders}
       pageInfo={pageInfo}
+      revenue={revenue}
       filter={filter}
       bounds={bounds}
       catalog={catalog}
