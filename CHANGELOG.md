@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: the 5 Watsons SKUs with no units sold are viewable
+The header total counted "5 with no units sold", but no tab listed them (any SKU with zero units and no link was dropped from every tab). They now form a "No units sold" view: the "5 with no units sold" text in the coverage panel opens it, and its tab shows only while open, so the working tabs stay at four (Hick's Law). Its help line says there is nothing to decide; "Choose item" is an outline button there instead of the primary one. The audit PDF lists the same 5 at the end of the Appendix, linked from the cover; its cover was also cut down to three action cards (42 check · 58 choose · 11 sold at Watsons?) and one "For your records" panel with the two totals as bars, with the "how links are made" steps moved to page 2.
+
 ## 2026-10-28 — SKU linking: a second total for our form items, form-items tab set apart
 The tab counts mix two lists, which read as one: 42 + 58 + 210 + 53 = 363 against "315 Watsons SKUs". The first three (plus 5 with no units sold) are Watsons SKUs; "Form items without a SKU" counts our items, and 42 of those 53 are the very items Coop suggested for the "to check" SKUs. So the coverage panel now gives both totals: 315 Watsons SKUs (210 linked · 42 to check · 58 to choose · 5 with no units sold) and 263 items on our forms (210 linked, the same pairs · 53 without a Watsons SKU, 42 of them Coop's matches to check), and a thin divider sets the form-items tab apart from the Watsons-SKU tabs. The audit PDF cover got the same second line.
 
