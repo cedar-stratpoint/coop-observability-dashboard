@@ -37,6 +37,7 @@ const timeLabel = (iso: string) =>
 export function OfflineOrdersView({
   orders,
   pageInfo,
+  revenue,
   filter,
   bounds,
   catalog,
@@ -50,6 +51,7 @@ export function OfflineOrdersView({
 }: {
   orders: PosOrder[];
   pageInfo: PageInfo;
+  revenue: number; // completed revenue (voided excluded) across the whole filtered set
   filter: PosOrdersFilter;
   bounds: PriceBounds;
   catalog: PosCatalogItem[];
@@ -156,6 +158,10 @@ export function OfflineOrdersView({
       <p className="mb-3 text-xs tabular-nums text-muted-foreground">
         {pageInfo.total} {pageInfo.total === 1 ? 'transaction' : 'transactions'}
         {filtered ? ' match these filters' : ''}
+        {' · '}
+        <span className="font-semibold text-foreground" title="Completed sales only; voided excluded">
+          ₱{revenue.toLocaleString()}
+        </span>
       </p>
 
       {actionError && (
