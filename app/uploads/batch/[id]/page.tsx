@@ -1,9 +1,11 @@
-import {notFound} from 'next/navigation';
+import {notFound, redirect} from 'next/navigation';
+import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {catalogForCodes, getBatch, getBatchPages, listStores} from '@/src/goldline-data';
+import {catalogForCodes, getBatch, getBatchPages, listStores, splitBatchIntoForms} from '@/src/goldline-data';
 import {MANIFESTS} from '@/src/goldline-extract';
-import {orderPages} from '@/src/upload-batch';
+import {groupForms, orderPages, scanOrder} from '@/src/upload-batch';
+import {getCurrentBas} from '@/src/goldline-ba-data';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 
 export const dynamic = 'force-dynamic';
@@ -28,8 +30,18 @@ export default async function Page(props: {params: Promise<{id: string}>; search
 
   const raw = await getBatchPages(ctx.companyId, id);
   const pdfPages = raw.filter((p) => p.upload.kind === 'inventory_pdf');
+  // A scan with several stores' forms whose split didn't run (the tab closed mid-upload):
+  // split it now, then show this batch's own form. The other forms are in Uploads.
+  if (batch.status === 'open' && canEditData(ctx.role) && !pdfPages.some((p) => p.upload.status === 'processing')) {
+    const ordered = scanOrder(pdfPages.map((p) => ({filename: p.upload.filename, created_at: p.upload.created_at, page: p.extraction?.page ?? null})));
+    if (groupForms(ordered).length > 1) {
+      const session = await auth();
+      await splitBatchIntoForms(ctx.companyId, id, session?.user?.email ?? null);
+      redirect(`/uploads/batch/${id}`);
+    }
+  }
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
-  const [catalog, stores] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId)]);
+  const [catalog, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);
 
   const pages: BatchReviewPage[] = orderPages(
     pdfPages.map((p) => {
@@ -62,6 +74,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       pages={pages}
       catalog={catalog}
       stores={stores}
+      bas={bas}
       initialPageId={typeof openPage === 'string' ? openPage : null}
       otherFiles={raw.filter((p) => p.upload.kind !== 'inventory_pdf').map((p) => p.upload)}
     />

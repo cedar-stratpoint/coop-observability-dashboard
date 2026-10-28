@@ -3,6 +3,11 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {classifyUpload} from '@/src/goldline-upload';
 import {parseGoldlinePos} from '@/src/goldline-csv';
+import {readWatsonsWorkbook} from '@/src/goldline-pos-xlsx';
+import {applyWatsonsMonth} from '@/src/goldline-watsons-data';
+import {runChecks} from '@/src/goldline-checks-data';
+import {glTags} from '@/src/goldline-ref-data';
+import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
   createUpload,
@@ -18,9 +23,11 @@ import {humanizeExtractError, INVENTORY_PAGES, MANIFESTS} from '@/src/goldline-e
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
-//   • .csv  → parse → idempotent upsert into gl_sales (needs period_start/_end)
+//   • .csv  → parse → idempotent upsert into sales (needs period_start/_end)
+//   • .xlsx → Watsons POS Sales Data: one month, every store. The month comes from the
+//             file; stores and Watsons SKUs are added, then the month's sales replaced
 //   • .pdf  → store → Claude Vision detects the page → extracts that page's items →
-//             staged in gl_extractions for review (page 6 / non-form → out of scope)
+//             staged in extractions for review (page 6 / non-form → out of scope)
 // Tenant isolation is enforced here (getDataContext + canEditData); the data-blind
 // Coop Admin and read-only analysts are refused. File-type gating is the first check.
 
@@ -241,11 +248,45 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const committed = await upsertSales(companyId, rows, {start, end}, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      await runChecks(companyId).catch((e) => console.error('runChecks after CSV upload', msg(e)));
       return json({uploadId, status: 'committed', rowsCommitted: committed, warnings: errors});
     } catch (e) {
-      console.error('goldline upload: gl_sales commit failed', e);
+      console.error('goldline upload: sales commit failed', e);
       await setUploadStatus(uploadId, 'failed', {rejectReason: 'Could not save sales rows.'});
       return json({uploadId, status: 'failed', error: 'Could not save sales rows. Please try again.'}, 500);
+    }
+  }
+
+  // --- Watsons POS Sales Data (.xlsx) ------------------------------------------
+  if (cls.kind === 'pos_xlsx') {
+    emit({type: 'stage', stage: 'parsing'});
+    const wb = await readWatsonsWorkbook(bytes);
+    // A file we can't date, or whose rows don't add up to its own TOTAL, is refused whole.
+    if (!wb.month || !wb.rows.length || wb.checksumOk === false) {
+      const reason = wb.errors[0] ?? 'No sales rows were found in this file.';
+      await setUploadStatus(uploadId, 'failed', {rejectReason: reason});
+      return json({uploadId, status: 'failed', error: reason, errors: wb.errors}, 422);
+    }
+    // A chain-wide file adds stores and changes SKU links for the whole company, so only
+    // a role that sees every store may load it (same rule as SKU linking).
+    if (Array.isArray(ctx.storeScope)) {
+      const reason = 'Only someone who sees every store can load POS Sales Data for the whole chain.';
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
+      return json({uploadId, status: 'rejected', error: reason}, 403);
+    }
+    try {
+      emit({type: 'stage', stage: 'saving'});
+      const summary = await applyWatsonsMonth(companyId, wb, uploadId);
+      await setUploadStatus(uploadId, 'committed');
+      // A new month of POS data can open or clear form vs. sales flags (counted stores only).
+      await runChecks(companyId).catch((e) => console.error('runChecks after Watsons upload', msg(e)));
+      revalidateTag(glTags.stores(companyId), {expire: 0});
+      revalidateTag(glTags.catalog(companyId), {expire: 0});
+      return json({uploadId, status: 'committed', rowsCommitted: summary.salesRows, watsons: summary, warnings: wb.errors});
+    } catch (e) {
+      console.error('goldline upload: Watsons month failed', msg(e));
+      await setUploadStatus(uploadId, 'failed', {rejectReason: 'Could not save this month of sales. Please try again.', errorDetail: msg(e)});
+      return json({uploadId, status: 'failed', error: 'Could not save this month of sales. Please try again.'}, 500);
     }
   }
 

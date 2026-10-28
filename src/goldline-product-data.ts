@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {addDays} from './goldline-movement';
@@ -13,18 +13,14 @@ export type {ProductInfo};
 // scoped on every query (the service-role key bypasses RLS; company_id is the fence),
 // and narrowed to a store-scoped role's stores.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 const HISTORY_DAYS = 470; // 3 real + 3 forecast months, plus the same months a year back
 
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 export type ProductData = {item: ProductInfo; stores: StoreInput[]};
 
 export async function getProductData(companyId: string, itemCode: string, storeScope?: string[] | null, today = new Date()): Promise<ProductData | null> {
-  if (!url || !key) return null;
+  if (!nichidoConfigured()) return null;
   const supa = db();
   const since = addDays(today.toISOString().slice(0, 10), -HISTORY_DAYS);
   const scope = storeScope ? new Set(storeScope) : null;
@@ -32,9 +28,9 @@ export async function getProductData(companyId: string, itemCode: string, storeS
   const [catalog, storesRows, counts, snaps] = await Promise.all([
     getGlCatalog(companyId),
     getGlStores(companyId),
-    fetchAllRows('gl_inventory', (from, to) => {
+    fetchAllRows('inventory', (from, to) => {
       let q = supa
-        .from('gl_inventory') // pagination-ok: paged by fetchAllRows (.range below)
+        .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
         .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
         .eq('company_id', companyId)
         .eq('item_code', itemCode)
@@ -43,9 +39,9 @@ export async function getProductData(companyId: string, itemCode: string, storeS
       return q.order('id').range(from, to);
     }) as unknown as Promise<Array<ItemCount & {store_code: string}>>,
     // Each store's latest count of any item — to tell "not on the latest count" from current.
-    fetchAllRows('gl_inventory_snapshots', (from, to) => {
+    fetchAllRows('inventory_snapshots', (from, to) => {
       let q = supa
-        .from('gl_inventory_snapshots') // pagination-ok: paged by fetchAllRows (.range below)
+        .from('inventory_snapshots') // pagination-ok: paged by fetchAllRows (.range below)
         .select('store_code,period_end')
         .eq('company_id', companyId)
         .gte('period_end', since);
@@ -58,9 +54,9 @@ export async function getProductData(companyId: string, itemCode: string, storeS
 
   const sku = p?.sku_code?.trim() || null;
   const sales = sku
-    ? ((await fetchAllRows('gl_sales', (from, to) => {
+    ? ((await fetchAllRows('sales', (from, to) => {
         let q = supa
-          .from('gl_sales') // pagination-ok: paged by fetchAllRows (.range below)
+          .from('sales') // pagination-ok: paged by fetchAllRows (.range below)
           .select('store_code,period_start,period_end,units')
           .eq('company_id', companyId)
           .eq('sku_code', sku)

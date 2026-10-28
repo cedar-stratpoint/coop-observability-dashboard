@@ -1,6 +1,6 @@
 // Pure logic behind the Goldline Inventory page (no I/O, unit-tested). Input is the
-// committed gl_inventory rows for ONE store × form period — i.e. the semi-monthly
-// handwritten form after review — plus the catalog (gl_products) and the printed
+// committed inventory rows for ONE store × form period — i.e. the semi-monthly
+// handwritten form after review — plus the catalog (products) and the printed
 // form manifests (page order + shade names).
 //
 // Rules (stated on the page too, so nobody has to guess):

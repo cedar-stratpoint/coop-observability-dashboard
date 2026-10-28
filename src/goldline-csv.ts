@@ -1,6 +1,6 @@
 // Goldline POS sales CSV parser (P1). Pure + unit-tested.
 //
-// Turns a Nichido POS export into gl_sales-ready rows. The file is store × SKU ×
+// Turns a Nichido POS export into sales-ready rows. The file is store × SKU ×
 // period; its real columns (see the plan's source-file schema) are:
 //   Location · Location Desc · SKU Code · SKU Desc · Gross Sales Retail TY ·
 //   Sales Units TY · Sales Net of Vat Net of Discount
@@ -24,13 +24,13 @@ const FIELD_ALIASES: Record<keyof PosSaleRow, string[]> = {
   storeCode: ['location'],
   storeName: ['location desc', 'location description'],
   skuCode: ['sku code'],
-  skuDesc: ['sku desc', 'sku description'],
+  skuDesc: ['sku desc', 'sku description', 'sku name'],
   grossRetail: ['gross sales retail ty', 'gross sales retail'],
   units: ['sales units ty', 'sales units'],
   netOfVat: ['sales net of vat net of discount', 'net of vat net of discount', 'net sales'],
 };
 
-const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+export const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /** Minimal RFC-4180-ish CSV: handles quoted fields, embedded commas, "" escapes, CRLF. */
 export function parseCsv(text: string): string[][] {
@@ -68,8 +68,8 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
 }
 
-function toNum(v: string): number | null {
-  const t = v.trim().replace(/,/g, '');
+function toNum(v: string | undefined): number | null {
+  const t = (v ?? '').trim().replace(/,/g, '');
   if (t === '') return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
@@ -80,7 +80,15 @@ function toNum(v: string): number | null {
  * errors (missing required columns, or rows missing a store/SKU). Never throws.
  */
 export function parseGoldlinePos(csvText: string): ParseResult {
-  const grid = parseCsv(csvText);
+  return rowsFromGrid(parseCsv(csvText));
+}
+
+/**
+ * Map a grid whose first row is the header into sale rows. Shared by the .csv parser
+ * and the Watsons .xlsx reader (src/goldline-pos-xlsx.ts), so both read the same
+ * columns the same way. Row numbers in errors are 1-based from the header + `rowOffset`.
+ */
+export function rowsFromGrid(grid: string[][], rowOffset = 0): ParseResult {
   if (grid.length < 2) return {rows: [], errors: ['The file has no data rows.']};
 
   const header = grid[0].map(norm);
@@ -95,14 +103,14 @@ export function parseGoldlinePos(csvText: string): ParseResult {
   });
   if (errors.length) return {rows: [], errors};
 
-  const at = (r: string[], c: number) => (c >= 0 && c < r.length ? r[c] : '');
+  const at = (r: string[], c: number) => (c >= 0 && c < r.length ? (r[c] ?? '') : '');
   const rows: PosSaleRow[] = [];
   for (let i = 1; i < grid.length; i++) {
     const r = grid[i];
     const storeCode = at(r, idx.storeCode).trim();
     const skuCode = at(r, idx.skuCode).trim();
     if (!storeCode || !skuCode) {
-      errors.push(`Row ${i + 1}: missing store code or SKU code, skipped.`);
+      errors.push(`Row ${i + 1 + rowOffset}: missing store code or SKU code, skipped.`);
       continue;
     }
     rows.push({

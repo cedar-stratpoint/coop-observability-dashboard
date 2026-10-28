@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {classifyUpload, MAX_UPLOAD_BYTES} from './goldline-upload';
+import {classifyUpload, MAX_UPLOAD_BYTES, XLSX_MIME} from './goldline-upload';
 
 describe('classifyUpload', () => {
   it('accepts a .csv as pos_csv', () => {
@@ -16,6 +16,17 @@ describe('classifyUpload', () => {
       kind: 'inventory_pdf',
       contentType: 'application/pdf',
     });
+  });
+
+  it('accepts a Watsons .xlsx as pos_xlsx', () => {
+    expect(classifyUpload('[2026 SEP] Watsons Scan Data.xlsx', XLSX_MIME, 2_000_000)).toEqual({
+      ok: true,
+      kind: 'pos_xlsx',
+      contentType: XLSX_MIME,
+    });
+    expect(classifyUpload('sep.XLSX', '', 10).ok).toBe(true);
+    expect(classifyUpload('sep.xlsx', 'application/pdf', 10).ok).toBe(false);
+    expect(classifyUpload('old.xls', 'application/vnd.ms-excel', 10).ok).toBe(false);
   });
 
   it('accepts when the browser sends no MIME (extension is authoritative)', () => {

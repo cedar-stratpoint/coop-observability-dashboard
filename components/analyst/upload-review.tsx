@@ -19,7 +19,7 @@ import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from 
 // Review workbench for one scanned inventory page. Shows the staged Claude Vision
 // read, pre-filled and editable; low-confidence rows are flagged so the reviewer
 // fixes the exceptions, confirms the header (store + period), and commits to
-// gl_inventory. A sales CSV has no extraction, so it renders a status summary.
+// inventory. A sales CSV has no extraction, so it renders a status summary.
 
 const LOW = LOW_BELOW; // below this a row is flagged for human eyes (shared with the confidence summary).
 const peso = (n: number) => `₱${n.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
@@ -280,11 +280,11 @@ export function UploadReview({
       {!extraction && (
         <Card>
           <CardHeader>
-            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : 'Upload'}</CardTitle>
+            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : upload.kind === 'pos_xlsx' ? 'POS Sales Data' : 'Upload'}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <p className="text-muted-foreground">
-              {upload.kind === 'pos_csv'
+              {upload.kind === 'pos_csv' || upload.kind === 'pos_xlsx'
                 ? 'Sales files commit directly to the sales table, so there is nothing to review here.'
                 : 'No extraction is staged for this file.'}
             </p>

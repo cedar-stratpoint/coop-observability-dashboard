@@ -83,6 +83,7 @@ export function BatchReview({
   pages,
   catalog,
   stores,
+  bas,
   otherFiles,
   initialPageId = null,
 }: {
@@ -93,6 +94,8 @@ export function BatchReview({
   pages: BatchReviewPage[];
   catalog: Record<string, CatalogLite>;
   stores: StoreOption[];
+  /** The BA list: each store's current BA and every name, for the BA field. */
+  bas?: {byStore: Record<string, string>; names: string[]};
   otherFiles: UploadRow[];
   /** The page (upload id) to open on: set when the reviewer came in from one file. */
   initialPageId?: string | null;
@@ -105,6 +108,10 @@ export function BatchReview({
   const [storeCode, setStoreCode] = useState(defaults.storeCode);
   const [periodStart, setPeriodStart] = useState(defaults.periodStart);
   const [periodEnd, setPeriodEnd] = useState(defaults.periodEnd);
+  // The BA written on the form (page 1's header). Left blank, the save uses the store's
+  // BA learned from its earlier forms, so the flags still count against someone.
+  const [ba, setBa] = useState(defaults.consultant ?? '');
+  const storeBa = bas?.byStore[storeCode] ?? null;
   const [tabId, setTabId] = useState<string | null>((pages.find((p) => p.upload.id === initialPageId) ?? pages[0])?.upload.id ?? null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -239,7 +246,7 @@ export function BatchReview({
         storeCode,
         periodStart,
         periodEnd,
-        consultant: defaults.consultant,
+        consultant: ba.trim() || null,
         pages: reviewable.map((p) => ({
           uploadId: p.upload.id,
           rows: (state[p.upload.id]?.rows ?? []).map((r) => ({
@@ -308,7 +315,7 @@ export function BatchReview({
         <CardContent className="flex flex-col gap-3">
           <fieldset className="flex flex-col gap-2" disabled={!editable}>
             <legend className="mb-2 text-xs font-medium">
-              Store and period <span className="font-normal text-muted-foreground">· applies to every page below</span>
+              Store, period and BA <span className="font-normal text-muted-foreground">· applies to every page below</span>
             </legend>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
@@ -337,7 +344,31 @@ export function BatchReview({
                   saveInfo({periodEnd: e.target.value});
                 }} className={fieldCls} />
               </label>
+              <label className="flex min-w-48 flex-1 flex-col gap-1">
+                <span className="text-xs text-muted-foreground">BA on the form</span>
+                <input
+                  value={ba}
+                  onChange={(e) => setBa(e.target.value)}
+                  list="ba-names"
+                  maxLength={80}
+                  placeholder={storeBa ?? 'Full name'}
+                  autoComplete="off"
+                  className={fieldCls}
+                />
+                <datalist id="ba-names">
+                  {(bas?.names ?? []).map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+              </label>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {ba.trim()
+                ? 'Saved with this BA. A BA Coop already knows is recognised, even shortened (“Liza M.”); a new name is added as a new BA and becomes this store’s BA from this cycle.'
+                : storeBa
+                  ? `Blank on the form: saved under ${storeBa}, this store’s BA from its earlier forms.`
+                  : 'Blank on the form and Coop hasn’t seen a BA for this store yet. Type the name from the form; flags count against the BA.'}
+            </p>
           </fieldset>
           {(coverage.missing.length > 0 && coverage.missing.length < 5) || coverage.duplicates.length > 0 ? (
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {COOP_ENVS, dbRefOf, envForHost, guardEnvKey, prodConfirmOk, resolveEnv, switchHref} from './coop-env';
+import {COOP_ENVS, dbRefOf, envForHost, guardEnvKey, nichidoPairOk, prodConfirmOk, resolveEnv, switchHref} from './coop-env';
 
 describe('coop environments', () => {
   it('has exactly Staging and Production', () => {
@@ -55,5 +55,27 @@ describe('environment from the database (not the address)', () => {
   });
   it('uses the first value of a forwarded host list', () => {
     expect(envForHost('coop-brand-os.vercel.app, proxy.internal').key).toBe('production');
+  });
+});
+
+describe('Nichido (Goldline) project pairs with the archive', () => {
+  const STG = 'https://syxwixxzmytvhwhkwdvw.supabase.co';
+  const PROD = 'https://qkxbwzdxhwcbwgriwipi.supabase.co';
+  const N_STG = 'https://jcqlnrvplaapvcxyhcns.supabase.co';
+  const N_PROD = 'https://pfwrkqsjmetibslltmok.supabase.co';
+  it('accepts each environment with its own Nichido project', () => {
+    expect(nichidoPairOk(STG, N_STG)).toBe(true);
+    expect(nichidoPairOk(PROD, N_PROD)).toBe(true);
+  });
+  it('refuses a cross-environment or unknown Nichido project for a known archive', () => {
+    expect(nichidoPairOk(STG, N_PROD)).toBe(false);
+    expect(nichidoPairOk(PROD, N_STG)).toBe(false);
+    expect(nichidoPairOk(PROD, 'https://someotherprojectref.supabase.co')).toBe(false);
+    expect(nichidoPairOk(STG, STG)).toBe(false); // the archive itself is not Goldline's project
+  });
+  it('needs a Nichido URL; a local (unknown) archive accepts any', () => {
+    expect(nichidoPairOk(STG, undefined)).toBe(false);
+    expect(nichidoPairOk(undefined, N_STG)).toBe(true);
+    expect(nichidoPairOk('http://127.0.0.1:54321', 'http://127.0.0.1:54331')).toBe(true);
   });
 });

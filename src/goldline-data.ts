@@ -1,27 +1,23 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
+import {groupForms, scanOrder} from './upload-batch';
 
-// Server-only writes/reads for the Goldline gl_* tables. Same seam as src/data.ts:
-// the archive Supabase project, service-role key, never exposed to the browser.
+// Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
+// project (src/nichido-client.ts): service-role key, never exposed to the browser.
 // Every row is stamped with company_id; callers pass the ACTIVE company from the
 // scoping layer (src/active-context.ts) so one tenant can never write another's data.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
 export const GOLDLINE_BUCKET = 'goldline-uploads';
 
-/** True when the archive env is absent — callers should refuse writes, not no-op silently. */
+/** False when the Nichido env is absent — callers should refuse writes, not no-op silently. */
 export function goldlineConfigured(): boolean {
-  return Boolean(url && key);
+  return nichidoConfigured();
 }
 
-function db(): SupabaseClient {
-  if (!goldlineConfigured()) throw new Error('Goldline storage is not configured (SUPABASE_URL_ARCHIVE).');
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const db = nichidoDb;
 
 /**
  * Reduce an uploaded file name to a single safe Storage path segment: basename
@@ -39,7 +35,9 @@ export function safeObjectName(filename: string): string {
   return cleaned.slice(0, 180) || 'upload';
 }
 
-export type UploadKind = 'pos_csv' | 'inventory_pdf';
+export type UploadKind = 'pos_csv' | 'pos_xlsx' | 'inventory_pdf';
+
+const SALES_CHUNK = 2000;
 export type UploadStatus = 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
@@ -57,7 +55,7 @@ export type UploadRow = {
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
 };
 
-/** Store the raw file, then open a gl_uploads row. Returns the new upload id. */
+/** Store the raw file, then open a uploads row. Returns the new upload id. */
 export async function createUpload(input: {
   companyId: string;
   kind: UploadKind;
@@ -77,7 +75,7 @@ export async function createUpload(input: {
   if (up.error) throw new Error(`storage upload failed: ${up.error.message}`);
 
   const ins = await supa
-    .from('gl_uploads')
+    .from('uploads')
     .insert({
       company_id: input.companyId,
       kind: input.kind,
@@ -89,7 +87,7 @@ export async function createUpload(input: {
     })
     .select('id')
     .single();
-  if (ins.error) throw new Error(`gl_uploads insert failed: ${ins.error.message}`);
+  if (ins.error) throw new Error(`uploads insert failed: ${ins.error.message}`);
   return (ins.data as {id: string}).id;
 }
 
@@ -104,12 +102,12 @@ export async function setUploadStatus(
   if (extra?.pageCount !== undefined) patch.page_count = extra.pageCount;
   // Scrubbed technical detail for diagnosis (never shown prominently in the UI).
   if (extra?.errorDetail !== undefined) patch.error_detail = extra.errorDetail?.slice(0, 500) ?? null;
-  const res = await supa.from('gl_uploads').update(patch).eq('id', id);
-  if (res.error) throw new Error(`gl_uploads update failed: ${res.error.message}`);
+  const res = await supa.from('uploads').update(patch).eq('id', id);
+  if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
 }
 
 /** What deleting an upload will take with it — shown in the confirmation before the
- *  user commits to it. `inventoryRows` are the gl_inventory counts this scan is still
+ *  user commits to it. `inventoryRows` are the inventory counts this scan is still
  *  the source of (a later scan that overwrote a count owns it instead). */
 export type DeleteImpact = {
   inventoryRows: number;
@@ -125,11 +123,11 @@ export async function uploadStores(companyId: string, id: string): Promise<strin
   const supa = db();
   // Paged: a sales export can hold far more than PostgREST's 1000-row cap. Only
   // called for store-scoped roles, so the full read is rare.
-  const page = (table: 'gl_inventory' | 'gl_sales') =>
+  const page = (table: 'inventory' | 'sales') =>
     fetchAllRows(table, (from, to) =>
       supa.from(table).select('store_code').eq('company_id', companyId).eq('source_upload_id', id).order('id').range(from, to),
     ) as unknown as Promise<Array<{store_code: string}>>;
-  const [inv, sales, ext] = await Promise.all([page('gl_inventory'), page('gl_sales'), getExtraction(companyId, id)]);
+  const [inv, sales, ext] = await Promise.all([page('inventory'), page('sales'), getExtraction(companyId, id)]);
   const codes = new Set<string>();
   for (const r of [...inv, ...sales]) if (r.store_code) codes.add(r.store_code);
   const header = ext?.data?.store_code?.trim();
@@ -144,18 +142,18 @@ export async function deleteImpact(companyId: string, id: string): Promise<Delet
   if (!upload) return null;
   const [inv, sales] = await Promise.all([
     // pagination-ok: count-only head request, returns no rows.
-    supa.from('gl_inventory').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('source_upload_id', id),
+    supa.from('inventory').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('source_upload_id', id),
     // pagination-ok: count-only head request, returns no rows.
-    supa.from('gl_sales').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('source_upload_id', id),
+    supa.from('sales').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('source_upload_id', id),
   ]);
   // Fail loud: an unknown impact must never be shown as "nothing changes".
-  if (inv.error) throw new Error(`gl_inventory count failed: ${inv.error.message}`);
-  if (sales.error) throw new Error(`gl_sales count failed: ${sales.error.message}`);
+  if (inv.error) throw new Error(`inventory count failed: ${inv.error.message}`);
+  if (sales.error) throw new Error(`sales count failed: ${sales.error.message}`);
   let snapshots: DeleteImpact['snapshots'] = [];
   if ((inv.count ?? 0) > 0) {
     // pagination-ok: a scan feeds one store/period; limit guards the odd re-commit.
     const one = await supa
-      .from('gl_inventory')
+      .from('inventory')
       .select('store_code,period_start,period_end')
       .eq('company_id', companyId)
       .eq('source_upload_id', id)
@@ -169,7 +167,7 @@ export async function deleteImpact(companyId: string, id: string): Promise<Delet
     });
     // pagination-ok: names for the handful of stores above.
     const names = await supa
-      .from('gl_stores')
+      .from('stores')
       .select('store_code,name')
       .eq('company_id', companyId)
       .in('store_code', [...new Set(distinct.map((s) => s.store_code))]);
@@ -189,24 +187,27 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
   const upload = await getUpload(companyId, id); // company-scoped ownership check
   if (!upload) return false;
   // Committed data first (fail loud: we must not drop the upload but keep its data).
-  const inv = await supa.from('gl_inventory').delete().eq('company_id', companyId).eq('source_upload_id', id);
-  if (inv.error) throw new Error(`gl_inventory delete failed: ${inv.error.message}`);
-  const sales = await supa.from('gl_sales').delete().eq('company_id', companyId).eq('source_upload_id', id);
-  if (sales.error) throw new Error(`gl_sales delete failed: ${sales.error.message}`);
-  const ext = await supa.from('gl_extractions').delete().eq('company_id', companyId).eq('upload_id', id);
-  if (ext.error) throw new Error(`gl_extractions delete failed: ${ext.error.message}`);
+  const inv = await supa.from('inventory').delete().eq('company_id', companyId).eq('source_upload_id', id);
+  if (inv.error) throw new Error(`inventory delete failed: ${inv.error.message}`);
+  const sales = await supa.from('sales').delete().eq('company_id', companyId).eq('source_upload_id', id);
+  if (sales.error) throw new Error(`sales delete failed: ${sales.error.message}`);
+  const ext = await supa.from('extractions').delete().eq('company_id', companyId).eq('upload_id', id);
+  if (ext.error) throw new Error(`extractions delete failed: ${ext.error.message}`);
   // The stored file is best-effort (an orphaned object is harmless and private);
   // the row goes last so a failure above leaves a visible, retryable upload.
   if (upload.storage_path) {
     const rm = await supa.storage.from(GOLDLINE_BUCKET).remove([upload.storage_path]);
     if (rm.error) console.error('deleteUpload: storage remove failed', rm.error.message);
   }
-  const res = await supa.from('gl_uploads').delete().eq('company_id', companyId).eq('id', id);
-  if (res.error) throw new Error(`gl_uploads delete failed: ${res.error.message}`);
+  const res = await supa.from('uploads').delete().eq('company_id', companyId).eq('id', id);
+  if (res.error) throw new Error(`uploads delete failed: ${res.error.message}`);
   return true;
 }
 
-/** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key). */
+/** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
+ *  Goes through the upsert_sales RPC, which encrypts the peso figures into
+ *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql);
+ *  the plain gross_retail / net_of_vat never reach the table. */
 export async function upsertSales(
   companyId: string,
   rows: PosSaleRow[],
@@ -216,7 +217,6 @@ export async function upsertSales(
   if (!rows.length) return 0;
   const supa = db();
   const payload = rows.map((r) => ({
-    company_id: companyId,
     store_code: r.storeCode,
     sku_code: r.skuCode,
     period_start: period.start,
@@ -226,14 +226,15 @@ export async function upsertSales(
     net_of_vat: r.netOfVat,
     source_upload_id: uploadId,
   }));
-  const res = await supa
-    .from('gl_sales')
-    .upsert(payload, {onConflict: 'company_id,store_code,sku_code,period_start,period_end'});
-  if (res.error) throw new Error(`gl_sales upsert failed: ${res.error.message}`);
+  // A Watsons month is ~40k rows: send it in chunks so no single request is huge.
+  for (let i = 0; i < payload.length; i += SALES_CHUNK) {
+    const res = await supa.rpc('upsert_sales', {p_company: companyId, p_rows: payload.slice(i, i + SALES_CHUNK)});
+    if (res.error) throw new Error(`sales upsert failed: ${res.error.message}`);
+  }
   return payload.length;
 }
 
-/** Stage one extracted page for review (gl_extractions). Idempotent on (upload, page).
+/** Stage one extracted page for review (extractions). Idempotent on (upload, page).
  *  The full page (header + rows) is stored in the `rows` jsonb so the review screen
  *  and commit have the store code + period, not just the counts. */
 export async function saveExtraction(input: {
@@ -244,7 +245,7 @@ export async function saveExtraction(input: {
   docConfidence: number;
 }): Promise<void> {
   const supa = db();
-  const res = await supa.from('gl_extractions').upsert(
+  const res = await supa.from('extractions').upsert(
     {
       company_id: input.companyId,
       upload_id: input.uploadId,
@@ -255,7 +256,7 @@ export async function saveExtraction(input: {
     },
     {onConflict: 'upload_id,page'},
   );
-  if (res.error) throw new Error(`gl_extractions upsert failed: ${res.error.message}`);
+  if (res.error) throw new Error(`extractions upsert failed: ${res.error.message}`);
 }
 
 /** One upload, scoped to a company (null if not found / not this company's). */
@@ -263,12 +264,12 @@ export async function getUpload(companyId: string, id: string): Promise<UploadRo
   if (!goldlineConfigured()) return null;
   const supa = db();
   const res = await supa
-    .from('gl_uploads')
+    .from('uploads')
     .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id')
     .eq('company_id', companyId)
     .eq('id', id)
     .maybeSingle();
-  if (res.error) throw new Error(`gl_uploads read failed: ${res.error.message}`);
+  if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
   return (res.data as UploadRow | null) ?? null;
 }
 
@@ -304,14 +305,14 @@ export async function getExtraction(companyId: string, uploadId: string): Promis
   if (!goldlineConfigured()) return null;
   const supa = db();
   const res = await supa
-    .from('gl_extractions')
+    .from('extractions')
     .select('page,status,doc_confidence,rows')
     .eq('company_id', companyId)
     .eq('upload_id', uploadId)
     .order('page', {ascending: true})
     .limit(1)
     .maybeSingle();
-  if (res.error) throw new Error(`gl_extractions read failed: ${res.error.message}`);
+  if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
   if (!res.data) return null;
   const row = res.data as {page: number; status: string; doc_confidence: number | null; rows: ExtractedPage};
   return {page: row.page, status: row.status, docConfidence: row.doc_confidence, data: row.rows};
@@ -328,7 +329,7 @@ export type ReviewedInventoryRow = {
 };
 
 /**
- * Commit a reviewed extraction into gl_inventory and close out the upload.
+ * Commit a reviewed extraction into inventory and close out the upload.
  * Idempotent on the inventory natural key (re-committing a period overwrites it).
  * All three writes are company-scoped so a reviewer can only ever touch their own
  * tenant's rows. total_value is left null (derived downstream as ending × price).
@@ -358,22 +359,22 @@ export async function commitInventory(input: {
   }));
   if (payload.length) {
     const ins = await supa
-      .from('gl_inventory')
+      .from('inventory')
       .upsert(payload, {onConflict: 'company_id,store_code,item_code,period_start,period_end'});
-    if (ins.error) throw new Error(`gl_inventory upsert failed: ${ins.error.message}`);
+    if (ins.error) throw new Error(`inventory upsert failed: ${ins.error.message}`);
   }
   const ext = await supa
-    .from('gl_extractions')
+    .from('extractions')
     .update({status: 'confirmed'})
     .eq('company_id', input.companyId)
     .eq('upload_id', input.uploadId);
-  if (ext.error) throw new Error(`gl_extractions update failed: ${ext.error.message}`);
+  if (ext.error) throw new Error(`extractions update failed: ${ext.error.message}`);
   const up = await supa
-    .from('gl_uploads')
+    .from('uploads')
     .update({status: 'committed'})
     .eq('company_id', input.companyId)
     .eq('id', input.uploadId);
-  if (up.error) throw new Error(`gl_uploads update failed: ${up.error.message}`);
+  if (up.error) throw new Error(`uploads update failed: ${up.error.message}`);
   return payload.length;
 }
 
@@ -381,9 +382,9 @@ export async function commitInventory(input: {
 export async function listUploads(companyId: string): Promise<UploadRow[]> {
   if (!goldlineConfigured()) return [];
   const supa = db();
-  const rows = await fetchAllRows('gl_uploads', (from, to) =>
+  const rows = await fetchAllRows('uploads', (from, to) =>
     supa
-      .from('gl_uploads')
+      .from('uploads')
       .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
       .eq('company_id', companyId)
       .order('created_at', {ascending: false})
@@ -401,11 +402,11 @@ export async function catalogForCodes(
 ): Promise<Record<string, {productLine: string | null; unitPrice: number | null}>> {
   if (!goldlineConfigured() || !codes.length) return {};
   const res = await db()
-    .from('gl_products')
+    .from('products')
     .select('item_code,product_line,unit_price')
     .eq('company_id', companyId)
     .in('item_code', codes.slice(0, 500)); // pagination-ok: one form page's codes (≤ ~70)
-  if (res.error) throw new Error(`gl_products read failed: ${res.error.message}`);
+  if (res.error) throw new Error(`products read failed: ${res.error.message}`);
   const out: Record<string, {productLine: string | null; unitPrice: number | null}> = {};
   for (const p of (res.data ?? []) as Array<{item_code: string; product_line: string | null; unit_price: string | number | null}>) {
     out[p.item_code] = {productLine: p.product_line, unitPrice: p.unit_price == null ? null : Number(p.unit_price)};
@@ -446,7 +447,7 @@ export async function formPageStrip(companyId: string, currentUploadId: string, 
   if (upload.status === 'committed') {
     // pagination-ok: single row — where this scan landed.
     const at = await supa
-      .from('gl_inventory')
+      .from('inventory')
       .select('store_code,period_start,period_end')
       .eq('company_id', companyId)
       .eq('source_upload_id', currentUploadId)
@@ -455,9 +456,9 @@ export async function formPageStrip(companyId: string, currentUploadId: string, 
     if (at.data) {
       scope = 'count';
       const snap = at.data as {store_code: string; period_start: string; period_end: string};
-      const src = (await fetchAllRows('gl_inventory', (from, to) =>
+      const src = (await fetchAllRows('inventory', (from, to) =>
         supa
-          .from('gl_inventory')
+          .from('inventory')
           .select('source_upload_id')
           .eq('company_id', companyId)
           .eq('store_code', snap.store_code)
@@ -473,20 +474,20 @@ export async function formPageStrip(companyId: string, currentUploadId: string, 
     scope = 'batch';
     // pagination-ok: one upload batch (≤ 20 files).
     const inBatch = await supa
-      .from('gl_uploads')
+      .from('uploads')
       .select('id')
       .eq('company_id', companyId)
       .eq('batch_id', upload.batch_id)
       .eq('kind', 'inventory_pdf')
       .in('status', ['needs_review', 'committed'])
       .limit(50);
-    if (inBatch.error) throw new Error(`gl_uploads read failed: ${inBatch.error.message}`);
+    if (inBatch.error) throw new Error(`uploads read failed: ${inBatch.error.message}`);
     ids = ((inBatch.data ?? []) as Array<{id: string}>).map((u) => u.id);
   }
   if (scope === 'recent') {
     const t = Date.parse(upload.created_at);
     let q = supa
-      .from('gl_uploads')
+      .from('uploads')
       .select('id')
       .eq('company_id', companyId)
       .eq('kind', 'inventory_pdf')
@@ -497,19 +498,19 @@ export async function formPageStrip(companyId: string, currentUploadId: string, 
       .limit(50); // pagination-ok: one sitting's scans
     q = upload.uploaded_by ? q.eq('uploaded_by', upload.uploaded_by) : q.is('uploaded_by', null);
     const near = await q;
-    if (near.error) throw new Error(`gl_uploads read failed: ${near.error.message}`);
+    if (near.error) throw new Error(`uploads read failed: ${near.error.message}`);
     ids = ((near.data ?? []) as Array<{id: string}>).map((u) => u.id);
   }
   if (!ids.includes(currentUploadId)) ids.push(currentUploadId);
 
   const [ext, ups] = await Promise.all([
     // pagination-ok: one extraction per scan in this form (bounded by ids).
-    supa.from('gl_extractions').select('upload_id,page,rows,created_at').eq('company_id', companyId).in('upload_id', ids.slice(0, 60)),
+    supa.from('extractions').select('upload_id,page,rows,created_at').eq('company_id', companyId).in('upload_id', ids.slice(0, 60)),
     // pagination-ok: same bound.
-    supa.from('gl_uploads').select('id,status,created_at').eq('company_id', companyId).in('id', ids.slice(0, 60)),
+    supa.from('uploads').select('id,status,created_at').eq('company_id', companyId).in('id', ids.slice(0, 60)),
   ]);
-  if (ext.error) throw new Error(`gl_extractions read failed: ${ext.error.message}`);
-  if (ups.error) throw new Error(`gl_uploads read failed: ${ups.error.message}`);
+  if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
+  if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
   const meta = new Map(((ups.data ?? []) as Array<{id: string; status: UploadStatus; created_at: string}>).map((u) => [u.id, u]));
   const list = ((ext.data ?? []) as Array<{upload_id: string; page: number; rows: {rows?: Array<{confidence?: unknown}>} | null}>)
     .filter((e) => meta.has(e.upload_id))
@@ -552,8 +553,8 @@ export type BatchRow = {
 const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,created_by,created_at,committed_at';
 
 export async function createBatch(companyId: string, createdBy: string | null): Promise<string> {
-  const res = await db().from('gl_upload_batches').insert({company_id: companyId, created_by: createdBy}).select('id').single();
-  if (res.error) throw new Error(`gl_upload_batches insert failed: ${res.error.message}`);
+  const res = await db().from('upload_batches').insert({company_id: companyId, created_by: createdBy}).select('id').single();
+  if (res.error) throw new Error(`upload_batches insert failed: ${res.error.message}`);
   return (res.data as {id: string}).id;
 }
 
@@ -561,8 +562,8 @@ export async function createBatch(companyId: string, createdBy: string | null): 
 export async function getBatch(companyId: string, id: string): Promise<BatchRow | null> {
   if (!goldlineConfigured()) return null;
   // pagination-ok: single row by primary key.
-  const res = await db().from('gl_upload_batches').select(BATCH_COLS).eq('company_id', companyId).eq('id', id).maybeSingle();
-  if (res.error) throw new Error(`gl_upload_batches read failed: ${res.error.message}`);
+  const res = await db().from('upload_batches').select(BATCH_COLS).eq('company_id', companyId).eq('id', id).maybeSingle();
+  if (res.error) throw new Error(`upload_batches read failed: ${res.error.message}`);
   return (res.data as BatchRow | null) ?? null;
 }
 
@@ -572,12 +573,78 @@ export async function updateBatchInfo(
   info: {storeCode: string | null; periodStart: string | null; periodEnd: string | null},
 ): Promise<void> {
   const res = await db()
-    .from('gl_upload_batches')
+    .from('upload_batches')
     .update({store_code: info.storeCode, period_start: info.periodStart, period_end: info.periodEnd})
     .eq('company_id', companyId)
     .eq('id', id)
     .eq('status', 'open');
-  if (res.error) throw new Error(`gl_upload_batches update failed: ${res.error.message}`);
+  if (res.error) throw new Error(`upload_batches update failed: ${res.error.message}`);
+}
+
+/** One form found in a scan, after splitting (see splitBatchIntoForms). */
+export type SplitForm = {
+  batchId: string;
+  pages: number[]; // page numbers read, in scan order (null = not numbered)
+  files: number;
+  storeCode: string | null; // from page 1's header, when written
+  periodStart: string | null;
+  periodEnd: string | null;
+  consultant: string | null;
+};
+
+/**
+ * Many stores in one scan (Q25): after every page of a drop is read, split the batch
+ * into one batch per form. Pages are put in scan order and a new form starts whenever
+ * the page number drops (…5, 1…). The first form keeps this batch; each other form
+ * gets a new open batch. Store and period come from each form's page 1 header at
+ * review, as for any batch. Returns every form; one form means nothing moved.
+ */
+export async function splitBatchIntoForms(companyId: string, batchId: string, createdBy: string | null): Promise<SplitForm[]> {
+  const batch = await getBatch(companyId, batchId);
+  if (!batch || batch.status !== 'open') return [];
+  const supa = db();
+  const uploads = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,filename,created_at').eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
+  )) as unknown as Array<{id: string; filename: string; created_at: string}>;
+  if (!uploads.length) return [];
+  const heads = new Map<string, {page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>();
+  for (let i = 0; i < uploads.length; i += 100) {
+    const res = await supa
+      .from('extractions')
+      .select('upload_id,page,store:rows->>store_code,ps:rows->>period_start,pe:rows->>period_end,ba:rows->>consultant')
+      .eq('company_id', companyId)
+      .in('upload_id', uploads.slice(i, i + 100).map((u) => u.id)); // pagination-ok: ≤100 ids, one row each
+    if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
+    for (const e of (res.data ?? []) as Array<{upload_id: string; page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>) {
+      heads.set(e.upload_id, {page: e.page ?? null, store: e.store?.trim() || null, ps: e.ps || null, pe: e.pe || null, ba: e.ba?.trim() || null});
+    }
+  }
+  const ordered = scanOrder(uploads).map((u) => ({...u, ...(heads.get(u.id) ?? {page: null, store: null, ps: null, pe: null, ba: null})}));
+  const forms = groupForms(ordered);
+  const out: SplitForm[] = [];
+  for (let f = 0; f < forms.length; f++) {
+    const group = forms[f];
+    let id = batchId;
+    if (f > 0) {
+      id = await createBatch(companyId, createdBy);
+      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', group.map((g) => g.id));
+      if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
+    }
+    const head = group.find((g) => g.page === 1);
+    out.push({
+      batchId: id,
+      pages: group.map((g) => g.page).filter((n): n is number => n != null),
+      files: group.length,
+      storeCode: head?.store ?? null,
+      periodStart: head?.ps ?? null,
+      periodEnd: head?.pe ?? null,
+      consultant: head?.ba ?? null,
+    });
+  }
+  // The first form keeps this batch; whatever store or period was typed for the whole
+  // drop belongs to it only when the scan held one form.
+  if (forms.length > 1) await updateBatchInfo(companyId, batchId, {storeCode: null, periodStart: null, periodEnd: null});
+  return out;
 }
 
 export type BatchPage = {
@@ -590,21 +657,21 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
   if (!goldlineConfigured()) return [];
   const supa = db();
   const ups = await supa
-    .from('gl_uploads')
+    .from('uploads')
     .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})
     .limit(50); // pagination-ok: a batch is capped at 20 files (UI) — 50 is a hard ceiling
-  if (ups.error) throw new Error(`gl_uploads read failed: ${ups.error.message}`);
+  if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
   const uploads = (ups.data ?? []) as UploadRow[];
   if (!uploads.length) return [];
   const ext = await supa
-    .from('gl_extractions')
+    .from('extractions')
     .select('upload_id,page,status,doc_confidence,rows')
     .eq('company_id', companyId)
     .in('upload_id', uploads.map((u) => u.id)); // pagination-ok: ≤ 50 ids, one row each
-  if (ext.error) throw new Error(`gl_extractions read failed: ${ext.error.message}`);
+  if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
   const byUpload = new Map(
     ((ext.data ?? []) as Array<{upload_id: string; page: number; status: string; doc_confidence: number | null; rows: ExtractedPage}>).map((e) => [
       e.upload_id,
@@ -615,7 +682,7 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
 }
 
 /**
- * Commit every page of a batch into gl_inventory in ONE upsert (all-or-nothing for the
+ * Commit every page of a batch into inventory in ONE upsert (all-or-nothing for the
  * counts), then close the pages and the batch. Refuses when two pages carry the same
  * item code — e.g. page 3 scanned twice — since one upsert can't write a key twice and
  * the counts would be ambiguous anyway.
@@ -628,7 +695,7 @@ export async function commitBatch(input: {
   consultant: string | null;
   pages: Array<{uploadId: string; rows: ReviewedInventoryRow[]}>;
 }): Promise<{committed: number}> {
-  // One code per count. Checked here for a friendly message; gl_commit_batch re-checks
+  // One code per count. Checked here for a friendly message; commit_batch re-checks
   // inside its transaction (it also locks the batch and requires exactly the batch's
   // pages awaiting review, so a concurrent or partial commit is refused, not half-applied).
   const seen = new Set<string>();
@@ -638,7 +705,7 @@ export async function commitBatch(input: {
       seen.add(r.item_code);
     }
   }
-  const {data, error} = await db().rpc('gl_commit_batch', {
+  const {data, error} = await db().rpc('commit_batch', {
     p_company: input.companyId,
     p_batch: input.batchId,
     p_store: input.storeCode,
@@ -663,7 +730,7 @@ export async function commitBatch(input: {
     if (dup) throw new BatchConflictError(dup[1].trim());
     if (msg.includes('batch_not_open')) throw new BatchStateError('closed');
     if (msg.includes('pages_mismatch')) throw new BatchStateError('pages');
-    throw new Error(`gl_commit_batch failed: ${msg}`);
+    throw new Error(`commit_batch failed: ${msg}`);
   }
   return {committed: typeof data === 'number' ? data : 0};
 }
@@ -687,8 +754,8 @@ export type StoreOption = {code: string; name: string};
 export async function listStores(companyId: string): Promise<StoreOption[]> {
   if (!goldlineConfigured()) return [];
   const supa = db();
-  const rows = (await fetchAllRows('gl_stores', (from, to) =>
-    supa.from('gl_stores').select('store_code,name,status').eq('company_id', companyId).order('store_code').range(from, to),
+  const rows = (await fetchAllRows('stores', (from, to) =>
+    supa.from('stores').select('store_code,name,status').eq('company_id', companyId).order('store_code').range(from, to),
   )) as unknown as Array<{store_code: string; name: string; status: string}>;
   return rows
     .filter((r) => r.status !== 'closed')

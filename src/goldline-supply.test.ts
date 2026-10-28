@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ItemMovement} from './goldline-movement';
-import {boardSummary, buildBoard, inTransitFor, lastsLabel, manilaDate, productionDaysFor, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
+import {boardSummary, buildBoard, inFocus, inTransitFor, lastsLabel, manilaDate, productionDaysFor, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
 
 const TODAY = '2026-10-20';
 const cfg: SupplyConfig = {
@@ -89,6 +89,9 @@ describe('ship now / warehouse short / produce now', () => {
     expect(rows[0].warehouseShort).toBe(true);
     expect(rows[0].produceBy).toEqual({kind: 'now'});
     expect(boardSummary(rows, TODAY)).toMatchObject({reorder: 1, out: 1, shipNow: 1, warehouseShort: 1, produceSoon: 1});
+    // Each summary tile filters the table with the same rule it counts with.
+    const s = boardSummary(rows, TODAY);
+    for (const f of ['reorder', 'out', 'shipNow', 'warehouseShort', 'produceSoon'] as const) expect(rows.filter((r) => inFocus(r, f, TODAY)).length).toBe(s[f]);
   });
   it('a stock-out date already within transit time means ship now', () => {
     const rows = buildBoard({
@@ -176,5 +179,23 @@ describe('review fixes', () => {
     // 2026-10-20 18:30 UTC = 2026-10-21 02:30 in Manila.
     expect(manilaDate(new Date('2026-10-20T18:30:00Z'))).toBe('2026-10-21');
     expect(manilaDate(new Date('2026-10-20T15:30:00Z'))).toBe('2026-10-20');
+  });
+});
+
+describe('boardSummary · values (F9)', () => {
+  it('values stock on hand and the latest delivery at selling price, all stores added up', () => {
+    const withDelivery = (code: string, onHand: number, delivery: number) => ({...item(code, {onHand}), row: {item_code: code, stockroom: onHand, drawer: 0, selling_area: 0, delivery, ending_on_hand: null}});
+    const rows = buildBoard({
+      stores: [block('1', [withDelivery('TWC', 10, 4), withDelivery('LIP', 2, 0)]), block('4', [withDelivery('TWC', 5, 1)])],
+      catalog,
+      warehouse: {},
+      config: cfg,
+      shipments: [],
+      currentMonth: '2026-10',
+      today: TODAY,
+      store: null,
+    });
+    // TWC: 15 on hand × ₱185 + LIP: 2 × ₱299; delivered: TWC 5 × ₱185
+    expect(boardSummary(rows, TODAY)).toMatchObject({stockValue: 15 * 185 + 2 * 299, deliveredValue: 5 * 185, deliveredUnits: 5, unpriced: 0});
   });
 });
