@@ -4,7 +4,7 @@ import {MANIFESTS} from './goldline-extract';
 // each tag says what happened and what to do next, instead of short labels like
 // "Needs a pick". Pure, so the page and the tests share it.
 
-export type SkuStatus = 'check' | 'choose' | 'rejected' | 'linked' | 'formOnly';
+export type SkuStatus = 'check' | 'choose' | 'rejected' | 'linked' | 'noSales' | 'formOnly';
 export type Tone = 'good' | 'warn' | 'crit' | 'info';
 
 type StatusInput = {
@@ -34,6 +34,11 @@ export const SKU_TAGS: Record<SkuStatus, {label: string; help: string; tone: Ton
     help: 'This SKU’s Watsons sales count for the item.',
     tone: 'good',
   },
+  noSales: {
+    label: 'No units sold: nothing to decide',
+    help: 'Watsons lists these codes in its files, but none sold in the 12 months, so they change no count. Link one only if you know the item.',
+    tone: 'info',
+  },
   formOnly: {
     label: 'On our forms, not in Watsons sales',
     help: 'Items on the inventory forms with no Watsons SKU yet. They get one when it is chosen for a SKU above.',
@@ -42,7 +47,7 @@ export const SKU_TAGS: Record<SkuStatus, {label: string; help: string; tone: Ton
 };
 
 /** Which tag a Watsons SKU gets. A new suggestion after a reject shows as "check it". */
-export function skuStatus(r: StatusInput): Exclude<SkuStatus, 'formOnly'> {
+export function skuStatus(r: StatusInput): Exclude<SkuStatus, 'formOnly' | 'noSales'> {
   if (r.linked) return 'linked';
   if (r.suggestion) return 'check';
   if (r.review?.action === 'rejected') return 'rejected';
