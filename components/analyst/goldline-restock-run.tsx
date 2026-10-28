@@ -459,7 +459,8 @@ function DecisionCell({
   if (l.state === 'covered') {
     return (
       <span className="flex flex-wrap items-center gap-1.5">
-        <ToneChip tone={null}>Covered</ToneChip>
+        {/* Capped to 0: the store needs some, but the warehouse has none left (not covered). */}
+        {l.warehouseShort ? <ToneChip tone="var(--status-warn)">Warehouse short</ToneChip> : <ToneChip tone={null}>Covered</ToneChip>}
         {l.warehouseShort ? <span className="text-xs text-muted-foreground">Warehouse has none to spare</span> : <span className="text-xs text-muted-foreground">Nothing to send</span>}
       </span>
     );
