@@ -4,7 +4,7 @@ import {MANIFESTS} from './goldline-extract';
 // each tag says what happened and what to do next, instead of short labels like
 // "Needs a pick". Pure, so the page and the tests share it.
 
-export type SkuStatus = 'check' | 'choose' | 'rejected' | 'linked' | 'noSales' | 'formOnly';
+export type SkuStatus = 'check' | 'choose' | 'rejected' | 'linked' | 'noSales' | 'formOnly' | 'decommissioned';
 export type Tone = 'good' | 'warn' | 'crit' | 'info';
 
 type StatusInput = {
@@ -39,6 +39,11 @@ export const SKU_TAGS: Record<SkuStatus, {label: string; help: string; tone: Ton
     help: 'Watsons lists these codes in its files, but none sold in the 12 months, so they change no count. Link one only if you know the item.',
     tone: 'info',
   },
+  decommissioned: {
+    label: 'Decommissioned',
+    help: 'Marked as no longer made or sold. Left out of SKU matching and restock. Bring one back if that changes.',
+    tone: 'info',
+  },
   formOnly: {
     label: 'Sold at Watsons?',
     help: 'On our inventory forms, but no Watsons SKU is linked and Coop found no likely match. Some may be under “Choose our item” with a shortened Watsons name; picking one there links it.',
@@ -47,7 +52,7 @@ export const SKU_TAGS: Record<SkuStatus, {label: string; help: string; tone: Ton
 };
 
 /** Which tag a Watsons SKU gets. A new suggestion after a reject shows as "check it". */
-export function skuStatus(r: StatusInput): Exclude<SkuStatus, 'formOnly' | 'noSales'> {
+export function skuStatus(r: StatusInput): Exclude<SkuStatus, 'formOnly' | 'noSales' | 'decommissioned'> {
   if (r.linked) return 'linked';
   if (r.suggestion) return 'check';
   if (r.review?.action === 'rejected') return 'rejected';
