@@ -9,9 +9,10 @@
 import {Fragment, useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
-import {AlertTriangle, CalendarClock, Check, ChevronDown, ChevronRight, Info, Loader2, PackageCheck, Pencil, RotateCcw, X} from 'lucide-react';
+import {AlertTriangle, CalendarClock, ChartColumn, Check, ChevronDown, ChevronRight, Info, Loader2, PackageCheck, Pencil, RotateCcw, X} from 'lucide-react';
 import type {RestockRunData, RunLine} from '@/src/goldline-restock-data';
 import type {Decision} from '@/src/goldline-restock';
+import {restockItemHref} from '@/src/goldline-restock-item';
 import {Metric} from '@/components/analyst/metric';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {Pagination} from '@/components/analyst/pagination';
@@ -347,6 +348,14 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                     <span className="font-medium">{l.name}</span> <span className="font-mono text-xs text-muted-foreground">{l.itemCode}</span>
                                   </span>
                                 </button>
+                                <Link
+                                  href={restockItemHref(l.itemCode, l.storeCode, data.preview ? data.runDate : null)}
+                                  aria-label={`${l.name}: a year of sales`}
+                                  title="A year of sales"
+                                  className="ml-1.5 inline-flex rounded p-0.5 align-[-3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                >
+                                  <ChartColumn className="size-3.5" aria-hidden />
+                                </Link>
                               </td>
                               <td className={cn(TD, 'text-right whitespace-nowrap tabular-nums')}>
                                 <span className="text-muted-foreground">{l.lyUnits.map((u) => (u == null ? '?' : num(u))).join(' · ')} =</span> {l.need == null ? '·' : num(l.need)}
