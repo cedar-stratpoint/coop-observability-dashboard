@@ -306,7 +306,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} />
             ))}
           </ul>
         </div>
@@ -752,6 +752,22 @@ function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize
   );
 }
 
+/** The decision's state in place of the buttons: a spinner while saving, a check once saved. */
+function DecisionChip({outcome}: {outcome: {doing: string; done: string; tone: Tone; state: 'saving' | 'saved'}}) {
+  const saved = outcome.state === 'saved';
+  return (
+    <span
+      role="status"
+      key={outcome.state}
+      className="inline-flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
+      style={{color: saved ? toneVar(outcome.tone) : 'var(--muted-foreground)', background: `color-mix(in oklab, ${saved ? toneVar(outcome.tone) : 'var(--muted-foreground)'} 13%, transparent)`}}
+    >
+      {saved ? <Check className="size-3.5 shrink-0" aria-hidden /> : <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />}
+      <span className="truncate">{saved ? outcome.done : outcome.doing}</span>
+    </span>
+  );
+}
+
 function SkuRow({
   r,
   company,
@@ -779,7 +795,30 @@ function SkuRow({
   const [item, setItem] = useState('');
   const [open, setOpen] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
-  const shown = r.linked ?? r.suggestion;
+  // A decision shows at once: the buttons give way to a chip ("Approving…", then
+  // "Approved" when the server confirms) while the page reloads and the row moves to its
+  // new list. A failure brings the buttons back with the error.
+  const [outcome, setOutcome] = useState<{doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem; state: 'saving' | 'saved'} | null>(null);
+  const rowKey = `${r.linked?.itemCode ?? ''}|${r.suggestion?.itemCode ?? ''}|${r.review?.action ?? ''}|${r.review?.remark ?? ''}`;
+  const [seenKey, setSeenKey] = useState(rowKey);
+  if (rowKey !== seenKey) {
+    // The reloaded row has caught up: drop the chip.
+    setSeenKey(rowKey);
+    if (outcome?.state === 'saved') setOutcome(null);
+  }
+  const decide = (fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, chip: {doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem}) => {
+    setOutcome({...chip, state: 'saving'});
+    done();
+    act(
+      sku,
+      fn,
+      okText,
+      () => setOutcome((o) => (o ? {...o, state: 'saved'} : o)),
+      () => setOutcome(null),
+    );
+  };
+  // While a link or approval is saving, show the item it is being linked to.
+  const shown = outcome?.item ?? r.linked ?? r.suggestion;
   const sku = r.skuCode;
   const choosing = status === 'choose' || status === 'rejected';
   const done = () => {
@@ -796,7 +835,10 @@ function SkuRow({
 
   return (
     <li>
-      <div className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}>
+      <div
+        className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}
+        style={outcome ? {background: `color-mix(in oklab, ${toneVar(outcome.tone)} 6%, transparent)`} : undefined}
+      >
         <div className="flex min-w-0 flex-col gap-1">
           <p className="truncate text-sm font-medium" title={r.name}>
             {watsonsName(r.name)}
@@ -849,14 +891,14 @@ function SkuRow({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {canEdit && status === 'check' && r.suggestion && (
+          {outcome && <DecisionChip outcome={outcome} />}
+          {!outcome && canEdit && status === 'check' && r.suggestion && (
             <>
               <Button
                 size="sm"
                 disabled={disabled}
                 onClick={() =>
-                  act(
-                    sku,
+                  decide(
                     () =>
                       approveSuggestionAction({
                         company,
@@ -865,19 +907,18 @@ function SkuRow({
                         remark,
                       }),
                     `Approved. ${sku} is now linked to ${r.suggestion!.itemCode}.`,
-                    done,
+                    {doing: 'Approving…', done: `Approved · linked to ${r.suggestion!.itemCode}`, tone: 'good', remark},
                   )
                 }
               >
-                <Check className="size-3.5" /> {busy ? 'Saving…' : 'Approve'}
+                <Check className="size-3.5" /> Approve
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={disabled}
                 onClick={() =>
-                  act(
-                    sku,
+                  decide(
                     () =>
                       rejectSuggestionAction({
                         company,
@@ -886,7 +927,7 @@ function SkuRow({
                         remark,
                       }),
                     `Rejected. Coop won't suggest ${r.suggestion!.itemCode} for ${sku} again.`,
-                    done,
+                    {doing: 'Rejecting…', done: `Rejected ${r.suggestion!.itemCode}`, tone: 'crit', remark},
                   )
                 }
               >
@@ -905,12 +946,12 @@ function SkuRow({
               </Button>
             </>
           )}
-          {canEdit && choosing && (
+          {!outcome && canEdit && choosing && (
             <Button size="sm" variant={open ? 'secondary' : quiet ? 'outline' : 'default'} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
               <Link2 className="size-3.5" /> Choose item
             </Button>
           )}
-          {canEdit && status === 'linked' && (
+          {!outcome && canEdit && status === 'linked' && (
             <Button
               size="icon-sm"
               variant="ghost"
@@ -923,10 +964,10 @@ function SkuRow({
               <MoreHorizontal className="size-4" />
             </Button>
           )}
-          {note && !open && (
-            <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={note}>
+          {(outcome?.remark?.trim() || note) && !open && (
+            <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={outcome?.remark?.trim() || note || undefined}>
               <MessageSquare className="size-3 shrink-0" />
-              <span className="truncate">{note}</span>
+              <span className="truncate">{outcome?.remark?.trim() || note}</span>
             </p>
           )}
         </div>
@@ -951,7 +992,7 @@ function SkuRow({
             />
             <div className="flex flex-wrap items-center gap-2">
               {choosing && (
-                <Button size="sm" disabled={disabled || !item} onClick={() => act(sku, () => linkSkuAction({company, sku, item, remark}), `Linked ${sku} to ${item}.`, done)}>
+                <Button size="sm" disabled={disabled || !item} onClick={() => decide(() => linkSkuAction({company, sku, item, remark}), `Linked ${sku} to ${item}.`, {doing: `Linking to ${item}…`, done: `Linked to ${item}`, tone: 'good', remark, item: items.find((x) => x.itemCode === item)})}>
                   <Link2 className="size-3.5" /> {busy ? 'Saving…' : 'Link'}
                 </Button>
               )}
@@ -961,7 +1002,7 @@ function SkuRow({
                     size="sm"
                     variant="destructive"
                     disabled={disabled}
-                    onClick={() => act(sku, () => unlinkSkuAction({company, sku, remark}), `Unlinked ${sku}. Coop won't match it to ${r.linked!.itemCode} again.`, done)}
+                    onClick={() => decide(() => unlinkSkuAction({company, sku, remark}), `Unlinked ${sku}. Coop won't match it to ${r.linked!.itemCode} again.`, {doing: 'Unlinking…', done: `Unlinked ${r.linked!.itemCode}`, tone: 'crit', remark})}
                   >
                     <Unlink className="size-3.5" /> {busy ? 'Saving…' : 'Confirm unlink'}
                   </Button>
@@ -975,7 +1016,7 @@ function SkuRow({
                   size="sm"
                   variant="outline"
                   disabled={disabled || !remark.trim()}
-                  onClick={() => act(sku, () => saveRemarkAction({company, sku, remark}), 'Remark saved.', done)}
+                  onClick={() => decide(() => saveRemarkAction({company, sku, remark}), 'Remark saved.', {doing: 'Saving remark…', done: 'Remark saved', tone: 'info', remark})}
                 >
                   Save remark only
                 </Button>
