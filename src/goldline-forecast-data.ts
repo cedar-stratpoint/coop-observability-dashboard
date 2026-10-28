@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getForecastSettings, getGlCatalog, getGlStores, getStoreScope} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
+import type {InventoryRowIn} from './goldline-inventory';
 import {
   buildForecastLines,
   DEFAULT_FORECAST_SETTINGS,
@@ -40,15 +41,23 @@ export type ForecastData = {
 
 const firstOf = (month: string) => `${month}-01`;
 
-export async function getForecastData(companyId: string, runDate: string, store: string | null, storeScope?: string[] | null): Promise<ForecastData> {
-  const settings = nichidoConfigured() ? await getForecastSettings(companyId) : DEFAULT_FORECAST_SETTINGS;
+/** F10's inputs for a run, before any store is picked. Shared with the restock (F11). */
+export type ForecastBase = {
+  settings: ForecastSettings;
+  window: ForecastWindow;
+  year: MonthStatus[];
+  lines: ForecastLine[]; // every store × item, holds included
+  inScope: Set<string>;
+  latestCounts: Array<InventoryRowIn & {store_code: string; period_end: string}>; // each store's latest count
+  storeName: Map<string, string | null>;
+  itemName: Map<string, string>;
+};
+
+/** Reads and builds F10's lines. Nichido must be configured (callers check first). */
+export async function loadForecastBase(companyId: string, runDate: string, storeScope?: string[] | null): Promise<ForecastBase> {
+  const settings = await getForecastSettings(companyId);
   const window = forecastWindow(runDate, settings);
   const yearMonths = salesYear(runDate);
-  const emptyYear = yearMonths.map((month) => ({month, loaded: false, units: 0, unlinkedUnits: 0}));
-  if (!nichidoConfigured()) {
-    return {configured: false, settings, window, year: emptyYear, summary: forecastSummary([], window, emptyYear), stores: [], store: null, lines: []};
-  }
-
   const supa = db();
   const scope = storeScope ?? null;
   const [months, history, scopeRows, catalog, storeRows, flags, counts] = await Promise.all([
@@ -65,7 +74,10 @@ export async function getForecastData(companyId: string, runDate: string, store:
       return q.order('id').range(from, to);
     }),
     fetchAllRows('inventory', (from, to) => {
-      let q = supa.from('inventory').select('id,store_code,item_code,period_end').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      let q = supa
+        .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
+        .select('id,store_code,item_code,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand')
+        .eq('company_id', companyId);
       if (scope) q = q.in('store_code', scope);
       return q.order('id').range(from, to);
     }),
@@ -83,22 +95,42 @@ export async function getForecastData(companyId: string, runDate: string, store:
   const hist = (history.data ?? {}) as Record<string, Record<string, number[]>>;
   const historyRows = Object.entries(hist).flatMap(([storeCode, items]) => Object.entries(items).map(([itemCode, units]) => ({storeCode, itemCode, units})));
 
-  // Pairs on each store's latest count (F9), so a product that didn't sell last year shows up.
+  // Each store's latest count (F9): its rows give on hand, and its pairs show up even when
+  // the product didn't sell last year.
+  type CountRow = InventoryRowIn & {store_code: string; period_end: string};
   const latestEnd = new Map<string, string>();
-  for (const r of counts as Array<{store_code: string; period_end: string}>) {
+  for (const r of counts as unknown as CountRow[]) {
     if ((latestEnd.get(r.store_code) ?? '') < r.period_end) latestEnd.set(r.store_code, r.period_end);
   }
-  const counted = (counts as Array<{store_code: string; item_code: string; period_end: string}>)
-    .filter((r) => latestEnd.get(r.store_code) === r.period_end)
-    .map((r) => ({storeCode: r.store_code, itemCode: r.item_code}));
+  const latestCounts = (counts as unknown as CountRow[]).filter((r) => latestEnd.get(r.store_code) === r.period_end);
+  const counted = latestCounts.map((r) => ({storeCode: r.store_code, itemCode: r.item_code}));
 
   const inScope = new Set(scopeRows.filter((s) => s.in_scope).map((s) => s.store_code));
   const retired = new Set(catalog.filter((p) => p.retired_at).map((p) => p.item_code));
   const openFlags = new Set((flags as Array<{store_code: string; item_code: string}>).map((f) => `${f.store_code}|${f.item_code}`));
-  const all = buildForecastLines({window, months: year, history: historyRows, inScope, retired, openFlags, counted});
+  const lines = buildForecastLines({window, months: year, history: historyRows, inScope, retired, openFlags, counted});
 
-  const storeName = new Map(storeRows.map((s) => [s.store_code, s.name]));
-  const itemName = new Map(catalog.map((p) => [p.item_code, itemDisplayName(p.product_line, p.variant, p.item_code)]));
+  return {
+    settings,
+    window,
+    year,
+    lines,
+    inScope,
+    latestCounts,
+    storeName: new Map(storeRows.map((s) => [s.store_code, s.name])),
+    itemName: new Map(catalog.map((p) => [p.item_code, itemDisplayName(p.product_line, p.variant, p.item_code)])),
+  };
+}
+
+export async function getForecastData(companyId: string, runDate: string, store: string | null, storeScope?: string[] | null): Promise<ForecastData> {
+  if (!nichidoConfigured()) {
+    const settings = DEFAULT_FORECAST_SETTINGS;
+    const window = forecastWindow(runDate, settings);
+    const emptyYear = salesYear(runDate).map((month) => ({month, loaded: false, units: 0, unlinkedUnits: 0}));
+    return {configured: false, settings, window, year: emptyYear, summary: forecastSummary([], window, emptyYear), stores: [], store: null, lines: []};
+  }
+  const scope = storeScope ?? null;
+  const {settings, window, year, lines: all, inScope, storeName, itemName} = await loadForecastBase(companyId, runDate, scope);
   const picked = store && (!scope || scope.includes(store)) ? store : null;
 
   return {
