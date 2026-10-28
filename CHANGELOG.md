@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: a second total for our form items, form-items tab set apart
+The tab counts mix two lists, which read as one: 42 + 58 + 210 + 53 = 363 against "315 Watsons SKUs". The first three (plus 5 with no units sold) are Watsons SKUs; "Form items without a SKU" counts our items, and 42 of those 53 are the very items Coop suggested for the "to check" SKUs. So the coverage panel now gives both totals: 315 Watsons SKUs (210 linked · 42 to check · 58 to choose · 5 with no units sold) and 263 items on our forms (210 linked, the same pairs · 53 without a Watsons SKU, 42 of them Coop's matches to check), and a thin divider sets the form-items tab apart from the Watsons-SKU tabs. The audit PDF cover got the same second line.
+
 ## 2026-10-28 — SKU linking: total of all Watsons SKUs, and a searchable item picker
 The coverage panel now ends with "315 Watsons SKUs in all" and its breakdown (210 linked · 42 to check · 58 to choose · 5 with no units sold), so the tabs add up to every code in the Watsons files. The 5 are listed by Watsons with 0 units over the whole window; the page already left them out of every tab (nothing to decide), which is why the tabs summed to 310. "Choose item" is now a searchable dropdown (`components/analyst/goldline-item-combobox.tsx`, Base UI Combobox) instead of a long native select: type any part of the code, name, product line or price, and every word must match ("blush 299"); items stay grouped by product line with their price and form page, and a price within 15% of Watsons' average is marked "near Watsons". The audit PDF (`Nichido_Data_Audit.pdf`, rebuilt Oct 28 outside this repo) now uses the same counts: a "315 Watsons codes in all" line, and the form-items card shows all 53 like Coop's tab (42 answered in Section A, 11 in Section C) instead of only the 11.
 
