@@ -1,25 +1,17 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
-import {fetchAllRows} from './pos-fetch-paginate';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
-import {buildOverview, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
+import {buildOverview, last12Months, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
 
 // Read-only analytics for a Goldline-style tenant: store + SKU rollups derived
-// from gl_sales, joined to gl_stores for names. Company-scoped on every read (the
+// from sales, joined to stores for names. Company-scoped on every read (the
 // service-role key bypasses RLS, so the company_id filter is the tenant fence) and
-// paginated via fetchAllRows so a large gl_sales is never silently capped. v1 does
+// paginated via fetchAllRows so a large sales is never silently capped. v1 does
 // the aggregation in JS — fine at the ~150k-rows/cycle scale; an RPC/view is the
 // later optimization (same path the pos_* reads will take).
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-
-function configured(): boolean {
-  return Boolean(url && key);
-}
-function db(): SupabaseClient {
-  return createClient(url as string, key as string, {auth: {persistSession: false}});
-}
+const configured = nichidoConfigured;
+const db = nichidoDb;
 
 const num = (v: unknown): number => {
   const n = typeof v === 'number' ? v : Number(v);
@@ -70,16 +62,15 @@ const EMPTY: GoldlineAnalytics = {
   summary: {gross: 0, units: 0, net: 0, storeCount: 0, skuCount: 0, periodStart: null, periodEnd: null},
 };
 
-
 /** One company's store + SKU sales rollups and headline summary. */
 export async function getGoldlineAnalytics(companyId: string): Promise<GoldlineAnalytics> {
   if (!configured()) return EMPTY;
   const supa = db();
 
-  // Sums are done in the database (gl_sales_rollup) — never the whole sales history
+  // Sums are done in the database (sales_rollup) — never the whole sales history
   // shipped to the app. The store list comes from the per-company cache.
-  const [cachedStores, rollup] = await Promise.all([getGlStores(companyId), supa.rpc('gl_sales_rollup', {p_company: companyId})]);
-  if (rollup.error) throw new Error(`gl_sales_rollup failed: ${rollup.error.message}`);
+  const [cachedStores, rollup] = await Promise.all([getGlStores(companyId), supa.rpc('sales_rollup', {p_company: companyId})]);
+  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
   const storeRows: GlStore[] = cachedStores.map((s) => ({store_code: s.store_code, name: s.name, region: s.region, area: s.area, status: s.status}));
   const r = (rollup.data ?? {}) as {
     byStore?: Array<{store_code: string; units: unknown; gross: unknown; net: unknown; sku_count: unknown}>;
@@ -140,17 +131,19 @@ export async function getGoldlineAnalytics(companyId: string): Promise<GoldlineA
   };
 }
 
+export type TrendMonth = {month: string; units: number; loaded: boolean}; // month = YYYY-MM-01
 export type GoldlineOverviewData = {
   companyName: string;
-  storesLive: number; // gl_stores with status 'active'
+  storesLive: number; // stores with status 'active'
   overview: GoldlineOverview;
+  trend: TrendMonth[]; // the 12 months up to the latest period's month, oldest first; [] if unavailable
 };
 
 /** Everything the Overview page needs for one company: name, live-store count,
  *  and the window/delta/category rollups (see goldline-overview.ts). */
 export async function getGoldlineOverviewData(companyId: string): Promise<GoldlineOverviewData> {
   const empty = buildOverview([], new Map());
-  if (!configured()) return {companyName: companyId, storesLive: 0, overview: empty};
+  if (!configured()) return {companyName: companyId, storesLive: 0, overview: empty, trend: []};
   const supa = db();
 
   // Independent reads run together; reference data (stores, catalog) is cached.
@@ -161,11 +154,11 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
     getGlStores(companyId),
     getGlCatalog(companyId),
     // Only the two periods the page shows: the latest one, and the latest one that ends
-    // before it starts (the comparison). Reading all of gl_sales on every render would
+    // before it starts (the comparison). Reading all of sales on every render would
     // grow with each upload (~150k rows per period at 300 stores).
     // pagination-ok: single row (latest period marker).
     supa
-      .from('gl_sales')
+      .from('sales')
       .select('period_start,period_end')
       .eq('company_id', companyId)
       .order('period_end', {ascending: false})
@@ -174,24 +167,24 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
       .maybeSingle(),
   ]);
   const companyName = (company.data?.name as string | undefined) ?? companyId;
-  if (latest.error) throw new Error(`gl_sales latest period failed: ${latest.error.message}`);
+  if (latest.error) throw new Error(`sales latest period failed: ${latest.error.message}`);
   const cur = latest.data as Period | null;
 
-  const salesFor = async (p: Period) =>
-    (await fetchAllRows(
-      'gl_sales',
-      (from, to) =>
-        supa
-          .from('gl_sales')
-          .select('sku_code,gross_retail,units,net_of_vat,period_start,period_end')
-          .eq('company_id', companyId)
-          .eq('period_start', p.period_start)
-          .eq('period_end', p.period_end)
-          .order('id', {ascending: true})
-          .range(from, to),
-      undefined,
-      {concurrency: 4},
-    )) as unknown as Array<Record<string, unknown>>;
+  // One row per SKU for the period, totalled in the database (sales_by_sku): a Watsons
+  // month is ~40k rows but the page only needs per-SKU sums, which buildOverview treats
+  // exactly like the raw rows.
+  const salesFor = async (p: Period): Promise<Array<Record<string, unknown>>> => {
+    const res = await supa.rpc('sales_by_sku', {p_company: companyId, p_start: p.period_start, p_end: p.period_end});
+    if (res.error) throw new Error(`sales_by_sku failed: ${res.error.message}`);
+    return ((res.data ?? []) as Array<{sku_code: string; units: unknown; gross: unknown; net: unknown}>).map((r) => ({
+      sku_code: r.sku_code,
+      units: r.units,
+      gross_retail: r.gross,
+      net_of_vat: r.net,
+      period_start: p.period_start,
+      period_end: p.period_end,
+    }));
+  };
 
   // The current period's rows and the comparison period's marker together, then its rows.
   let sales: Array<Record<string, unknown>> = [];
@@ -200,7 +193,7 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
       salesFor(cur),
       // pagination-ok: single row (previous period marker).
       supa
-        .from('gl_sales')
+        .from('sales')
         .select('period_start,period_end')
         .eq('company_id', companyId)
         .lt('period_end', cur.period_start)
@@ -209,7 +202,7 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
         .limit(1)
         .maybeSingle(),
     ]);
-    if (prev.error) throw new Error(`gl_sales previous period failed: ${prev.error.message}`);
+    if (prev.error) throw new Error(`sales previous period failed: ${prev.error.message}`);
     const prior = prev.data as Period | null;
     sales = [...curRows, ...(prior ? await salesFor(prior) : [])];
   }
@@ -226,9 +219,24 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
     period_end: (r.period_end as string | null) ?? null,
   }));
 
+  // Units per month for the trend chart, from forecast_months (F10): plain units only, no
+  // decryption, one cheap call. Optional: where the function isn't deployed yet (prod
+  // before the P3 SQL) the chart is simply left out.
+  let trend: TrendMonth[] = [];
+  if (cur?.period_start) {
+    const months = last12Months(cur.period_start);
+    const res = await supa.rpc('forecast_months', {p_company: companyId, p_months: months});
+    if (res.error) console.error('overview trend: forecast_months failed', res.error.message);
+    else
+      trend = ((res.data ?? []) as Array<{month: string; units: unknown; loaded: boolean}>)
+        .map((r) => ({month: String(r.month).slice(0, 10), units: num(r.units), loaded: Boolean(r.loaded)}))
+        .sort((a, b) => a.month.localeCompare(b.month));
+  }
+
   return {
     companyName,
     storesLive: stores.filter((s) => s.status === 'active').length,
     overview: buildOverview(rows, lineBySku),
+    trend,
   };
 }

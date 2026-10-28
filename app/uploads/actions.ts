@@ -1,6 +1,8 @@
 'use server';
 
 import {revalidatePath} from 'next/cache';
+import {runChecks} from '@/src/goldline-checks-data';
+import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {auth} from '@/auth';
@@ -15,16 +17,18 @@ import {
   getBatch,
   getBatchPages,
   getUpload,
+  splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
   type DeleteImpact,
+  type SplitForm,
   type ReviewedInventoryRow,
 } from '@/src/goldline-data';
 
 // Server action behind the review screen's "Commit" button. Re-derives the tenant
 // context server-side (never trusts a company id from the client beyond the switcher
 // hint), re-checks write capability + store scope, coerces the submitted rows, then
-// writes gl_inventory and closes the upload. All the authorization that the upload
+// writes inventory and closes the upload. All the authorization that the upload
 // route enforces is enforced again here — the two are independent entry points.
 
 export type CommitResult = {ok: true; committed: number} | {ok: false; error: string};
@@ -100,8 +104,13 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
   try {
     const out = await outOfScopeFor(ctx, input.uploadId);
     if (out) return {ok: false, error: out};
+    // A scan's stores are few (its counts); a sales file can touch every store, and its
+    // rows only matter to counted stores, so it re-runs the checks for those instead.
+    const upload = await getUpload(ctx.companyId, input.uploadId);
+    const touched = upload?.kind === 'inventory_pdf' ? await uploadStores(ctx.companyId, input.uploadId).catch(() => [] as string[]) : null;
     const ok = await deleteUpload(ctx.companyId, input.uploadId);
     if (!ok) return {ok: false, error: 'Upload not found.'};
+    await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
     revalidatePath('/uploads');
     revalidatePath('/stock');
     revalidatePath('/overview');
@@ -127,7 +136,7 @@ export async function commitReview(input: {
 
   // Ownership: the uploadId is client-supplied — confirm it belongs to THIS tenant
   // before any write, so a crafted id can't cross-link one company's inventory to
-  // another's upload (the gl_inventory insert stamps our company_id but would
+  // another's upload (the inventory insert stamps our company_id but would
   // otherwise store a foreign source_upload_id, and the status updates would no-op).
   const upload = await getUpload(ctx.companyId, input.uploadId);
   if (!upload) return {ok: false, error: 'Upload not found.'};
@@ -161,16 +170,22 @@ export async function commitReview(input: {
   }
 
   try {
+    const consultant = await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant);
     const committed = await commitInventory({
       companyId: ctx.companyId,
       uploadId: input.uploadId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: input.consultant ?? null,
+      consultant,
       rows,
     });
+    await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
+    // The P2 checks follow every change to counts; a failing check never fails the commit.
+    await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/${input.uploadId}`);
+    revalidatePath('/flags');
+    revalidatePath('/bas');
     return {ok: true, committed};
   } catch (e) {
     // Don't leak Postgres/schema detail to the browser; log it server-side.
@@ -297,17 +312,23 @@ export async function commitBatchAction(input: {
   if (!pages.some((p) => p.rows.length)) return {ok: false, error: 'No valid rows to commit.'};
 
   try {
+    const consultant = await resolveFormBa(ctx.companyId, store, input.periodEnd, input.consultant);
     const {committed} = await commitBatch({
       companyId: ctx.companyId,
       batchId: input.batchId,
       storeCode: store,
       period: {start: input.periodStart, end: input.periodEnd},
-      consultant: input.consultant ?? null,
+      consultant,
       pages,
     });
+    await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
+    // The P2 checks follow every change to counts; a failing check never fails the commit.
+    await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
     revalidatePath('/uploads');
     revalidatePath(`/uploads/batch/${input.batchId}`);
     revalidatePath('/stock');
+    revalidatePath('/flags');
+    revalidatePath('/bas');
     return {ok: true, committed};
   } catch (e) {
     if (e instanceof BatchConflictError) {
@@ -321,5 +342,25 @@ export async function commitBatchAction(input: {
     }
     console.error('commitBatchAction', e);
     return {ok: false, error: 'Could not commit these pages. Please try again; committing again is safe.'};
+  }
+}
+
+/**
+ * Many stores in one scan: once every page of the drop is read, split the batch into
+ * one batch per form (a new form wherever the page number drops back, e.g. 5 to 1).
+ */
+export async function splitFormsAction(input: {company: string | null; batchId: string}): Promise<{ok: true; forms: SplitForm[]} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  if (!/^[0-9a-f-]{36}$/i.test(input.batchId ?? '')) return {ok: false, error: 'Upload batch not found.'};
+  try {
+    const session = await auth();
+    const forms = await splitBatchIntoForms(ctx.companyId, input.batchId, session?.user?.email ?? null);
+    revalidatePath('/uploads');
+    return {ok: true, forms};
+  } catch (e) {
+    console.error('splitFormsAction', e);
+    return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
   }
 }

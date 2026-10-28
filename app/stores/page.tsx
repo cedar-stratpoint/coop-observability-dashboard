@@ -1,11 +1,13 @@
 import {getDataContext} from '@/src/active-context';
 import {getGoldlineAnalytics} from '@/src/goldline-analytics';
+import {getStoreScope} from '@/src/goldline-ref-data';
+import {canEditData} from '@/src/company';
 import {GoldlineStoresView} from '@/components/analyst/goldline-stores-view';
 
 export const dynamic = 'force-dynamic';
 
-// Store leaderboard, scoped to the active company's gl_sales. Not behind the
-// Zoomy guard — it shows whichever company is active (Zoomy has no gl_* data, so
+// Store leaderboard, scoped to the active company's sales. Not behind the
+// Zoomy guard — it shows whichever company is active (Zoomy has no Goldline data, so
 // it renders empty there; the nav only surfaces it for non-Zoomy companies).
 export default async function Page() {
   const ctx = await getDataContext();
@@ -17,6 +19,14 @@ export default async function Page() {
       </div>
     );
   }
-  const {byStore, summary} = await getGoldlineAnalytics(ctx.companyId);
-  return <GoldlineStoresView stores={byStore} summary={summary} />;
+  const [{byStore, summary}, scope] = await Promise.all([getGoldlineAnalytics(ctx.companyId), getStoreScope(ctx.companyId).catch(() => [])]);
+  return (
+    <GoldlineStoresView
+      company={ctx.companyId}
+      stores={byStore}
+      summary={summary}
+      scope={scope}
+      canEditScope={canEditData(ctx.role) && !ctx.storeScope}
+    />
+  );
 }

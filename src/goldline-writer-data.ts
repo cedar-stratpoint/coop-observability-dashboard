@@ -1,5 +1,5 @@
 import 'server-only';
-import {createClient, type SupabaseClient} from '@supabase/supabase-js';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {GOLDLINE_BUCKET} from './goldline-data';
 import {
@@ -15,15 +15,12 @@ import {
 
 // Builds the writer profile for one read from the CONNECTED database: the pages a
 // person reviewed and committed here (Staging learns from Staging, prod from prod;
-// nothing is baked into code). Reader output is kept in gl_extractions.rows and the
-// confirmed values in gl_inventory (by source_upload_id), so every review is a
+// nothing is baked into code). Reader output is kept in extractions.rows and the
+// confirmed values in inventory (by source_upload_id), so every review is a
 // labelled example with no extra writes. Any failure here returns an empty profile:
 // the reader then works exactly as before, it never blocks an upload.
 
-const url = process.env.SUPABASE_URL_ARCHIVE;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
-let client: SupabaseClient | null = null;
-const db = () => (client ??= createClient(url as string, key as string, {auth: {persistSession: false}}));
+const db = nichidoDb;
 
 /** How many recent reviewed pages the profile looks at. */
 const RECENT_PAGES = 40;
@@ -67,25 +64,25 @@ function recentReviewed(companyId: string): Promise<Reviewed[]> {
 /** The company's recent committed scans with the reader's and the confirmed values. */
 async function loadReviewed(companyId: string): Promise<Reviewed[]> {
   const ups = await db()
-    .from('gl_uploads')
+    .from('uploads')
     .select('id,created_at,storage_path')
     .eq('company_id', companyId)
     .eq('kind', 'inventory_pdf')
     .eq('status', 'committed')
     .order('created_at', {ascending: false})
     .limit(RECENT_PAGES); // pagination-ok: bounded to the most recent RECENT_PAGES pages
-  if (ups.error) throw new Error(`gl_uploads read failed: ${ups.error.message}`);
+  if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
   const uploads = (ups.data ?? []) as {id: string; created_at: string; storage_path: string | null}[];
   if (!uploads.length) return [];
   const ids = uploads.map((u) => u.id);
 
   const [ext, inv] = await Promise.all([
-    db().from('gl_extractions').select('upload_id,page,rows').eq('company_id', companyId).in('upload_id', ids).limit(RECENT_PAGES * 2), // pagination-ok: one row per upload, ≤ RECENT_PAGES uploads
-    fetchAllRows('gl_inventory', (from, to) =>
-      db().from('gl_inventory').select(COLS).eq('company_id', companyId).in('source_upload_id', ids).order('id').range(from, to),
+    db().from('extractions').select('upload_id,page,rows').eq('company_id', companyId).in('upload_id', ids).limit(RECENT_PAGES * 2), // pagination-ok: one row per upload, ≤ RECENT_PAGES uploads
+    fetchAllRows('inventory', (from, to) =>
+      db().from('inventory').select(COLS).eq('company_id', companyId).in('source_upload_id', ids).order('id').range(from, to),
     ),
   ]);
-  if (ext.error) throw new Error(`gl_extractions read failed: ${ext.error.message}`);
+  if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
 
   const confirmedBy = new Map<string, Counts[]>();
   const storeBy = new Map<string, string>();
@@ -144,7 +141,7 @@ function summarize(rows: Reviewed[]): Summary {
  * nothing has been reviewed yet, on any error, or after PROFILE_TIMEOUT_MS.
  */
 export async function getWriterProfile(companyId: string, page: number, storeCode: string | null, storeScope?: string[] | null): Promise<WriterProfile> {
-  if (!url || !key || process.env.GL_WRITER_PROFILE === 'off') return EMPTY;
+  if (!nichidoConfigured() || process.env.GL_WRITER_PROFILE === 'off') return EMPTY;
   try {
     return await withTimeout(buildProfile(companyId, page, storeCode, storeScope), PROFILE_TIMEOUT_MS, 'writer profile');
   } catch (e) {
@@ -182,7 +179,7 @@ export type ReaderAccuracy = ReaderStats & {before: ReaderStats; after: ReaderSt
  *  the writer profile was used (for the Uploads page). Null when nothing is reviewed
  *  yet, on error, or if it's slow (the page never waits on it). */
 export async function getReaderAccuracy(companyId: string, storeScope?: string[] | null): Promise<ReaderAccuracy | null> {
-  if (!url || !key) return null;
+  if (!nichidoConfigured()) return null;
   try {
     const rows = (await withTimeout(recentReviewed(companyId), PROFILE_TIMEOUT_MS, 'reader stats')).filter((r) => inScope(r, storeScope));
     const s = summarize(rows);

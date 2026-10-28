@@ -14,6 +14,7 @@ export type CoopEnvKey = 'staging' | 'production';
 export type CoopEnv = {
   key: CoopEnvKey;
   dbRef: string; // the Supabase project ref this environment's database has
+  nichidoRef: string; // the Nichido project that holds this environment's Goldline data
   label: string;
   url: string; // canonical origin
   host: string;
@@ -28,6 +29,7 @@ export const COOP_ENVS: readonly CoopEnv[] = [
     url: 'https://coop-brand-os-staging.vercel.app',
     host: 'coop-brand-os-staging.vercel.app',
     dbRef: 'syxwixxzmytvhwhkwdvw',
+    nichidoRef: 'jcqlnrvplaapvcxyhcns',
     tone: 'oklch(0.62 0.15 250)', // blue
     dbLabel: 'Staging Supabase (syxw…wdvw)',
   },
@@ -37,6 +39,7 @@ export const COOP_ENVS: readonly CoopEnv[] = [
     url: 'https://coop-brand-os.vercel.app',
     host: 'coop-brand-os.vercel.app',
     dbRef: 'qkxbwzdxhwcbwgriwipi',
+    nichidoRef: 'pfwrkqsjmetibslltmok',
     tone: 'oklch(0.6 0.2 305)', // purple
     dbLabel: 'Coop production Supabase (qkxb…wipi)',
   },
@@ -65,6 +68,19 @@ export function resolveEnv(dbUrl: string | null | undefined, host: string | null
   const byDb = envForDbRef(dbRefOf(dbUrl));
   if (byDb) return byDb;
   return envForHost(host);
+}
+
+/**
+ * Whether the Nichido project (Goldline's data) belongs with this archive. When the
+ * archive is a known environment, Nichido must be that environment's own project, so a
+ * Staging deploy can never write Goldline data into Production (or the reverse). An
+ * unknown archive (a local Docker stack) accepts any Nichido URL.
+ */
+export function nichidoPairOk(archiveUrl: string | null | undefined, nichidoUrl: string | null | undefined): boolean {
+  const ref = dbRefOf(nichidoUrl);
+  if (!ref) return false;
+  const env = envForDbRef(dbRefOf(archiveUrl));
+  return env ? env.nichidoRef === ref : true;
 }
 
 /** For safety checks: Staging only when the database is positively the Staging one. */

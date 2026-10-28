@@ -10,6 +10,18 @@ export function itemPercent(i: QueueItem, now: number): number {
   return progressFor(i.kind, i.phase, i.uploadFrac, Math.max(0, now - i.phaseAt));
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const n = (v: number) => v.toLocaleString('en-US');
+
+/** "Sep 2026 · 37,211 rows · 301 stores (12 new)" for a saved Watsons month. */
+export function watsonsLabel(i: QueueItem): string {
+  const w = i.watsons;
+  if (!w) return `Saved ${n(i.rowsCommitted ?? 0)} sales rows`;
+  const [y, m] = w.month.start.split('-');
+  const month = `${MONTHS[Number(m) - 1] ?? m} ${y}`;
+  return `${month} · ${n(w.salesRows)} rows · ${n(w.stores)} stores${w.storesAdded ? ` (${n(w.storesAdded)} new)` : ''}`;
+}
+
 export function itemLabel(i: QueueItem): string {
   switch (i.state) {
     case 'queued':
@@ -22,6 +34,7 @@ export function itemLabel(i: QueueItem): string {
       return i.error ?? 'Failed';
     case 'done':
       if (i.kind === 'csv') return `Saved ${i.rowsCommitted ?? 0} sales rows`;
+      if (i.kind === 'xlsx') return watsonsLabel(i);
       return i.page
         ? `Page ${i.page} · ${i.flagged ? `${i.flagged} to check` : 'nothing flagged'}`
         : 'Read — ready for review';
@@ -33,11 +46,11 @@ export function itemLabel(i: QueueItem): string {
         case 'detecting':
           return 'Finding the page…';
         case 'parsing':
-          return 'Reading the rows…';
+          return i.kind === 'xlsx' ? 'Reading the month…' : 'Reading the rows…';
         case 'reading':
           return `Reading page ${i.reading?.page ?? ''} · ${i.reading?.items ?? 0} items`;
         case 'saving':
-          return 'Saving…';
+          return i.kind === 'xlsx' ? 'Saving stores, SKUs and sales…' : 'Saving…';
         default:
           return 'Working…';
       }

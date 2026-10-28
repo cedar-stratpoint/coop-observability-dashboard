@@ -31,6 +31,16 @@ const MOBILE_LABEL: Record<ColKey, string> = {stockroom: 'Stockroom', drawer: 'D
 
 /** The VISIBLE element for review row `index` — the table row on wide screens, the
  *  card on phones (both are in the page; only one is shown). */
+
+const MARK_LABEL = {overwritten: 'Overwritten', unclear: 'Unclear', straddle: 'Between columns'} as const;
+const FIELD_LABEL: Record<string, string> = {stockroom: 'stockroom', drawer: 'drawer', selling_area: 'selling area', delivery: 'delivery', ending_on_hand: 'ending'};
+/** "Overwritten: drawer (was 5) · Unclear: ending" — the reader's cell marks (F3). */
+function marksText(r: ExtractedRow): string | null {
+  const m = r.marks ?? [];
+  if (!m.length) return null;
+  return m.map((x) => `${MARK_LABEL[x.mark] ?? x.mark}: ${FIELD_LABEL[x.field] ?? x.field}${x.written ? ` (written ${x.written})` : ''}`).join(' · ');
+}
+
 export function reviewRowEl(index: number): HTMLElement | null {
   const all = document.querySelectorAll<HTMLElement>(`[data-review-row="${index}"]`);
   for (const el of all) if (el.offsetParent !== null) return el;
@@ -119,6 +129,7 @@ export function ReviewRows({
             <span className="block max-w-[14rem] truncate text-[11px] text-muted-foreground/80">{catalog[r.item_code]?.productLine}</span>
           )}
           {r.alt && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
+          {marksText(r) && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
         </td>
         {COLS.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
@@ -182,6 +193,7 @@ export function ReviewRows({
             <span className="font-mono text-xs">{r.item_code}</span>
             {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
             {r.alt && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
+            {marksText(r) && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
           </div>
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
