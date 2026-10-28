@@ -1,5 +1,23 @@
 # Nichido (Goldline) prod cutover
 
+## v1.17.0 · Nichido on prod (Oct 29, 2026)
+
+**What changed from the plan below:** prod Nichido (`pfwrkqsjmetibslltmok`) already holds the schema up to `f2b_sku_link_reviews` and the real data (Rick's Oct 26 and 27 branch merges and copy): 326 stores, 263 items, all 12 months of sales (472,604 rows, the same units as Staging, amounts encrypted with prod's own Vault key), 315 Watsons SKUs with the same suggestions. So this release is three things, in this order:
+
+| # | Step | Who | Notes |
+|---|---|---|---|
+| 1 | `supabase/nichido/prod_2026-10-29_release.sql` on prod (**done Oct 29**: 5 scans, 263 counts, 211 links, 1 decision; sales decrypt to ₱382,845,653, same as Staging) | Lance (write access opened for one pass) | One transaction, counts checked before every delete. Adds `f2c` (decommission columns); syncs MUBBEP ↔ 70075146 and its decision (Oct 28); keeps one form run (Cubao, Oct 8 to 9, pages 1 to 5) and removes the 41 test scans with their counts, readings and flags. Sales files untouched |
+| 2 | Remove the test scan files from the `goldline-uploads` bucket (**done Oct 29**: 48 removed, the 41 plus 7 older copies with no upload row; 17 left, all in use) | Lance | Storage API with the prod service-role key, prod project only |
+| 3 | Prod Vercel env: `NICHIDO_URL=https://pfwrkqsjmetibslltmok.supabase.co`, `NICHIDO_SERVICE_ROLE_KEY` (prod), `GOLDLINE_ANTHROPIC_API_KEY` (a new key) | The co-worker who owns prod Vercel | Before step 4. Without them the Nichido pages show nothing (no fallback). `nichidoPairOk` refuses a Staging Nichido URL on prod |
+| 4 | Merge `release/nichido-to-main` → `main` (v1.17.0) (**done Oct 29**, PR #336, merge `975664a`, prod `/api/health` serves it) | Lance, on the go-ahead | Nichido only (see the list below); Ask Coop and Offline Sales work on staging is not in it |
+| 5 | Smoke test on prod | Lance | Overview shows revenue for Feb and Mar (decrypts with prod's key); SKU linking: 42 · 57 · 10, totals 315 \| 263; Inventory shows Cubao Oct 8 to 9; Uploads lists 5 scans + 12 sales files; a scan reads |
+| 6 | Justin's and the owner's sign-in emails (D4) | Lance | `company_admin` on Goldline in the prod archive |
+
+**In the code release (Nichido only, from staging):** every `goldline*` / `nichido*` file; the pages `/overview`, `/stores`, `/stock` (Inventory, Restock F10, SKU linking), `/flags`, `/bas`, `/uploads`; the upload components (uploader, queue, review, batch review); `src/coop-env.ts` (prod ↔ Nichido prod pairing), `src/upload-batch.ts`; the Goldline nav in `dashboard-shell.tsx`. Typecheck clean, 3,565 tests pass on the branch.
+
+**Not in it:** Rick's F11 (`p3b`, `p3c`, PR #335), its own release later; staging's Ask Coop tools (Shopify, CRM query, SKU compare, leads), the Offline Sales event filter and sales-range changes, which stay on staging.
+
+
 The one controlled pass that takes Goldline from Staging to prod. Prepared Oct 26, 2026, after P1, P2, the Oct 26 flag rework, the BA list and scorecard, the multi-store scan split and F2 landed on `staging`; updated Oct 27 (SKU links screen removed, BAs learned from forms, Q23 ending rule). Run it only after Justin's UAT sign-off (P5).
 
 Who: **Rick** (Nichido database, copy), **the co-worker who owns prod Vercel** (env vars, deploy), **Lance** (code to `main`, data load, smoke test).
