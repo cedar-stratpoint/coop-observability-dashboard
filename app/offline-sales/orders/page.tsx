@@ -1,4 +1,4 @@
-import {getPosOrdersPage, getPosOrdersPriceBounds, getPosEvents} from '@/src/pos-sales';
+import {getPosOrdersPage, getPosOrdersRevenue, getPosOrdersPriceBounds, getPosEvents} from '@/src/pos-sales';
 import {getPosProducts, getPosBundles, usingPosMock} from '@/src/pos-data';
 import {parseOrdersFilter, parsePage, eventFilterScope, manilaDayKey} from '@/src/pos-sales-compute';
 import {OfflineOrdersView} from '@/components/analyst/offline-orders';
@@ -22,8 +22,9 @@ export default async function Page(props: {searchParams: Promise<SearchParams>})
   const eventOptions = eventFilterScope(events, filter, todayKey);
   const showEventFilter = eventOptions.length >= 2;
   const effectiveFilter = showEventFilter ? filter : {...filter, event: 'all'};
-  const [{orders, pageInfo}, bounds, products, bundleRows, prizeOrderUuids] = await Promise.all([
+  const [{orders, pageInfo}, revenue, bounds, products, bundleRows, prizeOrderUuids] = await Promise.all([
     getPosOrdersPage(parsePage(searchParams.page), effectiveFilter),
+    getPosOrdersRevenue(effectiveFilter),
     getPosOrdersPriceBounds(),
     getPosProducts(),
     getPosBundles(),
@@ -45,6 +46,7 @@ export default async function Page(props: {searchParams: Promise<SearchParams>})
     <OfflineOrdersView
       orders={orders}
       pageInfo={pageInfo}
+      revenue={revenue}
       filter={effectiveFilter}
       bounds={bounds}
       catalog={catalog}
