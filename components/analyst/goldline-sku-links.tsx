@@ -7,7 +7,7 @@ import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-link
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
-import {NativeSelect} from '@/components/ui/native-select';
+import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
 import {Pagination} from '@/components/analyst/pagination';
 import {FormPageDialog} from '@/components/analyst/goldline-form-page';
 import {GL_PAGE, GL_SCROLL_ROW_MOBILE} from '@/src/goldline-ui';
@@ -128,16 +128,6 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const from = (safePage - 1) * size;
   const slice = <T,>(xs: T[]) => xs.slice(from, from + size);
 
-  // Unlinked catalog items, grouped by product line for the manual picker.
-  const groups = useMemo(() => {
-    const g = new Map<string, SkuLinkItem[]>();
-    for (const i of data.unlinkedItems) {
-      const k = i.productLine?.trim() || 'Other';
-      g.set(k, [...(g.get(k) ?? []), i]);
-    }
-    return [...g.entries()];
-  }, [data.unlinkedItems]);
-
   const act: Act = (key, fn, okText, onOk) => {
     setBusy(key);
     setNotice(null);
@@ -153,6 +143,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   };
 
   const t = data.totals;
+  // Every Watsons SKU in the files, so the tabs add up: the ones with no units sold in the
+  // whole window (listed by Watsons, never sold) have nothing to decide and aren't in a tab.
+  const allSkus = data.rows.length;
+  const noSales = allSkus - counts.check - counts.choose - counts.rejected - counts.linked;
   const linkedPct = pct(t.linkedUnits, t.units);
   const suggestedPct = pct(t.suggestedUnits, t.units);
   const pick = (s: SkuStatus) => {
@@ -190,6 +184,22 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
               <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden /> Not matched {Math.max(0, Math.round((100 - linkedPct - suggestedPct) * 10) / 10)}%
             </li>
           </ul>
+          <div className="flex flex-col gap-1 border-t pt-3">
+            <p className="text-sm">
+              <span className="font-semibold tabular-nums">{n(allSkus)}</span> <span className="text-muted-foreground">Watsons SKUs in all</span>
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground tabular-nums">
+              {[
+                `${n(counts.linked)} linked`,
+                `${n(counts.check)} to check`,
+                `${n(counts.choose)} to choose`,
+                counts.rejected > 0 && `${n(counts.rejected)} rejected`,
+                noSales > 0 && `${n(noSales)} with no units sold`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
         </div>
       </header>
 
@@ -294,7 +304,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} groups={groups} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} />
             ))}
           </ul>
         </div>
@@ -353,7 +363,7 @@ function SkuRow({
   r,
   company,
   canEdit,
-  groups,
+  items,
   disabled,
   busy,
   act,
@@ -362,7 +372,7 @@ function SkuRow({
   r: SkuLinkRow;
   company: string;
   canEdit: boolean;
-  groups: Array<[string, SkuLinkItem[]]>;
+  items: SkuLinkItem[];
   disabled: boolean;
   busy: boolean;
   act: Act;
@@ -531,20 +541,7 @@ function SkuRow({
           <div className="flex min-w-0 flex-1 flex-col gap-2.5">
             {r.linked && <p className="text-xs text-muted-foreground">How it was linked: {linkedHow(r)}.</p>}
             {choosing && (
-              <NativeSelect aria-label={`Item for ${sku}`} value={item} onChange={(e) => setItem(e.target.value)} wrapperClassName="min-w-0 max-w-xl">
-                <option value="">Choose our item…</option>
-                {groups.map(([line, items]) => (
-                  <optgroup key={line} label={line}>
-                    {items.map((i) => (
-                      <option key={i.itemCode} value={i.itemCode}>
-                        {i.itemCode} · {itemText(i)}
-                        {i.price != null ? ` · ₱${n(i.price)}` : ''}
-                        {i.formSpot ? ` · form page ${i.formSpot.page}` : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </NativeSelect>
+              <ItemCombobox items={items} value={item} onChange={setItem} watsonsPrice={r.avgPrice} label={`Item for ${sku}`} />
             )}
             <textarea
               value={remark}
