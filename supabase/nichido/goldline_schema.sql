@@ -557,6 +557,12 @@ exception when duplicate_object then null; end $$;
 
 alter table public.products add column if not exists category text;
 alter table public.products add column if not exists retired_at timestamptz;
+-- f2c (Oct 28): who decommissioned an item from SKU linking, and why (optional, ≤500).
+alter table public.products add column if not exists retired_by text;
+alter table public.products add column if not exists retired_remark text;
+do $$ begin
+  alter table public.products add constraint products_retired_remark_len check (retired_remark is null or char_length(retired_remark) <= 500);
+exception when duplicate_object then null; end $$;
 do $$ begin
   alter table public.products add constraint products_category_check
     check (category is null or category in ('eyes', 'lips', 'face', 'other'));
