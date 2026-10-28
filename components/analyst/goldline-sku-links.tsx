@@ -1,6 +1,6 @@
 'use client';
 
-import {Fragment, useEffect, useMemo, useState, useTransition} from 'react';
+import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
 import {Check, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
@@ -10,7 +10,7 @@ import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
 import {Pagination} from '@/components/analyst/pagination';
 import {FormPageDialog} from '@/components/analyst/goldline-form-page';
-import {GL_PAGE, GL_SCROLL_ROW_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 import {itemDisplayName} from '@/src/goldline-item-name';
 
@@ -28,15 +28,6 @@ const PAGE_SIZES = [5, 10, 20, 100] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 const SIZE_KEY = 'coop.skus.perPage';
 const REMARK_MAX = 500;
-const ORDER: SkuStatus[] = ['check', 'choose', 'rejected', 'linked', 'noSales', 'formOnly'];
-const TAB: Record<SkuStatus, string> = {
-  check: 'Check Coop’s match',
-  choose: 'Choose the item',
-  rejected: 'Rejected',
-  linked: 'Linked',
-  noSales: 'No units sold',
-  formOnly: 'Form items without a SKU',
-};
 // One column template for the header and every row, so the columns line up.
 const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
 const ITEM_COLS = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]';
@@ -56,7 +47,7 @@ const itemText = (i: SkuLinkItem) => itemDisplayName(i.productLine, i.variant, i
 // 'info' has no status token: it uses the muted text colour.
 const toneVar = (t: Tone) => (t === 'info' ? 'var(--muted-foreground)' : `var(--status-${t})`);
 const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
-// One icon per tab for the help strip under the tabs.
+// One icon per view for the help strip above the table.
 const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion};
 
 type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
@@ -103,18 +94,19 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     for (const r of data.rows) out[r.units > 0 || r.linked ? skuStatus(r) : 'noSales'].push(r);
     return out;
   }, [data.rows]);
+  // Our items Coop already suggested for a "to check" SKU are answered there, so the
+  // "Sold at Watsons?" view is only the ones with no Watsons SKU and no suggestion.
+  const suggestedItems = useMemo(() => new Set(lists.check.map((r) => r.suggestion?.itemCode).filter(Boolean)), [lists.check]);
+  const noMatchItems = useMemo(() => data.unlinkedItems.filter((i) => !suggestedItems.has(i.itemCode)), [data.unlinkedItems, suggestedItems]);
   const counts: Record<SkuStatus, number> = {
     check: lists.check.length,
     choose: lists.choose.length,
     rejected: lists.rejected.length,
     linked: lists.linked.length,
     noSales: lists.noSales.length,
-    formOnly: data.unlinkedItems.length,
+    formOnly: noMatchItems.length,
   };
   const [filter, setFilter] = useState<SkuStatus>(lists.check.length ? 'check' : lists.choose.length ? 'choose' : 'linked');
-  // Hide an empty "Rejected" tab (most days) so there are fewer choices.
-  // Rejected only shows when there are some; No units sold only while it's open (from the header total).
-  const tabs = ORDER.filter((s) => (s !== 'rejected' || counts.rejected > 0 || filter === 'rejected') && (s !== 'noSales' || filter === 'noSales'));
 
   const q = query.trim().toLowerCase();
   const shownSkus = useMemo(() => {
@@ -125,8 +117,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     });
   }, [lists, filter, q]);
   const shownItems = useMemo(
-    () => (filter === 'formOnly' ? data.unlinkedItems.filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q)) : []),
-    [data.unlinkedItems, filter, q],
+    () => (filter === 'formOnly' ? noMatchItems.filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q)) : []),
+    [noMatchItems, filter, q],
   );
   const total = filter === 'formOnly' ? shownItems.length : shownSkus.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
@@ -155,9 +147,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   // Our side is a second list, so it gets its own total: every form item is either linked
   // (the same 210 pairs) or has no Watsons code yet. Many of those are the items Coop
   // suggested for "to check" SKUs, which is why the tab counts can't simply be added up.
-  const formItems = counts.linked + counts.formOnly;
-  const suggestedItems = useMemo(() => new Set(lists.check.map((r) => r.suggestion?.itemCode).filter(Boolean)), [lists.check]);
-  const formOnlySuggested = data.unlinkedItems.filter((i) => suggestedItems.has(i.itemCode)).length;
+  const formItems = counts.linked + data.unlinkedItems.length;
+  const formOnlySuggested = data.unlinkedItems.length - noMatchItems.length;
   const linkedPct = pct(t.linkedUnits, t.units);
   const suggestedPct = pct(t.suggestedUnits, t.units);
   const pick = (s: SkuStatus) => {
@@ -169,102 +160,60 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
   return (
     <div className={GL_PAGE}>
-      <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex max-w-2xl flex-col gap-1.5 lg:pt-1">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">SKU linking</h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">Match each Watsons SKU to our item. A SKU&apos;s Watsons sales count for the item only once it is linked.</p>
-        </div>
-        <div className="flex w-full shrink-0 flex-col gap-3 rounded-xl border bg-card px-5 py-4 lg:w-[30rem]">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              <span className="font-heading text-2xl font-semibold text-foreground tabular-nums">{linkedPct}%</span> of Watsons units linked
-            </p>
-          </div>
-          <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div className="rounded-full" style={{width: `${linkedPct}%`, background: 'var(--status-good)'}} />
-            <div className="rounded-full" style={{width: `${suggestedPct}%`, background: 'var(--status-warn)'}} />
-          </div>
-          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
-            <li className="inline-flex items-center gap-1.5">
-              <span className="size-1.5 rounded-full" style={{background: 'var(--status-good)'}} aria-hidden /> Linked {linkedPct}%
-            </li>
-            <li className="inline-flex items-center gap-1.5">
-              <span className="size-1.5 rounded-full" style={{background: 'var(--status-warn)'}} aria-hidden /> Waiting on a decision {suggestedPct}%
-            </li>
-            <li className="inline-flex items-center gap-1.5">
-              <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden /> Not matched {Math.max(0, Math.round((100 - linkedPct - suggestedPct) * 10) / 10)}%
-            </li>
-          </ul>
-          <div className="flex flex-col gap-3 border-t pt-3">
-            <div className="flex flex-col gap-1">
-            <p className="text-sm">
-              <span className="font-semibold tabular-nums">{n(allSkus)}</span> <span className="text-muted-foreground">Watsons SKUs in all</span>
-            </p>
-            <p className="text-xs leading-relaxed text-muted-foreground tabular-nums">
-              {[`${n(counts.linked)} linked`, `${n(counts.check)} to check`, `${n(counts.choose)} to choose`, counts.rejected > 0 && `${n(counts.rejected)} rejected`].filter(Boolean).join(' · ')}
-              {counts.noSales > 0 && (
-                <>
-                  {' · '}
-                  <button
-                    type="button"
-                    onClick={() => pick('noSales')}
-                    className="rounded-sm underline decoration-border underline-offset-4 outline-none transition-colors hover:text-foreground hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {n(counts.noSales)} with no units sold
-                  </button>
-                </>
-              )}
-            </p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className="text-sm">
-                <span className="font-semibold tabular-nums">{n(formItems)}</span> <span className="text-muted-foreground">items on our forms</span>
-              </p>
-              <p className="text-xs leading-relaxed text-muted-foreground tabular-nums">
-                {n(counts.linked)} linked (the same pairs) · {n(counts.formOnly)} without a Watsons SKU
-                {formOnlySuggested > 0 ? `, ${n(formOnlySuggested)} of them Coop's matches to check` : ''}
-              </p>
-            </div>
-          </div>
-        </div>
+      <header className="flex max-w-3xl flex-col gap-1.5">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight">SKU linking</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">Coop has already linked the Watsons SKUs it is sure of. These need your eye.</p>
       </header>
 
-      <div className="flex flex-col gap-4">
-        <div className={cn('border-b', GL_SCROLL_ROW_MOBILE)}>
-          <div role="tablist" aria-label="Show" className="-mb-px flex gap-1">
-            {tabs.map((s) => {
-              const on = filter === s;
-              return (
-                <Fragment key={s}>
-                {/* The last tab lists our items, not Watsons SKUs: set apart so its count isn't read as part of the others. */}
-                {s === 'formOnly' && <span aria-hidden className="mx-2 my-2.5 w-px shrink-0 bg-border" />}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => pick(s)}
-                  className={cn(
-                    'inline-flex h-10 items-center gap-2 border-b-2 px-3 text-sm whitespace-nowrap transition-colors duration-150',
-                    on ? 'border-foreground font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <span className="size-1.5 rounded-full" style={{background: toneVar(SKU_TAGS[s].tone)}} aria-hidden />
-                  {TAB[s]}
-                  <span className={cn('rounded-full px-1.5 text-xs tabular-nums', on ? 'bg-foreground/10' : 'bg-muted')}>{counts[s]}</span>
-                </button>
-                </Fragment>
-              );
-            })}
-          </div>
-        </div>
-        <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
-            <TabIcon aria-hidden className="size-3.5" />
-          </span>
-          <p className="text-sm leading-relaxed">
-            <span className="font-medium">{tag.label}.</span> <span className="text-muted-foreground">{tag.help}</span>
-          </p>
-        </div>
+      {/* Three jobs, one card each (Hick's Law): a card filters the table below. Everything
+          else (linked, rejected, no units sold) is reached from "For your records". */}
+      <section aria-label="What needs a decision" className="grid grid-cols-3 gap-2 sm:gap-4">
+        <ActionCard view="check" value={counts.check} title="Check Coop’s match" sub="Approve or reject each one" active={filter === 'check'} onPick={pick} />
+        <ActionCard view="choose" value={counts.choose} title="Choose our item" sub="Pick it from our items" active={filter === 'choose'} onPick={pick} />
+        <ActionCard view="formOnly" value={counts.formOnly} title="Sold at Watsons?" sub="On our forms, no Watsons SKU yet" active={filter === 'formOnly'} onPick={pick} />
+      </section>
+
+      <section aria-label="For your records" className="flex flex-col gap-4 rounded-xl bg-muted/40 px-4 py-4 sm:px-6 sm:py-5">
+        <p className="text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">For your records</p>
+        <RecordRow
+          total={allSkus}
+          label="Watsons SKUs"
+          filter={filter}
+          onPick={pick}
+          parts={[
+            {view: 'linked', value: counts.linked, label: 'linked', color: 'var(--status-good)'},
+            {view: 'check', value: counts.check, label: 'to check', color: 'var(--status-warn)'},
+            {view: 'choose', value: counts.choose, label: 'to choose', color: 'var(--status-crit)'},
+            {view: 'rejected', value: counts.rejected, label: 'rejected', color: 'color-mix(in oklab, var(--status-crit) 55%, transparent)'},
+            {view: 'noSales', value: counts.noSales, label: 'with no units sold', color: 'color-mix(in oklab, var(--muted-foreground) 35%, transparent)'},
+          ]}
+        />
+        <RecordRow
+          total={formItems}
+          label="items on our forms"
+          filter={filter}
+          onPick={pick}
+          parts={[
+            {view: 'linked', value: counts.linked, label: 'linked (the same pairs)', color: 'var(--status-good)'},
+            {view: 'check', value: formOnlySuggested, label: 'Coop’s matches', color: 'var(--status-warn)'},
+            {view: 'formOnly', value: counts.formOnly, label: 'no Watsons SKU', color: 'var(--muted-foreground)'},
+          ]}
+        />
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground tabular-nums">{linkedPct}%</span> of the units Watsons sold are on linked SKUs. Approving Coop’s matches adds {suggestedPct}%.
+        </p>
+      </section>
+
+      <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
+        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
+          <TabIcon aria-hidden className="size-3.5" />
+        </span>
+        <p className="text-sm leading-relaxed">
+          <span className="font-medium">
+            {tag.label} · <span className="tabular-nums">{n(counts[filter])}</span>.
+          </span>{' '}
+          <span className="text-muted-foreground">{tag.help}</span>
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -356,13 +305,93 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   );
 }
 
+const CARD_TONE: Record<'check' | 'choose' | 'formOnly', Tone> = {check: 'warn', choose: 'crit', formOnly: 'info'};
+
+/** One job on the page: its count, what it is and what to do. Pressed while it's the table's filter. */
+function ActionCard({
+  view,
+  value,
+  title,
+  sub,
+  active,
+  onPick,
+}: {
+  view: 'check' | 'choose' | 'formOnly';
+  value: number;
+  title: string;
+  sub: string;
+  active: boolean;
+  onPick: (s: SkuStatus) => void;
+}) {
+  const tone = CARD_TONE[view];
+  const color = view === 'formOnly' ? 'var(--foreground)' : toneVar(tone);
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(view)}
+      aria-pressed={active}
+      className="flex min-w-0 flex-col items-start rounded-xl border bg-card px-3 py-3 text-left outline-none transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] sm:px-5 sm:py-4"
+      style={active ? {borderColor: color, boxShadow: `0 0 0 1px ${color}`} : undefined}
+    >
+      <span className="font-heading text-2xl font-semibold tabular-nums sm:text-4xl" style={{color: value > 0 ? color : 'var(--muted-foreground)'}}>
+        {n(value)}
+      </span>
+      <span className="mt-1.5 text-xs font-medium leading-snug sm:mt-3 sm:text-base">{title}</span>
+      <span className="mt-0.5 hidden text-sm text-muted-foreground sm:block">{sub}</span>
+    </button>
+  );
+}
+
+type Part = {view: SkuStatus; value: number; label: string; color: string};
+
+/** A total with its parts as one bar; each part's label filters the table. Empty parts are left out. */
+function RecordRow({total, label, parts, filter, onPick}: {total: number; label: string; parts: Part[]; filter: SkuStatus; onPick: (s: SkuStatus) => void}) {
+  const shown = parts.filter((p) => p.value > 0);
+  return (
+    <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-6">
+      <p className="text-sm text-muted-foreground">
+        <span className="mr-1.5 font-heading text-lg font-semibold text-foreground tabular-nums">{n(total)}</span>
+        {label}
+      </p>
+      <div className="flex min-w-0 flex-col gap-2 sm:pt-2">
+        <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+          {shown.map((p) => (
+            <span key={p.label} style={{flex: p.value, background: p.color}} />
+          ))}
+        </div>
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
+          {shown.map((p) => {
+            const on = filter === p.view;
+            return (
+              <li key={p.label}>
+                <button
+                  type="button"
+                  onClick={() => onPick(p.view)}
+                  aria-pressed={on}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-sm underline-offset-4 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring',
+                    on && 'font-medium text-foreground underline',
+                  )}
+                >
+                  <span className="size-1.5 rounded-full" style={{background: p.color}} aria-hidden />
+                  {n(p.value)} {p.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 const EMPTY: Record<SkuStatus, string> = {
   check: 'No matches waiting. Everything Coop suggested has been decided.',
   choose: 'Every Watsons SKU with sales has a link or a suggestion.',
   rejected: 'No rejected matches waiting for an item.',
   linked: 'No links yet.',
   noSales: 'Every Watsons SKU in the files has sold at least once.',
-  formOnly: 'Every item on our forms has a Watsons SKU.',
+  formOnly: 'Every item on our forms has a Watsons SKU or a match from Coop to check.',
 };
 
 function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize) => void}) {
