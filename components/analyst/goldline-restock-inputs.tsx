@@ -1,6 +1,6 @@
 'use client';
 
-// Goldline Restock · forecast inputs (F10). For the next run: the months it covers, last
+// Goldline Restock · forecast inputs (F10), the page's Inputs tab. For the next run: the months it covers, last
 // year's same months (loaded or missing), how many store × product lines are ready, and
 // which wait ("check data first") and why. All stores = one row per store; one store =
 // one row per product. Window and safety months live in Restock settings.
@@ -23,7 +23,7 @@ import {saveForecastSettingsAction} from '@/app/stock/actions';
 import {cn} from '@/lib/utils';
 import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 
-export type RestockViewData = ForecastData & {company: string | null; today: string; preview: boolean; canEditSettings: boolean};
+export type RestockViewData = ForecastData & {company: string | null; today: string; preview: boolean; canEditSettings: boolean; nav?: React.ReactNode};
 
 type Filter = 'all' | 'ready' | 'held';
 const PAGE_SIZE = 25;
@@ -31,18 +31,20 @@ const PAGE_SIZE = 25;
 export const HOLD_LABEL: Record<HoldReason, {label: string; hint: string; tone: string | null}> = {
   missing_month: {label: 'Month missing', hint: "A month of last year's POS Sales Data isn't loaded", tone: 'var(--status-warn)'},
   out_of_scope: {label: 'Store out of scope', hint: 'No sales in the last 3 loaded months, or set Always out', tone: null},
+  no_count: {label: 'No count yet', hint: 'The store has no counted form, so its stock on hand is unknown', tone: 'var(--status-warn)'},
+  blank_on_form: {label: 'Blank on form', hint: "The store's latest form has no figure for this product", tone: 'var(--status-warn)'},
   retired: {label: 'Retired', hint: 'The product is retired', tone: null},
   open_flag: {label: 'Open flag', hint: 'An open flag for this store and product', tone: 'var(--status-crit)'},
   no_history: {label: 'No sales last year', hint: "Counted now, but didn't sell in last year's window", tone: 'var(--status-warn)'},
 };
 
-const num = (n: number) => n.toLocaleString('en-US');
+export const num = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) => new Intl.NumberFormat('en', {notation: 'compact', maximumFractionDigits: 0}).format(n);
-const monthLabel = (key: string, opts: Intl.DateTimeFormatOptions = {month: 'short', year: 'numeric'}) => {
+export const monthLabel = (key: string, opts: Intl.DateTimeFormatOptions = {month: 'short', year: 'numeric'}) => {
   const [y, m] = key.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {...opts, timeZone: 'UTC'});
 };
-const span = (months: string[]) => (months.length === 1 ? monthLabel(months[0]) : `${monthLabel(months[0])} to ${monthLabel(months[months.length - 1])}`);
+export const span = (months: string[]) => (months.length === 1 ? monthLabel(months[0]) : `${monthLabel(months[0])} to ${monthLabel(months[months.length - 1])}`);
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
@@ -54,12 +56,12 @@ export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const go = (next: {store?: string | null; asOf?: string | null}) => {
-    const q = new URLSearchParams();
+    const q = new URLSearchParams({tab: 'inputs'});
     const s = next.store === undefined ? store : next.store;
     const a = next.asOf === undefined ? (data.preview ? w.runDate : null) : next.asOf;
     if (s) q.set('store', s);
     if (a && a !== data.today) q.set('asOf', a);
-    router.push(q.size ? `${pathname}?${q}` : pathname);
+    router.push(`${pathname}?${q}`);
   };
 
   const storeRows = useMemo(() => data.stores.filter((r) => (filter === 'ready' ? r.ready > 0 : filter === 'held' ? r.held > 0 : true)), [data.stores, filter]);
@@ -87,6 +89,7 @@ export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
                 Inventory
               </Link>
             </div>
+            {data.nav}
             <p className="max-w-[70ch] text-sm text-muted-foreground text-pretty">
               A run on <span className="font-medium text-foreground">{fmtDay(w.runDate)}</span> covers{' '}
               <span className="font-medium text-foreground">{span(w.months)}</span>, from last year&apos;s {span(w.lastYear)}
