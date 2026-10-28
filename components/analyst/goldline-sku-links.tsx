@@ -184,36 +184,26 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         <ActionCard view="formOnly" value={counts.formOnly} title="Sold at Watsons?" sub="On our forms, no Watsons SKU yet" active={filter === 'formOnly'} onPick={pick} />
       </section>
 
-      <section aria-label="For your records" className="flex flex-col gap-4 rounded-xl bg-muted/40 px-4 py-4 sm:px-6 sm:py-5">
-        <p className="text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">For your records</p>
-        <RecordRow
-          total={allSkus}
-          label="Watsons SKUs"
-          filter={filter}
-          onPick={pick}
-          parts={[
-            {view: 'linked', value: counts.linked, label: 'linked', color: 'var(--status-good)'},
-            {view: 'check', value: counts.check, label: 'to check', color: 'var(--status-warn)'},
-            {view: 'choose', value: counts.choose, label: 'to choose', color: 'var(--status-crit)'},
-            {view: 'rejected', value: counts.rejected, label: 'rejected', color: 'color-mix(in oklab, var(--status-crit) 55%, transparent)'},
-            {view: 'noSales', value: counts.noSales, label: 'with no units sold', color: 'color-mix(in oklab, var(--muted-foreground) 35%, transparent)'},
-          ]}
-        />
-        <RecordRow
-          total={formItems}
-          label="items on our forms"
-          filter={filter}
-          onPick={pick}
-          parts={[
-            {view: 'linked', value: counts.linked, label: 'linked (the same pairs)', color: 'var(--status-good)'},
-            {view: 'check', value: formOnlySuggested, label: 'Coop’s matches', color: 'var(--status-warn)'},
-            {view: 'formOnly', value: counts.formOnly, label: 'no Watsons SKU', color: 'var(--muted-foreground)'},
-          ]}
-        />
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground tabular-nums">{linkedPct}%</span> of the units Watsons sold are on linked SKUs. Approving Coop’s matches adds {suggestedPct}%.
-        </p>
-      </section>
+      <NumbersTable
+        filter={filter}
+        onPick={pick}
+        totals={{watsons: allSkus, ours: formItems}}
+        rows={[
+          {view: 'linked', tone: 'good', name: 'Linked', means: 'A Watsons SKU and our item, matched. Their sales count.', watsons: counts.linked, ours: counts.linked},
+          {view: 'check', tone: 'warn', name: 'Coop’s suggestion', means: 'Coop paired them. A person says if it is right.', watsons: counts.check, ours: formOnlySuggested},
+          {view: 'choose', tone: 'crit', name: 'No match found', means: 'Watsons sold it, but Coop could not tell which of our items it is.', watsons: counts.choose, ours: null},
+          ...(counts.rejected > 0
+            ? [{view: 'rejected' as const, tone: 'crit' as const, name: 'Rejected', means: 'Coop’s suggestion was turned down. Pick the right item.', watsons: counts.rejected, ours: null}]
+            : []),
+          {view: 'noSales', tone: 'info', name: 'No units sold', means: 'In Watsons’ files, but none sold in 12 months. Nothing to decide.', watsons: counts.noSales, ours: null},
+          {view: 'formOnly', tone: 'info', name: 'No Watsons SKU', means: 'On our forms, with no Watsons SKU and no suggestion. Some may be under No match found with a short name.', watsons: null, ours: counts.formOnly},
+        ]}
+        footnote={
+          <>
+            <span className="font-medium text-foreground tabular-nums">{linkedPct}%</span> of the units Watsons sold are on linked SKUs. Approving Coop’s suggestions adds {suggestedPct}%.
+          </>
+        }
+      />
 
       <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
@@ -433,46 +423,57 @@ function ActionCard({
   );
 }
 
-type Part = {view: SkuStatus; value: number; label: string; color: string};
+type NumbersRow = {view: SkuStatus; tone: Tone; name: string; means: string; watsons: number | null; ours: number | null};
 
-/** A total with its parts as one bar; each part's label filters the table. Empty parts are left out. */
-function RecordRow({total, label, parts, filter, onPick}: {total: number; label: string; parts: Part[]; filter: SkuStatus; onPick: (s: SkuStatus) => void}) {
-  const shown = parts.filter((p) => p.value > 0);
+/**
+ * Watsons SKUs and our items side by side (Oct 28): every group with its count on each
+ * side, so the two totals (315 and 263) visibly add up and the shared rows (linked pairs,
+ * Coop's suggestions) read as the same pairs, not extra items. A row filters the table.
+ */
+function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRow[]; totals: {watsons: number; ours: number}; filter: SkuStatus; onPick: (s: SkuStatus) => void; footnote: React.ReactNode}) {
+  const cell = (v: number | null) => (v == null ? <span className="text-muted-foreground/60">—</span> : n(v));
   return (
-    <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-6">
-      <p className="text-sm text-muted-foreground">
-        <span className="mr-1.5 font-heading text-lg font-semibold text-foreground tabular-nums">{n(total)}</span>
-        {label}
-      </p>
-      <div className="flex min-w-0 flex-col gap-2 sm:pt-2">
-        <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
-          {shown.map((p) => (
-            <span key={p.label} style={{flex: p.value, background: p.color}} />
-          ))}
-        </div>
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
-          {shown.map((p) => {
-            const on = filter === p.view;
-            return (
-              <li key={p.label}>
-                <button
-                  type="button"
-                  onClick={() => onPick(p.view)}
-                  aria-pressed={on}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-sm underline-offset-4 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring',
-                    on && 'font-medium text-foreground underline',
-                  )}
-                >
-                  <span className="size-1.5 rounded-full" style={{background: p.color}} aria-hidden />
-                  {n(p.value)} {p.label}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+    <section aria-label="How the numbers fit" className="overflow-hidden rounded-xl border">
+      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-end gap-x-4 border-b bg-muted/40 px-4 py-3 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6">
+        <span>How the numbers fit</span>
+        <span className="text-right">Watsons SKUs</span>
+        <span className="text-right">Our items</span>
       </div>
-    </div>
+      <ul className="divide-y">
+        {rows.map((r) => {
+          const on = filter === r.view;
+          return (
+            <li key={r.view}>
+              <button
+                type="button"
+                onClick={() => onPick(r.view)}
+                aria-pressed={on}
+                className={cn(
+                  'grid w-full grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 px-4 py-3 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6',
+                  on && 'bg-muted/50',
+                )}
+              >
+                <span className="flex min-w-0 items-start gap-2.5">
+                  <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{background: toneVar(r.tone)}} aria-hidden />
+                  <span className="flex min-w-0 flex-col">
+                    <span className={cn('text-sm', on ? 'font-semibold' : 'font-medium')}>{r.name}</span>
+                    <span className="text-xs leading-relaxed text-muted-foreground">{r.means}</span>
+                  </span>
+                </span>
+                <span className="text-right text-sm tabular-nums">{cell(r.watsons)}</span>
+                <span className="text-right text-sm tabular-nums">{cell(r.ours)}</span>
+              </button>
+            </li>
+          );
+        })}
+        <li className="grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 bg-muted/40 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6">
+          <span className="pl-[18px] text-sm font-semibold">Total</span>
+          <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.watsons)}</span>
+          <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.ours)}</span>
+        </li>
+      </ul>
+      <p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground sm:px-6">{footnote}</p>
+    </section>
   );
 }
 
