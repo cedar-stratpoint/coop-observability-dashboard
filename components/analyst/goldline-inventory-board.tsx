@@ -5,13 +5,13 @@
 // so it arrives in time, and when to produce more. One store, or all stores added up.
 // Row → product page; ⋯ → ship / warehouse stock / price / hide.
 
-import {useMemo, useState, useTransition} from 'react';
+import {useMemo, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
-import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronsUpDown, Eye, EyeOff, Factory, FileText, Info, MoreHorizontal, Package, PackageX, Pencil, RefreshCw, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
-import type {BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
-import {lastsLabel, sortRank} from '@/src/goldline-supply';
+import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronRight, ChevronsUpDown, Eye, EyeOff, Factory, FileText, Info, MoreHorizontal, Package, PackageX, Pencil, RefreshCw, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
+import type {BoardFocus, BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
+import {inFocus, lastsLabel, sortRank} from '@/src/goldline-supply';
 import {tint, toneVar} from '@/components/analyst/goldline-flags';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {Pagination} from '@/components/analyst/pagination';
@@ -111,6 +111,10 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
   const router = useRouter();
   const {rows, summary, store, config, today} = data;
   const [filter, setFilter] = useState<Filter>('all');
+  // A summary tile picked as the table's filter (click it again to clear). Picking one resets
+  // the status segments to All so the two never stack into an empty table.
+  const [focus, setFocus] = useState<BoardFocus | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const [line, setLine] = useState('');
   const [query, setQuery] = useState('');
   const [showHidden, setShowHidden] = useState(false);
@@ -147,16 +151,26 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
             (filter === 'out' && r.status === 'out') ||
             (filter === 'healthy' && r.status === 'healthy') ||
             (filter === 'not_counted' && (r.status === 'not_counted' || r.status === 'no_history'))) &&
+          (!focus || inFocus(r, focus, today)) &&
           (!line || r.productLine === line) &&
           (!q || r.itemCode.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || (r.productLine ?? '').toLowerCase().includes(q)),
       ),
       sort.key,
       sort.dir,
     );
-  }, [visible, filter, line, query, sort, showWarehouse]);
+  }, [visible, filter, focus, line, query, sort, showWarehouse, today]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  function pickFocus(f: BoardFocus) {
+    const next = focus === f ? null : f;
+    setFocus(next);
+    setFilter('all');
+    setPage(1);
+    if (next) tableRef.current?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'});
+  }
+  const tile = (f: BoardFocus) => ({active: focus === f, onClick: () => pickFocus(f)});
 
   const setSortKey = (key: SortKey) => {
     setPage(1);
@@ -231,7 +245,11 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
       {(data.pendingReview > 0 || config.isSample) && (
         <div className="flex flex-col gap-3">
           {data.pendingReview > 0 && (
-            <div className="flex flex-col gap-3 rounded-xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between" style={{borderColor: tint('info', 30), background: tint('info', 6)}}>
+            <Link
+              href="/uploads?status=needs_review"
+              className="group flex items-center justify-between gap-4 rounded-xl border border-[var(--b)] bg-[var(--bg)] px-5 py-4 outline-none transition-[background-color,border-color,transform] duration-150 ease-out hover:border-[var(--b-hover)] hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.995]"
+              style={{['--b' as string]: tint('info', 30), ['--bg' as string]: tint('info', 6), ['--b-hover' as string]: tint('info', 50), ['--bg-hover' as string]: tint('info', 11)}}
+            >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full" style={{background: tint('info', 16), color: toneVar('info')}}>
                   <Upload aria-hidden className="size-4" />
@@ -240,13 +258,11 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   <p className="text-sm font-medium">
                     {data.pendingReview} {data.pendingReview === 1 ? 'scan is' : 'scans are'} waiting for review
                   </p>
-                  <p className="text-sm text-muted-foreground">The numbers below update once they&apos;re committed.</p>
+                  <p className="text-sm text-muted-foreground">Open them to review. The numbers below update once they&apos;re committed.</p>
                 </div>
               </div>
-              <Link href="/uploads?status=needs_review" className={cn(buttonVariants({variant: 'outline', size: 'sm'}), 'shrink-0 self-start sm:self-auto')}>
-                Review scans
-              </Link>
-            </div>
+              <ChevronRight aria-hidden className="size-5 shrink-0 text-muted-foreground transition-[color,transform] duration-150 ease-out group-hover:translate-x-0.5 group-hover:text-foreground" />
+            </Link>
           )}
           {config.isSample && (
             <p className="flex items-start gap-2.5 px-1 text-sm text-muted-foreground">
@@ -281,17 +297,17 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
       ) : (
         <>
           <section aria-label="Summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryTile Icon={RefreshCw} tone="warn" value={summary.reorder} label="Reorder now" sub={`${summary.out} out, the rest under ~10 days`} />
-            <SummaryTile Icon={Truck} tone="crit" value={summary.shipNow} label="Ship now" sub="Won't arrive in time if sent later" />
+            <SummaryTile Icon={RefreshCw} tone="warn" value={summary.reorder} label="Reorder now" sub={`${summary.out} out, the rest under ~10 days`} {...tile('reorder')} />
+            <SummaryTile Icon={Truck} tone="crit" value={summary.shipNow} label="Ship now" sub="Won't arrive in time if sent later" {...tile('shipNow')} />
             {showWarehouse ? (
               <>
-                <SummaryTile Icon={Warehouse} tone="crit" value={summary.warehouseShort} label="Warehouse short" sub="Stores need more than it holds" />
-                <SummaryTile Icon={Factory} tone="warn" value={summary.produceSoon} label="Produce soon" sub="Start within 2 weeks to keep up" />
+                <SummaryTile Icon={Warehouse} tone="crit" value={summary.warehouseShort} label="Warehouse short" sub="Stores need more than it holds" {...tile('warehouseShort')} />
+                <SummaryTile Icon={Factory} tone="warn" value={summary.produceSoon} label="Produce soon" sub="Start within 2 weeks to keep up" {...tile('produceSoon')} />
               </>
             ) : (
               <>
-                <SummaryTile Icon={PackageX} tone="crit" value={summary.out} label="Out of stock" sub="Deliver first" />
-                <SummaryTile Icon={Truck} tone="info" value={data.shipments.length} label="On the way" sub="Shipments not yet counted" />
+                <SummaryTile Icon={PackageX} tone="crit" value={summary.out} label="Out of stock" sub="Deliver first" {...tile('out')} />
+                <SummaryTile Icon={Truck} tone="info" value={data.shipments.length} label="On the way" sub="Shipments not yet counted" onClick={() => document.getElementById('on-the-way')?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'})} />
               </>
             )}
           </section>
@@ -334,8 +350,25 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
             </section>
           )}
 
+          <div ref={tableRef} className="scroll-mt-20">
           <Card className="py-0">
             <CardContent className="flex flex-col gap-3 px-0 pt-4 pb-3">
+              {focus && (
+                <div className="flex flex-wrap items-center gap-2 px-4 text-sm">
+                  <span className="text-muted-foreground">Showing only</span>
+                  <button
+                    type="button"
+                    onClick={() => setFocus(null)}
+                    aria-label={`Clear the ${FOCUS_META[focus].label} filter`}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full border px-3 font-medium outline-none transition-transform duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
+                    style={{borderColor: tint(FOCUS_META[focus].tone, 45), background: tint(FOCUS_META[focus].tone, 10)}}
+                  >
+                    {FOCUS_META[focus].label}
+                    <span className="text-muted-foreground tabular-nums">{filtered.length}</span>
+                    <X aria-hidden className="size-3.5 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2 px-4">
 <div className={GL_SCROLL_ROW_MOBILE}>
                 <SegmentedControl<Filter>
@@ -343,6 +376,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   value={filter}
                   onChange={(v) => {
                     setFilter(v);
+                    setFocus(null);
                     setPage(1);
                   }}
                   options={[
@@ -566,6 +600,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
               </div>
             </CardContent>
           </Card>
+          </div>
 
           {data.shipments.length > 0 && <OnTheWay shipments={data.shipments} rows={rows} storeName={storeName} company={data.company} canEdit={data.canEdit} today={today} />}
 
@@ -647,11 +682,42 @@ function Th({k, sort, onSort, children, right, className, title}: {k: SortKey; s
   );
 }
 
-/** A summary tile: tinted icon, big number, plain label. Colour only when there's something to do. */
-function SummaryTile({Icon, tone, value, label, sub}: {Icon: typeof Truck; tone: 'warn' | 'crit' | 'info'; value: number; label: string; sub: string}) {
+const FOCUS_META: Record<BoardFocus, {label: string; tone: 'warn' | 'crit'}> = {
+  reorder: {label: 'Reorder now', tone: 'warn'},
+  out: {label: 'Out of stock', tone: 'crit'},
+  shipNow: {label: 'Ship now', tone: 'crit'},
+  warehouseShort: {label: 'Warehouse short', tone: 'crit'},
+  produceSoon: {label: 'Produce soon', tone: 'warn'},
+};
+
+// Opaque tint over the card colour, so a hovered or picked tile never goes see-through.
+const onCard = (tone: 'warn' | 'crit' | 'info', pct: number) => `color-mix(in oklab, ${toneVar(tone)} ${pct}%, var(--card))`;
+
+/**
+ * A summary tile: tinted icon, big number, plain label. Colour only when there's something to do.
+ * Clicking one filters the table below to those products (pressed while it's the filter, click
+ * again to clear). A tile at zero stays a plain card, nothing to click.
+ */
+function SummaryTile({Icon, tone, value, label, sub, active = false, onClick}: {Icon: typeof Truck; tone: 'warn' | 'crit' | 'info'; value: number; label: string; sub: string; active?: boolean; onClick?: () => void}) {
   const live = value > 0;
+  const clickable = live && !!onClick;
   return (
-    <div className="flex items-center gap-4 rounded-xl border bg-card px-5 py-4">
+    <button
+      type="button"
+      onClick={clickable ? onClick : undefined}
+      disabled={!clickable}
+      aria-pressed={clickable ? active : undefined}
+      title={clickable ? (active ? 'Show every product again' : 'Show only these in the table') : undefined}
+      className={cn(
+        'flex items-center gap-4 rounded-xl border bg-card px-5 py-4 text-left outline-none transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default',
+        clickable && 'cursor-pointer hover:border-[var(--tile-b)] hover:bg-[var(--tile-bg)] active:scale-[0.98]',
+      )}
+      style={{
+        ['--tile-b' as string]: tint(tone, 45),
+        ['--tile-bg' as string]: onCard(tone, 5),
+        ...(active ? {borderColor: tint(tone, 65), background: onCard(tone, 9), boxShadow: `0 0 0 1px ${tint(tone, 65)}`} : {}),
+      }}
+    >
       <span
         className="grid size-10 shrink-0 place-items-center rounded-full"
         style={live ? {background: tint(tone, 16), color: toneVar(tone)} : {background: 'var(--muted)', color: 'var(--muted-foreground)'}}
@@ -667,7 +733,7 @@ function SummaryTile({Icon, tone, value, label, sub}: {Icon: typeof Truck; tone:
         </p>
         <p className="truncate text-xs text-muted-foreground">{sub}</p>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -818,7 +884,7 @@ function OnTheWay({shipments, rows, storeName, company, canEdit, today}: {shipme
   const [confirm, setConfirm] = useState<string | null>(null);
   const nameOf = new Map(rows.map((r) => [r.itemCode, `${r.productLine ? `${r.productLine} · ` : ''}${r.name}`]));
   return (
-    <Card className="py-0">
+    <Card id="on-the-way" className="scroll-mt-20 py-0">
       <CardContent className="flex flex-col gap-1 px-0 pt-4 pb-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2 px-4">
           <h2 className="flex items-center gap-2 font-heading text-base font-semibold">

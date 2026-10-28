@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ItemMovement} from './goldline-movement';
-import {boardSummary, buildBoard, inTransitFor, lastsLabel, manilaDate, productionDaysFor, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
+import {boardSummary, buildBoard, inFocus, inTransitFor, lastsLabel, manilaDate, productionDaysFor, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
 
 const TODAY = '2026-10-20';
 const cfg: SupplyConfig = {
@@ -89,6 +89,9 @@ describe('ship now / warehouse short / produce now', () => {
     expect(rows[0].warehouseShort).toBe(true);
     expect(rows[0].produceBy).toEqual({kind: 'now'});
     expect(boardSummary(rows, TODAY)).toMatchObject({reorder: 1, out: 1, shipNow: 1, warehouseShort: 1, produceSoon: 1});
+    // Each summary tile filters the table with the same rule it counts with.
+    const s = boardSummary(rows, TODAY);
+    for (const f of ['reorder', 'out', 'shipNow', 'warehouseShort', 'produceSoon'] as const) expect(rows.filter((r) => inFocus(r, f, TODAY)).length).toBe(s[f]);
   });
   it('a stock-out date already within transit time means ship now', () => {
     const rows = buildBoard({
