@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: "How the numbers fit" folds away
+The table's header is now a toggle (chevron, `aria-expanded`): folded, it keeps only the Total row (315 | 263) so the page starts closer to the work; open, every group, its meaning and the units line. Open by default and remembered per browser (`coop.skus.numbersOpen`). The rows slide open with a 200ms grid-rows transition, off under reduced motion; folded rows are hidden from screen readers and the keyboard.
+
 ## 2026-10-28 — SKU linking: "How the numbers fit" table, Watsons SKUs and our items side by side
 From the team's whiteboard of how the counts relate, made into a table for Justin. It replaces the "For your records" bars: one row per group with its count on each side (Linked 211 | 211 · Coop's suggestion 42 | 42 · No match found 57 | — · No units sold 5 | — · No Watsons SKU — | 10, plus Rejected when any) and a Total row (315 | 263), each with a one-line meaning; a row filters the table below, then the units line. Two whiteboard notes were corrected in the wording: the 58 (now 57) "No match found" have no suggestion at all (Coop's unsure ones are inside the 42, marked "Not sure"), and what sets the 5 apart is 0 units sold in 12 months, not "in Watsons, not in inventory" (all of No match found is that too). Live counts moved on Oct 28: Berry Blossom Eyeshadow Palette (MUBBEP) was linked by hand, one of No match found and one of No Watsons SKU turning out to be the same product.
 
