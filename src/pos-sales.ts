@@ -6,6 +6,7 @@ import {POS_TAGS, POS_CACHE_REVALIDATE} from './pos-cache';
 import type {PetType, PosEvent, PosOrder, PosOrderLine, PosOrdersFilter, PosSyncEntry, PriceBounds} from './pos-sales-types';
 import {
   boundsFromMax,
+  computeKpis,
   DEFAULT_ORDERS_FILTER,
   filterOrders,
   paginate,
@@ -193,6 +194,44 @@ const posOrdersPageCached = unstable_cache(async (
 
   return {orders, pageInfo: info};
 }, ['pos-orders-page'], {tags: [POS_TAGS.orders], revalidate: POS_CACHE_REVALIDATE});
+
+/**
+ * Completed revenue (voided excluded) over the SAME filtered set the orders list
+ * shows — the peso subtotal that pairs with the count, so this page reconciles
+ * against the POS Transactions screen in one place. A void didn't happen, so it
+ * never adds revenue (a Status = Voided view totals ₱0).
+ */
+export const getPosOrdersRevenue = cache(async (
+  filter: PosOrdersFilter = DEFAULT_ORDERS_FILTER,
+): Promise<number> => {
+  // Mock path reuses computeKpis (voided-excluded total sum) so the subtotal
+  // matches the Overview / offline-sales revenue KPIs exactly; the SQL path below
+  // mirrors that definition server-side.
+  if (usingPosMock()) return computeKpis(filterOrders(MOCK_POS_ORDERS, filter)).revenue;
+  return posOrdersRevenueCached(filter);
+});
+
+// unstable_cache keyed on the filter (like posOrdersPageCached); order writes
+// revalidate POS_TAGS.orders.
+const posOrdersRevenueCached = unstable_cache(async (filter: PosOrdersFilter): Promise<number> => {
+  const supabase = posClient();
+  const ops = orderFilterOps(filter);
+  // Same predicates as the orders list, plus a hard voided exclusion so the sum
+  // is always completed revenue. Paged by the PK (total alone isn't unique) so
+  // PostgREST's 1000-row cap can't silently truncate the sum.
+  const rows = await fetchAllRows('pos_orders revenue', (from, to) => {
+    let q = supabase.from('pos_orders').select('id,total').neq('status', 'voided'); // pagination-ok: fetchAllRows pages this — .range(from, to) is applied after the dynamic filter loop below
+    for (const op of ops) {
+      q = op[0] === 'or' ? q.or(op[1])
+        : op[0] === 'eq' ? q.eq(op[1], op[2])
+        : op[0] === 'is' ? q.is(op[1], op[2])
+        : op[0] === 'gte' ? q.gte(op[1], op[2])
+        : q.lte(op[1], op[2]);
+    }
+    return q.order('id', {ascending: true}).range(from, to);
+  });
+  return rows.reduce((sum, r) => sum + Number((r as {total: number | null}).total ?? 0), 0);
+}, ['pos-orders-revenue'], {tags: [POS_TAGS.orders], revalidate: POS_CACHE_REVALIDATE});
 
 /**
  * Inclusive price bounds for the transactions filter slider, from the single
