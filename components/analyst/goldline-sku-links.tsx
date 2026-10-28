@@ -2,9 +2,9 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Archive, ArchiveRestore, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
-import type {DecommissionedItem, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
-import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import {Archive, ArchiveRestore, NotebookPen, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
+import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
@@ -32,7 +32,7 @@ const REMARK_MAX = 500;
 // One column template for the header and every row, so the columns line up.
 const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
 const ITEM_COLS = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]';
-const ITEM_COLS_EDIT = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(12.5rem,14rem)]';
+const ITEM_COLS_EDIT = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(18rem,19.5rem)]';
 
 const n = (v: number) => Math.round(v).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -281,6 +281,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
               <ItemRow
                 key={i.itemCode}
                 i={i}
+                note={data.notes[i.itemCode] ?? null}
                 decommissioned={filter === 'decommissioned'}
                 company={company}
                 canEdit={canEdit}
@@ -515,6 +516,7 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
  */
 function ItemRow({
   i,
+  note,
   decommissioned,
   company,
   canEdit,
@@ -524,6 +526,7 @@ function ItemRow({
   onShowForm,
 }: {
   i: SkuLinkItem | DecommissionedItem;
+  note: ItemNote | null;
   decommissioned: boolean;
   company: string;
   canEdit: boolean;
@@ -532,13 +535,21 @@ function ItemRow({
   act: Act;
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // One panel at a time: a note (for checking, or anything) or decommissioning; they're separate.
+  const [panel, setPanel] = useState<'note' | 'decom' | null>(null);
   const [remark, setRemark] = useState('');
+  const [text, setText] = useState('');
   const done = () => {
-    setOpen(false);
+    setPanel(null);
     setRemark('');
   };
+  const openNote = () => {
+    setText(note?.text ?? '');
+    setPanel((p) => (p === 'note' ? null : 'note'));
+  };
   const d = decommissioned ? (i as DecommissionedItem) : null;
+  const input =
+    'min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
   return (
     <li className="transition-colors duration-150 hover:bg-muted/30">
       <div className={cn('grid gap-1.5 px-6 py-4 md:items-center md:gap-8', canEdit ? ITEM_COLS_EDIT : ITEM_COLS)}>
@@ -551,11 +562,24 @@ function ItemRow({
             <span aria-hidden>·</span>
             <FormSpotLink spot={i.formSpot} onClick={() => onShowForm(i.itemCode, i.formSpot)} />
           </p>
+          {note && panel !== 'note' && (
+            <p
+              className="flex min-w-0 max-w-xl items-start gap-1.5 rounded-md px-2 py-1 text-xs"
+              style={{background: 'color-mix(in oklab, var(--status-warn) 12%, transparent)'}}
+              title={`${note.text}${note.by ? ` · ${note.by}` : ''} · ${day(note.at)}`}
+            >
+              <NotebookPen className="mt-0.5 size-3 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+              <span className="min-w-0">
+                <span className="line-clamp-2">{note.text}</span>
+                <span className="text-muted-foreground">{[note.by, day(note.at)].filter(Boolean).join(' · ')}</span>
+              </span>
+            </p>
+          )}
           {d && (
             <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={d.remark ?? undefined}>
-              <MessageSquare className="size-3 shrink-0" aria-hidden />
+              <Archive className="size-3 shrink-0" aria-hidden />
               <span className="truncate">
-                {[d.at && day(d.at), d.by].filter(Boolean).join(' · ')}
+                Decommissioned {[d.at && day(d.at), d.by].filter(Boolean).join(' · ')}
                 {d.remark ? ` · “${d.remark}”` : ''}
               </span>
             </p>
@@ -563,24 +587,66 @@ function ItemRow({
         </div>
         <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
         <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
-        {canEdit &&
-          (d ? (
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant={panel === 'note' ? 'secondary' : 'ghost'} onClick={openNote} aria-expanded={panel === 'note'}>
+              <NotebookPen className="size-3.5" /> {note ? 'Edit note' : 'Add note'}
+            </Button>
+            {d ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
+              >
+                <ArchiveRestore className="size-3.5" /> {busy && panel === null ? 'Saving…' : 'Bring back'}
+              </Button>
+            ) : (
+              <Button size="sm" variant={panel === 'decom' ? 'secondary' : 'outline'} onClick={() => setPanel((p) => (p === 'decom' ? null : 'decom'))} aria-expanded={panel === 'decom'}>
+                <Archive className="size-3.5" /> Mark as decommissioned
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      {panel === 'note' && canEdit && (
+        <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
+          <p className="text-xs text-muted-foreground">A note for this item, for example to check it later. It doesn’t change anything else; only the latest note is kept.</p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={REMARK_MAX}
+            rows={2}
+            autoFocus
+            placeholder="For example, “check with Justin” or “maybe the Watsons name LIP PNCL”"
+            aria-label={`Note for ${i.itemCode}`}
+            className={input}
+          />
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
-              className="justify-self-start"
-              disabled={disabled}
-              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
+              disabled={disabled || !text.trim() || text.trim() === note?.text}
+              onClick={() => act(i.itemCode, () => saveItemNoteAction({company, item: i.itemCode, note: text}), `Note saved for ${i.itemCode}.`, () => setPanel(null))}
             >
-              <ArchiveRestore className="size-3.5" /> {busy ? 'Saving…' : 'Bring back'}
+              <NotebookPen className="size-3.5" /> {busy ? 'Saving…' : 'Save note'}
             </Button>
-          ) : (
-            <Button size="sm" variant={open ? 'secondary' : 'outline'} className="justify-self-start" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              <Archive className="size-3.5" /> Mark as decommissioned
+            {note && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => act(i.itemCode, () => saveItemNoteAction({company, item: i.itemCode, note: null}), `Note removed from ${i.itemCode}.`, () => setPanel(null))}
+              >
+                Remove note
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setPanel(null)}>
+              Cancel
             </Button>
-          ))}
-      </div>
-      {open && canEdit && !d && (
+          </div>
+        </div>
+      )}
+      {panel === 'decom' && canEdit && !d && (
         <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
           <p className="text-xs text-muted-foreground">No longer made or sold. It leaves SKU matching and restock, and can be brought back from Decommissioned.</p>
           <textarea
@@ -591,7 +657,7 @@ function ItemRow({
             autoFocus
             placeholder="Why? For example, “discontinued in 2025” (optional)"
             aria-label={`Remarks for ${i.itemCode}`}
-            className="min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+            className={input}
           />
           <div className="flex flex-wrap items-center gap-2">
             <Button
