@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — Offline Sales: transactions list shows a revenue subtotal
+The All transactions page (`/offline-sales/orders`) now shows a peso subtotal next to the count ("524 transactions match these filters · ₱214,320"), so the page reconciles against the POS Transactions screen in one place instead of needing the Sales range view for the total. The subtotal is completed revenue (voided excluded) across the WHOLE filtered set, not just the visible page: a new `getPosOrdersRevenue(filter)` runs the same filter predicates as the list, adds a hard `status != voided`, and sums `total` server-side (paged by PK via `fetchAllRows` so the 1000-row cap can't truncate it). Mock mode reuses `computeKpis` so the number matches the Overview / offline KPIs. Set Status = Completed to match the POS count (524); the default All status counts voided too but the subtotal still excludes them (so a Voided-only view totals ₱0). Verified: typecheck, 4098 tests, pagination guard; revenue math sanity-checked on mock data (5 completed / ₱2,160, voided-filter ₱0). A live browser screenshot wasn't possible here (extension offline); the PR's Vercel preview covers the visual.
+
 ## 2026-10-28 — SKU linking: the numbers table's toggle moves to the bottom, in green
 The fold toggle on "How the numbers fit" is now a full-width button under the table in the brand green ("Hide the breakdown" / "Show the breakdown · 5 groups", with a chevron), so it reads as the way to open and close it; the header row is plain column labels again. Folded still keeps the Total row; the choice is still remembered.
 
