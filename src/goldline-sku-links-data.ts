@@ -44,14 +44,18 @@ export type SkuLinkRow = {
 export type FormLine = {row: number; itemCode: string; productLine: string | null; name: string; sku: string | null};
 export type FormPage = {page: number; lines: FormLine[]};
 
+/** One of our form items marked as no longer made or sold, with who did it and why. */
+export type DecommissionedItem = SkuLinkItem & {at: string | null; by: string | null; remark: string | null};
+
 export type SkuLinkData = {
   rows: SkuLinkRow[];
   unlinkedItems: SkuLinkItem[]; // catalog items with no Watsons SKU yet (for the manual picker)
+  decommissioned: DecommissionedItem[]; // retired items with no Watsons SKU (f2c)
   formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
 
-type ProductRow = {item_code: string; product_line: string | null; variant: string | null; unit_price: unknown; sku_code: string | null; sku_linked_by: LinkSource | null; retired_at: string | null};
+type ProductRow = {item_code: string; product_line: string | null; variant: string | null; unit_price: unknown; sku_code: string | null; sku_linked_by: LinkSource | null; retired_at: string | null; retired_by?: string | null; retired_remark?: string | null};
 type ReviewRow = {sku_code: string; action: ReviewAction | null; item_code: string | null; action_by: string | null; action_at: string | null; remark: string | null; remark_by: string | null; remark_at: string | null};
 type ChainRow = {sku_code: string; name: string; subclass: string | null; last_month: string | null; suggested_item_code: string | null; match_tier: MatchTier | null; match_score: unknown};
 
@@ -67,14 +71,14 @@ const item = (p: ProductRow): SkuLinkItem => ({
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
   const [products, chain, rollup, reviews] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
-        .select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at')
+        .select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at,retired_by,retired_remark')
         .eq('company_id', companyId)
         .order('item_code')
         .range(from, to),
@@ -140,6 +144,10 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
+    decommissioned: products
+      .filter((p) => !p.sku_code?.trim() && p.retired_at)
+      .map((p) => ({...item(p), at: p.retired_at, by: p.retired_by ?? null, remark: p.retired_remark ?? null}))
+      .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')),
     // The form in printed order (fixed template), named from the catalog where it can be.
     formPages: Object.entries(MANIFESTS)
       .map(([page, items]) => ({
@@ -214,6 +222,27 @@ export async function dismissSuggestion(companyId: string, skuCode: string, expe
   if (res.error) throw new Error(`dismiss failed: ${res.error.message}`);
   await relinkWatsons(companyId);
   return rejected;
+}
+
+/**
+ * Mark one of our form items as decommissioned (no longer made or sold), or bring it back.
+ * Uses the same retired_at as the Inventory board's Retire, so it leaves SKU matching and
+ * restock; also keeps who and why (f2c). Only items with no Watsons SKU: a linked item is
+ * still selling at Watsons, so unlink it first.
+ */
+export async function setDecommissioned(companyId: string, itemCode: string, on: boolean, by: string | null, remark: string | null): Promise<void> {
+  const supa = db();
+  // pagination-ok: one row by primary key (company_id, item_code).
+  const p = await supa.from('products').select('item_code,sku_code').eq('company_id', companyId).eq('item_code', itemCode).maybeSingle();
+  if (p.error) throw new Error(p.error.message);
+  if (!p.data) throw new LinkError(`Item ${itemCode} isn’t in the catalog.`);
+  if (on && p.data.sku_code) throw new LinkError(`${itemCode} is linked to Watsons SKU ${p.data.sku_code}. Unlink it first.`);
+  const res = await supa
+    .from('products')
+    .update(on ? {retired_at: new Date().toISOString(), retired_by: by, retired_remark: remark} : {retired_at: null, retired_by: null, retired_remark: null})
+    .eq('company_id', companyId)
+    .eq('item_code', itemCode);
+  if (res.error) throw new Error(`decommission failed: ${res.error.message}`);
 }
 
 /** Undo a link. The pair is remembered as turned down so matching won't redo it. */

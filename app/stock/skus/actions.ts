@@ -6,7 +6,7 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
-import {dismissSuggestion, linkSku, LinkError, saveReview, unlinkSku} from '@/src/goldline-sku-links-data';
+import {dismissSuggestion, linkSku, LinkError, saveReview, setDecommissioned, unlinkSku} from '@/src/goldline-sku-links-data';
 
 // Actions behind the Watsons SKU links screen. Links decide which sales count for which
 // item across every store, so only a role that sees every store may change them. Every
@@ -106,4 +106,23 @@ export async function saveRemarkAction(input: Base): Promise<LinkActionResult> {
   if (!remark) return {ok: false, error: 'Write a remark first.'};
   const by = await actor();
   return run(input.company, (companyId) => saveReview(companyId, input.sku, {action: null, remark, by}), {recheck: false});
+}
+
+/**
+ * Mark one of our form items as decommissioned (no longer made or sold), with an optional
+ * remark, or bring it back. Recorded with who did it; leaves SKU matching and restock.
+ */
+export async function setDecommissionedAction(input: {company: string | null; item: string; on: boolean; remark?: string | null}): Promise<LinkActionResult> {
+  const c = await linkerContext(input.company);
+  if ('error' in c) return {ok: false, error: c.error as string};
+  if (!ITEM.test(input.item ?? '')) return {ok: false, error: 'Item not found.'};
+  try {
+    await setDecommissioned(c.companyId, input.item, Boolean(input.on), await actor(), input.on ? remarkOf(input.remark) : null);
+    refresh(c.companyId);
+    return {ok: true};
+  } catch (err) {
+    if (err instanceof LinkError) return {ok: false, error: err.message};
+    console.error('setDecommissionedAction', err);
+    return {ok: false, error: 'Could not update the item. Please try again.'};
+  }
 }
