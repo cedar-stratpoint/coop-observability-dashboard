@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Archive, ArchiveRestore, NotebookPen, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import {Archive, ArchiveRestore, Loader2, NotebookPen, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
@@ -52,7 +52,7 @@ const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}
 // One icon per view for the help strip above the table.
 const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion, decommissioned: Archive};
 
-type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
+type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void, onErr?: () => void) => void;
 
 export function GoldlineSkuLinks({company, data, canEdit}: {company: string; data: SkuLinkData; canEdit: boolean}) {
   const router = useRouter();
@@ -140,7 +140,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const from = (safePage - 1) * size;
   const slice = <T,>(xs: T[]) => xs.slice(from, from + size);
 
-  const act: Act = (key, fn, okText, onOk) => {
+  const act: Act = (key, fn, okText, onOk, onErr) => {
     setBusy(key);
     setNotice(null);
     start(async () => {
@@ -150,7 +150,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         setNotice({kind: 'ok', text: okText});
         onOk?.();
         router.refresh();
-      } else setNotice({kind: 'err', text: res.error});
+      } else {
+        setNotice({kind: 'err', text: res.error});
+        onErr?.();
+      }
     });
   };
 
@@ -539,12 +542,42 @@ function ItemRow({
   const [panel, setPanel] = useState<'note' | 'decom' | null>(null);
   const [remark, setRemark] = useState('');
   const [text, setText] = useState('');
+  // Saving a note is optimistic: the note shows the moment Save is pressed ("Saving…", then
+  // "Saved" when the server confirms) while the page reloads behind it; if it fails, the
+  // note is taken back and the panel reopens. `removed` hides a note being removed.
+  const [optimistic, setOptimistic] = useState<ItemNote | 'removed' | null>(null);
+  const [saving, setSaving] = useState<'saving' | 'saved' | null>(null);
+  useEffect(() => {
+    // The reloaded page has caught up: drop the stand-in.
+    if (optimistic === 'removed' ? !note : optimistic && note?.text === optimistic.text) {
+      setOptimistic(null);
+      setSaving(null);
+    }
+  }, [note, optimistic]);
+  const shown = optimistic === 'removed' ? null : (optimistic ?? note);
+  const saveNote = (value: string | null) => {
+    const previous = optimistic;
+    setOptimistic(value ? {text: value.trim(), by: null, at: new Date().toISOString()} : 'removed');
+    setSaving(value ? 'saving' : null);
+    setPanel(null);
+    act(
+      i.itemCode,
+      () => saveItemNoteAction({company, item: i.itemCode, note: value}),
+      value ? `Note saved for ${i.itemCode}.` : `Note removed from ${i.itemCode}.`,
+      () => setSaving((st) => (st ? 'saved' : st)),
+      () => {
+        setOptimistic(previous);
+        setSaving(null);
+        if (value) setPanel('note');
+      },
+    );
+  };
   const done = () => {
     setPanel(null);
     setRemark('');
   };
   const openNote = () => {
-    setText(note?.text ?? '');
+    setText(shown?.text ?? '');
     setPanel((p) => (p === 'note' ? null : 'note'));
   };
   const d = decommissioned ? (i as DecommissionedItem) : null;
@@ -562,16 +595,33 @@ function ItemRow({
             <span aria-hidden>·</span>
             <FormSpotLink spot={i.formSpot} onClick={() => onShowForm(i.itemCode, i.formSpot)} />
           </p>
-          {note && panel !== 'note' && (
+          {shown && panel !== 'note' && (
             <p
-              className="flex min-w-0 max-w-xl items-start gap-1.5 rounded-md px-2 py-1 text-xs"
+              key={saving ? 'pending' : 'note'}
+              className="flex min-w-0 max-w-xl items-start gap-1.5 rounded-md px-2 py-1 text-xs motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200"
               style={{background: 'color-mix(in oklab, var(--status-warn) 12%, transparent)'}}
-              title={`${note.text}${note.by ? ` · ${note.by}` : ''} · ${day(note.at)}`}
+              title={`${shown.text}${shown.by ? ` · ${shown.by}` : ''} · ${day(shown.at)}`}
             >
               <NotebookPen className="mt-0.5 size-3 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
-              <span className="min-w-0">
-                <span className="line-clamp-2">{note.text}</span>
-                <span className="text-muted-foreground">{[note.by, day(note.at)].filter(Boolean).join(' · ')}</span>
+              <span className="flex min-w-0 flex-col">
+                <span className="line-clamp-2">{shown.text}</span>
+                {saving ? (
+                  <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground" role="status">
+                    {saving === 'saving' ? (
+                      <>
+                        <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> Saving…
+                      </>
+                    ) : (
+                      <>
+                        <Check className="size-3" style={{color: 'var(--status-good)'}} aria-hidden /> Saved
+                      </>
+                    )}
+                    {/* Who and when fill in once the page reloads. */}
+                    <span className="h-2 w-20 rounded-full bg-foreground/10 motion-safe:animate-pulse" aria-hidden />
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">{[shown.by, day(shown.at)].filter(Boolean).join(' · ')}</span>
+                )}
               </span>
             </p>
           )}
@@ -589,8 +639,8 @@ function ItemRow({
         <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant={panel === 'note' ? 'secondary' : 'ghost'} onClick={openNote} aria-expanded={panel === 'note'}>
-              <NotebookPen className="size-3.5" /> {note ? 'Edit note' : 'Add note'}
+            <Button size="sm" variant={panel === 'note' ? 'secondary' : 'ghost'} onClick={openNote} aria-expanded={panel === 'note'} disabled={saving === 'saving'}>
+              <NotebookPen className="size-3.5" /> {shown ? 'Edit note' : 'Add note'}
             </Button>
             {d ? (
               <Button
@@ -623,24 +673,15 @@ function ItemRow({
             className={input}
           />
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={disabled || !text.trim() || text.trim() === note?.text}
-              onClick={() => act(i.itemCode, () => saveItemNoteAction({company, item: i.itemCode, note: text}), `Note saved for ${i.itemCode}.`, () => setPanel(null))}
-            >
-              <NotebookPen className="size-3.5" /> {busy ? 'Saving…' : 'Save note'}
+            <Button size="sm" disabled={!text.trim() || text.trim() === shown?.text} onClick={() => saveNote(text)}>
+              <NotebookPen className="size-3.5" /> Save note
             </Button>
-            {note && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={disabled}
-                onClick={() => act(i.itemCode, () => saveItemNoteAction({company, item: i.itemCode, note: null}), `Note removed from ${i.itemCode}.`, () => setPanel(null))}
-              >
+            {shown && (
+              <Button size="sm" variant="outline" onClick={() => saveNote(null)}>
                 Remove note
               </Button>
             )}
-            <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setPanel(null)}>
+            <Button size="sm" variant="ghost" onClick={() => setPanel(null)}>
               Cancel
             </Button>
           </div>

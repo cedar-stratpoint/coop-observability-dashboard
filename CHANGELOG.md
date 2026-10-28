@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-29 — SKU linking: notes save instantly (optimistic), with Saving… and Saved
+Saving a note felt slow: the action reloads the whole page (several seconds in dev) and every button stayed disabled until it finished, with no sign anything happened. Now the note appears under the item the moment Save is pressed (about 60 ms), with "Saving…" and a spinner, then "Saved" with a check when the server confirms (about 1 s), and a pulsing placeholder where who and when go until the reloaded page fills them in. Removing a note hides it at once the same way. If the save fails, the note is taken back, the error shows and the note panel reopens. Note buttons no longer wait on the page reload; the fade-in is off under reduced motion.
+
 ## v1.17.1 (2026-10-29): SKU linking "Add note" on our form items (prod release)
 Ships "Add note" (below) to prod so Justin can mark an item to check, or note anything about it, while going through SKU linking on prod. The `item_notes` table (`f2d_item_notes.sql`) was applied on Nichido prod (`pfwrkqsjmetibslltmok`) first, since the page reads it. Code only otherwise; nothing else from staging.
 
