@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: the numbers table's toggle moves to the bottom, in green
+The fold toggle on "How the numbers fit" is now a full-width button under the table in the brand green ("Hide the breakdown" / "Show the breakdown · 5 groups", with a chevron), so it reads as the way to open and close it; the header row is plain column labels again. Folded still keeps the Total row; the choice is still remembered.
+
 ## 2026-10-28 — SKU linking: mark an item as decommissioned, with a remark
 On "Sold at Watsons?", each of our form items has "Mark as decommissioned": it opens an optional remark ("discontinued in 2025") and a confirm. It sets the same `products.retired_at` the Inventory board's Retire uses (so the item leaves SKU matching and restock) plus who did it and the remark, in two new columns (`f2c_product_decommission.sql`, additive, applied on Nichido Staging, cutover step 11). Only items with no Watsons SKU can be marked; a linked one must be unlinked first. Decommissioned items get their own row in "How the numbers fit" (our side, so 263 still adds up) and a view that shows when, who and the remark, with "Bring back" to undo. Tried end to end on Staging (marked RELB2012, saw it under Decommissioned, brought it back).
 
