@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — Inventory: summary tiles filter the table; the scans banner is the link
+The four summary tiles (Reorder now, Ship now, Warehouse short, Produce soon; Out of stock for a store-scoped view) are now buttons: one click filters the table to those products and scrolls to it, with a "Showing only Ship now 4 ×" chip above the table; clicking the tile again or the chip clears it. Picking a status segment clears the tile filter (and picking a tile resets the segments to All) so the two never stack into an empty table. Tiles at zero stay plain cards. "On the way" scrolls to the shipments list. The counts and the filter share one predicate (`inFocus` in `src/goldline-supply.ts`, now used by `boardSummary`) so a tile's number always equals the rows it shows; a test pins that. The "scans waiting for review" banner is itself the link to the review queue (hover tint and a chevron) instead of carrying a separate "Review scans" button.
+
 ## 2026-10-28 — SKU linking header: coverage panel and a tinted help strip
 Same look as the Overview and BAs: the coverage is a small panel ("87.7% of Watsons units linked") with a three-part bar and a legend (Linked · Waiting on a decision · Not matched); the explanation under the tabs is a soft strip tinted in the tab's colour with an icon.
 
