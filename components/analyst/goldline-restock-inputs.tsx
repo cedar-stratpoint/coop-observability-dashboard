@@ -158,7 +158,15 @@ export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
             </div>
           )}
 
-          <MonthStrip year={data.year} inWindow={inWindow} safety={safety} />
+          <MonthStrip
+            year={data.year}
+            storeYear={data.storeYear}
+            months={w.months}
+            lastYear={w.lastYear}
+            inWindow={inWindow}
+            safety={safety}
+            storeLabel={picked ? (picked.name ? `${picked.storeCode} · ${picked.name}` : `Store ${picked.storeCode}`) : null}
+          />
 
           <section aria-label="Summary" className={cn('grid grid-cols-2 gap-4 lg:grid-cols-4', GL_TILES_MOBILE)}>
             <Metric label="Ready" value={num(summary.ready)} sub={`of ${num(summary.lines)} store × product lines`} valueClassName={summary.ready ? 'text-[var(--status-good)]' : undefined} />
@@ -221,20 +229,39 @@ export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
   );
 }
 
-/** Last year's 12 months: loaded or missing, with the run's window and safety marked. */
-function MonthStrip({year, inWindow, safety}: {year: ForecastData['year']; inWindow: Set<string>; safety: Set<string>}) {
-  const max = Math.max(1, ...year.map((m) => m.units));
+/**
+ * The 12 months before the run (all stores, or the picked store's own units), loaded or
+ * missing, with the run's window and safety marked. Then the run's months, dashed: each
+ * sells what the same month sold last year (the F10 rule, no growth adjustment).
+ */
+function MonthStrip({year, storeYear, months, lastYear, inWindow, safety, storeLabel}: {
+  year: ForecastData['year'];
+  storeYear: number[] | null;
+  months: string[];
+  lastYear: string[];
+  inWindow: Set<string>;
+  safety: Set<string>;
+  storeLabel: string | null;
+}) {
+  const cells = year.map((m, i) => ({...m, units: storeYear ? (storeYear[i] ?? 0) : m.units, unlinkedUnits: storeYear ? 0 : m.unlinkedUnits}));
+  const byMonth = new Map(cells.map((m) => [m.month, m]));
+  const run = months.map((month, i) => {
+    const from = byMonth.get(lastYear[i]);
+    return {month, from: lastYear[i], loaded: from?.loaded === true, units: from?.units ?? 0};
+  });
+  const max = Math.max(1, ...cells.map((m) => m.units), ...run.map((m) => m.units));
+  const height = (u: number) => `${Math.max(6, (u / max) * 100)}%`;
   return (
-    <section aria-label="Last year's POS Sales Data by month" className="flex min-w-0 flex-col gap-2">
+    <section aria-label={`POS Sales Data by month${storeLabel ? `, ${storeLabel}` : ''}`} className="flex min-w-0 flex-col gap-2">
       <div className="overflow-x-auto pb-1">
-        <ol className="grid min-w-[40rem] grid-cols-12 gap-1.5">
-          {year.map((m) => {
+        <ol className="grid min-w-[48rem] gap-1.5" style={{gridTemplateColumns: `repeat(${cells.length + run.length}, minmax(0, 1fr))`}}>
+          {cells.map((m) => {
             const win = inWindow.has(m.month);
             const linked = m.units - m.unlinkedUnits;
             return (
               <li
                 key={m.month}
-                title={m.loaded ? `${monthLabel(m.month)}: ${num(m.units)} units, ${num(m.unlinkedUnits)} on unlinked SKUs` : `${monthLabel(m.month)}: not loaded`}
+                title={m.loaded ? `${monthLabel(m.month)}: ${num(m.units)} units${storeYear ? '' : `, ${num(m.unlinkedUnits)} on unlinked SKUs`}` : `${monthLabel(m.month)}: not loaded`}
                 className={cn(
                   'flex flex-col gap-1.5 rounded-lg border px-2 pt-2 pb-1.5 transition-colors',
                   win ? 'border-primary/45 bg-[color-mix(in_oklab,var(--primary)_7%,transparent)]' : 'border-border/70',
@@ -243,7 +270,7 @@ function MonthStrip({year, inWindow, safety}: {year: ForecastData['year']; inWin
               >
                 <div className="flex h-14 items-end" aria-hidden>
                   {m.loaded ? (
-                    <div className="flex w-full flex-col justify-end overflow-hidden rounded-[3px]" style={{height: `${Math.max(6, (m.units / max) * 100)}%`}}>
+                    <div className="flex w-full flex-col justify-end overflow-hidden rounded-[3px]" style={{height: height(m.units)}}>
                       <div className="bg-[color-mix(in_oklab,var(--primary)_28%,transparent)]" style={{flexGrow: m.unlinkedUnits}} />
                       <div className={win ? 'bg-primary' : 'bg-[color-mix(in_oklab,var(--primary)_55%,transparent)]'} style={{flexGrow: linked}} />
                     </div>
@@ -261,16 +288,44 @@ function MonthStrip({year, inWindow, safety}: {year: ForecastData['year']; inWin
               </li>
             );
           })}
+          {run.map((m, i) => (
+            <li
+              key={m.month}
+              title={m.loaded ? `${monthLabel(m.month)} forecast: ~${num(m.units)} units, what ${monthLabel(m.from)} sold` : `${monthLabel(m.month)}: ${monthLabel(m.from)} isn't loaded`}
+              className={cn('flex flex-col gap-1.5 rounded-lg border border-dashed border-primary/55 px-2 pt-2 pb-1.5', i === 0 && 'ml-2')}
+            >
+              <div className="flex h-14 items-end" aria-hidden>
+                {m.loaded ? (
+                  <div className="w-full rounded-[3px] border border-dashed border-primary bg-[color-mix(in_oklab,var(--primary)_12%,transparent)]" style={{height: height(m.units)}} />
+                ) : (
+                  <AlertTriangle className="mx-auto mb-3 size-4 text-[var(--status-warn)]" />
+                )}
+              </div>
+              <div className="flex flex-col leading-tight">
+                <span className="text-xs font-semibold text-primary">{monthLabel(m.month, {month: 'short'})}</span>
+                <span className="text-[11px] text-muted-foreground tabular-nums">{m.loaded ? `~${compact(m.units)}` : 'Missing'}</span>
+                <span className="text-[11px] font-medium text-muted-foreground">Run</span>
+              </div>
+            </li>
+          ))}
         </ol>
       </div>
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <i className="inline-block size-2.5 rounded-[2px] bg-primary" aria-hidden /> In this run, linked SKUs
         </span>
+        {!storeYear && (
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block size-2.5 rounded-[2px] bg-[color-mix(in_oklab,var(--primary)_28%,transparent)]" aria-hidden /> Unlinked SKUs (not forecast)
+          </span>
+        )}
         <span className="inline-flex items-center gap-1.5">
-          <i className="inline-block size-2.5 rounded-[2px] bg-[color-mix(in_oklab,var(--primary)_28%,transparent)]" aria-hidden /> Unlinked SKUs (not forecast)
+          <i className="inline-block size-2.5 rounded-[2px] border border-dashed border-primary" aria-hidden /> Forecast, same month last year
         </span>
-        <span>{year[0] && `${monthLabel(year[0].month)} to ${monthLabel(year[year.length - 1].month)}`}</span>
+        <span>
+          {cells[0] && `${monthLabel(cells[0].month)} to ${monthLabel(cells[cells.length - 1].month)}`} · {storeLabel ?? 'all stores'}
+          {storeYear ? ', linked SKUs only' : ''}
+        </span>
       </p>
     </section>
   );

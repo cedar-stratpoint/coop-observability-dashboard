@@ -33,6 +33,7 @@ export type ForecastData = {
   settings: ForecastSettings;
   window: ForecastWindow;
   year: MonthStatus[]; // the 12 months before the run, for the month strip
+  storeYear: number[] | null; // the picked store's units in those months (linked SKUs), else null
   summary: ForecastSummary;
   stores: Array<StoreRollup & {name: string | null}>;
   store: string | null; // the store picked, if any
@@ -127,17 +128,29 @@ export async function getForecastData(companyId: string, runDate: string, store:
     const settings = DEFAULT_FORECAST_SETTINGS;
     const window = forecastWindow(runDate, settings);
     const emptyYear = salesYear(runDate).map((month) => ({month, loaded: false, units: 0, unlinkedUnits: 0}));
-    return {configured: false, settings, window, year: emptyYear, summary: forecastSummary([], window, emptyYear), stores: [], store: null, lines: []};
+    return {configured: false, settings, window, year: emptyYear, storeYear: null, summary: forecastSummary([], window, emptyYear), stores: [], store: null, lines: []};
   }
   const scope = storeScope ?? null;
   const {settings, window, year, lines: all, inScope, storeName, itemName} = await loadForecastBase(companyId, runDate, scope);
   const picked = store && (!scope || scope.includes(store)) ? store : null;
+
+  // The month strip for one store: its own units per month, every product added up.
+  let storeYear: number[] | null = null;
+  if (picked) {
+    const months = salesYear(runDate);
+    // pagination-ok: returns one jsonb value ({store: {item: [units…]}}), not rows.
+    const {data, error} = await db().rpc('forecast_history', {p_company: companyId, p_months: months.map(firstOf), p_stores: [picked]});
+    if (error) throw new Error(`forecast_history failed: ${error.message}`);
+    const items = Object.values(((data ?? {}) as Record<string, Record<string, number[]>>)[picked] ?? {});
+    storeYear = months.map((_, i) => items.reduce((a, u) => a + (Number(u[i]) || 0), 0));
+  }
 
   return {
     configured: true,
     settings,
     window,
     year,
+    storeYear,
     summary: forecastSummary(all, window, year),
     stores: storeRollup(all, inScope).map((r) => ({...r, name: storeName.get(r.storeCode) ?? null})),
     store: picked,
