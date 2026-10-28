@@ -454,21 +454,11 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
   const GRID = 'grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-4 px-4 sm:grid-cols-[minmax(0,1fr)_7rem_7rem] sm:px-6';
   return (
     <section aria-label="How the numbers fit" className="overflow-hidden rounded-xl border">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls="numbers-rows"
-        className={cn(GRID, 'w-full bg-muted/40 py-3 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset', open && 'border-b')}
-      >
-        <span className="inline-flex items-center gap-1.5">
-          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none', !open && '-rotate-90')} />
-          How the numbers fit
-          {!open && <span className="font-normal">· {rows.length} groups</span>}
-        </span>
+      <div className={cn(GRID, 'bg-muted/40 py-3 text-xs font-medium text-muted-foreground', open && 'border-b')}>
+        <span>How the numbers fit</span>
         <span className="text-right">Watsons SKUs</span>
         <span className="text-right">Our items</span>
-      </button>
+      </div>
       <div id="numbers-rows" className={cn('grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
         <ul className="min-h-0 divide-y overflow-hidden" aria-hidden={!open}>
           {rows.map((r) => {
@@ -503,6 +493,17 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
         <span className="text-right font-heading text-base font-semibold tabular-nums">{n(totals.ours)}</span>
       </div>
       {open && <p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground sm:px-6">{footnote}</p>}
+      {/* The toggle sits at the bottom, in the brand colour, so it reads as the way in and out. */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls="numbers-rows"
+        className="flex w-full items-center justify-center gap-1.5 border-t border-primary/25 bg-primary/15 py-3 text-sm font-semibold text-primary outline-none transition-colors duration-150 hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        {open ? 'Hide the breakdown' : `Show the breakdown · ${rows.length} groups`}
+        <ChevronDown aria-hidden className={cn('size-4 transition-transform duration-200 ease-out motion-reduce:transition-none', open && 'rotate-180')} />
+      </button>
     </section>
   );
 }
