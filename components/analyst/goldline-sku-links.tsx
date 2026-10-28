@@ -2,7 +2,7 @@
 
 import {Fragment, useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, CircleCheck, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import {Check, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
@@ -28,12 +28,13 @@ const PAGE_SIZES = [5, 10, 20, 100] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 const SIZE_KEY = 'coop.skus.perPage';
 const REMARK_MAX = 500;
-const ORDER: SkuStatus[] = ['check', 'choose', 'rejected', 'linked', 'formOnly'];
+const ORDER: SkuStatus[] = ['check', 'choose', 'rejected', 'linked', 'noSales', 'formOnly'];
 const TAB: Record<SkuStatus, string> = {
   check: 'Check Coop’s match',
   choose: 'Choose the item',
   rejected: 'Rejected',
   linked: 'Linked',
+  noSales: 'No units sold',
   formOnly: 'Form items without a SKU',
 };
 // One column template for the header and every row, so the columns line up.
@@ -56,7 +57,7 @@ const itemText = (i: SkuLinkItem) => itemDisplayName(i.productLine, i.variant, i
 const toneVar = (t: Tone) => (t === 'info' ? 'var(--muted-foreground)' : `var(--status-${t})`);
 const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
 // One icon per tab for the help strip under the tabs.
-const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, formOnly: FileQuestion};
+const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion};
 
 type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
 
@@ -95,8 +96,11 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
       choose: [],
       rejected: [],
       linked: [],
+      noSales: [],
     };
-    for (const r of data.rows) if (r.units > 0 || r.linked) out[skuStatus(r)].push(r);
+    // Listed by Watsons but never sold in the window: nothing to decide, so kept out of the
+    // working tabs and reachable from the total in the header.
+    for (const r of data.rows) out[r.units > 0 || r.linked ? skuStatus(r) : 'noSales'].push(r);
     return out;
   }, [data.rows]);
   const counts: Record<SkuStatus, number> = {
@@ -104,11 +108,13 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     choose: lists.choose.length,
     rejected: lists.rejected.length,
     linked: lists.linked.length,
+    noSales: lists.noSales.length,
     formOnly: data.unlinkedItems.length,
   };
   const [filter, setFilter] = useState<SkuStatus>(lists.check.length ? 'check' : lists.choose.length ? 'choose' : 'linked');
   // Hide an empty "Rejected" tab (most days) so there are fewer choices.
-  const tabs = ORDER.filter((s) => s !== 'rejected' || counts.rejected > 0 || filter === 'rejected');
+  // Rejected only shows when there are some; No units sold only while it's open (from the header total).
+  const tabs = ORDER.filter((s) => (s !== 'rejected' || counts.rejected > 0 || filter === 'rejected') && (s !== 'noSales' || filter === 'noSales'));
 
   const q = query.trim().toLowerCase();
   const shownSkus = useMemo(() => {
@@ -146,7 +152,6 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   // Every Watsons SKU in the files, so the tabs add up: the ones with no units sold in the
   // whole window (listed by Watsons, never sold) have nothing to decide and aren't in a tab.
   const allSkus = data.rows.length;
-  const noSales = allSkus - counts.check - counts.choose - counts.rejected - counts.linked;
   // Our side is a second list, so it gets its own total: every form item is either linked
   // (the same 210 pairs) or has no Watsons code yet. Many of those are the items Coop
   // suggested for "to check" SKUs, which is why the tab counts can't simply be added up.
@@ -196,15 +201,19 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
               <span className="font-semibold tabular-nums">{n(allSkus)}</span> <span className="text-muted-foreground">Watsons SKUs in all</span>
             </p>
             <p className="text-xs leading-relaxed text-muted-foreground tabular-nums">
-              {[
-                `${n(counts.linked)} linked`,
-                `${n(counts.check)} to check`,
-                `${n(counts.choose)} to choose`,
-                counts.rejected > 0 && `${n(counts.rejected)} rejected`,
-                noSales > 0 && `${n(noSales)} with no units sold`,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+              {[`${n(counts.linked)} linked`, `${n(counts.check)} to check`, `${n(counts.choose)} to choose`, counts.rejected > 0 && `${n(counts.rejected)} rejected`].filter(Boolean).join(' · ')}
+              {counts.noSales > 0 && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => pick('noSales')}
+                    className="rounded-sm underline decoration-border underline-offset-4 outline-none transition-colors hover:text-foreground hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {n(counts.noSales)} with no units sold
+                  </button>
+                </>
+              )}
             </p>
             </div>
             <div className="flex flex-col gap-1">
@@ -275,7 +284,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         {total > 0 && (
           <p className="text-xs text-muted-foreground tabular-nums">
             {n(total)} {filter === 'formOnly' ? 'items' : 'Watsons SKUs'}
-            {filter !== 'formOnly' ? ', biggest sellers first' : ''}
+            {filter !== 'formOnly' && filter !== 'noSales' ? ', biggest sellers first' : ''}
           </p>
         )}
       </div>
@@ -324,7 +333,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} />
             ))}
           </ul>
         </div>
@@ -352,6 +361,7 @@ const EMPTY: Record<SkuStatus, string> = {
   choose: 'Every Watsons SKU with sales has a link or a suggestion.',
   rejected: 'No rejected matches waiting for an item.',
   linked: 'No links yet.',
+  noSales: 'Every Watsons SKU in the files has sold at least once.',
   formOnly: 'Every item on our forms has a Watsons SKU.',
 };
 
@@ -388,6 +398,7 @@ function SkuRow({
   busy,
   act,
   onShowForm,
+  quiet = false,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -397,6 +408,8 @@ function SkuRow({
   busy: boolean;
   act: Act;
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
+  /** Nothing to decide here (no units sold), so the action is offered, not pushed. */
+  quiet?: boolean;
 }) {
   const status = skuStatus(r);
   const [remark, setRemark] = useState('');
@@ -530,7 +543,7 @@ function SkuRow({
             </>
           )}
           {canEdit && choosing && (
-            <Button size="sm" variant={open ? 'secondary' : 'default'} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+            <Button size="sm" variant={open ? 'secondary' : quiet ? 'outline' : 'default'} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
               <Link2 className="size-3.5" /> Choose item
             </Button>
           )}
