@@ -574,6 +574,24 @@ create table if not exists public.item_notes (
 );
 alter table public.item_notes enable row level security;
 revoke all on public.item_notes from anon, authenticated;
+-- f2e (Oct 29): every SKU linking decision with the rows it changed, for Undo (trail kept).
+create table if not exists public.sku_decision_log (
+  id          bigint generated always as identity primary key,
+  company_id  text not null references public.companies(id) on delete cascade,
+  target      text not null check (target in ('sku', 'item')),
+  key         text not null,
+  action      text not null check (action in ('approved', 'rejected', 'linked', 'unlinked', 'remark', 'decommissioned', 'restored', 'note')),
+  summary     text,
+  done_by     text,
+  done_at     timestamptz not null default now(),
+  before      jsonb not null,
+  after       jsonb not null,
+  undone_by   text,
+  undone_at   timestamptz
+);
+create index if not exists sku_decision_log_latest on public.sku_decision_log (company_id, target, key, id desc);
+alter table public.sku_decision_log enable row level security;
+revoke all on public.sku_decision_log from anon, authenticated;
 do $$ begin
   alter table public.products add constraint products_category_check
     check (category is null or category in ('eyes', 'lips', 'face', 'other'));

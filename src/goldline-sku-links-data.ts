@@ -6,6 +6,7 @@ import {relinkWatsons} from './goldline-watsons-data';
 import type {MatchTier} from './goldline-sku-match';
 import {formSpots, type FormSpot} from './goldline-sku-tags';
 import {MANIFESTS} from './goldline-extract';
+import {latestDecisions, type DecisionInfo} from './goldline-sku-undo';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
 // lives on products.sku_code (every sales reader joins on it); chain_skus holds the
@@ -55,6 +56,7 @@ export type SkuLinkData = {
   unlinkedItems: SkuLinkItem[]; // catalog items with no Watsons SKU yet (for the manual picker)
   decommissioned: DecommissionedItem[]; // retired items with no Watsons SKU (f2c)
   notes: Record<string, ItemNote>; // latest note per item code (f2d)
+  decisions: Record<string, DecisionInfo>; // latest decision per `sku:CODE` / `item:CODE`, for Undo (f2e)
   formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
@@ -75,10 +77,10 @@ const item = (p: ProductRow): SkuLinkItem => ({
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
-  const [products, chain, rollup, reviews, notes] = await Promise.all([
+  const [products, chain, rollup, reviews, notes, decisions] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
@@ -109,6 +111,11 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
     fetchAllRows('item_notes', (from, to) =>
       supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to),
     ) as unknown as Promise<Array<{item_code: string; note: string; note_by: string | null; note_at: string}>>,
+    // Undo is a nicety: if the log can't be read, the page still works without it.
+    latestDecisions(companyId).catch((e) => {
+      console.error('sku_decision_log read failed', e);
+      return {} as Record<string, DecisionInfo>;
+    }),
   ]);
   const reviewBySku = new Map(
     reviews.map((r) => [
@@ -151,6 +158,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
+    decisions,
     notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
     decommissioned: products
       .filter((p) => !p.sku_code?.trim() && p.retired_at)
