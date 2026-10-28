@@ -7,6 +7,8 @@ import {canEditData, outOfScopeStores} from '@/src/company';
 import {manilaDate} from '@/src/goldline-supply';
 import {glTags} from '@/src/goldline-ref-data';
 import {MAX_WINDOW_MONTHS} from '@/src/goldline-forecast';
+import {decideRecommendations, makeRestockRun, RestockError} from '@/src/goldline-restock-writes';
+import type {Decision} from '@/src/goldline-restock';
 import {
   cancelShipment,
   existingItems,
@@ -213,5 +215,62 @@ export async function saveForecastSettingsAction(input: {company: string | null;
   } catch (err) {
     console.error('saveForecastSettingsAction', err);
     return {ok: false, error: 'Could not save the restock settings. Please try again.'};
+  }
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_REMARK = 500;
+const MAX_IDS = 2000;
+
+/** Make (or re-make) the restock run for a date's half month. Company-wide roles only. */
+export async function makeRestockRunAction(input: {company: string | null; runDate: string}): Promise<ActionResult<{saved: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (e.ctx.storeScope) return {ok: false, error: 'Only company-wide roles can make a restock run (the warehouse serves every store).'};
+  const runDate = ISO_DAY.test(input.runDate ?? '') && !Number.isNaN(Date.parse(input.runDate)) ? input.runDate : manilaDate();
+  try {
+    const {saved} = await makeRestockRun(e.companyId, runDate, e.by);
+    revalidatePath('/stock/restock');
+    return {ok: true, saved};
+  } catch (err) {
+    console.error('makeRestockRunAction', err);
+    return {ok: false, error: 'Could not make the run. Please try again.'};
+  }
+}
+
+const DECIDE_ERROR: Record<RestockError['code'], string> = {
+  remark_required: 'Add a remark that says why.',
+  bad_qty: 'Enter how many units to send (0 or more).',
+  over_warehouse: 'That is more than the warehouse holds.',
+  edit_one: 'Edit one line at a time.',
+  nothing_changed: 'Those lines can’t be decided (held, covered, or not in your stores). Refresh and try again.',
+};
+
+/** Approve many lines as is, or edit, reject or undo one. */
+export async function decideRecommendationsAction(input: {
+  company: string | null;
+  ids: string[];
+  decision: Decision;
+  qty?: number | null;
+  remark?: string | null;
+}): Promise<ActionResult<{changed: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  const ids = Array.isArray(input.ids) ? [...new Set(input.ids.filter((id) => typeof id === 'string' && UUID.test(id)))] : [];
+  if (!ids.length || ids.length > MAX_IDS) return {ok: false, error: 'Pick the lines to decide.'};
+  if (!['approved', 'edited', 'rejected', 'pending'].includes(input.decision)) return {ok: false, error: 'Unknown decision.'};
+  const remark = typeof input.remark === 'string' ? input.remark.trim().slice(0, MAX_REMARK) : '';
+  if ((input.decision === 'edited' || input.decision === 'rejected') && !remark) return {ok: false, error: DECIDE_ERROR.remark_required};
+  const qty = input.decision === 'edited' ? intIn(input.qty, 0, MAX_QTY) : null;
+  if (input.decision === 'edited' && qty == null) return {ok: false, error: DECIDE_ERROR.bad_qty};
+  try {
+    const changed = await decideRecommendations(e.companyId, e.ctx.storeScope ?? null, {ids, decision: input.decision, qty, remark: remark || null, by: e.by});
+    revalidatePath('/stock/restock');
+    return {ok: true, changed};
+  } catch (err) {
+    if (err instanceof RestockError) return {ok: false, error: DECIDE_ERROR[err.code]};
+    console.error('decideRecommendationsAction', err);
+    return {ok: false, error: 'Could not save the decision. Please try again.'};
   }
 }
