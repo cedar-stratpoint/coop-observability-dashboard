@@ -1011,7 +1011,7 @@
   {
    "route": "/settings/shopee-sync",
    "title": "Sync worker",
-   "shows": "Settings screen for the Shopee same-day sync: the one cloud worker (status Asleep, Online or Offline, owner, last seen, last Shopee login check; admins can revoke it and, only SHOPEE_SYNC_ADMINS members, set and copy the remote browser address); then a muted My sync Macs section to add, list and revoke the Macs you run yourself (admins see everyone's with the owner). Add shows a one-time docker run command (code valid 15 minutes, single use; the cloud variant is for SHOPEE_SYNC_ADMINS members only, flags the worker is_cloud and has a placeholder image tag)",
+   "shows": "Settings screen for the Shopee same-day sync: the one cloud worker (status Asleep, Online or Offline, owner, last seen, last Shopee login check; admins can revoke it and, only Coop Admins, set and copy the remote browser address); then a muted My sync Macs section to add, list and revoke the Macs you run yourself (admins see everyone's with the owner). Add shows a one-time docker run command (code valid 15 minutes, single use; the cloud variant is for Coop Admins only, flags the worker is_cloud and has a placeholder image tag)",
    "data": "",
    "domains": [
     "platform"

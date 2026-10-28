@@ -15,8 +15,6 @@ export interface SyncDeps {
   now: () => Date;
   /** Days that have figures in the archive (the same list the import coverage uses). */
   loadLoadedDays: () => Promise<string[]>;
-  /** SHOPEE_SYNC_ADMINS, lower-cased. A worker enrolled by one of them is the shared cloud worker. */
-  admins?: readonly string[];
   /** SHOPEE_SYNC_REMOTE_HOSTS, lower-cased. Empty or unset: any https host. */
   remoteHosts?: readonly string[];
 }
@@ -111,13 +109,13 @@ export const dockerCommand = (code: string, variant: EnrolVariant = 'mac'): stri
     : `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -p 127.0.0.1:6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
 
 /** Makes a one-time enrolment code for one of the person's own Macs. The code is shown once and stored only as a hash. */
-export async function beginEnrolment(d: SyncDeps, email: string, name: string, variant: EnrolVariant = 'mac'): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {
+export async function beginEnrolment(d: SyncDeps, email: string, name: string, variant: EnrolVariant = 'mac', isAdmin = false): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {
   const who = email.trim().toLowerCase();
   const clean = (name ?? '').replace(/\s+/g, ' ').trim();
   // eslint-disable-next-line no-control-regex
   if (!clean || clean.length > NAME_MAX || /[\u0000-\u001f]/.test(clean)) return fail(`Give the Mac a name of 1 to ${NAME_MAX} characters.`);
-  // The cloud worker is the one enrolled by an admin (SHOPEE_SYNC_ADMINS): that is what makes it serve everyone.
-  if (variant === 'cloud' && !(d.admins ?? []).some((a) => sameEmail(a, who))) return fail('Only an admin can add the cloud worker.');
+  // The cloud worker is the one enrolled by a Coop Admin: that is what makes it serve everyone.
+  if (variant === 'cloud' && !isAdmin) return fail('Only an admin can add the cloud worker.');
   const capped = canAddWorker(await d.store.listWorkers(), who);
   if (capped) return fail(capped);
   const code = newEnrolmentCode();
@@ -140,8 +138,8 @@ export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string)
 
 /** An admin sets or clears the address of the cloud worker's protected remote browser. Only the cloud worker has one; the address is never shown to anyone else. */
 export async function setRemoteUrlFor(d: SyncDeps, who: Actor, workerId: string, raw: string): Promise<{ok: true} | Fail> {
-  // The SHOPEE_SYNC_ADMINS list decides, not the Coop Admin role: this link is where a listed admin types the Shopee password.
-  if (!(d.admins ?? []).some((a) => sameEmail(a, who.email))) return fail('Only an admin can set the remote browser address.');
+  // Coop Admins only: this link is where an admin types the Shopee password.
+  if (!who.isAdmin) return fail('Only an admin can set the remote browser address.');
   const parsed = normaliseRemoteUrl(String(raw ?? ''), d.remoteHosts ?? []);
   if (!parsed.ok) return fail(parsed.error);
   const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);

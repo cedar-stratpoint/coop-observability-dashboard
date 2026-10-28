@@ -15,7 +15,7 @@ export interface WorkerLike {
 export const sameEmail = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 const live = <W extends Pick<WorkerLike, 'revokedAt'>>(ws: readonly W[]): W[] => ws.filter((w) => !w.revokedAt);
 
-/** The one cloud worker is the one flagged at enrolment (by a SHOPEE_SYNC_ADMINS member); it serves whoever pressed Sync. A Mac, even an admin's, serves only its owner. */
+/** The one cloud worker is the one flagged at enrolment (by a Coop Admin); it serves whoever pressed Sync. A Mac, even an admin's, serves only its owner. */
 export const isCloudWorker = (w: {isCloud: boolean}): boolean => w.isCloud;
 
 /** `anyOwner`: the worker is the shared cloud worker, so the presser need not be its owner. */

@@ -1,6 +1,6 @@
 // Failure alerts for the Shopee sync (SYN-06): which jobs deserve an email, and what it says. Pure, with the sender injected.
 //
-// Recipients: the SHOPEE_SYNC_ADMINS list (parseAdmins in admins.ts), passed as `to`. Failures, sign-in needs and nudges all go to the admins.
+// Recipients: the Coop Admins, resolved by the future sender and passed as `to`. Failures, sign-in needs and nudges all go to them.
 // TODO(SYN-06 wiring): the dashboard has no email mechanism today, so nothing calls this yet. To switch it on:
 //   1. a sender over Resend's HTTPS API (plain fetch, like the backend's src/lib/resend.js; RESEND_API_KEY + EMAIL_FROM + a recipient list in env, server-only),
 //   2. somewhere to remember which keys went (an `alerted_at` column on shopee_sync_jobs, applied by hand; apply it to staging first), so each alert is sent once,
@@ -84,7 +84,7 @@ export function loginAlertMessage(state: 'needs_password' | 'signed_out'): Alert
   };
 }
 
-/** The admins who are told (SHOPEE_SYNC_ADMINS), for the injected sender. Failures and sign-in alerts go to them, not to the person who pressed Sync. */
+/** The Coop Admins who are told, for the injected sender. Failures and sign-in alerts go to them, not to the person who pressed Sync. */
 export type Send = (m: AlertMessage, to: readonly string[]) => Promise<void>;
 
 /**

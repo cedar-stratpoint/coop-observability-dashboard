@@ -16,7 +16,7 @@ The Overview shows when Shopee is behind (finished days with no figures). Pressi
 One on-demand cloud server runs the worker. It sleeps when idle and wakes for a sync, about 1 to 4 minutes. Users never type the Shopee password anywhere. When Shopee asks, an admin types it in the worker's own Chrome through the remote browser link.
 
 **Environment (server-only, Vercel; redeploy after changing):**
-- `SHOPEE_SYNC_ADMINS`: comma-separated emails (case-insensitive). The only people who may enrol the cloud worker, set or see the remote browser address, and get the alerts. A Coop Admin who is not on this list gets none of that. Empty means nobody.
+- No admin list. "Admin" is the existing Coop Admin role (no company, role `coop_admin`). Only a Coop Admin may enrol the cloud worker, set or see the remote browser address, and get the alerts.
 - `SHOPEE_SYNC_REMOTE_HOSTS` (optional): comma-separated hosts the remote address may use. When set, any other host is refused, so a look-alike page cannot be put where an admin types the password. The address is https only either way.
 - `SHOPEE_SYNC_WAKE_TOKEN`: the bearer token the AWS Lambda sends. Unset means the wake route answers 401 to everyone.
 
@@ -34,7 +34,7 @@ One on-demand cloud server runs the worker. It sleeps when idle and wakes for a 
 2. Press **Open remote browser** (a new tab, Google sign-in through Cloudflare Access), type the Shopee password in the worker's Chrome, and close the tab. The worker re-checks the login and the sync resumes by itself. Coop never sees the password.
 3. A sync waiting for a sign-in expires after 60 minutes (it ends as expired; the Monday import still fills the gap).
 
-**Alerts are not sent yet.** The sender is still a TODO (`TODO(SYN-06 wiring)` in `src/shopee-sync/alerts.ts`; Resend is not wired). The message builders and recipient list (`SHOPEE_SYNC_ADMINS`) exist, so until the sender is wired nobody is emailed and the card says "Please ask an admin" instead of claiming anyone was told. Admins have to look at the card.
+**Alerts are not sent yet.** The sender is still a TODO (`TODO(SYN-06 wiring)` in `src/shopee-sync/alerts.ts`; Resend is not wired). The message builders and recipients (the Coop Admins, resolved by the future sender) are a parameter, so until the sender is wired nobody is emailed and the card says "Please ask an admin" instead of claiming anyone was told. Admins have to look at the card.
 
 ## Adding a Mac (secondary path)
 1. Settings, **My sync Macs**, name the Mac, **Add a Mac**. You get a one-time code (valid 15 minutes) and a `docker run` command. The code is shown once.

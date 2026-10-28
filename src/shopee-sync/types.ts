@@ -35,7 +35,7 @@ export interface Worker {
   remoteReady: boolean;
   /** Admin-set address of the protected remote browser; never sent to a non-admin. */
   remoteUrl: string | null;
-  /** The shared cloud worker, set once at enrolment by a SHOPEE_SYNC_ADMINS member. Only this flag makes a worker serve everyone and speak for the Shopee login. */
+  /** The shared cloud worker, set once at enrolment by a Coop Admin. Only this flag makes a worker serve everyone and speak for the Shopee login. */
   isCloud: boolean;
 }
 export interface Enrolment {

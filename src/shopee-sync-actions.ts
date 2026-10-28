@@ -53,7 +53,7 @@ export async function startEnrolment(name: string, variant: EnrolVariant = 'mac'
   const c = await ctx();
   if (!c.ok) return c;
   try {
-    return await beginEnrolment(c.deps, c.viewer.email, String(name ?? ''), variant === 'cloud' ? 'cloud' : 'mac');
+    return await beginEnrolment(c.deps, c.viewer.email, String(name ?? ''), variant === 'cloud' ? 'cloud' : 'mac', c.viewer.isAdmin);
   } catch (e) {
     console.error('startEnrolment failed', e);
     return {ok: false, error: 'Could not make an enrolment code. Try again in a moment.'};

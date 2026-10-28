@@ -80,7 +80,7 @@ export function supabaseSyncStore(sb: SupabaseClient): SyncStore {
     },
     async claimJob(jobId, workerId, _now, opts) {
       // One SQL statement (supabase/shopee_sync.sql, function claim_shopee_sync_job_shared in shopee_sync_login.sql): queued -> running, and only for a ready, non-revoked worker
-      // owned by the presser, unless it is the shared cloud worker (the app decides that from SHOPEE_SYNC_ADMINS and passes p_any_owner).
+      // owned by the presser, unless it is the shared cloud worker (the app decides that from the Coop Admin role and passes p_any_owner).
       const {data, error} = await sb.rpc('claim_shopee_sync_job_shared', {p_job: jobId, p_worker: workerId, p_any_owner: opts?.anyOwner === true});
       if (error?.code === UNIQUE_VIOLATION) return null; // another sync is already in flight (unique index)
       fail('claiming the sync job', error);

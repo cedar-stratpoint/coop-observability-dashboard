@@ -17,9 +17,9 @@ export async function getShopeeSyncStatus(): Promise<ShopeeSyncStatus | null> {
   if (!viewer) return null;
   const d = usingPosMock() ? null : shopeeSyncDeps();
   if (!d) {
-    return {signedInAs: viewer.email, isAdmin: viewer.isAdmin, isSyncAdmin: false, mock: true, workers: [], cloudWorkers: [], login: {state: 'unknown', checkedAt: null, ageSeconds: null, stale: false}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: [], moreMissing: 0, canSync: {ok: false, reason: MOCK_REASON}, canAddMac: {ok: false, reason: MOCK_REASON}};
+    return {signedInAs: viewer.email, isAdmin: viewer.isAdmin, mock: true, workers: [], cloudWorkers: [], login: {state: 'unknown', checkedAt: null, ageSeconds: null, stale: false}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: [], moreMissing: 0, canSync: {ok: false, reason: MOCK_REASON}, canAddMac: {ok: false, reason: MOCK_REASON}};
   }
   const now = d.now();
   const [jobs, workers, loadedDays] = await Promise.all([sweepJobs(d.store, now), d.store.listWorkers(), d.loadLoadedDays()]);
-  return buildSyncStatus({viewer, now, workers, jobs, loadedDays, admins: d.admins});
+  return buildSyncStatus({viewer, now, workers, jobs, loadedDays});
 }

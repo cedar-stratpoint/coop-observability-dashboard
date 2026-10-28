@@ -39,7 +39,7 @@ revoke all on function public.claim_shopee_sync_job_shared(uuid, uuid, boolean) 
 grant execute on function public.claim_shopee_sync_job_shared(uuid, uuid, boolean) to service_role;
 
 -- Which worker is THE cloud worker is stored, not guessed from the owner's email: an admin's own laptop must never become a shared worker or speak for
--- the box's Shopee login. The flag is set once, at enrolment, and only for the cloud variant made by a SHOPEE_SYNC_ADMINS member (the app checks that).
+-- the box's Shopee login. The flag is set once, at enrolment, and only for the cloud variant made by a Coop Admin (the app checks that).
 alter table public.shopee_sync_enrolments add column if not exists is_cloud boolean not null default false;
 alter table public.shopee_sync_workers add column if not exists is_cloud boolean not null default false;
 

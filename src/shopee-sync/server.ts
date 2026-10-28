@@ -3,7 +3,6 @@ import {revalidateTag} from 'next/cache';
 import {posClient, usingPosMock} from '../pos-data';
 import {supabaseImportStore} from '../shopee-import/store-supabase';
 import type {SyncApiDeps} from './api';
-import {parseAdmins} from './admins';
 import {parseHosts} from './remote';
 import type {SyncDeps} from './service';
 import {supabaseSyncStore} from './store-supabase';
@@ -17,7 +16,7 @@ export function shopeeSyncApiDeps(): SyncApiDeps | null {
 export function shopeeSyncDeps(): SyncDeps | null {
   if (usingPosMock()) return null;
   const sb = posClient();
-  return {store: supabaseSyncStore(sb), now: () => new Date(), loadLoadedDays: () => supabaseImportStore(sb).loadLoadedDays(), admins: parseAdmins(process.env.SHOPEE_SYNC_ADMINS), remoteHosts: parseHosts(process.env.SHOPEE_SYNC_REMOTE_HOSTS)};
+  return {store: supabaseSyncStore(sb), now: () => new Date(), loadLoadedDays: () => supabaseImportStore(sb).loadLoadedDays(), remoteHosts: parseHosts(process.env.SHOPEE_SYNC_REMOTE_HOSTS)};
 }
 
 /** The Overview and Sales readers cache under 'digest-archive'; a finished sync should show without waiting out the cache. Never fails the response. */

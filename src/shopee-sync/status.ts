@@ -60,8 +60,6 @@ export interface SyncJobView {
 export interface ShopeeSyncStatus {
   signedInAs: string;
   isAdmin: boolean;
-  /** In SHOPEE_SYNC_ADMINS: may sign in to Shopee on the cloud worker, see the remote address and get the alerts. A Coop Admin is not this unless listed. */
-  isSyncAdmin: boolean;
   /** True when the archive database is not configured: nothing is stored and every action is refused. */
   mock: boolean;
   workers: SyncWorkerView[];
@@ -92,8 +90,6 @@ export interface StatusInput {
   workers: readonly Worker[];
   jobs: readonly Job[];
   loadedDays: readonly string[];
-  /** SHOPEE_SYNC_ADMINS, lower-cased. */
-  admins?: readonly string[];
 }
 
 export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
@@ -111,8 +107,6 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
   const sorted = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const current = sorted.find((j) => j.status === 'queued' || isActive(j.status));
   const last = sorted.find((j) => j.status !== 'queued' && !isActive(j.status));
-  const admins = i.admins ?? [];
-  const isSyncAdmin = admins.some((a) => sameEmail(a, me));
   const gate = syncGate({who: me, now: i.now, jobs, workers: i.workers, loadedDays: i.loadedDays});
   const cl = cloudLogin(i.workers, i.now);
   const stateOf = (w: Worker): CloudState => {
@@ -120,20 +114,19 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     const waited = jobs.some((j) => (j.status === 'queued' && i.now.getTime() - Date.parse(j.createdAt) > WAKE_GRACE_MS) || (j.status === 'expired' && j.error === 'worker offline' && i.now.getTime() - Date.parse(j.finishedAt ?? j.createdAt) < 3_600_000));
     return waited ? 'offline' : 'asleep';
   };
-  const cloudViews: CloudWorkerView[] = cloud.map((w) => ({id: w.id, name: w.name, ownerEmail: w.ownerEmail, state: stateOf(w), lastSeen: w.lastSeen, loginState: w.loginState, loginCheckedAt: w.loginCheckedAt, remoteReady: w.remoteReady, remoteUrl: isSyncAdmin ? w.remoteUrl : null}));
+  const cloudViews: CloudWorkerView[] = cloud.map((w) => ({id: w.id, name: w.name, ownerEmail: w.ownerEmail, state: stateOf(w), lastSeen: w.lastSeen, loginState: w.loginState, loginCheckedAt: w.loginCheckedAt, remoteReady: w.remoteReady, remoteUrl: i.viewer.isAdmin ? w.remoteUrl : null}));
   const missing = missingClosedDays(i.loadedDays, i.now);
   const cap = canAddWorker(i.workers, me);
   return {
     signedInAs: me,
     isAdmin: i.viewer.isAdmin,
-    isSyncAdmin,
     mock: false,
     cloudWorkers: cloudViews,
     login: {state: cl.state, checkedAt: cl.checkedAt, ageSeconds: cl.checkedAt ? Math.max(0, Math.floor((i.now.getTime() - Date.parse(cl.checkedAt)) / 1000)) : null, stale: cl.stale},
     // with a cloud worker, 'online' is the box (a person's Mac being awake does not make the server awake); without one, any worker
     workerOnline: (cloud.length > 0 ? cloud : live).some((w) => isOnline(w.lastSeen, i.now)),
     remoteReady: cloud.some((w) => w.remoteReady),
-    remoteUrl: isSyncAdmin ? (cloud.find((w) => w.remoteUrl)?.remoteUrl ?? null) : null,
+    remoteUrl: i.viewer.isAdmin ? (cloud.find((w) => w.remoteUrl)?.remoteUrl ?? null) : null,
     workers: live
       .filter((w) => !isCloudWorker(w))
       .filter((w) => i.viewer.isAdmin || sameEmail(w.ownerEmail, me))

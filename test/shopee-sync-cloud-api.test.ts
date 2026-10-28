@@ -12,13 +12,13 @@ const ADMIN = 'owner@x.com';
 const WAKE = 'wake-token-for-tests';
 let store: FakeSyncStore;
 let clock: Date;
-const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED, admins: [ADMIN]});
+const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED});
 const api = (): SyncApiDeps => ({store, now: () => clock, wakeToken: WAKE});
 const enrolCloud = () => enrol(ADMIN, 'cloud', 'cloud');
 const post = (path: string, body: unknown, token?: string) =>
   new Request(`https://coop.example/api/shopee/sync/${path}`, {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...(token ? {authorization: `Bearer ${token}`} : {})}});
 async function enrol(owner: string, name = 'cloud', variant: 'mac' | 'cloud' = 'mac'): Promise<{token: string; workerId: string}> {
-  const e = await beginEnrolment(sd(), owner, name, variant);
+  const e = await beginEnrolment(sd(), owner, name, variant, owner === ADMIN);
   if (!e.ok) throw new Error(e.error);
   const b = await (await handleEnrol(post('enrol', {code: e.code}), api())).json();
   return {token: b.token, workerId: b.workerId};

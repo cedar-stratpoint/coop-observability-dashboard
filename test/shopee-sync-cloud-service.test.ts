@@ -5,7 +5,7 @@ import {FakeSyncStore} from './support/shopee-sync-fake-store';
 const ADMIN = 'owner@x.com';
 let store: FakeSyncStore;
 const now = new Date('2026-10-27T06:00:00Z');
-const sd = (): SyncDeps => ({store, now: () => now, loadLoadedDays: async () => [], admins: [ADMIN]});
+const sd = (): SyncDeps => ({store, now: () => now, loadLoadedDays: async () => []});
 const cloudWorker = async () => store.createWorker({ownerEmail: ADMIN, name: 'Cloud worker', tokenHash: 'h1', isCloud: true}, now);
 
 beforeEach(() => {
@@ -27,7 +27,7 @@ describe('the enrol command has a Mac and a cloud variant', () => {
   it('only an admin can make the cloud variant; anyone makes the Mac one', async () => {
     const asUser = await beginEnrolment(sd(), 'u@x.com', 'cloud', 'cloud');
     expect(asUser).toEqual({ok: false, error: 'Only an admin can add the cloud worker.'});
-    const asAdmin = await beginEnrolment(sd(), ADMIN, 'cloud', 'cloud');
+    const asAdmin = await beginEnrolment(sd(), ADMIN, 'cloud', 'cloud', true);
     expect(asAdmin).toMatchObject({ok: true, command: expect.stringContaining('<WORKER_IMAGE_TAG>')});
     expect(await beginEnrolment(sd(), 'u@x.com', 'my mac')).toMatchObject({ok: true, command: expect.stringContaining('6080')});
   });
@@ -41,9 +41,9 @@ describe('setRemoteUrlFor', () => {
     expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: true}, w.id, '')).toEqual({ok: true});
     expect(store.workers[0].remoteUrl).toBeNull();
   });
-  it('refuses a Coop Admin who is not in SHOPEE_SYNC_ADMINS: the list, not the role, decides who may point the link', async () => {
+  it('refuses a regular user, even one who owns the cloud worker: only the Coop Admin role may point the link', async () => {
     const w = await cloudWorker();
-    expect(await setRemoteUrlFor(sd(), {email: 'coop-admin@x.com', isAdmin: true}, w.id, 'https://lookalike.example.com')).toEqual({ok: false, error: 'Only an admin can set the remote browser address.'});
+    expect(await setRemoteUrlFor(sd(), {email: ADMIN, isAdmin: false}, w.id, 'https://lookalike.example.com')).toEqual({ok: false, error: 'Only an admin can set the remote browser address.'});
     expect(store.workers[0].remoteUrl).toBeNull();
   });
   it('refuses http, and a host outside SHOPEE_SYNC_REMOTE_HOSTS when that is set', async () => {
