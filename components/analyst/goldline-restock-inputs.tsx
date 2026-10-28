@@ -10,6 +10,7 @@ import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
 import {AlertTriangle, CalendarClock, CheckCircle2, Info, Loader2, Settings2} from 'lucide-react';
 import type {ForecastData} from '@/src/goldline-forecast-data';
+import {restockItemHref} from '@/src/goldline-restock-item';
 import {HOLD_REASONS, MAX_WINDOW_MONTHS, type HoldReason} from '@/src/goldline-forecast';
 import {Metric} from '@/components/analyst/metric';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
@@ -205,7 +206,7 @@ export function GoldlineRestockInputs({data}: {data: RestockViewData}) {
                   {data.stores.length === 0 ? `No sales in ${span(w.lastYear)} and no counts yet.` : 'Nothing matches this filter.'}
                 </p>
               ) : store ? (
-                <LineTable rows={slice(lineRows)} months={w.lastYear} safety={safety} />
+                <LineTable rows={slice(lineRows)} months={w.lastYear} safety={safety} store={store} asOf={data.preview ? w.runDate : null} />
               ) : (
                 <StoreTable rows={slice(storeRows)} onPick={(code) => go({store: code})} />
               )}
@@ -318,7 +319,7 @@ function StoreTable({rows, onPick}: {rows: RestockViewData['stores']; onPick: (c
   );
 }
 
-function LineTable({rows, months, safety}: {rows: RestockViewData['lines']; months: string[]; safety: Set<string>}) {
+function LineTable({rows, months, safety, store, asOf}: {rows: RestockViewData['lines']; months: string[]; safety: Set<string>; store: string | null; asOf: string | null}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
@@ -339,7 +340,9 @@ function LineTable({rows, months, safety}: {rows: RestockViewData['lines']; mont
           {rows.map((l) => (
             <tr key={l.itemCode} className="border-b border-border/60 transition-colors duration-150 last:border-b-0 hover:bg-muted/40">
               <td className={cn(TD, 'pl-4')}>
-                <span className="font-medium">{l.name}</span> <span className="font-mono text-xs text-muted-foreground">{l.itemCode}</span>
+                <Link href={restockItemHref(l.itemCode, store, asOf)} className="underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none">
+                  <span className="font-medium">{l.name}</span> <span className="font-mono text-xs text-muted-foreground">{l.itemCode}</span>
+                </Link>
               </td>
               {l.units.map((u, i) => (
                 <td key={months[i]} className={cn(TD, 'text-right tabular-nums', u == null && 'text-muted-foreground')}>
