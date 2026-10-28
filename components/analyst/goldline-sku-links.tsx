@@ -2,9 +2,9 @@
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
-import type {SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
-import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import {Archive, ArchiveRestore, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import type {DecommissionedItem, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
+import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
@@ -32,6 +32,7 @@ const REMARK_MAX = 500;
 // One column template for the header and every row, so the columns line up.
 const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
 const ITEM_COLS = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]';
+const ITEM_COLS_EDIT = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(12.5rem,14rem)]';
 
 const n = (v: number) => Math.round(v).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -49,7 +50,7 @@ const itemText = (i: SkuLinkItem) => itemDisplayName(i.productLine, i.variant, i
 const toneVar = (t: Tone) => (t === 'info' ? 'var(--muted-foreground)' : `var(--status-${t})`);
 const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}%, transparent)`;
 // One icon per view for the help strip above the table.
-const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion};
+const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion, decommissioned: Archive};
 
 type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
 
@@ -83,7 +84,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   };
 
   const lists = useMemo(() => {
-    const out: Record<Exclude<SkuStatus, 'formOnly'>, SkuLinkRow[]> = {
+    const out: Record<Exclude<SkuStatus, 'formOnly' | 'decommissioned'>, SkuLinkRow[]> = {
       check: [],
       choose: [],
       rejected: [],
@@ -106,6 +107,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     linked: lists.linked.length,
     noSales: lists.noSales.length,
     formOnly: noMatchItems.length,
+    decommissioned: data.decommissioned.length,
   };
   const [filter, setFilter] = useState<SkuStatus>(lists.check.length ? 'check' : lists.choose.length ? 'choose' : 'linked');
 
@@ -119,19 +121,20 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
   const q = query.trim().toLowerCase();
   const shownSkus = useMemo(() => {
-    if (filter === 'formOnly') return [];
+    if (filter === 'formOnly' || filter === 'decommissioned') return [];
     const rows = lists[filter].filter((r) => {
       const it = r.linked ?? r.suggestion;
       return !q || r.name.toLowerCase().includes(q) || r.skuCode.includes(q) || (it ? `${it.itemCode} ${itemText(it)}`.toLowerCase().includes(q) : false);
     });
     return sort.key === 'sales' ? rows : sortRows(rows, (r) => skuSortValue(r, sort.key), sort.dir);
   }, [lists, filter, q, sort]);
-  const shownItems = useMemo(() => {
-    if (filter !== 'formOnly') return [];
-    const items = noMatchItems.filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q));
+  const shownItems = useMemo((): Array<SkuLinkItem | DecommissionedItem> => {
+    if (filter !== 'formOnly' && filter !== 'decommissioned') return [];
+    const items = (filter === 'decommissioned' ? data.decommissioned : noMatchItems).filter((i) => !q || `${i.itemCode} ${itemText(i)}`.toLowerCase().includes(q));
     return sort.key === 'sales' ? items : sortRows(items, (i) => itemSortValue(i, sort.key), sort.dir);
-  }, [noMatchItems, filter, q, sort]);
-  const total = filter === 'formOnly' ? shownItems.length : shownSkus.length;
+  }, [noMatchItems, data.decommissioned, filter, q, sort]);
+  const itemView = filter === 'formOnly' || filter === 'decommissioned';
+  const total = itemView ? shownItems.length : shownSkus.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
   const from = (safePage - 1) * size;
@@ -158,7 +161,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   // Our side is a second list, so it gets its own total: every form item is either linked
   // (the same 210 pairs) or has no Watsons code yet. Many of those are the items Coop
   // suggested for "to check" SKUs, which is why the tab counts can't simply be added up.
-  const formItems = counts.linked + data.unlinkedItems.length;
+  const formItems = counts.linked + data.unlinkedItems.length + data.decommissioned.length;
   const formOnlySuggested = data.unlinkedItems.length - noMatchItems.length;
   const linkedPct = pct(t.linkedUnits, t.units);
   const suggestedPct = pct(t.suggestedUnits, t.units);
@@ -198,6 +201,9 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             : []),
           {view: 'noSales', tone: 'info', name: 'No units sold', means: 'In Watsons’ files, but none sold in 12 months. Nothing to decide.', watsons: counts.noSales, ours: null},
           {view: 'formOnly', tone: 'info', name: 'No Watsons SKU', means: 'On our forms, with no Watsons SKU and no suggestion. Some may be under No match found with a short name.', watsons: null, ours: counts.formOnly},
+          ...(counts.decommissioned > 0
+            ? [{view: 'decommissioned' as const, tone: 'info' as const, name: 'Decommissioned', means: 'On our forms, but no longer made or sold. Left out of matching and restock.', watsons: null, ours: counts.decommissioned}]
+            : []),
         ]}
         footnote={
           <>
@@ -234,16 +240,16 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         </div>
         {total > 0 && (
           <p className="text-xs text-muted-foreground tabular-nums">
-            {n(total)} {filter === 'formOnly' ? 'items' : 'Watsons SKUs'}
+            {n(total)} {itemView ? 'items' : 'Watsons SKUs'}
             {sort.key !== 'sales' ? (
               <>
                 , {sortText(sort, filter)}
                 {' · '}
                 <button type="button" onClick={() => setSort(DEFAULT_SORT)} className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground">
-                  {filter === 'formOnly' ? 'form order' : 'biggest sellers first'}
+                  {itemView ? 'form order' : 'biggest sellers first'}
                 </button>
               </>
-            ) : filter === 'formOnly' ? (
+            ) : itemView ? (
               ', in form order'
             ) : filter !== 'noSales' ? (
               ', biggest sellers first'
@@ -262,29 +268,27 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {total === 0 ? (
         <p className="rounded-xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">{query ? 'Nothing matches that search.' : EMPTY[filter]}</p>
-      ) : filter === 'formOnly' ? (
+      ) : itemView ? (
         <div className="overflow-hidden rounded-xl border">
-          <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground md:grid', ITEM_COLS)}>
+          <div className={cn('hidden gap-8 border-b px-6 py-3 text-xs font-medium text-muted-foreground md:grid', canEdit ? ITEM_COLS_EDIT : ITEM_COLS)}>
             <SortHead label="Item on our form" k="item" sort={sort} onSort={sortBy} />
             <SortHead label="Product line" k="line" sort={sort} onSort={sortBy} />
             <SortHead label="Price" k="price" sort={sort} onSort={sortBy} right />
+            {canEdit && <span>Your decision</span>}
           </div>
           <ul className="divide-y">
             {slice(shownItems).map((i) => (
-              <li key={i.itemCode} className={cn('grid gap-1.5 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 md:items-center md:gap-8', ITEM_COLS)}>
-                <div className="flex min-w-0 flex-col gap-1">
-                  <p className="truncate text-sm" title={itemText(i)}>
-                    {itemText(i)}
-                  </p>
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="tabular-nums">{i.itemCode}</span>
-                    <span aria-hidden>·</span>
-                    <FormSpotLink spot={i.formSpot} onClick={() => showForm(i.itemCode, i.formSpot)} />
-                  </p>
-                </div>
-                <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
-                <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
-              </li>
+              <ItemRow
+                key={i.itemCode}
+                i={i}
+                decommissioned={filter === 'decommissioned'}
+                company={company}
+                canEdit={canEdit}
+                disabled={pending}
+                busy={busy === i.itemCode}
+                act={act}
+                onShowForm={showForm}
+              />
             ))}
           </ul>
         </div>
@@ -503,6 +507,109 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
   );
 }
 
+/**
+ * One of our form items with no Watsons SKU. On "Sold at Watsons?" it can be marked as
+ * decommissioned (no longer made or sold) with an optional remark; on "Decommissioned"
+ * it shows who did it and why, and can be brought back.
+ */
+function ItemRow({
+  i,
+  decommissioned,
+  company,
+  canEdit,
+  disabled,
+  busy,
+  act,
+  onShowForm,
+}: {
+  i: SkuLinkItem | DecommissionedItem;
+  decommissioned: boolean;
+  company: string;
+  canEdit: boolean;
+  disabled: boolean;
+  busy: boolean;
+  act: Act;
+  onShowForm: (itemCode: string, spot: FormSpot | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [remark, setRemark] = useState('');
+  const done = () => {
+    setOpen(false);
+    setRemark('');
+  };
+  const d = decommissioned ? (i as DecommissionedItem) : null;
+  return (
+    <li className="transition-colors duration-150 hover:bg-muted/30">
+      <div className={cn('grid gap-1.5 px-6 py-4 md:items-center md:gap-8', canEdit ? ITEM_COLS_EDIT : ITEM_COLS)}>
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="truncate text-sm" title={itemText(i)}>
+            {itemText(i)}
+          </p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="tabular-nums">{i.itemCode}</span>
+            <span aria-hidden>·</span>
+            <FormSpotLink spot={i.formSpot} onClick={() => onShowForm(i.itemCode, i.formSpot)} />
+          </p>
+          {d && (
+            <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={d.remark ?? undefined}>
+              <MessageSquare className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                {[d.at && day(d.at), d.by].filter(Boolean).join(' · ')}
+                {d.remark ? ` · “${d.remark}”` : ''}
+              </span>
+            </p>
+          )}
+        </div>
+        <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
+        <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
+        {canEdit &&
+          (d ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="justify-self-start"
+              disabled={disabled}
+              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
+            >
+              <ArchiveRestore className="size-3.5" /> {busy ? 'Saving…' : 'Bring back'}
+            </Button>
+          ) : (
+            <Button size="sm" variant={open ? 'secondary' : 'outline'} className="justify-self-start" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+              <Archive className="size-3.5" /> Mark as decommissioned
+            </Button>
+          ))}
+      </div>
+      {open && canEdit && !d && (
+        <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
+          <p className="text-xs text-muted-foreground">No longer made or sold. It leaves SKU matching and restock, and can be brought back from Decommissioned.</p>
+          <textarea
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            maxLength={REMARK_MAX}
+            rows={2}
+            autoFocus
+            placeholder="Why? For example, “discontinued in 2025” (optional)"
+            aria-label={`Remarks for ${i.itemCode}`}
+            className="min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled}
+              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: true, remark}), `${i.itemCode} is marked as decommissioned.`, done)}
+            >
+              <Archive className="size-3.5" /> {busy ? 'Saving…' : 'Mark as decommissioned'}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={disabled} onClick={done}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
 const EMPTY: Record<SkuStatus, string> = {
   check: 'No matches waiting. Everything Coop suggested has been decided.',
   choose: 'Every Watsons SKU with sales has a link or a suggestion.',
@@ -510,6 +617,7 @@ const EMPTY: Record<SkuStatus, string> = {
   linked: 'No links yet.',
   noSales: 'Every Watsons SKU in the files has sold at least once.',
   formOnly: 'Every item on our forms has a Watsons SKU or a match from Coop to check.',
+  decommissioned: 'No items are marked as decommissioned.',
 };
 
 function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize) => void}) {
