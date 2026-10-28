@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-28 — SKU linking: "How the numbers fit" table, Watsons SKUs and our items side by side
+From the team's whiteboard of how the counts relate, made into a table for Justin. It replaces the "For your records" bars: one row per group with its count on each side (Linked 211 | 211 · Coop's suggestion 42 | 42 · No match found 57 | — · No units sold 5 | — · No Watsons SKU — | 10, plus Rejected when any) and a Total row (315 | 263), each with a one-line meaning; a row filters the table below, then the units line. Two whiteboard notes were corrected in the wording: the 58 (now 57) "No match found" have no suggestion at all (Coop's unsure ones are inside the 42, marked "Not sure"), and what sets the 5 apart is 0 units sold in 12 months, not "in Watsons, not in inventory" (all of No match found is that too). Live counts moved on Oct 28: Berry Blossom Eyeshadow Palette (MUBBEP) was linked by hand, one of No match found and one of No Watsons SKU turning out to be the same product.
+
 ## 2026-10-28 — SKU linking: sortable columns
 Every column header on SKU linking sorts the table: Watsons SKU (name), Our item (name; rows with no item last), Price (Watsons' average; no price last) and Your decision (Coop's least sure match first on Check Coop's match, the latest decision first elsewhere); on Sold at Watsons?: item, product line and price. Click once for ascending, again for descending, a third time back to the default (biggest sellers first; form order for our items). The line above the table names the current sort with a "biggest sellers first" link to reset, and picking another card or count resets it too.
 
