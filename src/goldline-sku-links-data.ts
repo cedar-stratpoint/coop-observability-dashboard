@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
+import {getSalesRollup} from './goldline-ref-data';
 import type {MatchTier} from './goldline-sku-match';
 import {formSpots, watsonsName, type FormSpot} from './goldline-sku-tags';
 import {MANIFESTS} from './goldline-extract';
@@ -157,7 +158,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
         .order('sku_code')
         .range(from, to),
     ) as unknown as Promise<ChainRow[]>,
-    supa.rpc('sales_rollup', {p_company: companyId}),
+    getSalesRollup(companyId), // cached: the sum decrypts every sales row
     fetchAllRows('sku_link_reviews', (from, to) =>
       supa
         .from('sku_link_reviews')
@@ -193,9 +194,8 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       {action: r.action, itemCode: r.item_code, actionBy: r.action_by, actionAt: r.action_at, remark: r.remark, remarkBy: r.remark_by, remarkAt: r.remark_at} satisfies SkuReview,
     ]),
   );
-  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
   const totalsBySku = new Map(
-    ((rollup.data as {bySku?: Array<{sku_code: string; units: unknown; gross: unknown}>} | null)?.bySku ?? []).map((r) => [
+    (rollup.bySku ?? []).map((r) => [
       r.sku_code,
       {units: Number(r.units) || 0, gross: Number(r.gross) || 0},
     ]),
