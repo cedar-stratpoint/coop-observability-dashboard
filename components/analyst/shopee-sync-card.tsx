@@ -107,7 +107,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
   const awaitingSignIn = job?.status === 'awaiting_verification';
   const showRemote = status.isAdmin && (awaitingSignIn || (needsSignIn(status) && !status.currentJob));
   const retryJob = !status.currentJob && meta && (meta.status === 'failed' || meta.status === 'expired');
-  const showMainButton = !status.currentJob && status.missingDays.length > 0 && !retryJob && meta?.status !== 'review';
+  const showMainButton = !status.currentJob && !retryJob && meta?.status !== 'review';
 
   const run = (fn: () => Promise<{ok: boolean; error?: string}>) =>
     start(async () => {

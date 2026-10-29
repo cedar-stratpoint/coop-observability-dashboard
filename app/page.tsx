@@ -103,9 +103,12 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
   const initial = ALL_CHANNELS.includes(ch as Channel) ? [ch as Channel] : DEFAULT_CHANNELS;
   // ?from&to (PH days) or ?span=all widen this same page past the selected week: totals, ad spend, ROAS and top products for any
   // dates, built from every stored digest (src/sales-range.ts). With no dates the weekly view below is unchanged.
-  const span = {from: searchParams.from, to: searchParams.to, span: searchParams.span};
+  // Sales opens on All time; a week, dates or a span in the link are optional narrowings.
+  const narrowed = Boolean(searchParams.week || searchParams.from || searchParams.to || searchParams.span);
+  const span = {from: searchParams.from, to: searchParams.to, span: narrowed ? searchParams.span : 'all'};
   if (isRangeRequest(span)) {
-    return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} />;
+    const [view, syncStatus] = await Promise.all([loadSalesRange(span, digests), shopeeSyncStatus()]);
+    return <SalesRangeView view={view} initialChannels={initial} shopeeSync={{status: syncStatus, at: new Date().toISOString()}} />;
   }
   const [offline, daily, syncStatus] = await Promise.all([offlineCompare({from: row.window_from, to: row.window_to}), getMarketplaceDaily(), shopeeSyncStatus()]);
   // Shopee figures come from the imported daily facts when every day of the week has one, so this view agrees with the date-range view.

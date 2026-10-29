@@ -31,12 +31,11 @@ describe('rangeText', () => {
 });
 
 describe('cardVisible and behindTag', () => {
-  it('shows when days are missing or a job is current, or one finished in the last day', () => {
+  it('is always shown for a real status, behind or not, so Sync is always reachable', () => {
     expect(cardVisible(status(), now)).toBe(true);
-    expect(cardVisible(status({missingDays: []}), now)).toBe(false);
+    expect(cardVisible(status({missingDays: []}), now)).toBe(true);
     expect(cardVisible(status({missingDays: [], currentJob: job()}), now)).toBe(true);
-    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3600)})}), now)).toBe(true);
-    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3 * 86400)})}), now)).toBe(false);
+    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3 * 86400)})}), now)).toBe(true);
   });
   it('is hidden with no status, in mock mode', () => {
     expect(cardVisible(null, now)).toBe(false);
@@ -54,6 +53,7 @@ describe('syncButton', () => {
   it('is labelled from canSync and enabled', () => {
     expect(syncButton(status())).toEqual({label: 'Sync 3 missing days', disabled: false, reason: null});
     expect(syncButton(status({canSync: {ok: true, days: 1}}))).toMatchObject({label: 'Sync 1 missing day'});
+    expect(syncButton(status({missingDays: [], canSync: {ok: true, days: 1, refresh: true}}))).toEqual({label: 'Sync latest data', disabled: false, reason: null});
   });
   it('carries the server reason when off', () => {
     expect(syncButton(status({canSync: {ok: false, reason: 'Shopee is up to date'}}))).toEqual({label: 'Sync Shopee', disabled: true, reason: 'Shopee is up to date'});

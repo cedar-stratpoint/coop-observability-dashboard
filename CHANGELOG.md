@@ -10,8 +10,8 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
-## 2026-10-29 — Shopee sync card is no longer scoped to the viewed week
-Found on staging: the newest digest ended Aug 12 while Shopee was missing Oct 19 to 28, so the card and the Sync button were hidden. Decision (owner): drop the per-window scoping altogether, because it confused more than it helped. The card now always speaks about every missing day, on any week, and `scopeToWindow` and its "also loads N days from other weeks" note are removed. No database change.
+## 2026-10-29 — Sales opens on All time, and the Shopee sync card shows there
+Found on staging: Sales opened on the newest digest week (Jul 13 to Aug 12) while Shopee was missing Oct 19 to 28, so the Sync card and button were hidden. Owner decisions: (1) the week is optional, so `/?channel=…` with no week, dates or span now opens on All time (the header and the Custom dates picker show it selected); picking a week or dates still narrows it, and Home links that carry `&week=` stay weekly. (2) The card is never scoped to a viewed week: it always covers every missing day, and it now also renders on the All time / custom-dates view. `scopeToWindow` and its "other weeks" note are removed. (3) The Sync button is never hidden or refused for being "up to date": with nothing missing it reads "Sync latest data" and re-exports the latest closed day, and the existing import compares it (unchanged or changed) like any other day. Ceiling: one day refreshed per press; the Monday import still settles older days. No database change.
 
 ## v1.19.2 (2026-10-29): sales totals cache hardened (prod fix)
 Ships the hardening (below) to prod: cached sales totals follow the committed sales files, refresh after a failed upload or delete, and stay put through SKU linking decisions. Code only; no database change. SKU linking's decision trail was re-checked end to end on Staging.

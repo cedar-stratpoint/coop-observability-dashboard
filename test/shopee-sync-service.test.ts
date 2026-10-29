@@ -26,11 +26,13 @@ describe('requestSync', () => {
     expect(r.job.days).toEqual(['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']);
     expect(r.job).toMatchObject({status: 'queued', requestedBy: 'a@x.com'});
   });
-  it('says Shopee is up to date and creates nothing when no day is missing', async () => {
+  it('with nothing missing, still runs: it re-exports the latest closed day and lets the import compare it', async () => {
     await heartbeat();
     loaded = [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)];
-    expect(await requestSync(deps(), 'a@x.com')).toEqual({ok: false, error: 'Shopee is up to date'});
-    expect(store.jobs).toHaveLength(0);
+    const r = await requestSync(deps(), 'a@x.com');
+    expect(r).toMatchObject({ok: true, job: {status: 'queued'}});
+    expect(store.jobs).toHaveLength(1);
+    expect((r as {job: {days: string[]}}).job.days).toHaveLength(1);
   });
   it('says the cloud worker has not connected yet when it never sent a heartbeat', async () => {
     const r = await requestSync(deps(), 'a@x.com');
