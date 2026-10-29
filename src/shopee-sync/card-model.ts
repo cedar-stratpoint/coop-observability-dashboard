@@ -38,32 +38,13 @@ export function rangeText(days: readonly string[]): string {
 /** The cloud worker's last known login needs an admin to sign in to Shopee. */
 export const needsSignIn = (s: ShopeeSyncStatus): boolean => s.login.state === 'needs_password' || s.login.state === 'signed_out';
 
-/** The card shows only when Shopee is behind or a sync is current or finished within the last day. */
-export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
-  if (!s || s.mock) return false;
-  if (s.missingDays.length > 0 || s.currentJob) return true;
-  if (s.isAdmin && needsSignIn(s)) return true; // an admin is told on the card even when nothing is behind
-  const fin = s.lastJob?.finishedAt;
-  return Boolean(fin && now.getTime() - Date.parse(fin) < DAY_MS);
-}
+/** The card (and its Sync button) is always there once the status is real: Sync is how anyone gets the latest data, behind or not. */
+export const cardVisible = (s: ShopeeSyncStatus | null, _now?: Date): boolean => Boolean(s && !s.mock);
 /** The small "Behind" tag on the Shopee chip. */
 export const behindTag = (s: ShopeeSyncStatus | null): boolean => Boolean(s && !s.mock && s.missingDays.length > 0);
 
-/**
- * The status as seen from the viewed window: only the missing days inside [from, to] (YYYY-MM-DD) count, so an older week with no gaps shows no card.
- * `outsideWindow` is how many missing days the sync will also load that are not in this window.
- */
-export function scopeToWindow(s: ShopeeSyncStatus, from: string, to: string): ShopeeSyncStatus & {outsideWindow: number};
-export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null;
-export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null {
-  if (!s) return null;
-  const inside = s.missingDays.filter((d) => d >= from && d <= to);
-  const outside = s.missingDays.length - inside.length;
-  return {...s, missingDays: inside, moreMissing: outside === 0 ? s.moreMissing : 0, outsideWindow: outside};
-}
-
 export function syncButton(s: ShopeeSyncStatus): {label: string; disabled: boolean; reason: string | null} {
-  if (s.canSync.ok) return {label: `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
+  if (s.canSync.ok) return {label: s.canSync.refresh ? 'Sync latest data' : `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
   const other = s.currentJob && !s.currentJob.mine;
   return {label: 'Sync Shopee', disabled: true, reason: other ? 'Waiting for another sync to finish.' : s.canSync.reason};
 }

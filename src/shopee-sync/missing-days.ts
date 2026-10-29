@@ -29,3 +29,9 @@ export function missingClosedDays(loadedDays: readonly string[], now: Date): Mis
     .sort();
   return {days: all.slice(0, MAX_SYNC_DAYS), more: Math.max(0, all.length - MAX_SYNC_DAYS)};
 }
+
+/** The newest day that is already final: yesterday (PH) once it passes 06:00 PH today, else the day before. What a refresh press re-exports when nothing is missing. */
+export function latestClosedDay(now: Date): string {
+  const yesterday = new Date(Date.parse(`${phDay(now)}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+  return now.getTime() >= finalFrom(yesterday) ? yesterday : new Date(Date.parse(`${yesterday}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+}

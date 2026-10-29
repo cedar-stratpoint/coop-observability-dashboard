@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {scopeToWindow, agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
+import {agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
 import type {ShopeeSyncStatus, SyncJobView} from '../src/shopee-sync/status';
 
 const now = new Date('2026-10-27T06:00:00Z');
@@ -31,12 +31,11 @@ describe('rangeText', () => {
 });
 
 describe('cardVisible and behindTag', () => {
-  it('shows when days are missing or a job is current, or one finished in the last day', () => {
+  it('is always shown for a real status, behind or not, so Sync is always reachable', () => {
     expect(cardVisible(status(), now)).toBe(true);
-    expect(cardVisible(status({missingDays: []}), now)).toBe(false);
+    expect(cardVisible(status({missingDays: []}), now)).toBe(true);
     expect(cardVisible(status({missingDays: [], currentJob: job()}), now)).toBe(true);
-    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3600)})}), now)).toBe(true);
-    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3 * 86400)})}), now)).toBe(false);
+    expect(cardVisible(status({missingDays: [], lastJob: job({status: 'done', finishedAt: ago(3 * 86400)})}), now)).toBe(true);
   });
   it('is hidden with no status, in mock mode', () => {
     expect(cardVisible(null, now)).toBe(false);
@@ -54,6 +53,7 @@ describe('syncButton', () => {
   it('is labelled from canSync and enabled', () => {
     expect(syncButton(status())).toEqual({label: 'Sync 3 missing days', disabled: false, reason: null});
     expect(syncButton(status({canSync: {ok: true, days: 1}}))).toMatchObject({label: 'Sync 1 missing day'});
+    expect(syncButton(status({missingDays: [], canSync: {ok: true, days: 1, refresh: true}}))).toEqual({label: 'Sync latest data', disabled: false, reason: null});
   });
   it('carries the server reason when off', () => {
     expect(syncButton(status({canSync: {ok: false, reason: 'Shopee is up to date'}}))).toEqual({label: 'Sync Shopee', disabled: true, reason: 'Shopee is up to date'});
@@ -133,24 +133,3 @@ describe('stepsFor', () => {
   });
 });
 
-describe('scopeToWindow', () => {
-  const s = status({missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 2});
-  it('keeps only the missing days inside the viewed week and counts the rest', () => {
-    const v = scopeToWindow(s, '2026-10-19', '2026-10-20');
-    expect(v.missingDays).toEqual(['2026-10-19', '2026-10-20']);
-    expect(v.outsideWindow).toBe(1);
-    expect(v.moreMissing).toBe(0);
-  });
-  it('shows nothing missing on an older week with no gaps', () => {
-    const v = scopeToWindow(s, '2026-09-28', '2026-10-04');
-    expect(v.missingDays).toEqual([]);
-    expect(cardVisible(v, now)).toBe(false);
-  });
-  it('is the identity when the window covers every missing day', () => {
-    const v = scopeToWindow(s, '2026-10-19', '2026-10-25');
-    expect(v.missingDays).toEqual(s.missingDays);
-    expect(v.moreMissing).toBe(2);
-    expect(v.outsideWindow).toBe(0);
-  });
-  it('leaves a null status alone', () => expect(scopeToWindow(null, 'a', 'b')).toBeNull());
-});
