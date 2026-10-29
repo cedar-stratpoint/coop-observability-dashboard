@@ -197,6 +197,8 @@ export function WatsonsMonthsPanel({data, onOpenMonth}: {data: SkuMonths; onOpen
   if (!rows.length) return null;
   const busiest = rows.reduce((a, r) => (r.skus > a.skus ? r : a), rows[0]);
   const last = rows[rows.length - 1].month;
+  // Every SKU is first seen in exactly one file, so both totals are the Watsons SKU count.
+  const totalSkus = rows.reduce((a, r) => a + r.firstSeen, 0);
 
   return (
     <section aria-label="Watsons files by month" className="overflow-hidden rounded-xl border">
@@ -242,11 +244,22 @@ export function WatsonsMonthsPanel({data, onOpenMonth}: {data: SkuMonths; onOpen
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 text-sm font-semibold">
+                    <td className="py-2 pr-3">Total</td>
+                    <td className="py-2 pr-3" />
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {n(totalSkus)}
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">SKUs</span>
+                    </td>
+                    <td className="py-2" />
+                  </tr>
+                </tfoot>
               </table>
             </div>
             <div className="flex flex-col gap-3">
               <p className="text-[11px] font-medium text-muted-foreground">How many files each SKU is in</p>
-              <ul className="flex flex-col divide-y rounded-lg border">
+              <ul className="flex flex-col divide-y overflow-hidden rounded-lg border">
                 {groups.map((g) => (
                   <li key={g.label} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <span className={cn(g.from === 1 && g.to === 1 && 'font-medium')} style={g.from === 1 && g.to === 1 ? {color: 'var(--status-warn)'} : undefined}>
@@ -255,6 +268,13 @@ export function WatsonsMonthsPanel({data, onOpenMonth}: {data: SkuMonths; onOpen
                     <span className="tabular-nums">{n(g.skus)}</span>
                   </li>
                 ))}
+                <li className="flex items-center justify-between gap-3 bg-muted/40 px-3 py-2 text-sm font-semibold">
+                  <span>Total</span>
+                  <span className="tabular-nums">
+                    {n(groups.reduce((a, g) => a + g.skus, 0))}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">SKUs</span>
+                  </span>
+                </li>
               </ul>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 A monthly file lists the SKUs that sold or were returned that month, so a SKU can skip months. One-month SKUs are often seasonal sets or old stock; the SKUs with no units sold are among them.
