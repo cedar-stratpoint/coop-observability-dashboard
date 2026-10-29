@@ -214,7 +214,7 @@ export async function relinkWatsons(companyId: string, opts: {freshSales?: boole
         .range(from, to),
     ),
     // Cached totals for a decision; straight from the database right after a sales upload.
-    opts.freshSales ? readSalesRollup(companyId) : getSalesRollup(companyId),
+    opts.freshSales ? readSalesRollup(companyId, {fresh: true}) : getSalesRollup(companyId),
   ]);
   const products = productsRes as unknown as Array<CatalogItem & {sku_code: string | null; retired_at: string | null}>;
   const skus = skuRows as unknown as Array<{sku_code: string; name: string; dismissed_item_codes: string[] | null; suggested_item_code: string | null}>;
