@@ -3,7 +3,7 @@
 import {periodWithin, syncStamp} from '../shopee-import/api';
 import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
-import {missingClosedDays} from './missing-days';
+import {latestClosedDay, missingClosedDays} from './missing-days';
 import {cloudLogin, sameEmail} from './routing';
 import {startBlock, staleSweep} from './rules';
 import {isActive, type Heartbeat, type Job} from './types';
@@ -39,9 +39,12 @@ export const NO_WORKER = 'The cloud worker has not connected yet.';
 export const FIRST_CHECK = 'Waiting for the first login check';
 export const FRESH_CHECK = 'Waiting for a fresh login check';
 
-export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
-  const {days, more} = missingClosedDays(i.loadedDays, i.now);
-  if (days.length === 0) return fail('Shopee is up to date');
+export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number; refresh: boolean} | Fail {
+  const missing = missingClosedDays(i.loadedDays, i.now);
+  // Nothing missing is not a reason to refuse: the press still runs the whole process on the latest closed day, and the import decides whether it changed.
+  const refresh = missing.days.length === 0;
+  const days = refresh ? [latestClosedDay(i.now)] : missing.days;
+  const more = missing.more;
   // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping).
   const login = cloudLogin(i.heartbeat, i.now);
   if (login.state !== 'ready') {
@@ -50,7 +53,7 @@ export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbe
     return fail(NO_WORKER);
   }
   const blocked = startBlock(i.now, i.jobs);
-  return blocked ? fail(blocked) : {ok: true, days, more};
+  return blocked ? fail(blocked) : {ok: true, days, more, refresh};
 }
 
 export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true; job: Job} | Fail> {

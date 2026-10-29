@@ -95,7 +95,7 @@ function Steps({job}: {job: SyncJobView}) {
   );
 }
 
-export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus & {outsideWindow?: number}; now: Date; refresh: () => Promise<void>}) {
+export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus; now: Date; refresh: () => Promise<void>}) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const job = status.currentJob ?? status.lastJob;
@@ -107,7 +107,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
   const awaitingSignIn = job?.status === 'awaiting_verification';
   const showRemote = status.isAdmin && (awaitingSignIn || (needsSignIn(status) && !status.currentJob));
   const retryJob = !status.currentJob && meta && (meta.status === 'failed' || meta.status === 'expired');
-  const showMainButton = !status.currentJob && status.missingDays.length > 0 && !retryJob && meta?.status !== 'review';
+  const showMainButton = !status.currentJob && !retryJob && meta?.status !== 'review';
 
   const run = (fn: () => Promise<{ok: boolean; error?: string}>) =>
     start(async () => {
@@ -193,7 +193,6 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
                 {rangeText(status.missingDays)}
                 {status.moreMissing > 0 ? `, ${status.moreMissing} more after this sync` : ''}
               </div>
-              {status.outsideWindow ? <div className="text-[13px] text-muted-foreground">Sync also loads {status.outsideWindow} missing {status.outsideWindow === 1 ? 'day' : 'days'} from other weeks.</div> : null}
             </div>
           )}
           {showMainButton && (

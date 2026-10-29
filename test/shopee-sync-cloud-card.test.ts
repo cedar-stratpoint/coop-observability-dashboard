@@ -126,12 +126,12 @@ describe('a queued job on the cloud worker', () => {
 });
 
 describe('cardVisible for an admin', () => {
-  it('shows the card to an admin when login needs them, even with nothing behind; not to a regular user', () => {
+  it('shows the card to everyone, even with nothing behind (Sync is always reachable)', () => {
     const w = cloud({loginState: 'needs_password'});
     const done = {loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]};
     expect(cardVisible(build({heartbeat: w, viewer: {email: ADMIN, isAdmin: true}, ...done}), now)).toBe(true);
     expect(cardVisible(build({heartbeat: w, viewer: {email: 'coop-admin@x.com', isAdmin: true}, ...done}), now)).toBe(true);
-    expect(cardVisible(build({heartbeat: w, ...done}), now)).toBe(false);
+    expect(cardVisible(build({heartbeat: w, ...done}), now)).toBe(true);
   });
 });
 
