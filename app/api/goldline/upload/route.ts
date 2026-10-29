@@ -248,6 +248,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const committed = await upsertSales(companyId, rows, {start, end}, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      revalidateTag(glTags.sales(companyId), {expire: 0}); // sales totals changed
       await runChecks(companyId).catch((e) => console.error('runChecks after CSV upload', msg(e)));
       return json({uploadId, status: 'committed', rowsCommitted: committed, warnings: errors});
     } catch (e) {
@@ -282,6 +283,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       await runChecks(companyId).catch((e) => console.error('runChecks after Watsons upload', msg(e)));
       revalidateTag(glTags.stores(companyId), {expire: 0});
       revalidateTag(glTags.catalog(companyId), {expire: 0});
+      revalidateTag(glTags.sales(companyId), {expire: 0}); // sales totals changed
       return json({uploadId, status: 'committed', rowsCommitted: summary.salesRows, watsons: summary, warnings: wb.errors});
     } catch (e) {
       console.error('goldline upload: Watsons month failed', msg(e));

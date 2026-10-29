@@ -1,6 +1,7 @@
 'use server';
 
-import {revalidatePath} from 'next/cache';
+import {revalidatePath, revalidateTag} from 'next/cache';
+import {glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
 import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
@@ -110,6 +111,8 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
     const touched = upload?.kind === 'inventory_pdf' ? await uploadStores(ctx.companyId, input.uploadId).catch(() => [] as string[]) : null;
     const ok = await deleteUpload(ctx.companyId, input.uploadId);
     if (!ok) return {ok: false, error: 'Upload not found.'};
+    // A sales file's rows are gone with it, so the cached sales totals are too.
+    if (upload && upload.kind !== 'inventory_pdf') revalidateTag(glTags.sales(ctx.companyId), {expire: 0});
     await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
     revalidatePath('/uploads');
     revalidatePath('/stock');
