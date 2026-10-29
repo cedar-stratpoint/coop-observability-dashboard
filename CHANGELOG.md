@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-29
+
+### Shopee same-day sync realigned to the one cloud worker: no Settings screen, no enrolment (PR #278)
+Owner decision: the worker is now exactly one cloud box (EC2), not a Mac per person. The Mac-centric half of the branch is deleted, not hidden. Nothing from this branch was applied to any database or deployed before this change, so there is no migration: `supabase/shopee_sync.sql` was rewritten in place and `shopee_sync_login.sql` is gone.
+- **Removed.** The Settings screen (`app/settings/shopee-sync`, "Sync worker" link on `/settings`, the Macs component), the enrol route, enrolment tables and both redeem functions, one-time codes, per-worker tokens and their hashing, revoke, the 2 per person / 3 per team cap, the enrol/revoke/set-remote-address server actions, `src/shopee-sync/tokens.ts`, the `is_cloud` flag, the owner-versus-shared claim (the shared claim is the only claim, and `claimed_by` is gone with it) and every "Mac", "enrol" and "Settings" word on the card.
+- **One shared secret.** The worker authenticates with `SHOPEE_SYNC_WORKER_TOKEN` as `Authorization: Bearer` on claim, progress and its import calls, compared as sha256 in constant time by the same helper as `SHOPEE_SYNC_WAKE_TOKEN` (`secretMatches`). Wrong or empty is 401 JSON; unset is 503 JSON (fail closed, an empty bearer never matches). The two secrets are never accepted for each other's routes (tested). Trade-off accepted: no per-worker revoke and no per-worker audit, because there is only one worker; rotating the secret in Vercel and in AWS SSM is the revoke. A leaked secret can plan and apply only `sales_overview` for the job running now (the existing grant limits), and the secret never reaches the browser.
+- **One heartbeat row.** `shopee_sync_worker` (constant id 1, enforced by a check) holds last seen, login state, login checked at and remote ready. Every claim and progress call upserts it; the card and the wake decision ("no worker seen in the last 2 minutes") read it. `sessionState` is no longer read: a job is handed out only while the stored login is Ready (also checked inside `claim_shopee_sync_job(p_job)`). Progress on an unknown job is 404 (it was 403 "not yours").
+- **Remote browser address** comes from `SHOPEE_SYNC_REMOTE_URL` (https only, optional `SHOPEE_SYNC_REMOTE_HOSTS` allow-list; invalid means no link) and reaches only a Coop Admin. The settings field and action are gone.
+- **Card.** Before the worker has ever sent a heartbeat it says the cloud worker has not connected yet: admins also get the env and runbook pointer, everyone else "Sync is not set up yet". Behind, Up to date, login state, the Sync button and every rule (cooldown, daily cap, quiet window, one at a time, closed days) are unchanged.
+- Docs, `.env.example`, the data catalog and the stories (SYN-08 superseded) updated in the same change. Deployment now needs `SHOPEE_SYNC_WORKER_TOKEN`, `SHOPEE_SYNC_WAKE_TOKEN`, `SHOPEE_SYNC_REMOTE_URL` (+ optional `SHOPEE_SYNC_REMOTE_HOSTS`).
+
 ## 2026-10-27
 
 ### Shopee same-day sync, slice 4: the one on-demand cloud worker (SYN-04, SYN-05, SYN-08 dashboard side)

@@ -1009,18 +1009,6 @@
    "redirectTo": null
   },
   {
-   "route": "/settings/shopee-sync",
-   "title": "Sync worker",
-   "shows": "Settings screen for the Shopee same-day sync: the one cloud worker (status Asleep, Online or Offline, owner, last seen, last Shopee login check; admins can revoke it and, only Coop Admins, set and copy the remote browser address); then a muted My sync Macs section to add, list and revoke the Macs you run yourself (admins see everyone's with the owner). Add shows a one-time docker run command (code valid 15 minutes, single use; the cloud variant is for Coop Admins only, flags the worker is_cloud and has a placeholder image tag)",
-   "data": "",
-   "domains": [
-    "platform"
-   ],
-   "fenced": false,
-   "access": "n/a",
-   "redirectTo": null
-  },
-  {
    "route": "/signin",
    "title": "Sign in",
    "shows": "Google sign-in page (outside the auth matcher)",
