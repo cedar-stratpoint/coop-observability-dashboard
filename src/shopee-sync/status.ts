@@ -51,7 +51,7 @@ export interface ShopeeSyncStatus {
   missingDays: string[];
   /** Missing closed days beyond the 31 one job can carry. */
   moreMissing: number;
-  canSync: {ok: true; days: number} | {ok: false; reason: string};
+  canSync: {ok: true; days: number; refresh?: boolean} | {ok: false; reason: string};
 }
 
 export interface StatusInput {
@@ -94,6 +94,6 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     lastJob: last ? view(last) : null,
     missingDays: missing.days,
     moreMissing: missing.more,
-    canSync: gate.ok ? {ok: true, days: gate.days.length} : {ok: false, reason: gate.error},
+    canSync: gate.ok ? {ok: true, days: gate.days.length, ...(gate.refresh ? {refresh: true} : {})} : {ok: false, reason: gate.error},
   };
 }

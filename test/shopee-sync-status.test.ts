@@ -33,10 +33,10 @@ describe('buildSyncStatus', () => {
     expect(s.missingDays).toHaveLength(8);
     expect(s.canSync).toEqual({ok: true, days: 8});
   });
-  it('explains why Sync is off: login not Ready, a sync in flight, up to date', () => {
+  it('explains why Sync is off: login not Ready, a sync in flight; with nothing missing it is a refresh, not off', () => {
     expect(build({heartbeat: beat({loginState: 'needs_password'})}).canSync).toMatchObject({ok: false, reason: expect.stringMatching(/admin/)});
     expect(build({jobs: [job({status: 'running', createdAt: ago(60)})]}).canSync).toMatchObject({ok: false, reason: expect.stringMatching(/already/)});
-    expect(build({loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]}).canSync).toEqual({ok: false, reason: 'Shopee is up to date'});
+    expect(build({loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]}).canSync).toEqual({ok: true, days: 1, refresh: true});
   });
   it('currentJob is the queued or running one (team-wide), lastJob the newest finished one', () => {
     const running = job({id: 'r', status: 'running', createdAt: ago(60)});

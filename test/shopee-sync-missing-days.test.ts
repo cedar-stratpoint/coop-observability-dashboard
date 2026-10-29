@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {MAX_SYNC_DAYS, missingClosedDays, phDay} from '../src/shopee-sync/missing-days';
+import {MAX_SYNC_DAYS, latestClosedDay, missingClosedDays, phDay} from '../src/shopee-sync/missing-days';
 
 // PH = UTC+8. 2026-10-26 is a Monday.
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
@@ -42,5 +42,12 @@ describe('missingClosedDays', () => {
     expect(r.days[0]).toBe('2026-08-04');
     expect(r.more).toBeGreaterThan(0);
     expect(r.days.length + r.more).toBe(83); // 4 Aug .. 25 Oct
+  });
+});
+
+describe('latestClosedDay', () => {
+  it('is yesterday (PH) once past 06:00 PH, else the day before', () => {
+    expect(latestClosedDay(new Date('2026-10-29T08:00:00+08:00'))).toBe('2026-10-28');
+    expect(latestClosedDay(new Date('2026-10-29T05:00:00+08:00'))).toBe('2026-10-27');
   });
 });
