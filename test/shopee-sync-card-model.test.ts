@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
+import {progressBar, agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
 import type {ShopeeSyncStatus, SyncJobView} from '../src/shopee-sync/status';
 
 const now = new Date('2026-10-27T06:00:00Z');
@@ -133,3 +133,18 @@ describe('stepsFor', () => {
   });
 });
 
+
+describe('progressBar', () => {
+  const days = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22'];
+  it('has no determinate value before a day is finished, then counts finished days', () => {
+    expect(progressBar(job({status: 'queued', days}))).toEqual({value: null, label: 'Waiting for the worker'});
+    expect(progressBar(job({status: 'running', days, progress: {}}))).toEqual({value: null, label: '0 of 4 days'});
+    expect(progressBar(job({status: 'running', days, progress: {'2026-10-19': {state: 'loaded'}}}))).toEqual({value: 0.25, label: '1 of 4 days'});
+    expect(progressBar(job({status: 'importing', days, progress: {'2026-10-19': {state: 'loaded'}, '2026-10-20': {state: 'skipped'}}}))).toEqual({value: 0.5, label: '2 of 4 days'});
+  });
+  it('is full when done and absent when it failed or expired', () => {
+    expect(progressBar(job({status: 'done', days}))).toEqual({value: 1, label: '4 days loaded'});
+    expect(progressBar(job({status: 'failed', days}))).toBeNull();
+    expect(progressBar(job({status: 'expired', days}))).toBeNull();
+  });
+});

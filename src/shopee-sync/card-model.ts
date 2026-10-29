@@ -108,6 +108,22 @@ export interface Step {
   label: string;
   state: 'done' | 'now' | 'todo' | 'bad';
 }
+export interface ProgressBar {
+  /** 0 to 1, or null when the worker has not reported a finished day yet (the bar then just shows it is alive). */
+  value: number | null;
+  label: string;
+}
+/** The bar above the steps: days the worker has finished (any outcome) out of the days in the job. Null when a bar would mean nothing (failed, expired, no days). */
+export function progressBar(j: SyncJobView): ProgressBar | null {
+  const total = j.days.length;
+  if (total === 0 || j.status === 'failed' || j.status === 'expired') return null;
+  if (j.status === 'done') return {value: 1, label: `${plural(total, 'day')} loaded`};
+  const settled = j.days.filter((d) => j.progress[d]).length;
+  if (j.status === 'queued') return {value: null, label: 'Waiting for the worker'};
+  if (settled === 0) return {value: null, label: `0 of ${plural(total, 'day')}`};
+  return {value: settled / total, label: `${settled} of ${plural(total, 'day')}`};
+}
+
 /** The little progress list under the status: Requested, Exporting, (Admin signs in), Importing, Done. */
 export function stepsFor(j: SyncJobView): Step[] {
   const verify = j.status === 'awaiting_verification';
