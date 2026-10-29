@@ -8,6 +8,8 @@ import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItem
 import type {DecisionInfo} from '@/src/goldline-sku-undo';
 import {decisionLabel, UndoDialog} from '@/components/analyst/goldline-undo-dialog';
 import {RecentActivity} from '@/components/analyst/goldline-sku-activity';
+import {MonthsPointer, WatsonsMonthDialog, WatsonsMonthsPanel, type SkuInfo} from '@/components/analyst/goldline-watsons-months';
+import {allMonths, presence, type Presence} from '@/src/goldline-sku-months';
 import type {ActivityEvent} from '@/src/goldline-sku-activity';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
@@ -70,6 +72,17 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
   const [formAt, setFormAt] = useState<{page: number; itemCode: string} | null>(null);
+  // Watsons files by month (f2f): which months each SKU is in, and the month-tabs view.
+  const [monthsAt, setMonthsAt] = useState<{sku: string | null; month: string} | null>(null);
+  const monthList = useMemo(() => allMonths(data.skuMonths), [data.skuMonths]);
+  const skuInfo = useMemo(
+    () => Object.fromEntries(data.rows.map((r) => [r.skuCode, {name: watsonsName(r.name), linked: r.linked?.itemCode ?? null} satisfies SkuInfo])),
+    [data.rows],
+  );
+  const showMonths = (sku: string) => {
+    const p = presence(data.skuMonths[sku]);
+    if (p) setMonthsAt({sku, month: p.last});
+  };
   const showForm = (itemCode: string, spot: FormSpot | null) => spot && setFormAt({page: spot.page, itemCode});
 
   // Rows per page is a per-viewer convenience: remembered in this browser only.
@@ -256,6 +269,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         }
       />
 
+      <WatsonsMonthsPanel data={data.skuMonths} onOpenMonth={(month) => setMonthsAt({sku: null, month})} />
       </div>
       <RecentActivity events={data.activity} onJump={jumpTo} />
       </div>
@@ -352,7 +366,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} months={presence(data.skuMonths[r.skuCode])} monthsTotal={monthList.length} onShowMonths={showMonths} />
             ))}
           </ul>
         </div>
@@ -371,6 +385,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
       )}
 
       {formAt && data.formPages.length > 0 && <FormPageDialog pages={data.formPages} at={formAt} onClosed={() => setFormAt(null)} />}
+      {monthsAt && <WatsonsMonthDialog data={data.skuMonths} skus={skuInfo} at={monthsAt} onClosed={() => setMonthsAt(null)} />}
     </div>
   );
 }
@@ -883,6 +898,9 @@ function SkuRow({
   onShowForm,
   quiet = false,
   decision,
+  months,
+  monthsTotal = 0,
+  onShowMonths,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -896,6 +914,10 @@ function SkuRow({
   quiet?: boolean;
   /** The latest decision on this SKU, for Undo (or the record that it was undone). */
   decision?: DecisionInfo;
+  /** Which monthly Watsons files this SKU is in (f2f), for the pointer under its code. */
+  months?: Presence | null;
+  monthsTotal?: number;
+  onShowMonths?: (sku: string) => void;
 }) {
   const status = skuStatus(r);
   const [undoOpen, setUndoOpen] = useState(false);
@@ -952,6 +974,7 @@ function SkuRow({
             {watsonsName(r.name)}
           </p>
           <p className="text-xs text-muted-foreground tabular-nums">{sku}</p>
+          {months && onShowMonths && <MonthsPointer p={months} total={monthsTotal} onClick={() => onShowMonths(sku)} />}
         </div>
 
         <div className="flex min-w-0 flex-col gap-1">
