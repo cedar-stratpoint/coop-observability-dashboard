@@ -79,6 +79,60 @@ const item = (p: ProductRow): SkuLinkItem => ({
   formSpot: SPOTS.get(p.item_code) ?? null,
 });
 
+type NoteRow = {item_code: string; note: string; note_by: string | null; note_at: string};
+
+/** Activity events from the rows the page already read (see goldline-sku-activity.ts). */
+function activityFrom(log: LogRow[], reviews: ReviewRow[], notes: NoteRow[], products: ProductRow[], chain: Array<Pick<ChainRow, 'sku_code' | 'name'>>): ActivityEvent[] {
+  const byItem = new Map(products.map((p) => [p.item_code, p]));
+  const chainName = new Map(chain.map((c) => [c.sku_code, c.name]));
+  return buildActivity({
+    log: log.map((l) => ({
+      id: Number(l.id),
+      target: l.target,
+      key: l.key,
+      action: l.action,
+      summary: l.summary,
+      done_by: l.done_by,
+      done_at: l.done_at,
+      undone_by: l.undone_by,
+      undone_at: l.undone_at,
+      noteRemoved: l.action === 'note' && !(l.after?.notes?.[l.key] ?? null),
+      itemCode: l.action === 'unlinked' ? (Object.entries(l.before?.products ?? {}).find(([, p]) => p?.sku_code === l.key)?.[0] ?? null) : null,
+    })),
+    reviews,
+    notes,
+    retired: products.filter((p) => p.retired_at).map((p) => ({item_code: p.item_code, retired_by: p.retired_by ?? null, retired_at: p.retired_at as string})),
+    skuName: (k) => watsonsName(chainName.get(k) ?? k),
+    itemName: (k) => {
+      const p = byItem.get(k);
+      return p ? itemDisplayName(p.product_line, p.variant, k) : k;
+    },
+  });
+}
+
+/** The whole activity trail for its own page: the same reads minus the sales rollup. */
+export async function getSkuActivity(companyId: string): Promise<ActivityEvent[]> {
+  if (!nichidoConfigured()) return [];
+  const supa = db();
+  const [products, chain, reviews, notes, log] = await Promise.all([
+    fetchAllRows('products', (from, to) =>
+      supa.from('products').select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at,retired_by,retired_remark').eq('company_id', companyId).order('item_code').range(from, to),
+    ) as unknown as Promise<ProductRow[]>,
+    fetchAllRows('chain_skus', (from, to) => supa.from('chain_skus').select('sku_code,name').eq('company_id', companyId).eq('chain', CHAIN).order('sku_code').range(from, to)) as unknown as Promise<
+      Array<Pick<ChainRow, 'sku_code' | 'name'>>
+    >,
+    fetchAllRows('sku_link_reviews', (from, to) =>
+      supa.from('sku_link_reviews').select('sku_code,action,item_code,action_by,action_at,remark,remark_by,remark_at').eq('company_id', companyId).eq('chain', CHAIN).order('sku_code').range(from, to),
+    ) as unknown as Promise<ReviewRow[]>,
+    fetchAllRows('item_notes', (from, to) => supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to)) as unknown as Promise<NoteRow[]>,
+    readDecisionLog(companyId).catch((e) => {
+      console.error('sku_decision_log read failed', e);
+      return [] as LogRow[];
+    }),
+  ]);
+  return activityFrom(log, reviews, notes, products, chain);
+}
+
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
   const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
@@ -134,7 +188,6 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
     ]),
   );
   const byItem = new Map(products.map((p) => [p.item_code, p]));
-  const chainName = new Map(chain.map((c) => [c.sku_code, c.name]));
   const bySku = new Map(products.filter((p) => p.sku_code?.trim()).map((p) => [p.sku_code!.trim(), p]));
 
   const rows: SkuLinkRow[] = chain.map((c) => {
@@ -163,29 +216,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
     decisions: latestFromLog(log),
-    activity: buildActivity({
-      log: log.map((l) => ({
-        id: Number(l.id),
-        target: l.target,
-        key: l.key,
-        action: l.action,
-        summary: l.summary,
-        done_by: l.done_by,
-        done_at: l.done_at,
-        undone_by: l.undone_by,
-        undone_at: l.undone_at,
-        noteRemoved: l.action === 'note' && !(l.after?.notes?.[l.key] ?? null),
-        itemCode: l.action === 'unlinked' ? (Object.entries(l.before?.products ?? {}).find(([, p]) => p?.sku_code === l.key)?.[0] ?? null) : null,
-      })),
-      reviews,
-      notes,
-      retired: products.filter((p) => p.retired_at).map((p) => ({item_code: p.item_code, retired_by: p.retired_by ?? null, retired_at: p.retired_at as string})),
-      skuName: (k) => watsonsName(chainName.get(k) ?? k),
-      itemName: (k) => {
-        const p = byItem.get(k);
-        return p ? itemDisplayName(p.product_line, p.variant, k) : k;
-      },
-    }),
+    activity: activityFrom(log, reviews, notes, products, chain),
     notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
     decommissioned: products
       .filter((p) => !p.sku_code?.trim() && p.retired_at)
