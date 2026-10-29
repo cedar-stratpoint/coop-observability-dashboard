@@ -1,12 +1,11 @@
 import {describe, expect, it} from 'vitest';
-import {scopeToWindow, macOf, agoText, behindTag, cardVisible, pollInterval, enrolCommand, macStatus, rangeText, statusMeta, stepsFor, syncButton, workerLine} from '../src/shopee-sync/card-model';
-import type {ShopeeSyncStatus, SyncJobView, SyncWorkerView} from '../src/shopee-sync/status';
+import {scopeToWindow, agoText, behindTag, cardVisible, pollInterval, rangeText, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
+import type {ShopeeSyncStatus, SyncJobView} from '../src/shopee-sync/status';
 
 const now = new Date('2026-10-27T06:00:00Z');
 const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
-const worker = (o: Partial<SyncWorkerView> = {}): SyncWorkerView => ({id: 'w1', name: 'Dave MacBook', ownerEmail: 'a@x.com', own: true, online: true, sessionState: 'ready', lastSeen: ago(12), createdAt: ago(9999), lastSyncAt: null, ...o});
-const job = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'a@x.com', mine: true, days: ['2026-10-19', '2026-10-20'], status: 'running', error: null, progress: {}, createdAt: ago(60), finishedAt: null, workerName: 'Dave MacBook', awaitingSince: null, cloud: false, ...o});
-const status = (o: Partial<ShopeeSyncStatus> = {}): ShopeeSyncStatus => ({signedInAs: 'a@x.com', isAdmin: false, mock: false, workers: [worker()], cloudWorkers: [], login: {state: 'unknown', checkedAt: null, ageSeconds: null, stale: false}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 0, canSync: {ok: true, days: 3}, canAddMac: {ok: true}, ...o});
+const job = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'a@x.com', mine: true, days: ['2026-10-19', '2026-10-20'], status: 'running', error: null, progress: {}, createdAt: ago(60), finishedAt: null, awaitingSince: null, ...o});
+const status = (o: Partial<ShopeeSyncStatus> = {}): ShopeeSyncStatus => ({signedInAs: 'a@x.com', isAdmin: false, mock: false, worker: null, login: {state: 'unknown', checkedAt: null, ageSeconds: null, stale: false}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: ['2026-10-19', '2026-10-20', '2026-10-21'], moreMissing: 0, canSync: {ok: true, days: 3}, ...o});
 
 describe('agoText', () => {
   it('speaks in seconds, minutes, hours, days', () => {
@@ -59,28 +58,10 @@ describe('syncButton', () => {
   it('carries the server reason when off', () => {
     expect(syncButton(status({canSync: {ok: false, reason: 'Shopee is up to date'}}))).toEqual({label: 'Sync Shopee', disabled: true, reason: 'Shopee is up to date'});
   });
-  it('is disabled while a job is current, with a reason naming whose sync it is', () => {
+  it('is disabled while a job is current, with a plain reason when it is someone else\'s', () => {
     expect(syncButton(status({currentJob: job(), canSync: {ok: false, reason: 'A Shopee sync is already queued or running. Wait for it to finish.'}}))).toMatchObject({disabled: true});
     const other = syncButton(status({currentJob: job({mine: false, requestedBy: 'bea@x.com'}), canSync: {ok: false, reason: 'A Shopee sync is already queued or running. Wait for it to finish.'}}));
-    expect(other.reason).toBe('Waiting for Dave MacBook to finish its sync.');
-  });
-});
-
-describe('workerLine', () => {
-  it('names the online Mac and when it was last seen', () => {
-    expect(workerLine(status(), now)).toEqual({kind: 'online', text: 'Your Mac Dave MacBook is online, last seen 12 seconds ago.'});
-  });
-  it('says none is online, and when the newest was seen', () => {
-    const s = status({workers: [worker({online: false, lastSeen: ago(7200)})]});
-    expect(workerLine(s, now).kind).toBe('offline');
-    expect(workerLine(s, now).text).toMatch(/None of your Macs is online\. Add a Mac or wake yours/);
-    expect(workerLine(s, now).text).toMatch(/2 hours ago/);
-  });
-  it('says there is no Mac at all', () => {
-    expect(workerLine(status({workers: []}), now)).toEqual({kind: 'none', text: 'You have not added a Mac yet.'});
-  });
-  it('ignores other people\'s Macs (an admin sees them in the list)', () => {
-    expect(workerLine(status({isAdmin: true, workers: [worker({own: false})]}), now).kind).toBe('none');
+    expect(other.reason).toBe('Waiting for another sync to finish.');
   });
 });
 
@@ -93,10 +74,10 @@ describe('statusMeta', () => {
       expect(m.body).toBeTruthy();
     }
   });
-  it('awaiting_verification tells the person to type the password on the Mac, and offers no input', () => {
-    const m = statusMeta(job({status: 'awaiting_verification'}));
-    expect(m.label).toBe('Needs your password');
-    expect(m.body).toMatch(/Shopee browser on Dave MacBook/);
+  it('awaiting_verification tells an admin to type the password in the worker\'s browser, and offers no input', () => {
+    const m = statusMeta(job({status: 'awaiting_verification'}), {isAdmin: true});
+    expect(m.label).toBe('Needs your sign-in');
+    expect(m.body).toMatch(/worker's Chrome, not in Coop/);
     expect(m.body).toMatch(/continues by itself/);
     expect(m.actions).toEqual(['cancel']);
   });
@@ -122,12 +103,6 @@ describe('statusMeta', () => {
   it('ends the reason with a full stop before the next sentence', () => {
     expect(statusMeta(job({status: 'failed', error: 'Cancelled by a@x.com'})).body).toMatch(/^Cancelled by a@x\.com\. Days/);
   });
-  it('names a workmate\'s Mac, not their email, and does not tell you to type their password', () => {
-    const o = statusMeta(job({status: 'awaiting_verification', mine: false, requestedBy: 'bea@x.com', workerName: 'Bea Mac'}));
-    expect(JSON.stringify(o)).not.toMatch(/bea@x.com/);
-    expect(o.title).toBe('Waiting for Bea Mac to verify');
-    expect(o.body).not.toMatch(/Open the Shopee browser/);
-  });
   it('running reports how many days are done', () => {
     const m = statusMeta(job({status: 'running', days: ['2026-10-19', '2026-10-20', '2026-10-21'], progress: {'2026-10-19': {state: 'loaded'}}}));
     expect(m.body).toMatch(/1 of 3 days/);
@@ -148,30 +123,13 @@ describe('stepsFor', () => {
   it('marks progress through the steps, adding the password step only while it is needed', () => {
     expect(labels(job({status: 'queued'}))).toEqual(['Requested:now', 'Exporting from Shopee:todo', 'Importing orders:todo', 'Done:todo']);
     expect(labels(job({status: 'running'}))).toEqual(['Requested:done', 'Exporting from Shopee:now', 'Importing orders:todo', 'Done:todo']);
-    expect(labels(job({status: 'awaiting_verification'}))).toEqual(['Requested:done', 'Exporting from Shopee:done', 'Verify on the Mac:now', 'Importing orders:todo', 'Done:todo']);
+    expect(labels(job({status: 'awaiting_verification'}))).toEqual(['Requested:done', 'Exporting from Shopee:done', 'Admin signs in:now', 'Importing orders:todo', 'Done:todo']);
     expect(labels(job({status: 'importing'}))).toEqual(['Requested:done', 'Exporting from Shopee:done', 'Importing orders:now', 'Done:todo']);
     expect(labels(job({status: 'done'}))).toEqual(['Requested:done', 'Exporting from Shopee:done', 'Importing orders:done', 'Done:done']);
   });
   it('failed marks the step it stopped at: exporting when nothing came back, importing when something did', () => {
     expect(labels(job({status: 'failed'}))[1]).toBe('Exporting from Shopee:bad');
     expect(labels(job({status: 'failed', progress: {'2026-10-19': {state: 'loaded'}}}))[2]).toBe('Importing orders:bad');
-  });
-});
-
-describe('macStatus', () => {
-  it('names the four states of a Mac', () => {
-    expect(macStatus(worker({lastSeen: null, online: false, sessionState: 'signed_out'}))).toEqual({key: 'first', label: 'Waiting for first sign-in', tone: 'neutral'});
-    expect(macStatus(worker())).toEqual({key: 'online', label: 'Online', tone: 'good'});
-    expect(macStatus(worker({sessionState: 'expired'}))).toEqual({key: 'signin', label: 'Needs sign-in', tone: 'warn'});
-    expect(macStatus(worker({sessionState: 'signed_out'}))).toMatchObject({key: 'signin'});
-    expect(macStatus(worker({online: false, lastSeen: ago(900)}))).toEqual({key: 'offline', label: 'Offline', tone: 'neutral'});
-  });
-});
-
-describe('enrolCommand', () => {
-  it('puts the dashboard address into the command and leaves the image placeholder alone', () => {
-    const cmd = 'docker run -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=abc <WORKER_IMAGE>';
-    expect(enrolCommand(cmd, 'https://coop.example')).toBe('docker run -e COOP_URL=https://coop.example -e ENROL_CODE=abc <WORKER_IMAGE>');
   });
 });
 
@@ -195,21 +153,4 @@ describe('scopeToWindow', () => {
     expect(v.outsideWindow).toBe(0);
   });
   it('leaves a null status alone', () => expect(scopeToWindow(null, 'a', 'b')).toBeNull());
-});
-
-describe('macOf', () => {
-  it('names the Mac, never the person, once a worker has claimed the job', () => {
-    expect(macOf(job({mine: false, requestedBy: 'x@y.com', workerName: 'Ana MacBook'}))).toBe('Ana MacBook');
-    expect(macOf(job({mine: true, workerName: null}))).toBe('your Mac');
-  });
-  it('falls back to the requester only while nobody has claimed it', () => {
-    expect(macOf(job({mine: false, requestedBy: 'x@y.com', workerName: null}))).toBe("x@y.com's Mac");
-  });
-  it('is used in the waiting messages', () => {
-    const other = job({mine: false, requestedBy: 'x@y.com', workerName: 'Ana MacBook', status: 'running'});
-    expect(statusMeta(other).body).toContain('Ana MacBook');
-    expect(statusMeta(other).body).not.toContain('x@y.com');
-    const st = status({currentJob: other, canSync: {ok: false, reason: 'busy'}});
-    expect(syncButton(st).reason).toBe('Waiting for Ana MacBook to finish its sync.');
-  });
 });

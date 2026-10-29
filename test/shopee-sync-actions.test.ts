@@ -12,19 +12,17 @@ vi.mock('@/auth', () => ({auth: async () => (session.email ? {user: {email: sess
 vi.mock('../src/company', () => ({fetchMemberships: async () => memberships.rows}));
 vi.mock('../src/pos-data', () => ({usingPosMock: () => state.mock, posClient: () => ({})}));
 vi.mock('../src/shopee-sync/server', () => ({
-  shopeeSyncDeps: () => ({store: state.store, now: () => new Date('2026-10-27T06:00:00Z'), loadLoadedDays: async () => state.loaded}),
+  shopeeSyncDeps: () => ({store: state.store, now: () => new Date('2026-10-27T06:00:00Z'), loadLoadedDays: async () => state.loaded, remoteUrl: 'https://browser.example.com'}),
   revalidateDigestArchive: vi.fn(),
 }));
 
-import {cancelSyncJob, createSyncJob, revokeWorker, startEnrolment} from '../src/shopee-sync-actions';
+import * as actions from '../src/shopee-sync-actions';
+import {cancelSyncJob, createSyncJob} from '../src/shopee-sync-actions';
 import {getShopeeSyncStatus} from '../src/shopee-sync-data';
 
 let store: FakeSyncStore;
-const readyWorker = async (owner: string) => {
-  const w = await store.createWorker({ownerEmail: owner, name: 'm', tokenHash: `h-${owner}-${Math.random()}`}, new Date());
-  await store.touchWorker(w.id, {sessionState: 'ready'}, new Date('2026-10-27T05:59:50Z'));
-  return w;
-};
+const when = new Date('2026-10-27T05:59:50Z');
+const readyWorker = () => store.touchHeartbeat({login: {state: 'ready', checkedAt: when.toISOString()}}, when);
 
 beforeEach(() => {
   store = new FakeSyncStore();
@@ -46,56 +44,54 @@ describe('emailAllowed', () => {
 
 describe('actions', () => {
   it('refuse when signed out or not on ALLOWED_EMAILS, without touching the store', async () => {
-    await readyWorker('a@x.com');
+    await readyWorker();
     session.email = null;
     expect((await createSyncJob()).ok).toBe(false);
     session.email = 'a@x.com';
     process.env.ALLOWED_EMAILS = 'b@x.com';
     expect((await createSyncJob()).ok).toBe(false);
-    expect((await startEnrolment('mac')).ok).toBe(false);
     expect(store.jobs).toHaveLength(0);
-    expect(store.enrolments).toHaveLength(0);
   });
   it('createSyncJob takes no days: the server computes them', async () => {
-    await readyWorker('a@x.com');
+    await readyWorker();
     expect(createSyncJob.length).toBe(0);
     const r = await createSyncJob();
     expect(r).toMatchObject({ok: true, days: 8});
     expect(store.jobs[0].days[0]).toBe('2026-10-19');
   });
-  it('startEnrolment, cancelSyncJob and revokeWorker work for the owner', async () => {
-    expect((await startEnrolment('Dave Mac')).ok).toBe(true);
-    const w = await readyWorker('a@x.com');
+  it('cancelSyncJob works for the requester', async () => {
+    await readyWorker();
     const job = await createSyncJob();
     if (!job.ok) throw new Error(job.error);
     expect((await cancelSyncJob(job.jobId)).ok).toBe(true);
-    expect((await revokeWorker(w.id)).ok).toBe(true);
   });
-  it('revokeWorker: a non-owner is refused, a Coop Admin may', async () => {
-    const w = await readyWorker('b@x.com');
-    expect((await revokeWorker(w.id)).ok).toBe(false);
-    memberships.rows = [{companyId: null, role: 'coop_admin'}];
-    expect((await revokeWorker(w.id)).ok).toBe(true);
+  it('there is no enrol, revoke or remote-address action any more', () => {
+    expect(Object.keys(actions).sort()).toEqual(['cancelSyncJob', 'confirmSyncReview', 'createSyncJob']);
   });
   it('mock mode refuses every action', async () => {
     state.mock = true;
     expect(await createSyncJob()).toMatchObject({ok: false});
-    expect(await startEnrolment('m')).toMatchObject({ok: false});
   });
 });
 
 describe('getShopeeSyncStatus', () => {
-  it('is null when signed out, and shows only own Macs unless admin', async () => {
-    await readyWorker('a@x.com');
-    await readyWorker('b@x.com');
-    expect((await getShopeeSyncStatus())?.workers).toHaveLength(1);
-    memberships.rows = [{companyId: null, role: 'coop_admin'}];
-    expect((await getShopeeSyncStatus())?.workers).toHaveLength(2);
+  it('is null when signed out', async () => {
+    await readyWorker();
+    expect(await getShopeeSyncStatus()).toMatchObject({signedInAs: 'a@x.com', worker: {state: 'online'}});
     session.email = null;
     expect(await getShopeeSyncStatus()).toBeNull();
   });
+  it('gives the remote browser address to a Coop Admin only', async () => {
+    await readyWorker();
+    expect((await getShopeeSyncStatus())?.remoteUrl).toBeNull();
+    memberships.rows = [{companyId: null, role: 'coop_admin'}];
+    expect((await getShopeeSyncStatus())?.remoteUrl).toBe('https://browser.example.com');
+  });
+  it('before the worker has ever connected there is no worker', async () => {
+    expect(await getShopeeSyncStatus()).toMatchObject({worker: null, canSync: {ok: false, reason: 'The cloud worker has not connected yet.'}});
+  });
   it('mock mode returns an empty refusing status', async () => {
     state.mock = true;
-    expect(await getShopeeSyncStatus()).toMatchObject({mock: true, workers: [], canSync: {ok: false}});
+    expect(await getShopeeSyncStatus()).toMatchObject({mock: true, worker: null, canSync: {ok: false}});
   });
 });

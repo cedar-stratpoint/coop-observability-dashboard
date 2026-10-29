@@ -1,17 +1,18 @@
 import {describe, expect, it} from 'vitest';
-import {cardVisible, loginLine, serverLine, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
+import {cardVisible, loginLine, noWorkerText, serverLine, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
 import {buildSyncStatus, type ShopeeSyncStatus, type SyncJobView} from '../src/shopee-sync/status';
 import {FIRST_CHECK, FRESH_CHECK, NEEDS_ADMIN} from '../src/shopee-sync/service';
-import type {Job, Worker} from '../src/shopee-sync/types';
+import type {Heartbeat, Job} from '../src/shopee-sync/types';
 
 // The card on the one cloud worker: login state first, then the server (asleep, waking, online), and an admin-only way in.
 const now = new Date('2026-10-27T06:00:00Z'); // PH Tuesday 14:00
 const LOADED = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
 const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
 const ADMIN = 'owner@x.com';
-const cloud = (o: Partial<Worker> = {}): Worker => ({id: 'c1', ownerEmail: ADMIN, name: 'Cloud worker', tokenHash: 'h', lastSeen: ago(7200), sessionState: 'ready', createdAt: ago(9999), revokedAt: null, loginState: 'ready', loginCheckedAt: ago(7200), remoteReady: true, remoteUrl: 'https://browser.example.com', isCloud: true, ...o});
-const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'u@x.com', days: ['2026-10-19'], status: 'queued', claimedBy: null, claimedAt: null, heartbeatAt: null, importIds: [], error: null, createdAt: ago(60), finishedAt: null, progress: {}, awaitingSince: null, ...o});
-const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'u@x.com', isAdmin: false}, now, workers: [cloud()], jobs: [], loadedDays: LOADED, ...o});
+const REMOTE = 'https://browser.example.com';
+const cloud = (o: Partial<Heartbeat> = {}): Heartbeat => ({lastSeen: ago(7200), loginState: 'ready', loginCheckedAt: ago(7200), remoteReady: true, ...o});
+const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'u@x.com', days: ['2026-10-19'], status: 'queued', claimedAt: null, heartbeatAt: null, importIds: [], error: null, createdAt: ago(60), finishedAt: null, progress: {}, awaitingSince: null, ...o});
+const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'u@x.com', isAdmin: false}, now, heartbeat: cloud(), remoteUrl: REMOTE, jobs: [], loadedDays: LOADED, ...o});
 
 describe('login on the status', () => {
   it('carries the last known login with its check time and age, and keeps it while the server sleeps', () => {
@@ -21,28 +22,20 @@ describe('login on the status', () => {
     expect(s.canSync).toMatchObject({ok: true});
   });
   it('is unknown before the first check, and Sync waits for it', () => {
-    const s = build({workers: [cloud({loginState: null, loginCheckedAt: null, lastSeen: null, sessionState: 'signed_out'})]});
+    const s = build({heartbeat: cloud({loginState: null, loginCheckedAt: null, lastSeen: null})});
     expect(s.login).toEqual({state: 'unknown', checkedAt: null, ageSeconds: null, stale: false});
     expect(s.canSync).toEqual({ok: false, reason: FIRST_CHECK});
   });
   it('disables Sync and says an admin must sign in for needs_password and signed_out', () => {
     for (const loginState of ['needs_password', 'signed_out'] as const) {
-      const s = build({workers: [cloud({loginState, sessionState: 'signed_out'})]});
+      const s = build({heartbeat: cloud({loginState})});
       expect(s.canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
       expect(syncButton(s)).toMatchObject({disabled: true, reason: 'Shopee needs an admin to sign in. Please ask an admin.'});
     }
   });
-  it('is online when any worker was seen within 2 minutes', () => {
-    expect(build({workers: [cloud({lastSeen: ago(100)})]}).workerOnline).toBe(true);
-    expect(build({workers: [cloud({lastSeen: ago(130)})]}).workerOnline).toBe(false);
-  });
-});
-
-describe('workerOnline follows the box', () => {
-  it('a Mac being awake does not make the server online', () => {
-    const mac = cloud({id: 'm1', ownerEmail: 'bea@x.com', isCloud: false, lastSeen: ago(5), loginState: null, loginCheckedAt: null});
-    expect(build({workers: [cloud(), mac]}).workerOnline).toBe(false);
-    expect(build({workers: [mac], }).workerOnline).toBe(true); // no cloud worker at all: any worker
+  it('is online when the worker was seen within 2 minutes', () => {
+    expect(build({heartbeat: cloud({lastSeen: ago(100)})}).workerOnline).toBe(true);
+    expect(build({heartbeat: cloud({lastSeen: ago(130)})}).workerOnline).toBe(false);
   });
 });
 
@@ -50,31 +43,24 @@ describe('the remote browser address is for admins only', () => {
   it('is null for a regular user, in every field', () => {
     const s = build();
     expect(s.remoteUrl).toBeNull();
-    expect(s.cloudWorkers[0].remoteUrl).toBeNull();
     expect(JSON.stringify(s)).not.toContain('browser.example.com');
     expect(s.remoteReady).toBe(true);
   });
   it('is given to a Coop Admin', () => {
     const s = build({viewer: {email: 'coop-admin@x.com', isAdmin: true}});
-    expect(s.remoteUrl).toBe('https://browser.example.com');
-    expect(s.cloudWorkers[0].remoteUrl).toBe('https://browser.example.com');
+    expect(s.remoteUrl).toBe(REMOTE);
   });
-  it('never exposes a token hash', () => {
-    expect(JSON.stringify(build({viewer: {email: ADMIN, isAdmin: true}}))).not.toContain('tokenHash');
+  it('never exposes a secret', () => {
+    expect(JSON.stringify(build({viewer: {email: ADMIN, isAdmin: true}}))).not.toMatch(/token|secret/i);
   });
 });
 
-describe('the cloud worker is shown once, apart from the Macs', () => {
-  it('lists it for everyone as asleep, online or offline, and not among My sync Macs', () => {
-    expect(build().cloudWorkers[0].state).toBe('asleep');
-    expect(build().workers).toEqual([]);
-    expect(build({workers: [cloud({lastSeen: ago(10)})]}).cloudWorkers[0].state).toBe('online');
-    expect(build({jobs: [job({createdAt: ago(11 * 60)})]}).cloudWorkers[0].state).toBe('offline');
-    expect(build({jobs: [job({status: 'expired', error: 'worker offline', createdAt: ago(40 * 60), finishedAt: ago(600)})]}).cloudWorkers[0].state).toBe('offline');
-  });
-  it('a Mac owned by a regular person stays in their own list', () => {
-    const mac = cloud({id: 'm1', ownerEmail: 'u@x.com', name: 'My Mac', loginState: null, loginCheckedAt: null, isCloud: false});
-    expect(build({workers: [cloud(), mac]}).workers.map((w) => w.id)).toEqual(['m1']);
+describe('the worker on the status', () => {
+  it('is asleep, online or offline for everyone', () => {
+    expect(build().worker?.state).toBe('asleep');
+    expect(build({heartbeat: cloud({lastSeen: ago(10)})}).worker?.state).toBe('online');
+    expect(build({jobs: [job({createdAt: ago(11 * 60)})]}).worker?.state).toBe('offline');
+    expect(build({jobs: [job({status: 'expired', error: 'worker offline', createdAt: ago(40 * 60), finishedAt: ago(600)})]}).worker?.state).toBe('offline');
   });
 });
 
@@ -91,26 +77,26 @@ describe('loginLine', () => {
 });
 
 describe('serverLine', () => {
-  it('has nothing without a cloud worker', () => {
-    expect(serverLine(build({workers: []}), now)).toBeNull();
+  it('has nothing until the worker has sent a heartbeat', () => {
+    expect(serverLine(build({heartbeat: null}), now)).toBeNull();
   });
   it('asleep: Sync will wake it', () => {
     expect(serverLine(build(), now)).toMatchObject({kind: 'asleep', text: expect.stringContaining('Server asleep. Sync will wake it, about 1 to 4 minutes')});
   });
   it('asleep with a login that is not Ready does not promise that Sync will wake it', () => {
-    expect(serverLine(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'})]}), now)?.text).toBe('Server asleep, last seen 2 hours ago.');
+    expect(serverLine(build({heartbeat: cloud({loginState: 'needs_password'})}), now)?.text).toBe('Server asleep, last seen 2 hours ago.');
   });
   it('waking: a queued job and nobody online', () => {
     expect(serverLine(build({jobs: [job()]}), now)).toEqual({kind: 'waking', text: 'Waking the server, about 1 to 4 minutes.'});
   });
   it('online and offline', () => {
-    expect(serverLine(build({workers: [cloud({lastSeen: ago(12)})]}), now)).toMatchObject({kind: 'online', text: 'Server online, last seen 12 seconds ago.'});
+    expect(serverLine(build({heartbeat: cloud({lastSeen: ago(12)})}), now)).toMatchObject({kind: 'online', text: 'Server online, last seen 12 seconds ago.'});
     expect(serverLine(build({jobs: [job({createdAt: ago(11 * 60)})]}), now)).toMatchObject({kind: 'offline'});
   });
 });
 
 describe('awaiting verification on the cloud worker', () => {
-  const view = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'u@x.com', mine: true, days: ['2026-10-19'], status: 'awaiting_verification', error: null, progress: {}, createdAt: ago(60), finishedAt: null, workerName: 'Cloud worker', awaitingSince: ago(30), cloud: true, ...o});
+  const view = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'u@x.com', mine: true, days: ['2026-10-19'], status: 'awaiting_verification', error: null, progress: {}, createdAt: ago(60), finishedAt: null, awaitingSince: ago(30), ...o});
   it('says Waiting for an admin to a regular user, who gets no password instruction', () => {
     const m = statusMeta(view(), {isAdmin: false});
     expect(m).toMatchObject({label: 'Waiting for an admin', title: 'Waiting for an admin'});
@@ -129,7 +115,7 @@ describe('awaiting verification on the cloud worker', () => {
 });
 
 describe('a queued job on the cloud worker', () => {
-  const view = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'u@x.com', mine: true, days: ['2026-10-19'], status: 'queued', error: null, progress: {}, createdAt: ago(60), finishedAt: null, workerName: null, awaitingSince: null, cloud: true, ...o});
+  const view = (o: Partial<SyncJobView> = {}): SyncJobView => ({id: 'j', requestedBy: 'u@x.com', mine: true, days: ['2026-10-19'], status: 'queued', error: null, progress: {}, createdAt: ago(60), finishedAt: null, awaitingSince: null, ...o});
   it('says Waking the server when nobody is online, and plain queued once a worker is', () => {
     expect(statusMeta(view(), {isAdmin: false, workerOnline: false})).toMatchObject({label: 'Waking the server', body: expect.stringContaining('1 to 4 minutes')});
     expect(statusMeta(view(), {isAdmin: false, workerOnline: true}).label).toBe('Queued');
@@ -141,56 +127,45 @@ describe('a queued job on the cloud worker', () => {
 
 describe('cardVisible for an admin', () => {
   it('shows the card to an admin when login needs them, even with nothing behind; not to a regular user', () => {
-    const w = [cloud({loginState: 'needs_password', sessionState: 'signed_out'})];
+    const w = cloud({loginState: 'needs_password'});
     const done = {loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]};
-    expect(cardVisible(build({workers: w, viewer: {email: ADMIN, isAdmin: true}, ...done}), now)).toBe(true);
-    expect(cardVisible(build({workers: w, viewer: {email: 'coop-admin@x.com', isAdmin: true}, ...done}), now)).toBe(true);
-    expect(cardVisible(build({workers: w, ...done}), now)).toBe(false);
-  });
-});
-
-describe('only the worker flagged is_cloud is the box', () => {
-  it('an admin\'s own Mac does not become the cloud worker or lend its login to the card', () => {
-    const adminMac = cloud({id: 'am', name: 'Admin Mac', isCloud: false, loginState: 'ready', loginCheckedAt: ago(10)});
-    const s = build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out', loginCheckedAt: ago(7200)}), adminMac]});
-    expect(s.login.state).toBe('needs_password');
-    expect(s.cloudWorkers.map((w) => w.id)).toEqual(['c1']);
-    expect(s.workers.map((w) => w.id)).toEqual([]); // not the viewer's Mac (the viewer is u@x.com)
-    expect(build({workers: [adminMac]}).cloudWorkers).toEqual([]);
+    expect(cardVisible(build({heartbeat: w, viewer: {email: ADMIN, isAdmin: true}, ...done}), now)).toBe(true);
+    expect(cardVisible(build({heartbeat: w, viewer: {email: 'coop-admin@x.com', isAdmin: true}, ...done}), now)).toBe(true);
+    expect(cardVisible(build({heartbeat: w, ...done}), now)).toBe(false);
   });
 });
 
 describe('a stored Ready login does not last forever', () => {
   const H = 3600;
   it('older than 24 hours it is unknown: Sync waits for a fresh check, and the card keeps the age', () => {
-    const stale = build({workers: [cloud({loginCheckedAt: ago(24 * H + 60)})]});
+    const stale = build({heartbeat: cloud({loginCheckedAt: ago(24 * H + 60)})});
     expect(stale.login).toEqual({state: 'unknown', checkedAt: ago(24 * H + 60), ageSeconds: 24 * H + 60, stale: true});
     expect(stale.canSync).toEqual({ok: false, reason: FRESH_CHECK});
-    const fresh = build({workers: [cloud({loginCheckedAt: ago(24 * H - 60)})]});
+    const fresh = build({heartbeat: cloud({loginCheckedAt: ago(24 * H - 60)})});
     expect(fresh.login).toMatchObject({state: 'ready', stale: false});
     expect(fresh.canSync).toMatchObject({ok: true});
   });
   it('says so on the card without pretending it was never checked', () => {
-    const s = build({workers: [cloud({loginCheckedAt: ago(30 * H)})]});
+    const s = build({heartbeat: cloud({loginCheckedAt: ago(30 * H)})});
     expect(loginLine(s, now)).toMatchObject({label: 'Check is old', tone: 'neutral', text: 'Last check was 1 day ago'});
   });
   it('a bad login is not made stale: needs_password stays needs_password', () => {
-    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out', loginCheckedAt: ago(30 * H)})]}).login.state).toBe('needs_password');
+    expect(build({heartbeat: cloud({loginState: 'needs_password', loginCheckedAt: ago(30 * H)})}).login.state).toBe('needs_password');
   });
 });
 
-describe('a person\'s own worker and the cloud login', () => {
-  it('the cloud worker owned by the presser is not "their own Mac": a bad or stale cloud login still disables Sync for them', () => {
-    const asOwner = {viewer: {email: ADMIN, isAdmin: true}};
-    expect(build({...asOwner, workers: [cloud({loginState: 'needs_password', sessionState: 'ready'})]}).canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
-    expect(build({...asOwner, workers: [cloud({loginCheckedAt: ago(30 * 3600), sessionState: 'ready'})]}).canSync).toEqual({ok: false, reason: FRESH_CHECK});
+describe('the card before the worker has ever connected', () => {
+  it('says plainly that it has not connected: admins get the env and runbook pointer, others "Sync is not set up yet"', () => {
+    const none = build({heartbeat: null});
+    expect(noWorkerText({...none, isAdmin: true})).toMatch(/cloud worker has not connected yet/);
+    expect(noWorkerText({...none, isAdmin: true})).toMatch(/SHOPEE_SYNC_WORKER_TOKEN/);
+    expect(noWorkerText({...none, isAdmin: true})).toMatch(/shopee-sync-runbook/);
+    expect(noWorkerText(none)).toBe('Sync is not set up yet.');
+    expect(noWorkerText(none)).not.toMatch(/SHOPEE_SYNC/);
   });
-  it('their own ready Mac can serve their own job, so it still allows Sync while the cloud login is bad', () => {
-    const mac = cloud({id: 'm1', ownerEmail: 'u@x.com', name: 'My Mac', isCloud: false, loginState: null, loginCheckedAt: null, sessionState: 'ready'});
-    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'}), mac]}).canSync).toMatchObject({ok: true});
-  });
-  it('another person\'s Mac never allows it', () => {
-    const mac = cloud({id: 'm1', ownerEmail: 'bea@x.com', isCloud: false, loginState: null, loginCheckedAt: null, sessionState: 'ready'});
-    expect(build({workers: [cloud({loginState: 'needs_password', sessionState: 'signed_out'}), mac]}).canSync).toEqual({ok: false, reason: NEEDS_ADMIN});
+  it('turns Sync off with the same plain reason, and still shows the card when days are behind', () => {
+    const none = build({heartbeat: null});
+    expect(syncButton(none)).toMatchObject({disabled: true, reason: 'The cloud worker has not connected yet.'});
+    expect(cardVisible(none, now)).toBe(true);
   });
 });

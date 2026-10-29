@@ -15,10 +15,9 @@ const deps = (): SyncDeps => ({store: sync, now: () => now, loadLoadedDays: asyn
 beforeEach(async () => {
   sync = new FakeSyncStore();
   imports = new FakeStore();
-  const w = await sync.createWorker({ownerEmail: 'a@x.com', name: 'm', tokenHash: 'h'}, now);
-  await sync.touchWorker(w.id, {sessionState: 'ready'}, now);
+  await sync.touchHeartbeat({login: {state: 'ready', checkedAt: now.toISOString()}}, now);
   const job = (await sync.createJob({requestedBy: 'a@x.com', days: ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25']}, now)) as Job;
-  await sync.claimJob(job.id, w.id, now);
+  await sync.claimJob(job.id, now);
   const o = await planFile({store: imports, bytes: new Uint8Array(await salesOverviewFile(week('2026-10-19', [100, 200, 300, 400, 500, 600, 700]))), filename: 'sales_overview_20261019-20261025.xlsx', today: '2026-10-27', importedBy: `sync:${job.id}`});
   if (o.status !== 'staged') throw new Error('fixture should stage');
   await sync.transitionJob(job.id, ['running'], {status: 'review', importIds: [o.importId], finishedAt: now.toISOString()});

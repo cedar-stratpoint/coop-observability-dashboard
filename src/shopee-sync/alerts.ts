@@ -27,8 +27,8 @@ export interface AlertMessage {
   text: string;
 }
 
-// A person ending a sync (cancel, removing the Mac) is not a failure to chase; an expired job nobody claimed is shown on the card and has nothing running to fix.
-const endedByPerson = (error: string | null): boolean => /^(Cancelled by|The Mac was removed)/i.test(error ?? '');
+// A person ending a sync (cancel) is not a failure to chase; an expired job nobody claimed is shown on the card and has nothing running to fix.
+const endedByPerson = (error: string | null): boolean => /^Cancelled by/i.test(error ?? '');
 
 export function alertsDue(jobs: readonly Job[], now: Date, alreadySent: ReadonlySet<string>): Alert[] {
   const out: Alert[] = [];

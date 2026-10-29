@@ -1,16 +1,17 @@
-// The HTTP face of the sync for the WORKER: enrol (code for token), claim (a poll) and progress. Plain Request -> Response handlers like
-// src/shopee-import/api.ts; the files in app/api/shopee/sync/ are thin wrappers. Auth is the worker's own bearer token (hash lookup,
-// revocable per Mac). No field anywhere carries a Shopee password or code: unknown request fields are dropped, never stored.
+// The HTTP face of the sync for the WORKER: claim (a poll) and progress, plus the wake check. Plain Request -> Response handlers like
+// src/shopee-import/api.ts; the files in app/api/shopee/sync/ are thin wrappers. There is ONE worker (the cloud box) and one shared secret:
+// SHOPEE_SYNC_WORKER_TOKEN, sent as `Authorization: Bearer`. No field anywhere carries a Shopee password or code: unknown request fields are dropped, never stored.
+import {createHash, timingSafeEqual} from 'node:crypto';
 import type {SyncStore} from './store';
-import {canAddWorker, chooseJob, isCloudWorker, MAX_PER_PERSON, MAX_PER_TEAM} from './routing';
 import {inQuietWindow, isOnline} from './rules';
 import {sweepJobs} from './service';
-import {hashSecret, newWorkerToken, verifySecret} from './tokens';
-import {isActive, LOGIN_STATES, SESSION_STATES, type DayResult, type DayState, type Job, type JobStatus, type LoginState, type SessionState, type Worker, type WorkerReport} from './types';
+import {isActive, LOGIN_STATES, type DayResult, type DayState, type Job, type JobStatus, type LoginState, type WorkerReport} from './types';
 
 export interface SyncApiDeps {
   store: SyncStore;
   now: () => Date;
+  /** SHOPEE_SYNC_WORKER_TOKEN (env only), the worker's shared secret. Null or unset: claim and progress answer 503 (fail closed). */
+  workerToken?: string | null;
   /** SHOPEE_SYNC_WAKE_TOKEN (env only), for the wake route. Null or unset: the route answers 401 to everyone. */
   wakeToken?: string | null;
 }
@@ -26,44 +27,27 @@ const readBody = async (req: Request): Promise<Record<string, unknown>> => {
 };
 export const bearerOf = (req: Request): string | null => /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1].trim() || null;
 
-/** The enrolled, non-revoked worker behind a bearer token, or null. */
-export async function workerForToken(store: SyncStore, token: string): Promise<Worker | null> {
-  const w = await store.findWorkerByTokenHash(hashSecret(token));
-  return w && !w.revokedAt && verifySecret(token, w.tokenHash) ? w : null;
-}
-async function authenticate(req: Request, d: SyncApiDeps): Promise<Worker | null> {
-  const t = bearerOf(req);
-  return t ? workerForToken(d.store, t) : null;
-}
+const sha = (v: string): Buffer => createHash('sha256').update(v).digest();
+/** Constant-time: both sides are hashed to 32 bytes first, so length leaks nothing. An empty or missing secret never matches. */
+export const secretMatches = (given: string | null, expected: string | null | undefined): boolean => Boolean(given && expected) && timingSafeEqual(sha(given as string), sha(expected as string));
+const bearerMatches = (req: Request, secret: string | null | undefined): boolean => secretMatches(bearerOf(req), secret);
+
 const denied = (): Response => reply({error: 'Unauthorized.'}, 401);
+/** The worker routes' gate: null when the bearer is the shared worker secret; otherwise the 503 (secret not configured) or 401 (wrong) to send. */
+const workerGate = (req: Request, d: SyncApiDeps): Response | null => (!d.workerToken ? reply({error: 'The sync worker secret (SHOPEE_SYNC_WORKER_TOKEN) is not configured on this deployment.'}, 503) : bearerMatches(req, d.workerToken) ? null : denied());
 
-export async function handleEnrol(req: Request, d: SyncApiDeps): Promise<Response> {
-  const b = await readBody(req);
-  const code = typeof b.code === 'string' ? b.code.trim() : '';
-  if (!code) return denied();
-  const token = newWorkerToken();
-  const r = await d.store.redeemEnrolment(hashSecret(code), hashSecret(token), d.now(), {perPerson: MAX_PER_PERSON, perTeam: MAX_PER_TEAM});
-  if (r.status === 'invalid') return denied(); // unknown, used or expired: one answer for all three
-  if (r.status === 'capped') return reply({error: canAddWorker(await d.store.listWorkers(), r.ownerEmail) ?? 'No room for another Mac. Remove one first.'}, 409); // the code is not spent
-  const w = r.worker;
-  return reply({workerId: w.id, name: w.name, token}); // the token is shown this once
-}
-
-const asSession = (v: unknown): SessionState | null => (typeof v === 'string' && (SESSION_STATES as readonly string[]).includes(v) ? (v as SessionState) : null);
 const asLogin = (v: unknown): LoginState | null => (typeof v === 'string' && (LOGIN_STATES as readonly string[]).includes(v) ? (v as LoginState) : null);
 const FUTURE_SLACK_MS = 5 * 60_000;
 /** What a worker said about itself in a poll: only the known fields, each validated; anything else (and any Shopee secret) is dropped, never stored. */
 export function readReport(b: Record<string, unknown>, now: Date): WorkerReport {
   const out: WorkerReport = {};
-  const session = asSession(b.sessionState);
   const login = b.login && typeof b.login === 'object' && !Array.isArray(b.login) ? (b.login as Record<string, unknown>) : null;
   const state = login ? asLogin(login.state) : null;
   if (state) {
     const t = typeof login!.checkedAt === 'string' ? Date.parse(login!.checkedAt) : NaN;
     // an unreadable or future time (a clock that is off) is taken as "just now" rather than trusted
     out.login = {state, checkedAt: (Number.isNaN(t) || t > now.getTime() + FUTURE_SLACK_MS ? now : new Date(t)).toISOString()};
-    out.sessionState = state === 'ready' ? 'ready' : session === 'expired' ? 'expired' : 'signed_out';
-  } else if (session) out.sessionState = session;
+  }
   const remote = b.remote && typeof b.remote === 'object' && !Array.isArray(b.remote) ? (b.remote as Record<string, unknown>) : null;
   if (remote && typeof remote.ready === 'boolean') out.remoteReady = remote.ready;
   return out;
@@ -71,22 +55,19 @@ export function readReport(b: Record<string, unknown>, now: Date): WorkerReport 
 const toWire = (j: Job) => ({id: j.id, days: j.days, status: j.status});
 
 export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Response> {
-  const worker = await authenticate(req, d);
-  if (!worker) return denied();
+  const gate = workerGate(req, d);
+  if (gate) return gate;
   const now = d.now();
-  const report = readReport(await readBody(req), now);
-  const state = report.sessionState ?? worker.sessionState;
-  await d.store.touchWorker(worker.id, {...report, sessionState: state}, now);
+  const hb = await d.store.touchHeartbeat(readReport(await readBody(req), now), now);
   const jobs = await sweepJobs(d.store, now);
-  const mine = jobs.find((j) => isActive(j.status) && j.claimedBy === worker.id);
-  if (mine) {
-    await d.store.transitionJob(mine.id, [mine.status], {heartbeatAt: now.toISOString()}); // a poll is also a heartbeat
-    return reply({job: null, activeJobId: mine.id});
+  const active = jobs.find((j) => isActive(j.status)); // one worker, one sync at a time: an active job is the worker's own
+  if (active) {
+    await d.store.transitionJob(active.id, [active.status], {heartbeatAt: now.toISOString()}); // a poll is also a heartbeat
+    return reply({job: null, activeJobId: active.id});
   }
-  if (jobs.some((j) => isActive(j.status)) || inQuietWindow(now)) return reply({job: null});
-  const anyOwner = isCloudWorker(worker);
-  const pick = chooseJob({...worker, sessionState: state}, jobs.filter((j) => j.status === 'queued'), anyOwner);
-  const claimed = pick ? await d.store.claimJob(pick.id, worker.id, now, {anyOwner}) : null;
+  if (hb.loginState !== 'ready' || inQuietWindow(now)) return reply({job: null});
+  const pick = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  const claimed = pick ? await d.store.claimJob(pick.id, now) : null;
   return reply({job: claimed ? toWire(claimed) : null});
 }
 
@@ -105,11 +86,11 @@ const clip = (v: unknown, n: number): string | undefined => (typeof v === 'strin
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
 export async function handleProgress(req: Request, d: SyncApiDeps): Promise<Response> {
-  const worker = await authenticate(req, d);
-  if (!worker) return denied();
+  const gate = workerGate(req, d);
+  if (gate) return gate;
   const b = await readBody(req);
   const job = typeof b.jobId === 'string' ? await d.store.getJob(b.jobId) : null;
-  if (!job || job.claimedBy !== worker.id) return reply({error: 'That job is not yours.'}, 403);
+  if (!job) return reply({error: 'No such job.'}, 404);
   if (!isActive(job.status)) return reply({error: `The job is ${job.status}.`, stop: true, status: job.status, reason: job.error}, 409);
 
   const status = b.status === undefined ? undefined : typeof b.status === 'string' && FROM[b.status] ? (b.status as JobStatus) : null;
@@ -139,8 +120,7 @@ export async function handleProgress(req: Request, d: SyncApiDeps): Promise<Resp
     ...(status === 'awaiting_verification' && job.status !== 'awaiting_verification' && {awaitingSince: now}),
   });
   if (!updated) return reply({error: 'The job changed while reporting. Poll again.', stop: true}, 409);
-  const report = readReport(b, d.now());
-  if (report.sessionState || report.login || report.remoteReady !== undefined) await d.store.touchWorker(worker.id, report, d.now());
+  await d.store.touchHeartbeat(readReport(b, d.now()), d.now()); // every progress call is a heartbeat too
   return reply({ok: true, job: {id: updated.id, status: updated.status}});
 }
 
@@ -149,12 +129,10 @@ export async function handleProgress(req: Request, d: SyncApiDeps): Promise<Resp
  * time; 401 for anything else (including no token configured). The answer carries no email and no person: just a boolean and the job id.
  */
 export async function handleWake(req: Request, d: SyncApiDeps): Promise<Response> {
-  const t = bearerOf(req);
-  if (!d.wakeToken || !t || !verifySecret(t, hashSecret(d.wakeToken))) return denied();
+  if (!bearerMatches(req, d.wakeToken)) return denied();
   const now = d.now();
-  const [jobs, workers] = await Promise.all([sweepJobs(d.store, now), d.store.listWorkers()]);
+  const [jobs, hb] = await Promise.all([sweepJobs(d.store, now), d.store.getHeartbeat()]);
   const queued = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-  // only the cloud worker counts: a person's Mac being awake says nothing about whether the box is
-  const online = workers.some((w) => !w.revokedAt && isCloudWorker(w) && isOnline(w.lastSeen, now));
+  const online = isOnline(hb?.lastSeen ?? null, now);
   return queued && !online ? reply({wake: true, jobId: queued.id}) : reply({wake: false});
 }

@@ -1,31 +1,30 @@
 import {describe, expect, it} from 'vitest';
 import {handleApply, handleCoverage, handlePlan, handleUndo} from '../src/shopee-import/api';
 import {workerAuthFor} from '../src/shopee-sync/worker-auth';
-import {hashSecret, newWorkerToken} from '../src/shopee-sync/tokens';
 import type {Job} from '../src/shopee-sync/types';
 import {salesOverviewFile, week} from './support/shopee-fixture';
 import {FakeStore} from './support/shopee-fake-store';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
 
 const IMPORT_TOKEN = 'import-token-0123456789';
+const WORKER_TOKEN = 'worker-secret-0123456789';
 const NOW = new Date('2026-10-27T03:00:00Z');
 const bearer = (t: string) => ({authorization: `Bearer ${t}`});
 
 const WEEK = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
-/** A worker that owns a running job for `days` (default: the week of the fixture file), the only time its token may plan or apply. */
+/** A worker running a job for `days` (default: the week of the fixture file): the only time its secret may plan or apply. */
 async function setup(opts: {days?: string[] | null; status?: Job['status']} = {}) {
   const sync = new FakeSyncStore();
-  const token = newWorkerToken();
-  const w = await sync.createWorker({ownerEmail: 'a@x.com', name: 'm', tokenHash: hashSecret(token)}, NOW);
+  const token = WORKER_TOKEN;
   const store = new FakeStore();
   const days = opts.days === undefined ? WEEK : opts.days;
   if (days) {
-    await sync.touchWorker(w.id, {sessionState: 'ready'}, NOW);
+    await sync.touchHeartbeat({login: {state: 'ready', checkedAt: NOW.toISOString()}}, NOW);
     const job = (await sync.createJob({requestedBy: 'a@x.com', days}, NOW)) as Job;
-    await sync.claimJob(job.id, w.id, NOW);
+    await sync.claimJob(job.id, NOW);
     if (opts.status && opts.status !== 'running') await sync.transitionJob(job.id, ['running'], {status: opts.status});
   }
-  return {sync, token, w, store, deps: {store, token: IMPORT_TOKEN as string | undefined, now: () => NOW, workerAuth: workerAuthFor(sync)}};
+  return {sync, token, store, deps: {store, token: IMPORT_TOKEN as string | undefined, now: () => NOW, workerAuth: workerAuthFor(sync, WORKER_TOKEN)}};
 }
 async function planReq(token: string, files: {name: string; bytes: Buffer}[], fields: Record<string, string> = {}) {
   const form = new FormData();
@@ -36,7 +35,7 @@ async function planReq(token: string, files: {name: string; bytes: Buffer}[], fi
 const json = (token: string, body: unknown) => new Request('https://coop.example/x', {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...bearer(token)}});
 const daily = async () => ({name: 'sales_overview_20261012-20261018.xlsx', bytes: await salesOverviewFile(week('2026-10-12', [100, 200, 300, 400, 500, 600, 700]))});
 
-describe('a worker token is only good for its own running job', () => {
+describe('the worker secret is only good for its own running job', () => {
   it('refuses plan and apply with no active job, writing nothing', async () => {
     const {token, deps, store} = await setup({days: null});
     const res = await handlePlan(await planReq(token, [await daily()]), deps);
@@ -71,15 +70,13 @@ describe('a worker token is only good for its own running job', () => {
     const importing = await setup({status: 'importing'});
     expect((await handlePlan(await planReq(importing.token, [await daily()]), importing.deps)).status).toBe(200);
   });
-  it('another worker with no job of its own is refused while the first one is running', async () => {
-    const {sync, deps} = await setup();
-    const t2 = newWorkerToken();
-    await sync.createWorker({ownerEmail: 'b@x.com', name: 'n', tokenHash: hashSecret(t2)}, NOW);
-    expect((await handlePlan(await planReq(t2, [await daily()]), deps)).status).toBe(403);
+  it('a wrong secret is refused even while a job is running', async () => {
+    const {deps} = await setup();
+    expect((await handlePlan(await planReq('some-other-secret', [await daily()]), deps)).status).toBe(401);
   });
 });
 
-describe('the import API with a worker token', () => {
+describe('the import API with the worker secret', () => {
   it('plans and applies a sales_overview file', async () => {
     const {token, deps} = await setup();
     const planned = await (await handlePlan(await planReq(token, [await daily()]), deps)).json();
@@ -136,16 +133,16 @@ describe('the import API with a worker token', () => {
     expect((await handleUndo(json(token, {importId: 'x', reason: 'r'}), deps)).status).toBe(403);
     expect((await handleCoverage(new Request('https://x', {headers: bearer(token)}), deps)).status).toBe(403);
   });
-  it('401 for an unknown or revoked worker token', async () => {
-    const {token, deps, sync, w} = await setup();
-    expect((await handlePlan(await planReq('zsw_unknown', [await daily()]), deps)).status).toBe(401);
-    await sync.revokeWorker(w.id, NOW);
-    expect((await handlePlan(await planReq(token, [await daily()]), deps)).status).toBe(401);
-    expect((await handleApply(json(token, {importIds: ['x']}), deps)).status).toBe(401);
+  it('401 for an unknown secret, and for the worker secret when it is not configured', async () => {
+    const {token, deps, sync} = await setup();
+    expect((await handlePlan(await planReq('unknown-secret', [await daily()]), deps)).status).toBe(401);
+    const unset = {...deps, workerAuth: workerAuthFor(sync, undefined)};
+    expect((await handlePlan(await planReq(token, [await daily()]), unset)).status).toBe(401);
+    expect((await handleApply(json(token, {importIds: ['x']}), unset)).status).toBe(401);
   });
   it('401 (not 503) for a bad token on a deployment with no import token but worker auth', async () => {
     const {deps} = await setup();
-    expect((await handlePlan(await planReq('zsw_unknown', [await daily()]), {...deps, token: undefined})).status).toBe(401);
+    expect((await handlePlan(await planReq('unknown-secret', [await daily()]), {...deps, token: undefined})).status).toBe(401);
   });
   it('the import token keeps doing everything it did, including undo', async () => {
     const {deps} = await setup();

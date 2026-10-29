@@ -1,22 +1,20 @@
-// The rules of the sync as plain functions over SyncStore: press Sync, cancel, enrol a Mac, revoke a Mac, and the stale-job sweep.
+// The rules of the sync as plain functions over SyncStore: press Sync, cancel, confirm a review, and the stale-job sweep.
 // The server actions (src/shopee-sync-actions.ts) and the worker routes (api.ts) are thin shells around these; authentication is theirs.
 import {periodWithin, syncStamp} from '../shopee-import/api';
 import {applyRun, type ImportStore} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
 import {missingClosedDays} from './missing-days';
-import {canAddWorker, cloudLogin, isCloudWorker, sameEmail} from './routing';
-import {normaliseRemoteUrl} from './remote';
+import {cloudLogin, sameEmail} from './routing';
 import {startBlock, staleSweep} from './rules';
-import {ENROL_TTL_MS, hashSecret, newEnrolmentCode} from './tokens';
-import {isActive, type Job, type Worker} from './types';
+import {isActive, type Heartbeat, type Job} from './types';
 
 export interface SyncDeps {
   store: SyncStore;
   now: () => Date;
   /** Days that have figures in the archive (the same list the import coverage uses). */
   loadLoadedDays: () => Promise<string[]>;
-  /** SHOPEE_SYNC_REMOTE_HOSTS, lower-cased. Empty or unset: any https host. */
-  remoteHosts?: readonly string[];
+  /** SHOPEE_SYNC_REMOTE_URL, already checked (https, SHOPEE_SYNC_REMOTE_HOSTS). The card hands it to a Coop Admin only. */
+  remoteUrl?: string | null;
 }
 export type Fail = {ok: false; error: string};
 export interface Actor {
@@ -37,20 +35,19 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 
 /** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
 export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
+export const NO_WORKER = 'The cloud worker has not connected yet.';
 export const FIRST_CHECK = 'Waiting for the first login check';
 export const FRESH_CHECK = 'Waiting for a fresh login check';
 
-export function syncGate(i: {who: string; now: Date; jobs: readonly Job[]; workers: readonly Worker[]; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
+export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number} | Fail {
   const {days, more} = missingClosedDays(i.loadedDays, i.now);
   if (days.length === 0) return fail('Shopee is up to date');
-  // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping), or one of the person's own ready Macs.
-  const login = cloudLogin(i.workers, i.now);
-  // Only the person's own MAC counts (it serves its owner's jobs). The cloud worker is judged by its login, even when the presser owns it.
-  const ownReady = i.workers.some((w) => !w.revokedAt && !w.isCloud && w.sessionState === 'ready' && sameEmail(w.ownerEmail, i.who));
-  if (login.state !== 'ready' && !ownReady) {
+  // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping).
+  const login = cloudLogin(i.heartbeat, i.now);
+  if (login.state !== 'ready') {
     if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
-    if (login.hasCloud) return fail(login.stale ? FRESH_CHECK : FIRST_CHECK);
-    return fail('Add a Mac or wake yours: none of your Macs is signed in to Seller Centre.');
+    if (login.hasWorker) return fail(login.stale ? FRESH_CHECK : FIRST_CHECK);
+    return fail(NO_WORKER);
   }
   const blocked = startBlock(i.now, i.jobs);
   return blocked ? fail(blocked) : {ok: true, days, more};
@@ -60,7 +57,7 @@ export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true
   const who = email.trim().toLowerCase();
   const now = d.now();
   const jobs = await sweepJobs(d.store, now);
-  const gate = syncGate({who, now, jobs, workers: await d.store.listWorkers(), loadedDays: await d.loadLoadedDays()});
+  const gate = syncGate({now, jobs, heartbeat: await d.store.getHeartbeat(), loadedDays: await d.loadLoadedDays()});
   if (!gate.ok) return gate;
   const job = await d.store.createJob({requestedBy: who, days: gate.days}, now);
   return job === 'conflict' ? fail('A Shopee sync is already queued or running. Wait for it to finish.') : {ok: true, job};
@@ -98,51 +95,4 @@ export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Acto
   }
   const ended = await d.store.transitionJob(jobId, ['review'], {status: 'done', error: null});
   return ended ? {ok: true} : fail('That sync changed while you were confirming it. Refresh and try again.');
-}
-
-const NAME_MAX = 60;
-export type EnrolVariant = 'mac' | 'cloud';
-/** The one command a person runs. `cloud` is for the shared server: no published port (the admin reaches its browser through the protected remote link) and a worker image tag to fill in. */
-export const dockerCommand = (code: string, variant: EnrolVariant = 'mac'): string =>
-  variant === 'cloud'
-    ? `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE_TAG>`
-    : `docker run -d --name zoomy-shopee-sync --restart unless-stopped --shm-size=1g -p 127.0.0.1:6080:6080 -v zoomy-shopee-sync:/data -e COOP_URL=<DASHBOARD_ADDRESS> -e ENROL_CODE=${code} <WORKER_IMAGE>`;
-
-/** Makes a one-time enrolment code for one of the person's own Macs. The code is shown once and stored only as a hash. */
-export async function beginEnrolment(d: SyncDeps, email: string, name: string, variant: EnrolVariant = 'mac', isAdmin = false): Promise<{ok: true; code: string; command: string; expiresAt: string} | Fail> {
-  const who = email.trim().toLowerCase();
-  const clean = (name ?? '').replace(/\s+/g, ' ').trim();
-  // eslint-disable-next-line no-control-regex
-  if (!clean || clean.length > NAME_MAX || /[\u0000-\u001f]/.test(clean)) return fail(`Give the Mac a name of 1 to ${NAME_MAX} characters.`);
-  // The cloud worker is the one enrolled by a Coop Admin: that is what makes it serve everyone.
-  if (variant === 'cloud' && !isAdmin) return fail('Only an admin can add the cloud worker.');
-  const capped = canAddWorker(await d.store.listWorkers(), who);
-  if (capped) return fail(capped);
-  const code = newEnrolmentCode();
-  const expiresAt = new Date(d.now().getTime() + ENROL_TTL_MS).toISOString();
-  await d.store.createEnrolment({codeHash: hashSecret(code), ownerEmail: who, workerName: clean, expiresAt, usedAt: null, isCloud: variant === 'cloud'});
-  return {ok: true, code, command: dockerCommand(code, variant), expiresAt};
-}
-
-export async function revokeWorkerFor(d: SyncDeps, who: Actor, workerId: string): Promise<{ok: true} | Fail> {
-  const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
-  if (!worker) return fail('That Mac is not enrolled.');
-  if (!who.isAdmin && !sameEmail(worker.ownerEmail, who.email)) return fail('You can only remove your own Macs.');
-  if (!(await d.store.revokeWorker(workerId, d.now()))) return fail('That Mac is not enrolled.');
-  // its token is dead, so nothing would ever finish or time out its job faster than the heartbeat sweep: end it now
-  for (const j of await d.store.recentJobs(RECENT_JOBS)) {
-    if (j.claimedBy === workerId && isActive(j.status)) await d.store.transitionJob(j.id, [j.status], {status: 'failed', error: 'The Mac was removed during the sync', finishedAt: d.now().toISOString()});
-  }
-  return {ok: true};
-}
-
-/** An admin sets or clears the address of the cloud worker's protected remote browser. Only the cloud worker has one; the address is never shown to anyone else. */
-export async function setRemoteUrlFor(d: SyncDeps, who: Actor, workerId: string, raw: string): Promise<{ok: true} | Fail> {
-  // Coop Admins only: this link is where an admin types the Shopee password.
-  if (!who.isAdmin) return fail('Only an admin can set the remote browser address.');
-  const parsed = normaliseRemoteUrl(String(raw ?? ''), d.remoteHosts ?? []);
-  if (!parsed.ok) return fail(parsed.error);
-  const worker = (await d.store.listWorkers()).find((w) => w.id === workerId && !w.revokedAt);
-  if (!worker || !isCloudWorker(worker)) return fail('That is not the cloud worker.');
-  return (await d.store.setRemoteUrl(workerId, parsed.url)) ? {ok: true} : fail('That worker is not enrolled.');
 }

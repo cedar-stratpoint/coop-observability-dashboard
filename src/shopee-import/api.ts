@@ -10,7 +10,7 @@ export interface ApiDeps {
   store: ImportStore;
   token: string | undefined;
   now: () => Date;
-  /** The grant of an enrolled, non-revoked Shopee sync worker, or null. Such a worker may plan and apply sales_overview only (never restate, undo or coverage),
+  /** The grant of the Shopee sync worker (it holds the shared worker secret), or null. Such a worker may plan and apply sales_overview only (never restate, undo or coverage),
    * and only for days of the job it is running right now. */
   workerAuth?: (bearer: string) => Promise<{days: readonly string[]; jobId: string | null} | null>;
 }

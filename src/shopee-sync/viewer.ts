@@ -6,8 +6,8 @@ import {DEV_SESSION, devAuthEnabled, devSessionWithMemberships} from '../dev-aut
 import type {Actor} from './service';
 
 /**
- * The signed-in person, if they may use the sync (ALLOWED_EMAILS respected). Admin = an active Coop Admin role (no company, role coop_admin) re-read from the database: cancel, confirm, revoke, enrol the
- * cloud worker, sign in to Shopee on it and open the remote browser.
+ * The signed-in person, if they may use the sync (ALLOWED_EMAILS respected). Admin = an active Coop Admin role (no company, role coop_admin) re-read from the database: cancel, confirm, sign in to Shopee on
+ * the cloud worker and open the remote browser.
  */
 export async function syncViewer(): Promise<Actor | null> {
   let email: string | undefined;

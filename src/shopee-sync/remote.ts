@@ -8,7 +8,7 @@ export const remoteBrowserHref = (remoteUrl: string): string => `${remoteUrl.rep
 export const parseHosts = (env: string | undefined): string[] => (env ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
 
 /**
- * An address an admin may save: https only, no credentials, query or fragment. Empty clears it. Returns it without a trailing slash.
+ * The remote browser address from the environment: https only, no credentials, query or fragment. Empty means none. Returns it without a trailing slash.
  * When `allowedHosts` is not empty the host must be exactly one of them, so a look-alike page cannot be put where an admin types the Shopee password.
  */
 export function normaliseRemoteUrl(raw: string, allowedHosts: readonly string[] = []): {ok: true; url: string | null} | {ok: false; error: string} {
@@ -27,4 +27,10 @@ export function normaliseRemoteUrl(raw: string, allowedHosts: readonly string[] 
   if (u.username || u.password) return bad('The address must not contain a user name or password.');
   if (u.search || u.hash) return bad('Leave off anything after the address (no ? or #).');
   return {ok: true, url: `${u.origin}${u.pathname}`.replace(/\/+$/, '')};
+}
+
+/** SHOPEE_SYNC_REMOTE_URL checked against SHOPEE_SYNC_REMOTE_HOSTS: the address to offer an admin, or null (unset or invalid: the card then shows no link). */
+export function remoteUrlFromEnv(rawUrl: string | undefined, rawHosts: string | undefined): string | null {
+  const r = normaliseRemoteUrl(rawUrl ?? '', parseHosts(rawHosts));
+  return r.ok ? r.url : null;
 }

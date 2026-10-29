@@ -2,12 +2,12 @@
 
 import {posClient, usingPosMock} from './pos-data';
 import {supabaseImportStore} from './shopee-import/store-supabase';
-import {beginEnrolment, cancelSync, confirmReview, requestSync, revokeWorkerFor, setRemoteUrlFor, type Actor, type EnrolVariant, type SyncDeps} from './shopee-sync/service';
+import {cancelSync, confirmReview, requestSync, type Actor, type SyncDeps} from './shopee-sync/service';
 import {revalidateDigestArchive, shopeeSyncDeps} from './shopee-sync/server';
 import {syncViewer} from './shopee-sync/viewer';
 
 // Server actions for the Shopee same-day sync. Every one re-derives the signed-in person on the server (auth() + ALLOWED_EMAILS); the client sends
-// no days, no email and no worker owner. The rules live in src/shopee-sync/service.ts. Nothing here takes or stores a Shopee password or code.
+// no days and no email. The rules live in src/shopee-sync/service.ts. Nothing here takes or stores a Shopee password or code.
 export type ActionResult = {ok: true} | {ok: false; error: string};
 const MOCK = 'Running in mock mode: set the Supabase archive env to use Shopee sync.';
 
@@ -48,30 +48,6 @@ export async function cancelSyncJob(jobId: string): Promise<ActionResult> {
   }
 }
 
-/** Add a Mac (or, for an admin, the cloud worker): returns the one-time code (shown once, valid 15 minutes) and the docker command with placeholders for the dashboard address and image. */
-export async function startEnrolment(name: string, variant: EnrolVariant = 'mac'): Promise<{ok: true; code: string; command: string; expiresAt: string} | {ok: false; error: string}> {
-  const c = await ctx();
-  if (!c.ok) return c;
-  try {
-    return await beginEnrolment(c.deps, c.viewer.email, String(name ?? ''), variant === 'cloud' ? 'cloud' : 'mac', c.viewer.isAdmin);
-  } catch (e) {
-    console.error('startEnrolment failed', e);
-    return {ok: false, error: 'Could not make an enrolment code. Try again in a moment.'};
-  }
-}
-
-/** Remove a Mac: its next request returns 401. The owner or an admin only. */
-export async function revokeWorker(workerId: string): Promise<ActionResult> {
-  const c = await ctx();
-  if (!c.ok) return c;
-  try {
-    return await revokeWorkerFor(c.deps, c.viewer, String(workerId));
-  } catch (e) {
-    console.error('revokeWorker failed', e);
-    return {ok: false, error: 'Could not remove the Mac. Try again in a moment.'};
-  }
-}
-
 /** Confirm a sync that ended in review: apply its staged imports (the requester or an admin). */
 export async function confirmSyncReview(jobId: string): Promise<ActionResult> {
   const c = await ctx();
@@ -83,17 +59,5 @@ export async function confirmSyncReview(jobId: string): Promise<ActionResult> {
   } catch (e) {
     console.error('confirmSyncReview failed', e);
     return {ok: false, error: 'Could not confirm the sync. Try again in a moment.'};
-  }
-}
-
-/** An admin sets (or clears with an empty string) the cloud worker's remote browser address. */
-export async function setRemoteBrowserUrl(workerId: string, url: string): Promise<ActionResult> {
-  const c = await ctx();
-  if (!c.ok) return c;
-  try {
-    return await setRemoteUrlFor(c.deps, c.viewer, String(workerId), String(url ?? ''));
-  } catch (e) {
-    console.error('setRemoteBrowserUrl failed', e);
-    return {ok: false, error: 'Could not save the address. Try again in a moment.'};
   }
 }
