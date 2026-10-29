@@ -4,9 +4,11 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
 import type {MatchTier} from './goldline-sku-match';
-import {formSpots, type FormSpot} from './goldline-sku-tags';
+import {formSpots, watsonsName, type FormSpot} from './goldline-sku-tags';
 import {MANIFESTS} from './goldline-extract';
-import {latestDecisions, type DecisionInfo} from './goldline-sku-undo';
+import {latestFromLog, readDecisionLog, type DecisionInfo, type LogRow} from './goldline-sku-undo';
+import {buildActivity, type ActivityEvent} from './goldline-sku-activity';
+import {itemDisplayName} from './goldline-item-name';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
 // lives on products.sku_code (every sales reader joins on it); chain_skus holds the
@@ -57,6 +59,7 @@ export type SkuLinkData = {
   decommissioned: DecommissionedItem[]; // retired items with no Watsons SKU (f2c)
   notes: Record<string, ItemNote>; // latest note per item code (f2d)
   decisions: Record<string, DecisionInfo>; // latest decision per `sku:CODE` / `item:CODE`, for Undo (f2e)
+  activity: ActivityEvent[]; // who did what, newest first (log plus older history)
   formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
@@ -77,10 +80,10 @@ const item = (p: ProductRow): SkuLinkItem => ({
 });
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
-  const [products, chain, rollup, reviews, notes, decisions] = await Promise.all([
+  const [products, chain, rollup, reviews, notes, log] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
@@ -111,10 +114,10 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
     fetchAllRows('item_notes', (from, to) =>
       supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to),
     ) as unknown as Promise<Array<{item_code: string; note: string; note_by: string | null; note_at: string}>>,
-    // Undo is a nicety: if the log can't be read, the page still works without it.
-    latestDecisions(companyId).catch((e) => {
+    // Undo and activity are niceties: if the log can't be read, the page still works without them.
+    readDecisionLog(companyId).catch((e) => {
       console.error('sku_decision_log read failed', e);
-      return {} as Record<string, DecisionInfo>;
+      return [] as LogRow[];
     }),
   ]);
   const reviewBySku = new Map(
@@ -131,6 +134,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
     ]),
   );
   const byItem = new Map(products.map((p) => [p.item_code, p]));
+  const chainName = new Map(chain.map((c) => [c.sku_code, c.name]));
   const bySku = new Map(products.filter((p) => p.sku_code?.trim()).map((p) => [p.sku_code!.trim(), p]));
 
   const rows: SkuLinkRow[] = chain.map((c) => {
@@ -158,7 +162,30 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
-    decisions,
+    decisions: latestFromLog(log),
+    activity: buildActivity({
+      log: log.map((l) => ({
+        id: Number(l.id),
+        target: l.target,
+        key: l.key,
+        action: l.action,
+        summary: l.summary,
+        done_by: l.done_by,
+        done_at: l.done_at,
+        undone_by: l.undone_by,
+        undone_at: l.undone_at,
+        noteRemoved: l.action === 'note' && !(l.after?.notes?.[l.key] ?? null),
+        itemCode: l.action === 'unlinked' ? (Object.entries(l.before?.products ?? {}).find(([, p]) => p?.sku_code === l.key)?.[0] ?? null) : null,
+      })),
+      reviews,
+      notes,
+      retired: products.filter((p) => p.retired_at).map((p) => ({item_code: p.item_code, retired_by: p.retired_by ?? null, retired_at: p.retired_at as string})),
+      skuName: (k) => watsonsName(chainName.get(k) ?? k),
+      itemName: (k) => {
+        const p = byItem.get(k);
+        return p ? itemDisplayName(p.product_line, p.variant, k) : k;
+      },
+    }),
     notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
     decommissioned: products
       .filter((p) => !p.sku_code?.trim() && p.retired_at)

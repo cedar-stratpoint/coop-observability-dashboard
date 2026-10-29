@@ -78,14 +78,18 @@ export async function recordDecision(
   return Number((res.data as {id: number}).id);
 }
 
-type LogRow = {id: number; target: DecisionTarget; key: string; action: DecisionAction; summary: string | null; done_by: string | null; done_at: string; before: Snap; after: Snap; undone_by: string | null; undone_at: string | null};
+export type LogRow = {id: number; target: DecisionTarget; key: string; action: DecisionAction; summary: string | null; done_by: string | null; done_at: string; before: Snap; after: Snap; undone_by: string | null; undone_at: string | null};
 
-/** The latest decision per SKU and per item, keyed `sku:CODE` / `item:CODE`. */
-export async function latestDecisions(companyId: string): Promise<Record<string, DecisionInfo>> {
+/** Every logged decision, newest first (the page reads it once for Undo and for activity). */
+export async function readDecisionLog(companyId: string): Promise<LogRow[]> {
   const supa = db();
-  const rows = (await fetchAllRows('sku_decision_log', (from, to) =>
+  return (await fetchAllRows('sku_decision_log', (from, to) =>
     supa.from('sku_decision_log').select('id,target,key,action,summary,done_by,done_at,before,after,undone_by,undone_at').eq('company_id', companyId).order('id', {ascending: false}).range(from, to),
   )) as unknown as LogRow[];
+}
+
+/** The latest decision per SKU and per item, keyed `sku:CODE` / `item:CODE`. */
+export function latestFromLog(rows: LogRow[]): Record<string, DecisionInfo> {
   const out: Record<string, DecisionInfo> = {};
   for (const r of rows) {
     const k = `${r.target}:${r.key}`;
