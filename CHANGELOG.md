@@ -10,8 +10,8 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
-## 2026-10-29 — Shopee sync card shows on the newest digest
-Found on staging: the newest digest ended Aug 12 while Shopee was missing Oct 19 to 28, so the card (scoped to the viewed window) and the Sync button were hidden. Decision: the newest digest uses the global status, since gaps after it are exactly what the sync fills; older digests and the scoped note stay as they were. No database change.
+## 2026-10-29 — Shopee sync card is no longer scoped to the viewed week
+Found on staging: the newest digest ended Aug 12 while Shopee was missing Oct 19 to 28, so the card and the Sync button were hidden. Decision (owner): drop the per-window scoping altogether, because it confused more than it helped. The card now always speaks about every missing day, on any week, and `scopeToWindow` and its "also loads N days from other weeks" note are removed. No database change.
 
 ## v1.19.2 (2026-10-29): sales totals cache hardened (prod fix)
 Ships the hardening (below) to prod: cached sales totals follow the committed sales files, refresh after a failed upload or delete, and stay put through SKU linking decisions. Code only; no database change. SKU linking's decision trail was re-checked end to end on Staging.

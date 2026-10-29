@@ -49,19 +49,6 @@ export function cardVisible(s: ShopeeSyncStatus | null, now: Date): boolean {
 /** The small "Behind" tag on the Shopee chip. */
 export const behindTag = (s: ShopeeSyncStatus | null): boolean => Boolean(s && !s.mock && s.missingDays.length > 0);
 
-/**
- * The status as seen from the viewed window: only the missing days inside [from, to] (YYYY-MM-DD) count, so an older week with no gaps shows no card.
- * `outsideWindow` is how many missing days the sync will also load that are not in this window.
- */
-export function scopeToWindow(s: ShopeeSyncStatus, from: string, to: string): ShopeeSyncStatus & {outsideWindow: number};
-export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null;
-export function scopeToWindow(s: ShopeeSyncStatus | null, from: string, to: string): (ShopeeSyncStatus & {outsideWindow: number}) | null {
-  if (!s) return null;
-  const inside = s.missingDays.filter((d) => d >= from && d <= to);
-  const outside = s.missingDays.length - inside.length;
-  return {...s, missingDays: inside, moreMissing: outside === 0 ? s.moreMissing : 0, outsideWindow: outside};
-}
-
 export function syncButton(s: ShopeeSyncStatus): {label: string; disabled: boolean; reason: string | null} {
   if (s.canSync.ok) return {label: `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
   const other = s.currentJob && !s.currentJob.mine;

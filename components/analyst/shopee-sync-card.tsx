@@ -95,7 +95,7 @@ function Steps({job}: {job: SyncJobView}) {
   );
 }
 
-export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus & {outsideWindow?: number}; now: Date; refresh: () => Promise<void>}) {
+export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus; now: Date; refresh: () => Promise<void>}) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const job = status.currentJob ?? status.lastJob;
@@ -193,7 +193,6 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
                 {rangeText(status.missingDays)}
                 {status.moreMissing > 0 ? `, ${status.moreMissing} more after this sync` : ''}
               </div>
-              {status.outsideWindow ? <div className="text-[13px] text-muted-foreground">Sync also loads {status.outsideWindow} missing {status.outsideWindow === 1 ? 'day' : 'days'} from other weeks.</div> : null}
             </div>
           )}
           {showMainButton && (
