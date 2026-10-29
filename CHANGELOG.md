@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-10-29 — SKU linking: Recent activity beside the cards; the full trail is its own page
+Recent activity moves to a right-hand column (25%) next to the cards and "How the numbers fit" (75%) on wide screens; it stacks under them on smaller ones. "See all" now opens its own page, **/stock/skus/activity**, instead of a dialog: a "← SKU linking" link back, the whole trail grouped by day, search by product, code or person, and the count of changes. Clicking an entry there goes back to SKU linking with that SKU or item found (`?find=sku:CODE` or `item:CODE`, dropped from the address once used); `?company=` is kept on every link. The page reads only what activity needs (`getSkuActivity`, no sales rollup), so it loads fast.
+
 ## v1.18.1 (2026-10-29): SKU linking Linked card and Recent activity (prod release)
 Ships the Linked card and Recent activity with the full trail (below) to prod. Code only: the activity reads tables already on Nichido prod (decision log, decisions, notes, decommissions).
 

@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
-import {useRouter} from 'next/navigation';
+import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {Archive, ArchiveRestore, Loader2, NotebookPen, RotateCcw, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
 import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, undoDecisionAction, unlinkSkuAction} from '@/app/stock/skus/actions';
@@ -195,6 +195,21 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     setQuery(e.key);
     requestAnimationFrame(() => document.getElementById('sku-list-top')?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'}));
   };
+  // Arriving from the activity page (?find=sku:CODE or item:CODE): go to it, then drop the param.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const findParam = searchParams.get('find');
+  useEffect(() => {
+    if (!findParam) return;
+    const m = /^(sku|item):(.+)$/.exec(findParam);
+    if (m) jumpTo({id: 'find', at: '', by: null, kind: 'note', text: '', target: m[1] as 'sku' | 'item', key: m[2]});
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('find');
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, {scroll: false});
+    // Only on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findParam]);
   const tag = SKU_TAGS[filter];
   const TabIcon = TAB_ICON[filter];
 
@@ -207,6 +222,9 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {/* Three jobs, one card each (Hick's Law): a card filters the table below. Everything
           else (linked, rejected, no units sold) is reached from "For your records". */}
+      {/* Cards and the numbers on the left (75%), recent activity on the right (25%); stacked on smaller screens. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] xl:items-stretch">
+      <div className="flex min-w-0 flex-col gap-4">
       <section aria-label="What needs a decision" className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
         <ActionCard view="check" value={counts.check} title="Check Coop’s match" sub="Approve or reject each one" active={filter === 'check'} onPick={pick} />
         <ActionCard view="choose" value={counts.choose} title="Choose our item" sub="Pick it from our items" active={filter === 'choose'} onPick={pick} />
@@ -238,7 +256,9 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         }
       />
 
+      </div>
       <RecentActivity events={data.activity} onJump={jumpTo} />
+      </div>
 
       <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>

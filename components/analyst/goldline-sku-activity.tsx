@@ -1,15 +1,17 @@
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
-import {Archive, ArchiveRestore, Check, History, Link2, MessageSquare, NotebookPen, RotateCcw, Search, Unlink, X} from 'lucide-react';
+import {useMemo, useState} from 'react';
+import Link from 'next/link';
+import {useSearchParams} from 'next/navigation';
+import {Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, History, Link2, MessageSquare, NotebookPen, RotateCcw, Search, Unlink, X} from 'lucide-react';
 import type {ActivityEvent, ActivityKind} from '@/src/goldline-sku-activity';
-import {Button} from '@/components/ui/button';
-import {ModalShell, useModalExit} from './modal-shell';
+import {GL_PAGE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 
-// "Recent activity" on SKU linking (Oct 29): the 5 latest changes under the numbers table,
-// and "See all" for the whole trail (grouped by day, searchable). Clicking an entry jumps
-// to that SKU or item in the list below.
+// SKU linking activity (Oct 29). "Recent activity" sits beside the cards and numbers table
+// with the 5 latest changes; "See all" opens the whole trail on its own page
+// (/stock/skus/activity, grouped by day, searchable) with a way back. Clicking an entry
+// goes to that SKU or item on SKU linking, in the view it is in now.
 
 const ICON: Record<ActivityKind, typeof Check> = {
   approved: Check,
@@ -49,15 +51,12 @@ const timeOf = (iso: string) => {
   return `${h % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 };
 
-function Entry({e, onJump, showDay}: {e: ActivityEvent; onJump: (e: ActivityEvent) => void; showDay: boolean}) {
+const ENTRY = 'flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left outline-none transition-colors duration-150 hover:bg-muted/50 focus-visible:bg-muted/50';
+
+function Entry({e, onJump, href, showDay}: {e: ActivityEvent; onJump?: (e: ActivityEvent) => void; href?: string; showDay: boolean}) {
   const Icon = ICON[e.kind];
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onJump(e)}
-        className="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left outline-none transition-colors duration-150 hover:bg-muted/50 focus-visible:bg-muted/50"
-      >
+  const body = (
+    <>
         <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full" style={{color: TONE[e.kind], background: `color-mix(in oklab, ${TONE[e.kind]} 14%, transparent)`}}>
           <Icon className="size-3.5" aria-hidden />
         </span>
@@ -67,27 +66,50 @@ function Entry({e, onJump, showDay}: {e: ActivityEvent; onJump: (e: ActivityEven
             {[e.by ?? 'Coop', showDay ? `${dayOf(e.at)}, ${timeOf(e.at)}` : timeOf(e.at)].join(' · ')}
           </span>
         </span>
-      </button>
+    </>
+  );
+  return (
+    <li>
+      {href ? (
+        <Link href={href} className={ENTRY}>
+          {body}
+        </Link>
+      ) : (
+        <button type="button" onClick={() => onJump?.(e)} className={ENTRY}>
+          {body}
+        </button>
+      )}
     </li>
   );
 }
 
+/** Keeps `?company=` (and nothing else) on links between SKU linking and its activity page. */
+function useCompanyQuery(): string {
+  const sp = useSearchParams();
+  const c = sp.get('company');
+  return c ? `company=${encodeURIComponent(c)}` : '';
+}
+
 export function RecentActivity({events, onJump}: {events: ActivityEvent[]; onJump: (e: ActivityEvent) => void}) {
-  const [all, setAll] = useState(false);
+  const cq = useCompanyQuery();
   return (
-    <section aria-label="Recent activity" className="flex flex-col gap-2 rounded-xl border px-4 py-4 sm:px-6">
+    <section aria-label="Recent activity" className="flex h-full min-w-0 flex-col gap-2 rounded-xl border px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-medium">
           <History className="size-4 text-muted-foreground" aria-hidden /> Recent activity
         </h2>
         {events.length > 0 && (
-          <Button size="sm" variant="ghost" className="text-primary" onClick={() => setAll(true)}>
+          <Link
+            href={`/stock/skus/activity${cq ? `?${cq}` : ''}`}
+            className="inline-flex items-center gap-0.5 rounded-sm text-xs font-medium text-primary outline-none underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
             See all {events.length}
-          </Button>
+            <ChevronRight className="size-3.5" aria-hidden />
+          </Link>
         )}
       </div>
       {events.length ? (
-        <ul className="flex flex-col">
+        <ul className="-mx-2 flex flex-col">
           {events.slice(0, 5).map((e) => (
             <Entry key={e.id} e={e} onJump={onJump} showDay />
           ))}
@@ -95,19 +117,14 @@ export function RecentActivity({events, onJump}: {events: ActivityEvent[]; onJum
       ) : (
         <p className="py-2 text-sm text-muted-foreground">No changes yet. Decisions, remarks, notes and undos show up here.</p>
       )}
-      {all && <ActivityDialog events={events} onJump={onJump} onClosed={() => setAll(false)} />}
     </section>
   );
 }
 
-function ActivityDialog({events, onJump, onClosed}: {events: ActivityEvent[]; onJump: (e: ActivityEvent) => void; onClosed: () => void}) {
-  const {closing, close} = useModalExit(onClosed);
+/** The whole trail, its own page, with the way back to SKU linking. */
+export function SkuActivityPage({events}: {events: ActivityEvent[]}) {
+  const cq = useCompanyQuery();
   const [q, setQ] = useState('');
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [close]);
   const groups = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const shown = events.filter((e) => words.every((w) => `${e.text} ${e.by ?? ''}`.toLowerCase().includes(w)));
@@ -115,57 +132,49 @@ function ActivityDialog({events, onJump, onClosed}: {events: ActivityEvent[]; on
     for (const e of shown) g.set(dayOf(e.at), [...(g.get(dayOf(e.at)) ?? []), e]);
     return [...g.entries()];
   }, [events, q]);
+  const back = `/stock/skus${cq ? `?${cq}` : ''}`;
+  const find = (e: ActivityEvent) => `/stock/skus?${[cq, `find=${encodeURIComponent(`${e.target}:${e.key}`)}`].filter(Boolean).join('&')}`;
 
   return (
-    <ModalShell closing={closing} onBackdropClick={close} labelledBy="activity-title" panelClassName="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border bg-popover shadow-lg">
-      <div className="flex flex-col gap-3 border-b px-6 pt-5 pb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
-            <h2 id="activity-title" className="font-heading text-lg font-semibold tracking-tight">
-              Activity on SKU linking
-            </h2>
-            <p className="text-sm text-muted-foreground">Every decision, remark, note and undo, newest first. Click one to go to it.</p>
-          </div>
-          <Button size="icon-sm" variant="ghost" onClick={close} aria-label="Close">
-            <X className="size-4" />
-          </Button>
+    <div className={GL_PAGE}>
+      <header className="flex flex-col gap-3">
+        <Link href={back} className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          <ArrowLeft className="size-4" aria-hidden /> SKU linking
+        </Link>
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Activity</h1>
+          <p className="text-sm text-muted-foreground">Every decision, remark, note and undo on SKU linking, newest first. Click one to go to it.</p>
         </div>
-        <div className="relative">
+      </header>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative max-md:w-full">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
-            autoFocus
+            onChange={(ev) => setQ(ev.target.value)}
             placeholder="Search by product, code or person"
             aria-label="Search activity"
-            className="h-9 w-full rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+            className="h-9 w-80 rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 max-md:w-full"
           />
         </div>
+        <p className="text-xs text-muted-foreground tabular-nums">{events.length} changes in all</p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {groups.length ? (
-          groups.map(([day, list]) => (
-            <div key={day} className="flex flex-col gap-1 pb-3">
-              <p className="sticky top-0 z-10 bg-popover px-2 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{day}</p>
-              <ul className="flex flex-col">
+      {groups.length ? (
+        <div className="flex flex-col gap-6">
+          {groups.map(([day, list]) => (
+            <section key={day} aria-label={day} className="flex flex-col gap-1">
+              <h2 className="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">{day}</h2>
+              <ul className="flex flex-col rounded-xl border p-2">
                 {list.map((e) => (
-                  <Entry
-                    key={e.id}
-                    e={e}
-                    showDay={false}
-                    onJump={(x) => {
-                      onJump(x);
-                      close();
-                    }}
-                  />
+                  <Entry key={e.id} e={e} href={find(e)} showDay={false} />
                 ))}
               </ul>
-            </div>
-          ))
-        ) : (
-          <p className="px-2 py-6 text-center text-sm text-muted-foreground">Nothing matches that search.</p>
-        )}
-      </div>
-    </ModalShell>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">{events.length ? 'Nothing matches that search.' : 'No changes yet.'}</p>
+      )}
+    </div>
   );
 }
