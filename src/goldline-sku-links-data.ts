@@ -8,6 +8,7 @@ import {formSpots, watsonsName, type FormSpot} from './goldline-sku-tags';
 import {MANIFESTS} from './goldline-extract';
 import {latestFromLog, readDecisionLog, type DecisionInfo, type LogRow} from './goldline-sku-undo';
 import {buildActivity, type ActivityEvent} from './goldline-sku-activity';
+import type {SkuMonths} from './goldline-sku-months';
 import {itemDisplayName} from './goldline-item-name';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
@@ -60,6 +61,7 @@ export type SkuLinkData = {
   notes: Record<string, ItemNote>; // latest note per item code (f2d)
   decisions: Record<string, DecisionInfo>; // latest decision per `sku:CODE` / `item:CODE`, for Undo (f2e)
   activity: ActivityEvent[]; // who did what, newest first (log plus older history)
+  skuMonths: SkuMonths; // per Watsons SKU, [month, units, stores] for each monthly file it is in (f2f)
   formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
@@ -134,10 +136,10 @@ export async function getSkuActivity(companyId: string): Promise<ActivityEvent[]
 }
 
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], skuMonths: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
-  const [products, chain, rollup, reviews, notes, log] = await Promise.all([
+  const [products, chain, rollup, reviews, notes, log, months] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
@@ -173,6 +175,17 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       console.error('sku_decision_log read failed', e);
       return [] as LogRow[];
     }),
+    // Month by month is a nicety too: without it the pointers and the panel just don't show.
+    Promise.resolve(supa.rpc('sku_months', {p_company: companyId})).then(
+      (r) => {
+        if (r.error) console.error('sku_months failed', r.error.message);
+        return ((r.data as SkuMonths | null) ?? {}) as SkuMonths;
+      },
+      (e) => {
+        console.error('sku_months failed', e);
+        return {} as SkuMonths;
+      },
+    ),
   ]);
   const reviewBySku = new Map(
     reviews.map((r) => [
@@ -216,6 +229,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
     decisions: latestFromLog(log),
+    skuMonths: months,
     activity: activityFrom(log, reviews, notes, products, chain),
     notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
     decommissioned: products
