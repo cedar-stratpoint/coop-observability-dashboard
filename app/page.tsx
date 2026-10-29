@@ -118,7 +118,7 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
           Shopee sales use the imported daily report (₱{shopee.facts!.toLocaleString()}). The digest published ₱{shopee.published!.toLocaleString()}.
         </p>
       )}
-      <ChannelOverview brief={getBrief()} row={shopee.row} priorRow={priorRow} initialChannels={initial} offline={offline} shopeeSync={{status: syncStatus, at: new Date().toISOString()}} />
+      <ChannelOverview brief={getBrief()} row={shopee.row} priorRow={priorRow} initialChannels={initial} offline={offline} shopeeSync={{status: syncStatus, at: new Date().toISOString(), latest: idx === 0}} />
     </>
   );
 }

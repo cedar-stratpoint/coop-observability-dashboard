@@ -542,10 +542,12 @@ function ChannelDetail({channel, row}: {channel: Channel; row: DigestArchiveRow}
 }
 
 // ── the unified overview ─────────────────────────────────────────────────────────
-export function ChannelOverview({row, priorRow, initialChannels, offline, custom, shopeeSync}: {brief: AnalystBrief; row: DigestArchiveRow; priorRow?: DigestArchiveRow | null; initialChannels: Channel[]; offline?: ChannelMetrics | null; custom?: CustomView | null; shopeeSync?: {status: ShopeeSyncStatus | null; at: string}}) {
+export function ChannelOverview({row, priorRow, initialChannels, offline, custom, shopeeSync}: {brief: AnalystBrief; row: DigestArchiveRow; priorRow?: DigestArchiveRow | null; initialChannels: Channel[]; offline?: ChannelMetrics | null; custom?: CustomView | null; shopeeSync?: {status: ShopeeSyncStatus | null; at: string; latest?: boolean}}) {
   const sync = useShopeeSyncStatus(shopeeSync?.status ?? null, shopeeSync?.at ?? new Date(0).toISOString());
-  // The card speaks about the week on screen: missing days outside it are not this page's gap (a custom range has no single window, so it keeps the global view).
-  const syncView = useMemo(() => (custom ? sync.status : scopeToWindow(sync.status, row.window_from, row.window_to)), [custom, sync.status, row.window_from, row.window_to]);
+  // The card speaks about the week on screen: missing days outside it are not this page's gap (a custom range has no single window, so it keeps the global view). The newest digest keeps the global view too: its days are the freshest data
+  // there is, so gaps after it are exactly what the sync fills (a stale digest would otherwise hide the button).
+  const global = custom || shopeeSync?.latest;
+  const syncView = useMemo(() => (global ? sync.status : scopeToWindow(sync.status, row.window_from, row.window_to)), [global, sync.status, row.window_from, row.window_to]);
   const [selected, setSelected] = useState<Channel[]>(initialChannels.length ? initialChannels : ['shopee', 'lazada', 'website']);
   // Default to Revenue (not Ad spend) so every channel — including offline, which
   // has no ad spend — shows a bar on first paint.
