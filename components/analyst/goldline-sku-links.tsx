@@ -7,6 +7,8 @@ import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow}
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, undoDecisionAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import type {DecisionInfo} from '@/src/goldline-sku-undo';
 import {decisionLabel, UndoDialog} from '@/components/analyst/goldline-undo-dialog';
+import {RecentActivity} from '@/components/analyst/goldline-sku-activity';
+import type {ActivityEvent} from '@/src/goldline-sku-activity';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
@@ -175,6 +177,24 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     setPage(1);
     setSort(DEFAULT_SORT);
   };
+  // From an activity entry to that SKU or item, in whichever view it is in now.
+  const jumpTo = (e: ActivityEvent) => {
+    let view: SkuStatus | null = null;
+    if (e.target === 'sku') view = (Object.keys(lists) as Array<keyof typeof lists>).find((v) => lists[v].some((r) => r.skuCode === e.key)) ?? null;
+    else if (noMatchItems.some((i) => i.itemCode === e.key)) view = 'formOnly';
+    else if (data.decommissioned.some((i) => i.itemCode === e.key)) view = 'decommissioned';
+    else {
+      // A linked item: find it by its Watsons SKU.
+      const r = lists.linked.find((x) => x.linked?.itemCode === e.key);
+      if (r) return (pick('linked'), setQuery(r.skuCode));
+      const s2 = lists.check.find((x) => x.suggestion?.itemCode === e.key);
+      if (s2) return (pick('check'), setQuery(s2.skuCode));
+    }
+    if (!view) return;
+    pick(view);
+    setQuery(e.key);
+    requestAnimationFrame(() => document.getElementById('sku-list-top')?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'}));
+  };
   const tag = SKU_TAGS[filter];
   const TabIcon = TAB_ICON[filter];
 
@@ -187,10 +207,11 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {/* Three jobs, one card each (Hick's Law): a card filters the table below. Everything
           else (linked, rejected, no units sold) is reached from "For your records". */}
-      <section aria-label="What needs a decision" className="grid grid-cols-3 gap-2 sm:gap-4">
+      <section aria-label="What needs a decision" className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
         <ActionCard view="check" value={counts.check} title="Check Coop’s match" sub="Approve or reject each one" active={filter === 'check'} onPick={pick} />
         <ActionCard view="choose" value={counts.choose} title="Choose our item" sub="Pick it from our items" active={filter === 'choose'} onPick={pick} />
         <ActionCard view="formOnly" value={counts.formOnly} title="Sold at Watsons?" sub="On our forms, no Watsons SKU yet" active={filter === 'formOnly'} onPick={pick} />
+        <ActionCard view="linked" value={counts.linked} title="Linked" sub="Done: their sales count" active={filter === 'linked'} onPick={pick} />
       </section>
 
       <NumbersTable
@@ -217,6 +238,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         }
       />
 
+      <RecentActivity events={data.activity} onJump={jumpTo} />
+
       <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
           <TabIcon aria-hidden className="size-3.5" />
@@ -229,7 +252,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div id="sku-list-top" className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3">
         <div className="relative max-md:w-full">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -413,7 +436,7 @@ function UndoneLine({decision}: {decision: DecisionInfo}) {
   );
 }
 
-const CARD_TONE: Record<'check' | 'choose' | 'formOnly', Tone> = {check: 'warn', choose: 'crit', formOnly: 'info'};
+const CARD_TONE: Record<'check' | 'choose' | 'formOnly' | 'linked', Tone> = {check: 'warn', choose: 'crit', formOnly: 'info', linked: 'good'};
 
 /** One job on the page: its count, what it is and what to do. Pressed while it's the table's filter. */
 function ActionCard({
@@ -424,7 +447,7 @@ function ActionCard({
   active,
   onPick,
 }: {
-  view: 'check' | 'choose' | 'formOnly';
+  view: 'check' | 'choose' | 'formOnly' | 'linked';
   value: number;
   title: string;
   sub: string;
