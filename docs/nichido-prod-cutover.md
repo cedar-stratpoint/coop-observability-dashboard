@@ -50,6 +50,7 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 11 | `f2c_product_decommission.sql` | Lance | `products.retired_by`, `products.retired_remark` (who decommissioned an item from SKU linking, and why) |
 | 12 | `f2d_item_notes.sql` | Lance | `item_notes` (the latest note on one of our form items, from SKU linking). **Applied on prod Oct 29** for v1.17.1 |
 | 13 | `f2e_sku_decision_log.sql` | Lance | `sku_decision_log` (each SKU linking decision with the rows it changed, for Undo). **Applied on prod Oct 29** for v1.18.0 |
+| 14 | `f2f_sku_months.sql` | Lance | `sku_months()` (units and stores per Watsons SKU per monthly file, for SKU linking's months view). Staging only so far |
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).
 
