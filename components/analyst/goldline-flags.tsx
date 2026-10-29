@@ -2,7 +2,7 @@
 
 import {Fragment, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, Calculator, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, OctagonAlert, PenLine, RefreshCw, TriangleAlert, Trash2} from 'lucide-react';
+import {ArrowLeft, ArrowRight, Calculator, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, OctagonAlert, PenLine, RefreshCw, TriangleAlert, Trash2} from 'lucide-react';
 import type {AdjustmentReason, AdjustmentRow, BaTile, FlagRow, FlagsData, FormCell, FormCycle, FormRow} from '@/src/goldline-flags-data';
 import {basOf, FLAG_CAUSES, type BaTag, type FlagCause} from '@/src/goldline-checks';
 import {addAdjustmentAction, deleteAdjustmentAction, formPagesAction, logLossAction, remarkFlagAction, runChecksAction, type FlagActionResult} from '@/app/flags/actions';
@@ -10,7 +10,7 @@ import {Card, CardContent} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
-import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_PAGE, GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 import {cn} from '@/lib/utils';
 
 // The flag queue (F7), as decided Oct 26: one tile per store, BA and month with the BA's
@@ -65,7 +65,7 @@ function cellsOf(f: FlagRow): FormCell[] {
 }
 /** For an incorrect row total, the cells it should add up (underlined, not boxed). */
 const partsOf = (f: FlagRow, r: FormRow): FormCell[] =>
-  f.kind === 'row_math' ? (['stockroom', 'drawer', 'selling_area', 'delivery'] as FormCell[]).filter((c) => r[c] != null && (c !== 'delivery' || f.details.counted !== f.details.withDelivery)) : [];
+  f.kind === 'row_math' ? (['stockroom', 'drawer', 'selling_area'] as FormCell[]).filter((c) => r[c] != null) : [];
 // The box style names the cause without colour: solid, dashed, dotted.
 const BORDER: Record<FlagCause, 'solid' | 'dashed' | 'dotted'> = {incorrect_total: 'solid', padding: 'dashed', messy_handwriting: 'dotted'};
 // Column layout of the digital form (fixed, so a note's arrow can land on its cell).
@@ -86,8 +86,7 @@ export function explain(f: FlagRow): string {
     )
       .filter(([, v]) => v != null)
       .map(([k, v], i) => `${i === 0 ? k[0].toUpperCase() + k.slice(1) : k} ${n(v)}`);
-    const sum = d.counted === d.withDelivery ? n(d.counted) : `${n(d.counted)} (${n(d.withDelivery)} with delivery)`;
-    return `${parts.join(' + ') || 'Nothing counted'} = ${sum}, but the ending says ${n(d.written)}.`;
+    return `${parts.join(' + ') || 'Nothing counted'} = ${n(d.counted)}, but the ending says ${n(d.written)}.`;
   }
   if (f.kind === 'zero_or_below') return Number(d.onHand) === 0 ? 'The count is 0.' : `The count is below 0 (${n(d.onHand)}).`;
   if (f.kind === 'unreadable') {
@@ -167,7 +166,7 @@ export function GoldlineFlags({
   const cov = data.coverage.find((c) => c.month === month);
 
   return (
-    <div className={cn('mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6', GL_TILES_MOBILE)}>
+    <div className={cn(GL_PAGE, GL_TILES_MOBILE)}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Flags</h1>
@@ -317,7 +316,7 @@ export function GoldlineFlags({
                   <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">No BAs match.</CardContent>
                 </Card>
               ) : (
-                <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                   {rows.map((t) => (
                     <li key={t.key}>
                       <Tile t={t} onOpen={() => setOpenKey(t.key)} />
@@ -340,23 +339,28 @@ function Tile({t, onOpen}: {t: BaTile; onOpen: () => void}) {
     <button
       type="button"
       onClick={onOpen}
-      className="flex h-full w-full flex-col gap-2.5 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-[border-color,transform] duration-150 ease-out hover:border-foreground/25 active:scale-[0.98]"
-      style={{boxShadow: `inset 3px 0 0 ${toneVar(tag.tone)}`}}
+      className="group flex h-full w-full flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left transition-[border-color,background-color,transform] duration-150 ease-out hover:border-foreground/25 hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.98]"
     >
-      <span className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium">{t.storeName ?? `Store ${t.store_code}`}</span>
-        {/* Full BA name, never shortened (Oct 26). */}
-        <span className="text-sm text-muted-foreground">{t.ba ?? 'BA not named on the form'}</span>
-      </span>
-      <span className="flex flex-wrap items-center gap-2">
+      <span className="flex items-start justify-between gap-3">
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium">{t.storeName ?? `Store ${t.store_code}`}</span>
+          {/* Full BA name, never shortened (Oct 26). */}
+          <span className="text-sm text-muted-foreground">{t.ba ?? 'BA not named on the form'}</span>
+        </span>
         <Pill tone={tag.tone} Icon={tag.Icon}>
           {tag.label}
         </Pill>
-        <span className="text-xs tabular-nums text-muted-foreground">{plural(t.points, 'point')}</span>
       </span>
-      <span className="text-xs text-muted-foreground">{t.points ? breakdown(t) : 'Form in, nothing flagged'}</span>
-      {t.category && t.points > 1 && <span className="text-xs text-muted-foreground">Mostly {CAUSE[t.category].label.toLowerCase()}</span>}
-      <span className="mt-auto pt-1 text-xs font-medium text-foreground underline-offset-4">Open form</span>
+      <span className="flex flex-col gap-1 text-xs text-muted-foreground">
+        <span>
+          <span className="font-medium tabular-nums text-foreground">{plural(t.points, 'point')}</span>
+          {t.points ? ` · ${breakdown(t)}` : ' · form in, nothing flagged'}
+        </span>
+        {t.category && t.points > 1 && <span>Mostly {CAUSE[t.category].label.toLowerCase()}</span>}
+      </span>
+      <span className="mt-auto flex items-center gap-1 border-t border-border/60 pt-3 text-xs font-medium text-foreground">
+        Open form <ArrowRight aria-hidden className="size-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+      </span>
     </button>
   );
 }
@@ -666,7 +670,7 @@ function FlagNote({f, num, company, canEdit, pending, act}: {f: FlagRow; num?: n
   const [qty, setQty] = useState(String(Math.max(1, Math.round(Number(f.details.gap) || 1))));
   const field = 'rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
   return (
-    <Card className="py-0" style={{boxShadow: `inset 3px 0 0 ${toneVar(c.tone)}`}}>
+    <Card className="py-0">
       <CardContent className="flex flex-col gap-2.5 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
           <div className="flex min-w-0 flex-col gap-1">

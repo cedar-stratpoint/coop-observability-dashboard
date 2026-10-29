@@ -22,6 +22,13 @@
 -- the service role (the Coop server) gets through. Functions are security invoker and
 -- executable by service_role only. Run on Nichido STAGING first, PROD after review.
 -- The private storage bucket `goldline-uploads` is created at the end.
+--
+-- Sales money is encrypted at rest AFTER this file: it creates sales with plain
+-- gross_retail / net_of_vat (what migrate-goldline.ts copies into), then
+-- s1_sales_encryption.sql moves them into sales.amounts_enc with a Vault key and
+-- replaces sales_rollup / sales_by_sku, and s2_sales_drop_plaintext.sql drops the plain
+-- columns. A fresh project: this file → (copy) → s1 → s2. The two functions below are
+-- the pre-encryption versions; s1 holds the live ones.
 
 -- ---------------------------------------------------------------------------------
 -- Company mirror (FK target only; not the auth source).
@@ -550,6 +557,57 @@ exception when duplicate_object then null; end $$;
 
 alter table public.products add column if not exists category text;
 alter table public.products add column if not exists retired_at timestamptz;
+-- f2c (Oct 28): who decommissioned an item from SKU linking, and why (optional, ≤500).
+alter table public.products add column if not exists retired_by text;
+alter table public.products add column if not exists retired_remark text;
+do $$ begin
+  alter table public.products add constraint products_retired_remark_len check (retired_remark is null or char_length(retired_remark) <= 500);
+exception when duplicate_object then null; end $$;
+-- f2d (Oct 29): the latest note on one of our form items (SKU linking's "Sold at Watsons?").
+create table if not exists public.item_notes (
+  company_id  text not null references public.companies(id) on delete cascade,
+  item_code   text not null,
+  note        text not null check (char_length(note) between 1 and 500),
+  note_by     text,
+  note_at     timestamptz not null default now(),
+  primary key (company_id, item_code)
+);
+alter table public.item_notes enable row level security;
+revoke all on public.item_notes from anon, authenticated;
+-- f2e (Oct 29): every SKU linking decision with the rows it changed, for Undo (trail kept).
+create table if not exists public.sku_decision_log (
+  id          bigint generated always as identity primary key,
+  company_id  text not null references public.companies(id) on delete cascade,
+  target      text not null check (target in ('sku', 'item')),
+  key         text not null,
+  action      text not null check (action in ('approved', 'rejected', 'linked', 'unlinked', 'remark', 'decommissioned', 'restored', 'note')),
+  summary     text,
+  done_by     text,
+  done_at     timestamptz not null default now(),
+  before      jsonb not null,
+  after       jsonb not null,
+  undone_by   text,
+  undone_at   timestamptz
+);
+create index if not exists sku_decision_log_latest on public.sku_decision_log (company_id, target, key, id desc);
+alter table public.sku_decision_log enable row level security;
+revoke all on public.sku_decision_log from anon, authenticated;
+-- f2f (Oct 29): per Watsons SKU, units and stores in each monthly file (one jsonb value).
+create or replace function public.sku_months(p_company text)
+returns jsonb
+language sql stable security invoker set search_path = public
+as $$
+  select coalesce(jsonb_object_agg(sku_code, months), '{}'::jsonb)
+  from (
+    select sku_code, jsonb_agg(jsonb_build_array(m, units, stores) order by m) as months
+    from (
+      select sku_code, date_trunc('month', period_start)::date as m, coalesce(sum(units), 0)::bigint as units, count(distinct store_code)::int as stores
+      from sales where company_id = p_company group by 1, 2
+    ) x group by sku_code
+  ) y;
+$$;
+revoke all on function public.sku_months(text) from public, anon, authenticated;
+grant execute on function public.sku_months(text) to service_role;
 do $$ begin
   alter table public.products add constraint products_category_check
     check (category is null or category in ('eyes', 'lips', 'face', 'other'));
@@ -690,6 +748,33 @@ as $$
 $$;
 revoke all on function public.sales_months(text) from public, anon, authenticated;
 grant execute on function public.sales_months(text) to service_role;
+
+-- ---------------------------------------------------------------------------------
+-- From f2b_sku_link_reviews.sql (Oct 27): latest SKU link decision and remark.
+--
+-- Decided Oct 27: SKU linking is back in Coop with Approve / Reject on Coop's
+-- suggested matches and an optional remark. Only the latest decision and the latest
+-- remark per Watsons SKU are kept (no history). The link itself stays on
+-- products.sku_code; this table only says who decided what, and why.
+--   action    approved (Coop's suggestion accepted), rejected (turned down),
+--             linked (an item picked by hand), unlinked (a link undone)
+--   item_code the item the action was about
+
+create table if not exists public.sku_link_reviews (
+  company_id  text not null references public.companies(id) on delete cascade,
+  chain       text not null check (chain in ('watsons', 'robinsons')),
+  sku_code    text not null,
+  action      text check (action is null or action in ('approved', 'rejected', 'linked', 'unlinked')),
+  item_code   text,
+  action_by   text,
+  action_at   timestamptz,
+  remark      text check (remark is null or char_length(remark) <= 500),
+  remark_by   text,
+  remark_at   timestamptz,
+  primary key (company_id, chain, sku_code)
+);
+alter table public.sku_link_reviews enable row level security;
+revoke all on public.sku_link_reviews from anon, authenticated;
 
 -- ---------------------------------------------------------------------------------
 -- Storage: private bucket for the uploaded source files (paths are `${companyId}/…`,

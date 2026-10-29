@@ -74,7 +74,7 @@ const leafActive = (href: string, pathname: string, channel: string | null) => {
   }
   if (href === '/offline-sales/orders') return pathname.startsWith('/offline-sales/orders');
   if (href === '/offline-sales/events') return pathname.startsWith('/offline-sales/events');
-  // Goldline: SKU links (/stock/skus) owns its subtree; Inventory owns the rest of /stock.
+  // Goldline: SKU linking (/stock/skus) owns its subtree; Inventory owns the rest of /stock.
   if (href === '/stock') return pathname.startsWith('/stock') && !pathname.startsWith('/stock/skus');
   return pathname.startsWith(href.split('?')[0]);
 };
@@ -225,7 +225,7 @@ export function DashboardShell({
   const overviewTab: NavItem = {href: '/overview', label: 'Overview', icon: BarChart3};
   const storesTab: NavItem = {href: '/stores', label: 'Stores', icon: Store};
   const stockTab: NavItem = {href: '/stock', label: 'Inventory', icon: Package};
-  const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU links', icon: Link2};
+  const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU linking', icon: Link2};
   const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
   const flagsTab: NavItem = {href: '/flags', label: 'Flags', icon: Flag};
   const basTab: NavItem = {href: '/bas', label: 'BAs', icon: Contact};

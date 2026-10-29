@@ -2,11 +2,12 @@
 
 import {useEffect, useRef, useState} from 'react';
 import Link from 'next/link';
-import {AlertTriangle, ArrowRight, Check, ChevronRight, CloudUpload, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
+import {AlertTriangle, ArrowRight, Check, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, itemLabel, itemPercent, summarize} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
+import {UploadIllustration} from '@/components/analyst/upload-illustration';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {SplitForm, StoreOption} from '@/src/goldline-data';
 import {Card, CardContent} from '@/components/ui/card';
@@ -134,14 +135,18 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             }}
             {...dropProps}
             className={cn(
-              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center outline-none transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
+              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center outline-none transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
               dragging ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-muted/40',
               disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
           >
-            <span className={cn('flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground transition-transform duration-200 ease-out', dragging && 'scale-110 bg-primary/15 text-primary')}>
-              {q.preparing ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <CloudUpload className="size-5" aria-hidden />}
-            </span>
+            {q.preparing ? (
+              <span className="flex size-11 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <Loader2 className="size-5 animate-spin" aria-hidden />
+              </span>
+            ) : (
+              <UploadIllustration active={dragging} className="mb-1" />
+            )}
             <span className="text-sm">
               <span className="font-medium">{q.preparing ? 'Preparing pages…' : dragging ? 'Drop to add them' : 'Drop files here'}</span>
               {!dragging && !q.preparing && (

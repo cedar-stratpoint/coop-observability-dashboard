@@ -3,18 +3,37 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
+import {getSalesRollup} from './goldline-ref-data';
 import type {MatchTier} from './goldline-sku-match';
+import {formSpots, watsonsName, type FormSpot} from './goldline-sku-tags';
+import {MANIFESTS} from './goldline-extract';
+import {latestFromLog, readDecisionLog, type DecisionInfo, type LogRow} from './goldline-sku-undo';
+import {buildActivity, type ActivityEvent} from './goldline-sku-activity';
+import type {SkuMonths} from './goldline-sku-months';
+import {itemDisplayName} from './goldline-item-name';
 
 // Watsons SKU links (P1 · F2): which Watsons SKU code is which Nichido item. The link
 // lives on products.sku_code (every sales reader joins on it); chain_skus holds the
-// Watsons list with any suggestion still waiting for an admin. Company-wide data, so
-// the actions behind this only let roles that see every store change it.
+// Watsons list with any suggestion still waiting for an admin; sku_link_reviews keeps
+// the latest decision (approve, reject, link, unlink) and the latest remark per SKU.
+// Company-wide data, so the actions behind this only let roles that see every store
+// change it.
 
 const CHAIN = 'watsons';
 const db = nichidoDb;
 
 export type LinkSource = 'code' | 'match' | 'admin';
-export type SkuLinkItem = {itemCode: string; productLine: string | null; variant: string | null; price: number | null};
+export type SkuLinkItem = {itemCode: string; productLine: string | null; variant: string | null; price: number | null; formSpot: FormSpot | null};
+export type ReviewAction = 'approved' | 'rejected' | 'linked' | 'unlinked';
+export type SkuReview = {
+  action: ReviewAction | null;
+  itemCode: string | null;
+  actionBy: string | null;
+  actionAt: string | null;
+  remark: string | null;
+  remarkBy: string | null;
+  remarkAt: string | null;
+};
 export type SkuLinkRow = {
   skuCode: string;
   name: string;
@@ -24,32 +43,108 @@ export type SkuLinkRow = {
   lastMonth: string | null;
   linked: (SkuLinkItem & {source: LinkSource | null}) | null;
   suggestion: (SkuLinkItem & {tier: MatchTier; score: number}) | null;
+  review: SkuReview | null;
 };
+/** One printed line of the inventory form, with the Watsons SKU it is linked to (if any). */
+export type FormLine = {row: number; itemCode: string; productLine: string | null; name: string; sku: string | null};
+export type FormPage = {page: number; lines: FormLine[]};
+
+/** The latest note on one of our form items (f2d): what, who and when. */
+export type ItemNote = {text: string; by: string | null; at: string};
+
+/** One of our form items marked as no longer made or sold, with who did it and why. */
+export type DecommissionedItem = SkuLinkItem & {at: string | null; by: string | null; remark: string | null};
+
 export type SkuLinkData = {
   rows: SkuLinkRow[];
   unlinkedItems: SkuLinkItem[]; // catalog items with no Watsons SKU yet (for the manual picker)
+  decommissioned: DecommissionedItem[]; // retired items with no Watsons SKU (f2c)
+  notes: Record<string, ItemNote>; // latest note per item code (f2d)
+  decisions: Record<string, DecisionInfo>; // latest decision per `sku:CODE` / `item:CODE`, for Undo (f2e)
+  activity: ActivityEvent[]; // who did what, newest first (log plus older history)
+  skuMonths: SkuMonths; // per Watsons SKU, [month, units, stores] for each monthly file it is in (f2f)
+  formPages: FormPage[]; // the printed inventory form, page by page, for "show on the form"
   totals: {units: number; linkedUnits: number; suggestedUnits: number};
 };
 
-type ProductRow = {item_code: string; product_line: string | null; variant: string | null; unit_price: unknown; sku_code: string | null; sku_linked_by: LinkSource | null; retired_at: string | null};
+type ProductRow = {item_code: string; product_line: string | null; variant: string | null; unit_price: unknown; sku_code: string | null; sku_linked_by: LinkSource | null; retired_at: string | null; retired_by?: string | null; retired_remark?: string | null};
+type ReviewRow = {sku_code: string; action: ReviewAction | null; item_code: string | null; action_by: string | null; action_at: string | null; remark: string | null; remark_by: string | null; remark_at: string | null};
 type ChainRow = {sku_code: string; name: string; subclass: string | null; last_month: string | null; suggested_item_code: string | null; match_tier: MatchTier | null; match_score: unknown};
+
+// Printed order of the inventory form (fixed template), so each item shows its page and row.
+const SPOTS = formSpots();
 
 const item = (p: ProductRow): SkuLinkItem => ({
   itemCode: p.item_code,
   productLine: p.product_line,
   variant: p.variant,
   price: p.unit_price == null ? null : Number(p.unit_price),
+  formSpot: SPOTS.get(p.item_code) ?? null,
 });
 
+type NoteRow = {item_code: string; note: string; note_by: string | null; note_at: string};
+
+/** Activity events from the rows the page already read (see goldline-sku-activity.ts). */
+function activityFrom(log: LogRow[], reviews: ReviewRow[], notes: NoteRow[], products: ProductRow[], chain: Array<Pick<ChainRow, 'sku_code' | 'name'>>): ActivityEvent[] {
+  const byItem = new Map(products.map((p) => [p.item_code, p]));
+  const chainName = new Map(chain.map((c) => [c.sku_code, c.name]));
+  return buildActivity({
+    log: log.map((l) => ({
+      id: Number(l.id),
+      target: l.target,
+      key: l.key,
+      action: l.action,
+      summary: l.summary,
+      done_by: l.done_by,
+      done_at: l.done_at,
+      undone_by: l.undone_by,
+      undone_at: l.undone_at,
+      noteRemoved: l.action === 'note' && !(l.after?.notes?.[l.key] ?? null),
+      itemCode: l.action === 'unlinked' ? (Object.entries(l.before?.products ?? {}).find(([, p]) => p?.sku_code === l.key)?.[0] ?? null) : null,
+    })),
+    reviews,
+    notes,
+    retired: products.filter((p) => p.retired_at).map((p) => ({item_code: p.item_code, retired_by: p.retired_by ?? null, retired_at: p.retired_at as string})),
+    skuName: (k) => watsonsName(chainName.get(k) ?? k),
+    itemName: (k) => {
+      const p = byItem.get(k);
+      return p ? itemDisplayName(p.product_line, p.variant, k) : k;
+    },
+  });
+}
+
+/** The whole activity trail for its own page: the same reads minus the sales rollup. */
+export async function getSkuActivity(companyId: string): Promise<ActivityEvent[]> {
+  if (!nichidoConfigured()) return [];
+  const supa = db();
+  const [products, chain, reviews, notes, log] = await Promise.all([
+    fetchAllRows('products', (from, to) =>
+      supa.from('products').select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at,retired_by,retired_remark').eq('company_id', companyId).order('item_code').range(from, to),
+    ) as unknown as Promise<ProductRow[]>,
+    fetchAllRows('chain_skus', (from, to) => supa.from('chain_skus').select('sku_code,name').eq('company_id', companyId).eq('chain', CHAIN).order('sku_code').range(from, to)) as unknown as Promise<
+      Array<Pick<ChainRow, 'sku_code' | 'name'>>
+    >,
+    fetchAllRows('sku_link_reviews', (from, to) =>
+      supa.from('sku_link_reviews').select('sku_code,action,item_code,action_by,action_at,remark,remark_by,remark_at').eq('company_id', companyId).eq('chain', CHAIN).order('sku_code').range(from, to),
+    ) as unknown as Promise<ReviewRow[]>,
+    fetchAllRows('item_notes', (from, to) => supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to)) as unknown as Promise<NoteRow[]>,
+    readDecisionLog(companyId).catch((e) => {
+      console.error('sku_decision_log read failed', e);
+      return [] as LogRow[];
+    }),
+  ]);
+  return activityFrom(log, reviews, notes, products, chain);
+}
+
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
-  const empty: SkuLinkData = {rows: [], unlinkedItems: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
+  const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], skuMonths: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
   const supa = db();
-  const [products, chain, rollup] = await Promise.all([
+  const [products, chain, rollup, reviews, notes, log, months] = await Promise.all([
     fetchAllRows('products', (from, to) =>
       supa
         .from('products')
-        .select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at')
+        .select('item_code,product_line,variant,unit_price,sku_code,sku_linked_by,retired_at,retired_by,retired_remark')
         .eq('company_id', companyId)
         .order('item_code')
         .range(from, to),
@@ -63,11 +158,44 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
         .order('sku_code')
         .range(from, to),
     ) as unknown as Promise<ChainRow[]>,
-    supa.rpc('sales_rollup', {p_company: companyId}),
+    getSalesRollup(companyId), // cached: the sum decrypts every sales row
+    fetchAllRows('sku_link_reviews', (from, to) =>
+      supa
+        .from('sku_link_reviews')
+        .select('sku_code,action,item_code,action_by,action_at,remark,remark_by,remark_at')
+        .eq('company_id', companyId)
+        .eq('chain', CHAIN)
+        .order('sku_code')
+        .range(from, to),
+    ) as unknown as Promise<ReviewRow[]>,
+    fetchAllRows('item_notes', (from, to) =>
+      supa.from('item_notes').select('item_code,note,note_by,note_at').eq('company_id', companyId).order('item_code').range(from, to),
+    ) as unknown as Promise<Array<{item_code: string; note: string; note_by: string | null; note_at: string}>>,
+    // Undo and activity are niceties: if the log can't be read, the page still works without them.
+    readDecisionLog(companyId).catch((e) => {
+      console.error('sku_decision_log read failed', e);
+      return [] as LogRow[];
+    }),
+    // Month by month is a nicety too: without it the pointers and the panel just don't show.
+    Promise.resolve(supa.rpc('sku_months', {p_company: companyId})).then(
+      (r) => {
+        if (r.error) console.error('sku_months failed', r.error.message);
+        return ((r.data as SkuMonths | null) ?? {}) as SkuMonths;
+      },
+      (e) => {
+        console.error('sku_months failed', e);
+        return {} as SkuMonths;
+      },
+    ),
   ]);
-  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
+  const reviewBySku = new Map(
+    reviews.map((r) => [
+      r.sku_code,
+      {action: r.action, itemCode: r.item_code, actionBy: r.action_by, actionAt: r.action_at, remark: r.remark, remarkBy: r.remark_by, remarkAt: r.remark_at} satisfies SkuReview,
+    ]),
+  );
   const totalsBySku = new Map(
-    ((rollup.data as {bySku?: Array<{sku_code: string; units: unknown; gross: unknown}>} | null)?.bySku ?? []).map((r) => [
+    (rollup.bySku ?? []).map((r) => [
       r.sku_code,
       {units: Number(r.units) || 0, gross: Number(r.gross) || 0},
     ]),
@@ -88,6 +216,7 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       lastMonth: c.last_month,
       linked: linked ? {...item(linked), source: linked.sku_linked_by} : null,
       suggestion: sug && !sug.sku_code ? {...item(sug), tier: c.match_tier ?? 'low', score: Number(c.match_score) || 0} : null,
+      review: reviewBySku.get(c.sku_code) ?? null,
     };
   });
   rows.sort((a, b) => b.units - a.units || a.skuCode.localeCompare(b.skuCode));
@@ -99,6 +228,24 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       .filter((p) => !p.sku_code?.trim() && !p.retired_at)
       .map(item)
       .sort((a, b) => (a.productLine ?? '').localeCompare(b.productLine ?? '') || (a.variant ?? '').localeCompare(b.variant ?? '')),
+    decisions: latestFromLog(log),
+    skuMonths: months,
+    activity: activityFrom(log, reviews, notes, products, chain),
+    notes: Object.fromEntries(notes.map((r) => [r.item_code, {text: r.note, by: r.note_by, at: r.note_at} satisfies ItemNote])),
+    decommissioned: products
+      .filter((p) => !p.sku_code?.trim() && p.retired_at)
+      .map((p) => ({...item(p), at: p.retired_at, by: p.retired_by ?? null, remark: p.retired_remark ?? null}))
+      .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')),
+    // The form in printed order (fixed template), named from the catalog where it can be.
+    formPages: Object.entries(MANIFESTS)
+      .map(([page, items]) => ({
+        page: Number(page),
+        lines: items.map((it, i) => {
+          const p = byItem.get(it.code);
+          return {row: i + 1, itemCode: it.code, productLine: p?.product_line ?? null, name: p?.variant?.trim() || it.product, sku: p?.sku_code?.trim() || null};
+        }),
+      }))
+      .sort((a, b) => a.page - b.page),
     totals: {
       units,
       linkedUnits: rows.reduce((a, r) => a + (r.linked ? r.units : 0), 0),
@@ -141,11 +288,14 @@ export async function linkSku(companyId: string, skuCode: string, itemCode: stri
 }
 
 /** Turn a suggestion down: it is never offered again, and the next best is looked for. */
-export async function dismissSuggestion(companyId: string, skuCode: string): Promise<void> {
+export async function dismissSuggestion(companyId: string, skuCode: string, expected?: string): Promise<string> {
   const supa = db();
   const cur = await supa.from('chain_skus').select('suggested_item_code,dismissed_item_codes').eq('company_id', companyId).eq('chain', CHAIN).eq('sku_code', skuCode).maybeSingle();
   if (cur.error) throw new Error(cur.error.message);
   if (!cur.data?.suggested_item_code) throw new LinkError('There’s no suggestion to turn down.');
+  const rejected = cur.data.suggested_item_code as string;
+  // The page may be stale: never turn down an item the person didn't see.
+  if (expected && expected !== rejected) throw new LinkError('Coop’s suggestion for this SKU changed. Refresh and check it again.');
   const res = await supa
     .from('chain_skus')
     .update({
@@ -159,10 +309,46 @@ export async function dismissSuggestion(companyId: string, skuCode: string): Pro
     .eq('sku_code', skuCode);
   if (res.error) throw new Error(`dismiss failed: ${res.error.message}`);
   await relinkWatsons(companyId);
+  return rejected;
+}
+
+/**
+ * Mark one of our form items as decommissioned (no longer made or sold), or bring it back.
+ * Uses the same retired_at as the Inventory board's Retire, so it leaves SKU matching and
+ * restock; also keeps who and why (f2c). Only items with no Watsons SKU: a linked item is
+ * still selling at Watsons, so unlink it first.
+ */
+export async function setDecommissioned(companyId: string, itemCode: string, on: boolean, by: string | null, remark: string | null): Promise<void> {
+  const supa = db();
+  // pagination-ok: one row by primary key (company_id, item_code).
+  const p = await supa.from('products').select('item_code,sku_code').eq('company_id', companyId).eq('item_code', itemCode).maybeSingle();
+  if (p.error) throw new Error(p.error.message);
+  if (!p.data) throw new LinkError(`Item ${itemCode} isn’t in the catalog.`);
+  if (on && p.data.sku_code) throw new LinkError(`${itemCode} is linked to Watsons SKU ${p.data.sku_code}. Unlink it first.`);
+  const res = await supa
+    .from('products')
+    .update(on ? {retired_at: new Date().toISOString(), retired_by: by, retired_remark: remark} : {retired_at: null, retired_by: null, retired_remark: null})
+    .eq('company_id', companyId)
+    .eq('item_code', itemCode);
+  if (res.error) throw new Error(`decommission failed: ${res.error.message}`);
+}
+
+/** Keep the latest note on one of our items, or remove it (empty text). Separate from decommissioning. */
+export async function saveItemNote(companyId: string, itemCode: string, text: string | null, by: string | null): Promise<void> {
+  const supa = db();
+  // pagination-ok: one row by primary key (company_id, item_code).
+  const p = await supa.from('products').select('item_code').eq('company_id', companyId).eq('item_code', itemCode).maybeSingle();
+  if (p.error) throw new Error(p.error.message);
+  if (!p.data) throw new LinkError(`Item ${itemCode} isn’t in the catalog.`);
+  const note = text?.trim();
+  const res = note
+    ? await supa.from('item_notes').upsert({company_id: companyId, item_code: itemCode, note, note_by: by, note_at: new Date().toISOString()}, {onConflict: 'company_id,item_code'})
+    : await supa.from('item_notes').delete().eq('company_id', companyId).eq('item_code', itemCode);
+  if (res.error) throw new Error(`note save failed: ${res.error.message}`);
 }
 
 /** Undo a link. The pair is remembered as turned down so matching won't redo it. */
-export async function unlinkSku(companyId: string, skuCode: string): Promise<void> {
+export async function unlinkSku(companyId: string, skuCode: string): Promise<string> {
   const supa = db();
   const p = await supa.from('products').select('item_code').eq('company_id', companyId).eq('sku_code', skuCode).limit(1);
   if (p.error) throw new Error(p.error.message);
@@ -183,4 +369,25 @@ export async function unlinkSku(companyId: string, skuCode: string): Promise<voi
     .eq('chain', CHAIN)
     .eq('sku_code', skuCode);
   if (mark.error) throw new Error(`unlink note failed: ${mark.error.message}`);
+  return itemCode;
+}
+
+/**
+ * Keep the latest decision and remark for a SKU. A decision replaces the last one; a
+ * remark replaces the last remark only when one is given, so approving without a note
+ * keeps an earlier note. `action: null` saves just the remark.
+ */
+export async function saveReview(
+  companyId: string,
+  skuCode: string,
+  input: {action: ReviewAction | null; itemCode?: string | null; remark?: string | null; by: string | null},
+): Promise<void> {
+  const now = new Date().toISOString();
+  const remark = input.remark?.trim() || null;
+  const row: Record<string, unknown> = {company_id: companyId, chain: CHAIN, sku_code: skuCode};
+  if (input.action) Object.assign(row, {action: input.action, item_code: input.itemCode ?? null, action_by: input.by, action_at: now});
+  if (remark) Object.assign(row, {remark, remark_by: input.by, remark_at: now});
+  if (!input.action && !remark) return;
+  const res = await db().from('sku_link_reviews').upsert(row, {onConflict: 'company_id,chain,sku_code'});
+  if (res.error) throw new Error(`review save failed: ${res.error.message}`);
 }

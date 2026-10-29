@@ -73,3 +73,35 @@ describe('matchSkus', () => {
     expect(m.find((x) => x.skuCode === '70022220')?.itemCode).not.toBe('BPDB01');
   });
 });
+
+// Wrong suggestions found in the Oct 26 hand check of the 10 Watsons months.
+describe('matchSkus regressions (Oct 26 hand check)', () => {
+  const lashes: CatalogItem[] = ['84331', '84440', '84452', '84453'].map((n) => ({item_code: `TLGL${n.slice(1)}`, product_line: 'Glamour Lashes', variant: `Glamour Lashes ${n}`, unit_price: 150}));
+  it('reads the lash number inside "84331BR" so the lashes are not shifted one row', () => {
+    const skus = [sku('1', 'NICHIDO TRULASHES GLAMOUR LASHES 84331BR', 150), sku('2', 'NICHIDO TRULASHES GLAMOUR LASHES 84440TL', 150), sku('3', 'NICHIDO TRULASHES GLAMOUR LASHES 84452TL', 150), sku('4', 'NICHIDO TRULASHES GLAMOUR LASHES 84453TL', 150)];
+    const m = Object.fromEntries(matchSkus(skus, lashes).map((x) => [x.skuCode, x.itemCode]));
+    expect(m).toEqual({'1': 'TLGL4331', '2': 'TLGL4440', '3': 'TLGL4452', '4': 'TLGL4453'});
+  });
+  it('tells the pink and silver lip brushes apart by the shade initial', () => {
+    const brushes: CatalogItem[] = [
+      {item_code: 'RLBP191', product_line: 'Accessories', variant: 'Ret Lip Brush Aluminum Pink or Violet', unit_price: 60},
+      {item_code: 'RLBS191', product_line: 'Accessories', variant: 'Ret Lip Brush Aluminum Silver', unit_price: 60},
+    ];
+    const m = Object.fromEntries(matchSkus([sku('p', 'NICHIDO RETRACTABLE LIP BRUSH ALUMINUM P', 60), sku('s', 'NICHIDO RETRACTABLE LIP BRUSH ALUMINUM S', 60)], brushes).map((x) => [x.skuCode, x.itemCode]));
+    expect(m).toEqual({p: 'RLBP191', s: 'RLBS191'});
+  });
+  it('lets the price pick the ₱150 matte cake over the ₱185 one', () => {
+    const s = sku('m', 'NICHIDO TWO WAY CKE MTTE ORIENTAL', 150);
+    expect(scorePair(s, catalog[3])).toBeGreaterThan(scorePair(s, catalog[2]));
+  });
+  it('does not offer a ₱160 item to an ₱88 SKU', () => {
+    const s = sku('b', 'NICHIDO TRUE COLORS POWDER BLUSH COOL RU', 88);
+    const item: CatalogItem = {item_code: 'TCPBCR04', product_line: 'True Colors Powder Blush', variant: 'Powder Blush Cool Rum', unit_price: 160};
+    expect(matchSkus([s], [item]).find((x) => x.tier !== 'low')).toBeUndefined();
+  });
+  it('does not match item codes by their digits alone (FP01202 is not TSP01202)', () => {
+    const s = sku('f', 'NICHIDO FINAL POWDER IVORY GLOW FP01202', 200);
+    const tsp: CatalogItem = {item_code: 'TSP01202', product_line: 'Translucent Setting Powder', variant: 'Ivory Glow', unit_price: 240};
+    expect(matchSkus([s], [tsp]).find((x) => x.tier === 'high')).toBeUndefined();
+  });
+});

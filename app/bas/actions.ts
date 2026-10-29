@@ -4,9 +4,9 @@ import {revalidatePath} from 'next/cache';
 import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {assignBa, BaError, importBas} from '@/src/goldline-ba-data';
+import {assignBa, BaError} from '@/src/goldline-ba-data';
 
-// Actions behind the BA list. Each re-derives the tenant context, re-checks write
+// Actions behind the BA list (BAs come from the forms; /bas only corrects a store's BA). Each re-derives the tenant context, re-checks write
 // capability, and passes the role's store scope down.
 
 export type BaActionResult = {ok: true; note: string} | {ok: false; error: string};
@@ -39,15 +39,5 @@ export async function assignBaAction(input: {company: string | null; store: stri
   return run(input.company, async (e) => {
     const r = await assignBa(e.companyId, e.scope, {store: input.store, name: input.name ?? '', from: input.from, by: e.by});
     return r.unchanged && !r.filled ? 'Already this store’s BA.' : `Saved.${filledNote(r.filled)}`;
-  });
-}
-
-export async function importBasAction(input: {company: string | null; text: string; from: string}): Promise<BaActionResult> {
-  if (!DATE.test(input.from ?? '')) return {ok: false, error: 'Pick the date the list starts.'};
-  if (typeof input.text !== 'string' || input.text.length > 100_000) return {ok: false, error: 'Paste a shorter list.'};
-  return run(input.company, async (e) => {
-    const r = await importBas(e.companyId, e.scope, {text: input.text, from: input.from, by: e.by});
-    const skipped = r.errors.length ? ` Skipped ${r.errors.length}: ${r.errors.slice(0, 3).join(' · ')}${r.errors.length > 3 ? ' …' : ''}` : '';
-    return `Saved ${r.assigned} ${r.assigned === 1 ? 'store' : 'stores'}.${filledNote(r.filled)}${skipped}`;
   });
 }

@@ -1,19 +1,33 @@
 'use server';
 
 import {revalidatePath, revalidateTag} from 'next/cache';
+import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
-import {dismissSuggestion, linkSku, LinkError, unlinkSku} from '@/src/goldline-sku-links-data';
+import {dismissSuggestion, linkSku, LinkError, saveItemNote, saveReview, setDecommissioned, unlinkSku} from '@/src/goldline-sku-links-data';
+import {recordDecision, undoDecision, UndoError} from '@/src/goldline-sku-undo';
 
 // Actions behind the Watsons SKU links screen. Links decide which sales count for which
-// item across every store, so only a role that sees every store may change them.
+// item across every store, so only a role that sees every store may change them. Every
+// decision is recorded with who made it and an optional remark (latest only).
 
-export type LinkActionResult = {ok: true} | {ok: false; error: string};
+// `undoId`: the logged decision, so the page can offer Undo right away.
+export type LinkActionResult = {ok: true; undoId?: number | null} | {ok: false; error: string};
 
 const SKU = /^[0-9A-Za-z-]{1,40}$/;
 const ITEM = /^.{1,80}$/;
+const REMARK_MAX = 500;
+
+type Base = {company: string | null; sku: string; remark?: string | null};
+
+const remarkOf = (r: string | null | undefined) => (r ?? '').trim().slice(0, REMARK_MAX) || null;
+
+async function actor(): Promise<string | null> {
+  const u = (await auth())?.user;
+  return u?.name?.trim() || u?.email || null;
+}
 
 async function linkerContext(company: string | null) {
   const ctx = await getDataContext(company);
@@ -30,33 +44,128 @@ function refresh(companyId: string) {
   revalidatePath('/flags');
 }
 
-async function run(company: string | null, fn: (companyId: string) => Promise<void>): Promise<LinkActionResult> {
+async function run(company: string | null, fn: (companyId: string) => Promise<unknown>, opts: {recheck?: boolean} = {}): Promise<LinkActionResult> {
   const c = await linkerContext(company);
   if ('error' in c) return {ok: false, error: c.error as string};
   try {
-    await fn(c.companyId);
+    const out = await fn(c.companyId);
     // A link decides which sales count for an item, so the form vs. sales checks follow it.
-    await runChecks(c.companyId).catch((e) => console.error('runChecks after SKU link change', e));
+    if (opts.recheck !== false) await runChecks(c.companyId).catch((e) => console.error('runChecks after SKU link change', e));
     refresh(c.companyId);
-    return {ok: true};
+    return {ok: true, undoId: typeof out === 'number' ? out : null};
   } catch (e) {
-    if (e instanceof LinkError) return {ok: false, error: e.message};
+    if (e instanceof LinkError || e instanceof UndoError) return {ok: false, error: e.message};
     console.error('sku link action failed', e);
     return {ok: false, error: 'Couldn’t save that. Please try again.'};
   }
 }
 
-export async function linkSkuAction(input: {company: string | null; sku: string; item: string}): Promise<LinkActionResult> {
+/** Approve Coop's suggestion: link the SKU to the item it suggested. */
+export async function approveSuggestionAction(input: Base & {item: string}): Promise<LinkActionResult> {
   if (!SKU.test(input.sku ?? '') || !ITEM.test(input.item ?? '')) return {ok: false, error: 'Pick a Watsons SKU and an item.'};
-  return run(input.company, (companyId) => linkSku(companyId, input.sku, input.item));
+  const by = await actor();
+  return run(input.company, (companyId) =>
+    recordDecision(companyId, {target: 'sku', key: input.sku, action: 'approved', summary: input.item, by}, async () => {
+      await linkSku(companyId, input.sku, input.item);
+      await saveReview(companyId, input.sku, {action: 'approved', itemCode: input.item, remark: remarkOf(input.remark), by});
+    }),
+  );
 }
 
-export async function dismissSuggestionAction(input: {company: string | null; sku: string}): Promise<LinkActionResult> {
-  if (!SKU.test(input.sku ?? '')) return {ok: false, error: 'Pick a Watsons SKU.'};
-  return run(input.company, (companyId) => dismissSuggestion(companyId, input.sku));
+/** Reject Coop's suggestion: it is never offered again, and the next best is looked for. */
+export async function rejectSuggestionAction(input: Base & {item: string}): Promise<LinkActionResult> {
+  if (!SKU.test(input.sku ?? '') || !ITEM.test(input.item ?? '')) return {ok: false, error: 'Pick a Watsons SKU.'};
+  const by = await actor();
+  // Turning one down can auto-link a strong next match, so the checks still re-run.
+  return run(input.company, (companyId) =>
+    recordDecision(companyId, {target: 'sku', key: input.sku, action: 'rejected', summary: input.item, by}, async () => {
+      const rejected = await dismissSuggestion(companyId, input.sku, input.item);
+      await saveReview(companyId, input.sku, {action: 'rejected', itemCode: rejected, remark: remarkOf(input.remark), by});
+    }),
+  );
 }
 
-export async function unlinkSkuAction(input: {company: string | null; sku: string}): Promise<LinkActionResult> {
+/** Link a SKU to an item picked by hand. */
+export async function linkSkuAction(input: Base & {item: string}): Promise<LinkActionResult> {
+  if (!SKU.test(input.sku ?? '') || !ITEM.test(input.item ?? '')) return {ok: false, error: 'Pick a Watsons SKU and an item.'};
+  const by = await actor();
+  return run(input.company, (companyId) =>
+    recordDecision(companyId, {target: 'sku', key: input.sku, action: 'linked', summary: input.item, by}, async () => {
+      await linkSku(companyId, input.sku, input.item);
+      await saveReview(companyId, input.sku, {action: 'linked', itemCode: input.item, remark: remarkOf(input.remark), by});
+    }),
+  );
+}
+
+/** Undo a link. The pair is remembered as turned down so matching won't redo it. */
+export async function unlinkSkuAction(input: Base): Promise<LinkActionResult> {
   if (!SKU.test(input.sku ?? '')) return {ok: false, error: 'Pick a Watsons SKU.'};
-  return run(input.company, (companyId) => unlinkSku(companyId, input.sku));
+  const by = await actor();
+  return run(input.company, (companyId) =>
+    recordDecision(companyId, {target: 'sku', key: input.sku, action: 'unlinked', by}, async () => {
+      const item = await unlinkSku(companyId, input.sku);
+      await saveReview(companyId, input.sku, {action: 'unlinked', itemCode: item, remark: remarkOf(input.remark), by});
+    }),
+  );
+}
+
+/** Save a remark on its own (replaces the last one). */
+export async function saveRemarkAction(input: Base): Promise<LinkActionResult> {
+  if (!SKU.test(input.sku ?? '')) return {ok: false, error: 'Pick a Watsons SKU.'};
+  const remark = remarkOf(input.remark);
+  if (!remark) return {ok: false, error: 'Write a remark first.'};
+  const by = await actor();
+  return run(input.company, (companyId) => recordDecision(companyId, {target: 'sku', key: input.sku, action: 'remark', by}, () => saveReview(companyId, input.sku, {action: null, remark, by})), {recheck: false});
+}
+
+/**
+ * Mark one of our form items as decommissioned (no longer made or sold), with an optional
+ * remark, or bring it back. Recorded with who did it; leaves SKU matching and restock.
+ */
+export async function setDecommissionedAction(input: {company: string | null; item: string; on: boolean; remark?: string | null}): Promise<LinkActionResult> {
+  const c = await linkerContext(input.company);
+  if ('error' in c) return {ok: false, error: c.error as string};
+  if (!ITEM.test(input.item ?? '')) return {ok: false, error: 'Item not found.'};
+  try {
+    const by = await actor();
+    const undoId = await recordDecision(c.companyId, {target: 'item', key: input.item, action: input.on ? 'decommissioned' : 'restored', by}, () =>
+      setDecommissioned(c.companyId, input.item, Boolean(input.on), by, input.on ? remarkOf(input.remark) : null),
+    );
+    refresh(c.companyId);
+    return {ok: true, undoId};
+  } catch (err) {
+    if (err instanceof LinkError) return {ok: false, error: err.message};
+    console.error('setDecommissionedAction', err);
+    return {ok: false, error: 'Could not update the item. Please try again.'};
+  }
+}
+
+/** Save the latest note on one of our items (empty removes it). Kept separate from decommissioning. */
+export async function saveItemNoteAction(input: {company: string | null; item: string; note: string | null}): Promise<LinkActionResult> {
+  const c = await linkerContext(input.company);
+  if ('error' in c) return {ok: false, error: c.error as string};
+  if (!ITEM.test(input.item ?? '')) return {ok: false, error: 'Item not found.'};
+  try {
+    const by = await actor();
+    const undoId = await recordDecision(c.companyId, {target: 'item', key: input.item, action: 'note', by}, () => saveItemNote(c.companyId, input.item, remarkOf(input.note), by));
+    refresh(c.companyId);
+    return {ok: true, undoId};
+  } catch (err) {
+    if (err instanceof LinkError) return {ok: false, error: err.message};
+    console.error('saveItemNoteAction', err);
+    return {ok: false, error: 'Could not save the note. Please try again.'};
+  }
+}
+
+/**
+ * Undo the latest decision on a Watsons SKU or one of our items (f2e). Restores exactly
+ * the rows it changed, only if nothing has changed them since; the log keeps who undid it.
+ */
+export async function undoDecisionAction(input: {company: string | null; id: number}): Promise<LinkActionResult> {
+  const id = Number(input.id);
+  if (!Number.isInteger(id) || id <= 0) return {ok: false, error: 'Nothing to undo.'};
+  const by = await actor();
+  return run(input.company, async (companyId) => {
+    await undoDecision(companyId, id, by);
+  });
 }
