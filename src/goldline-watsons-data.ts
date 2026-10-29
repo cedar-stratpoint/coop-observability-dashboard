@@ -4,6 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {upsertSales} from './goldline-data';
 import {categoryFromSubclass, itemCodeFromName, type Category, type WatsonsWorkbook} from './goldline-pos-xlsx';
 import {matchSkus, type CatalogItem} from './goldline-sku-match';
+import {getSalesRollup, readSalesRollup} from './goldline-ref-data';
 
 // Apply one month of Watsons POS Sales Data (P1 · F2, F4) to Goldline's Nichido tables.
 // The workbook is authoritative for Watsons:
@@ -141,7 +142,7 @@ export async function applyWatsonsMonth(
   }
 
   // 5 · Name/price/number matching for the rest, now that this month's sales count too.
-  const matched = await relinkWatsons(companyId);
+  const matched = await relinkWatsons(companyId, {freshSales: true}); // this month's sales just changed
   for (const m of matched.linked) {
     const p = byItem.get(m.itemCode);
     if (p) p.sku_code = m.skuCode;
@@ -192,7 +193,7 @@ export async function applyWatsonsMonth(
  * chain_skus as suggestions. Pairs an admin turned down are never offered again.
  * Safe to run any time; existing links are never changed.
  */
-export async function relinkWatsons(companyId: string): Promise<{linked: Array<{skuCode: string; itemCode: string}>; suggested: number}> {
+export async function relinkWatsons(companyId: string, opts: {freshSales?: boolean} = {}): Promise<{linked: Array<{skuCode: string; itemCode: string}>; suggested: number}> {
   const supa = db();
   const [productsRes, skuRows, rollup] = await Promise.all([
     fetchAllRows('products', (from, to) =>
@@ -212,13 +213,13 @@ export async function relinkWatsons(companyId: string): Promise<{linked: Array<{
         .order('sku_code')
         .range(from, to),
     ),
-    supa.rpc('sales_rollup', {p_company: companyId}),
+    // Cached totals for a decision; straight from the database right after a sales upload.
+    opts.freshSales ? readSalesRollup(companyId) : getSalesRollup(companyId),
   ]);
-  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
   const products = productsRes as unknown as Array<CatalogItem & {sku_code: string | null; retired_at: string | null}>;
   const skus = skuRows as unknown as Array<{sku_code: string; name: string; dismissed_item_codes: string[] | null; suggested_item_code: string | null}>;
   const totals = new Map(
-    ((rollup.data as {bySku?: Array<{sku_code: string; units: unknown; gross: unknown}>} | null)?.bySku ?? []).map((r) => [
+    (rollup.bySku ?? []).map((r) => [
       r.sku_code,
       {units: Number(r.units) || 0, gross: Number(r.gross) || 0},
     ]),

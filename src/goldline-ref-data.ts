@@ -10,8 +10,9 @@ import {clampSettings, DEFAULT_FORECAST_SETTINGS, type ForecastSettings} from '.
 // for up to REVALIDATE_SECONDS, and expired immediately by the writes that change them
 // (see glTags + app/stock/actions.ts), so an edit shows on the next load.
 //
-// Never cached here: counts, sales, uploads, shipments — they change with every
-// upload / action and are big; they're read fresh.
+// Never cached here: counts, uploads, shipments, and sales rows — they change with
+// every upload / action and are big; they're read fresh. The one exception is the sales
+// *totals* (getSalesRollup below), which are slow to add up and change only on upload.
 
 const REVALIDATE_SECONDS = 600;
 
@@ -22,6 +23,7 @@ export const glTags = {
   stores: (companyId: string) => `gl-stores:${companyId}`,
   supply: (companyId: string) => `gl-supply:${companyId}`,
   forecast: (companyId: string) => `gl-forecast:${companyId}`,
+  sales: (companyId: string) => `gl-sales:${companyId}`,
 };
 
 export type GlProduct = {
@@ -142,4 +144,45 @@ export function getStoreScope(companyId: string): Promise<StoreScope[]> {
 /** Store codes in scope, for the restock (P3) and anything that should skip quiet stores. */
 export async function inScopeStores(companyId: string): Promise<Set<string>> {
   return new Set((await getStoreScope(companyId)).filter((s) => s.in_scope).map((s) => s.store_code));
+}
+
+export type SalesRollup = {
+  byStore?: Array<{store_code: string; units: unknown; gross: unknown; net: unknown; sku_count: unknown}>;
+  bySku?: Array<{sku_code: string; units: unknown; gross: unknown; net: unknown}>;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+};
+
+// Sales totals per store and per SKU (sales_rollup). Adding them up decrypts every sales
+// row (472k on prod, about 5 s), and two or three loads at once went past the database
+// timeout (Oct 29). Sales change only when a sales file is committed or deleted, and
+// those paths expire glTags.sales, so the totals are cached for an hour and served stale
+// while a background refresh runs (a failed refresh keeps the last good totals).
+const SALES_REVALIDATE_SECONDS = 3600;
+
+// One sales_rollup at a time per company on this server: loads that arrive while it runs
+// share it instead of starting their own, which is what pushed it past the timeout.
+const rollupInFlight = new Map<string, Promise<SalesRollup>>();
+
+/** sales_rollup straight from the database, sharing a run already in progress. */
+export function readSalesRollup(companyId: string): Promise<SalesRollup> {
+  let run = rollupInFlight.get(companyId);
+  if (!run) {
+    run = (async () => {
+      const res = await db().rpc('sales_rollup', {p_company: companyId});
+      if (res.error) throw new Error(`sales_rollup failed: ${res.error.message}`);
+      return (res.data ?? {}) as SalesRollup;
+    })().finally(() => rollupInFlight.delete(companyId));
+    rollupInFlight.set(companyId, run);
+  }
+  return run;
+}
+
+/** Cached sales totals for the SKU linking and Stores pages and SKU re-matching. */
+export function getSalesRollup(companyId: string): Promise<SalesRollup> {
+  if (!configured()) return Promise.resolve({});
+  return unstable_cache(() => readSalesRollup(companyId), ['gl-sales-rollup', companyId], {
+    tags: [glTags.sales(companyId)],
+    revalidate: SALES_REVALIDATE_SECONDS,
+  })();
 }
