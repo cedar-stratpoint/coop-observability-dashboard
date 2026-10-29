@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.18.1 (2026-10-29): SKU linking Linked card and Recent activity (prod release)
+Ships the Linked card and Recent activity with the full trail (below) to prod. Code only: the activity reads tables already on Nichido prod (decision log, decisions, notes, decommissions).
+
+## 2026-10-29 — SKU linking: a Linked card, and Recent activity with the full trail
+A fourth card, **Linked** (green), shows how many Watsons SKUs are linked and filters the list like the others (four across on desktop, 2×2 on phones). Under "How the numbers fit", **Recent activity** lists the 5 latest changes in plain words ("Approved Coop's match EPS001 for Lip and Eye Pencil Sharpener (70002726)", "Chose ELDF03 for …", "Rejected MPEPTE for …", "Saved a note on …", "Undid: …") with who and when (Manila time); **See all** opens the whole trail grouped by day, searchable by product, code or person, and clicking any entry jumps to that SKU or item in the view it is in now. Built from the decision log (f2e) plus the history kept before the log existed (each SKU's latest decision and remark, notes, decommissions), with a logged decision and the review row it wrote counted once (`src/goldline-sku-activity.ts`, pure, 4 tests). No database change.
+
 ## v1.18.0 (2026-10-29): SKU linking Undo with a what-will-happen confirm (prod release)
 Ships Undo (below) to prod for Justin's walkthrough: every SKU linking decision can be undone until something newer is decided, after a confirm that lists each change it will make. The decision log (`f2e_sku_decision_log.sql`) was applied on Nichido prod (`pfwrkqsjmetibslltmok`) first; cutover step 13 is applied.
 
