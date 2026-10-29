@@ -3,7 +3,7 @@
 import {useState, useTransition} from 'react';
 import {AlertTriangle, CalendarClock, Check, CheckCircle2, ClipboardCheck, Clock, Download, ExternalLink, Hourglass, KeyRound, Power, RefreshCw, ShieldAlert, ShieldCheck, X} from 'lucide-react';
 import {cancelSyncJob, confirmSyncReview, createSyncJob} from '@/src/shopee-sync-actions';
-import {loginLine, needsSignIn, noWorkerText, rangeText, serverLine, statusMeta, stepsFor, syncButton, type JobAction, type Tone} from '@/src/shopee-sync/card-model';
+import {loginLine, needsSignIn, noWorkerText, progressBar, rangeText, serverLine, statusMeta, stepsFor, syncButton, type JobAction, type Tone} from '@/src/shopee-sync/card-model';
 import {remoteBrowserHref} from '@/src/shopee-sync/remote';
 import type {JobStatus} from '@/src/shopee-sync/types';
 import type {ShopeeSyncStatus, SyncJobView} from '@/src/shopee-sync/status';
@@ -64,6 +64,32 @@ function RemoteBrowser({status}: {status: ShopeeSyncStatus}) {
         <p className="text-[13px]">The remote browser address is not set (SHOPEE_SYNC_REMOTE_URL). See docs/shopee-sync-runbook.md.</p>
       )}
       <p className="text-[13px]">Type the Shopee password in that browser, not in Coop. Coop never sees it.{status.remoteUrl && !status.remoteReady ? ' The remote browser may not be ready yet.' : ''}</p>
+    </div>
+  );
+}
+
+function Bar({job}: {job: SyncJobView}) {
+  const bar = progressBar(job);
+  if (!bar) return null;
+  const pct = bar.value === null ? null : Math.round(bar.value * 100);
+  return (
+    <div className="flex max-w-[34rem] flex-col gap-1.5">
+      <div
+        role="progressbar"
+        aria-label="Sync progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct ?? undefined}
+        aria-valuetext={bar.label}
+        className="relative h-1.5 w-full overflow-hidden rounded-full bg-border"
+      >
+        {pct === null ? (
+          <span className="coop-progress-slide absolute inset-y-0 left-0 w-1/3 rounded-full bg-primary/60" />
+        ) : (
+          <span className="absolute inset-0 origin-left rounded-full bg-primary transition-transform duration-300 ease-out" style={{transform: `scaleX(${pct / 100})`}} />
+        )}
+      </div>
+      <div className="text-[12px] tabular-nums text-muted-foreground">{bar.label}</div>
     </div>
   );
 }
@@ -134,6 +160,7 @@ export function ShopeeSyncCard({status, now, refresh}: {status: ShopeeSyncStatus
               </Pill>
               <h2 className="font-serif text-[1.5rem] font-normal leading-tight text-foreground max-md:text-[1.35rem]">{meta.title}</h2>
               <p className="max-w-[60ch] text-sm text-foreground/75">{meta.body}</p>
+              {meta.status !== 'expired' && <Bar job={job} />}
               {meta.status !== 'expired' && <Steps job={job} />}
               {showRemote && <RemoteBrowser status={status} />}
               {(meta.actions.length > 0 || retryJob) && (

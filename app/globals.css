@@ -308,3 +308,13 @@ html.coop-splash-seen .coop-splash { display: none; }
    app's theme, so they stay visible in dark mode. */
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
+
+/* Shopee sync card: a sliver sweeping across the bar while the worker has not finished a day yet. Static (partly filled) under reduced motion. */
+@keyframes coop-progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.coop-progress-slide { animation: coop-progress-slide 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .coop-progress-slide { animation: none; transform: none; width: 20%; }
+}
