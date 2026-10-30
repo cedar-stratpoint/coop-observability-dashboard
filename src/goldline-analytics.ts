@@ -219,8 +219,8 @@ export async function getGoldlineOverviewData(companyId: string): Promise<Goldli
     period_end: (r.period_end as string | null) ?? null,
   }));
 
-  // Units per month for the trend chart, from forecast_months (F10): plain units only, no
-  // decryption, one cheap call. Optional: where the function isn't deployed yet (prod
+  // Units per month for the trend chart, from forecast_months (F10): decrypts only the
+  // requested months' rows, one call. Optional: where the function isn't deployed yet (prod
   // before the P3 SQL) the chart is simply left out.
   let trend: TrendMonth[] = [];
   if (cur?.period_start) {

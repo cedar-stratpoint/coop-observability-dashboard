@@ -1,6 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
+import {salesUnits} from './goldline-sales-units';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {addDays} from './goldline-movement';
 import type {ItemCount, ProductInfo, SalesRow, StoreInput} from './goldline-product';
@@ -53,18 +54,7 @@ export async function getProductData(companyId: string, itemCode: string, storeS
   if (!p && !counts.length) return null; // not this company's item
 
   const sku = p?.sku_code?.trim() || null;
-  const sales = sku
-    ? ((await fetchAllRows('sales', (from, to) => {
-        let q = supa
-          .from('sales') // pagination-ok: paged by fetchAllRows (.range below)
-          .select('store_code,period_start,period_end,units')
-          .eq('company_id', companyId)
-          .eq('sku_code', sku)
-          .gte('period_end', since);
-        if (storeScope) q = q.in('store_code', storeScope);
-        return q.order('id').range(from, to);
-      })) as unknown as Array<SalesRow & {store_code: string}>)
-    : [];
+  const sales = sku ? await salesUnits(companyId, {fromEnd: since, skus: [sku], stores: storeScope}) : [];
 
   const countsBy = new Map<string, ItemCount[]>();
   for (const r of counts) {
