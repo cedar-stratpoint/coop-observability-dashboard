@@ -2,6 +2,7 @@ import 'server-only';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
+import {salesUnits} from './goldline-sales-units';
 import {getGlCatalog, getGlStores, getGlSupplyRef} from './goldline-ref-data';
 import type {InventoryRowIn} from './goldline-inventory';
 import {addDays, storeMovement, type Count} from './goldline-movement';
@@ -198,24 +199,7 @@ async function linkedSales(
   const chunks: string[][] = [];
   for (let i = 0; i < skus.length; i += 100) chunks.push(skus.slice(i, i + 100));
   const pages = await Promise.all(
-    chunks.map(
-      (chunk) =>
-        fetchAllRows(
-          'sales',
-          (from, to) => {
-            let q = supa
-              .from('sales') // pagination-ok: paged by fetchAllRows (.range below)
-              .select('store_code,sku_code,period_end,units')
-              .eq('company_id', companyId)
-              .in('sku_code', chunk)
-              .gte('period_end', since);
-            if (storeScope) q = q.in('store_code', storeScope);
-            return q.order('id').range(from, to);
-          },
-          undefined,
-          {concurrency: 2} // several chunks already run in parallel,
-        ) as unknown as Promise<Array<{store_code: string; sku_code: string; period_end: string; units: number}>>,
-    ),
+    chunks.map((chunk) => salesUnits(companyId, {fromEnd: since, skus: chunk, stores: storeScope})),
   );
-  return pages.flat();
+  return pages.flat().map((r) => ({store_code: r.store_code, sku_code: r.sku_code, period_end: r.period_end, units: Number(r.units) || 0}));
 }
