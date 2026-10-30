@@ -52,6 +52,8 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 13 | `f2e_sku_decision_log.sql` | Lance | `sku_decision_log` (each SKU linking decision with the rows it changed, for Undo). **Applied on prod Oct 29** for v1.18.0 |
 | 14 | `f2f_sku_months.sql` | Lance | `sku_months()` (units and stores per Watsons SKU per monthly file, for SKU linking's months view). **Applied on prod Oct 29** for v1.19.0 (315 SKUs, 260 in all 12 files, 14 in one, same as Staging) |
 | 15 | `f2g_service_role_timeout.sql` | Lance | Statement timeout 30 s for `service_role` (was PostgREST's 8 s), so a slow `sales_rollup` under load doesn't fail the page. **Applied on prod Oct 29** with v1.19.1 |
+| 16 | `p3b_recommendations.sql` | Rick | `restock_runs`, `recommendations`, `save_restock_run()`, `decide_recommendations()` (F11) |
+| 17 | `p3c_item_history.sql` | Rick | `forecast_item_history()` (Restock product page). Apply **before** `s3_sales_units_encryption.sql`, which redefines it to read units from the ciphertext; re-running p3c after s3 puts the plain-units reader back |
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).
 

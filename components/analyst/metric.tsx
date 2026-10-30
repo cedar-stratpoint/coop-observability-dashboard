@@ -48,7 +48,7 @@ export function Metric({
   value: string;
   unit?: string;
   delta?: number;
-  sub?: string;
+  sub?: React.ReactNode;
   valueClassName?: string;
 }) {
   return (

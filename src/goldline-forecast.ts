@@ -18,9 +18,11 @@ export const MAX_WINDOW_MONTHS = 6;
 /** One month of POS Sales Data, as forecast_months() reports it. Month is YYYY-MM. */
 export type MonthStatus = {month: string; loaded: boolean; units: number; unlinkedUnits: number};
 
-export type HoldReason = 'missing_month' | 'out_of_scope' | 'retired' | 'open_flag' | 'no_history';
+// no_count and blank_on_form are added by the restock (F11, src/goldline-restock.ts): the
+// store has no counted form, or its latest form has no figure for the product.
+export type HoldReason = 'missing_month' | 'out_of_scope' | 'no_count' | 'blank_on_form' | 'retired' | 'open_flag' | 'no_history';
 /** Display order; a line lists every reason that applies, in this order. */
-export const HOLD_REASONS: HoldReason[] = ['missing_month', 'out_of_scope', 'retired', 'open_flag', 'no_history'];
+export const HOLD_REASONS: HoldReason[] = ['missing_month', 'out_of_scope', 'no_count', 'blank_on_form', 'retired', 'open_flag', 'no_history'];
 
 export type ForecastWindow = {
   runDate: string; // YYYY-MM-DD
