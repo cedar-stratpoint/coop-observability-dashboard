@@ -1,5 +1,7 @@
 -- F10 · Forecast inputs (Nichido project). Additive and safe to re-run.
 -- Run on Nichido STAGING (Nichido-Supabase-Staging) first; PROD after review.
+-- Once s3_sales_units_encryption.sql is applied, re-run s3 after this file: s3 holds the
+-- decrypting versions of the sales readers below (units are encrypted, then dropped by s2).
 --
 -- Decided Oct 26 (meeting) and Oct 27:
 --   • A restock run covers the next `window_months` calendar months after the run date

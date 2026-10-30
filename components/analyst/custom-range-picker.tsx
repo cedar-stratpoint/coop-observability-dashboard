@@ -21,7 +21,8 @@ export function CustomRangePicker({min, max}: {min: string; max: string}) {
   const searchParams = useSearchParams();
   const from = searchParams.get('from');
   const to = searchParams.get('to');
-  const all = searchParams.get('span') === 'all';
+  // No week, dates or span in the link means Sales is on All time (app/page.tsx), so it is listed as selected.
+  const all = searchParams.get('span') === 'all' || (!from && !to && !searchParams.get('week'));
   const active = all || Boolean(from && to);
   const resolved = from && to ? resolveSpan({from, to}, {firstDay: min, todayDay: max}) : null;
 

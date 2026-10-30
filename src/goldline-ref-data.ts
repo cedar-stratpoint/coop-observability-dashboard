@@ -1,5 +1,5 @@
 import 'server-only';
-import {unstable_cache} from 'next/cache';
+import {revalidateTag, unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {clampSettings, DEFAULT_FORECAST_SETTINGS, type ForecastSettings} from './goldline-forecast';
@@ -10,8 +10,9 @@ import {clampSettings, DEFAULT_FORECAST_SETTINGS, type ForecastSettings} from '.
 // for up to REVALIDATE_SECONDS, and expired immediately by the writes that change them
 // (see glTags + app/stock/actions.ts), so an edit shows on the next load.
 //
-// Never cached here: counts, sales, uploads, shipments — they change with every
-// upload / action and are big; they're read fresh.
+// Never cached here: counts, uploads, shipments, and sales rows — they change with
+// every upload / action and are big; they're read fresh. The one exception is the sales
+// *totals* (getSalesRollup below), which are slow to add up and change only on upload.
 
 const REVALIDATE_SECONDS = 600;
 
@@ -22,6 +23,7 @@ export const glTags = {
   stores: (companyId: string) => `gl-stores:${companyId}`,
   supply: (companyId: string) => `gl-supply:${companyId}`,
   forecast: (companyId: string) => `gl-forecast:${companyId}`,
+  sales: (companyId: string) => `gl-sales:${companyId}`,
 };
 
 export type GlProduct = {
@@ -142,4 +144,96 @@ export function getStoreScope(companyId: string): Promise<StoreScope[]> {
 /** Store codes in scope, for the restock (P3) and anything that should skip quiet stores. */
 export async function inScopeStores(companyId: string): Promise<Set<string>> {
   return new Set((await getStoreScope(companyId)).filter((s) => s.in_scope).map((s) => s.store_code));
+}
+
+export type SalesRollup = {
+  byStore?: Array<{store_code: string; units: unknown; gross: unknown; net: unknown; sku_count: unknown}>;
+  bySku?: Array<{sku_code: string; units: unknown; gross: unknown; net: unknown}>;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+};
+
+// Sales totals per store and per SKU (sales_rollup). Adding them up decrypts every sales
+// row (472k on prod, about 5 s), and two or three loads at once went past the database
+// timeout (Oct 29). In the app, sales change only when a sales file is committed or
+// deleted: the cache key follows the committed files (salesVersion), and the write paths
+// also expire glTags.sales, even when they fail partway. Otherwise totals are kept for an
+// hour and served stale while a background refresh runs (a failed refresh keeps the last
+// good totals). Sales changed outside the app (scripts, SQL) show within the hour.
+const SALES_REVALIDATE_SECONDS = 3600;
+
+// One sales_rollup at a time per company on this server: loads that arrive while it runs
+// share it instead of starting their own, which is what pushed it past the timeout.
+const rollupInFlight = new Map<string, Promise<SalesRollup>>();
+
+/**
+ * sales_rollup straight from the database. By default it shares a run already in
+ * progress; `fresh` starts its own, for a caller that has just changed sales (a run that
+ * began before the change would hand it the old totals).
+ */
+export function readSalesRollup(companyId: string, opts: {fresh?: boolean} = {}): Promise<SalesRollup> {
+  const run = async () => {
+    const res = await db().rpc('sales_rollup', {p_company: companyId});
+    if (res.error) throw new Error(`sales_rollup failed: ${res.error.message}`);
+    return (res.data ?? {}) as SalesRollup;
+  };
+  if (opts.fresh) return run();
+  let shared = rollupInFlight.get(companyId);
+  if (!shared) {
+    shared = run().finally(() => rollupInFlight.delete(companyId));
+    rollupInFlight.set(companyId, shared);
+  }
+  return shared;
+}
+
+/**
+ * Which sales files are committed, as a short key. The cached totals are stored under it,
+ * so a new, re-loaded or deleted sales file always gets fresh totals, on every server,
+ * even if a slow refresh that began before the change finishes after it (it lands under
+ * the old key). A few dozen rows, read on each load.
+ */
+async function salesVersion(companyId: string): Promise<string> {
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    db()
+      .from('uploads')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('status', 'committed')
+      .in('kind', ['pos_csv', 'pos_xlsx'])
+      .order('id')
+      .range(from, to),
+  )) as unknown as Array<{id: string}>;
+  // FNV-1a over the ids: short and stable; a collision would only cost one stale hour.
+  let h = 0x811c9dc5;
+  for (const ch of rows.map((r) => r.id).join(',')) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return `${rows.length}-${h.toString(36)}`;
+}
+
+// A copy on this server too. SKU linking's decisions refresh the /stock pages
+// (revalidatePath), and Next drops data cached while rendering those pages along with
+// them, so without this every decision made the next load add the totals up again
+// (about 5 s). Decisions never change sales; the copy is keyed to the same sales version
+// and kept for a short while.
+const MEMO_MS = 10 * 60 * 1000;
+const rollupMemo = new Map<string, {version: string; at: number; data: SalesRollup}>();
+
+/** Cached sales totals for the SKU linking and Stores pages and SKU re-matching. */
+export async function getSalesRollup(companyId: string): Promise<SalesRollup> {
+  if (!configured()) return {};
+  const version = await salesVersion(companyId);
+  const memo = rollupMemo.get(companyId);
+  if (memo && memo.version === version && Date.now() - memo.at < MEMO_MS) return memo.data;
+  const data = await unstable_cache(() => readSalesRollup(companyId), ['gl-sales-rollup', companyId, version], {
+    tags: [glTags.sales(companyId)],
+    revalidate: SALES_REVALIDATE_SECONDS,
+  })();
+  rollupMemo.set(companyId, {version, at: Date.now(), data});
+  return data;
+}
+
+/** Sales rows changed (or may have): drop the cached totals, here and in the data cache.
+ *  Call from a Server Action or Route Handler. */
+export function expireSalesTotals(companyId: string): void {
+  rollupMemo.delete(companyId);
+  revalidateTag(glTags.sales(companyId), {expire: 0});
 }

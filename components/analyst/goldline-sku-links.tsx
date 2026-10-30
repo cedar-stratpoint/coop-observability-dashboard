@@ -1,10 +1,16 @@
 'use client';
 
 import {useEffect, useMemo, useState, useTransition} from 'react';
-import {useRouter} from 'next/navigation';
-import {Archive, ArchiveRestore, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
-import type {DecommissionedItem, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
-import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveRemarkAction, setDecommissionedAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import {usePathname, useRouter, useSearchParams} from 'next/navigation';
+import {Archive, ArchiveRestore, Loader2, NotebookPen, RotateCcw, ArrowDown, ArrowUp, Check, ChevronDown, ChevronsUpDown, CircleCheck, CircleDashed, CircleHelp, FileQuestion, Link2, MessageSquare, MoreHorizontal, Search, SearchCheck, Unlink, X} from 'lucide-react';
+import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow} from '@/src/goldline-sku-links-data';
+import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, undoDecisionAction, unlinkSkuAction} from '@/app/stock/skus/actions';
+import type {DecisionInfo} from '@/src/goldline-sku-undo';
+import {decisionLabel, UndoDialog} from '@/components/analyst/goldline-undo-dialog';
+import {RecentActivity} from '@/components/analyst/goldline-sku-activity';
+import {MonthsPointer, WatsonsMonthDialog, WatsonsMonthsPanel, type SkuInfo} from '@/components/analyst/goldline-watsons-months';
+import {allMonths, presence, type Presence} from '@/src/goldline-sku-months';
+import type {ActivityEvent} from '@/src/goldline-sku-activity';
 import {ACTION_WORD, formSpotText, type FormSpot, linkedHow, SKU_TAGS, skuStatus, type SkuStatus, type Tone, watsonsName} from '@/src/goldline-sku-tags';
 import {Button} from '@/components/ui/button';
 import {ItemCombobox} from '@/components/analyst/goldline-item-combobox';
@@ -32,7 +38,7 @@ const REMARK_MAX = 500;
 // One column template for the header and every row, so the columns line up.
 const COLS = 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_9rem_minmax(12.5rem,14rem)]';
 const ITEM_COLS = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]';
-const ITEM_COLS_EDIT = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(12.5rem,14rem)]';
+const ITEM_COLS_EDIT = 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem_minmax(18rem,19.5rem)]';
 
 const n = (v: number) => Math.round(v).toLocaleString('en-US');
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);
@@ -52,7 +58,7 @@ const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}
 // One icon per view for the help strip above the table.
 const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion, decommissioned: Archive};
 
-type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void) => void;
+type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void, onErr?: () => void) => void;
 
 export function GoldlineSkuLinks({company, data, canEdit}: {company: string; data: SkuLinkData; canEdit: boolean}) {
   const router = useRouter();
@@ -66,6 +72,17 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
   const [formAt, setFormAt] = useState<{page: number; itemCode: string} | null>(null);
+  // Watsons files by month (f2f): which months each SKU is in, and the month-tabs view.
+  const [monthsAt, setMonthsAt] = useState<{sku: string | null; month: string} | null>(null);
+  const monthList = useMemo(() => allMonths(data.skuMonths), [data.skuMonths]);
+  const skuInfo = useMemo(
+    () => Object.fromEntries(data.rows.map((r) => [r.skuCode, {name: watsonsName(r.name), linked: r.linked?.itemCode ?? null} satisfies SkuInfo])),
+    [data.rows],
+  );
+  const showMonths = (sku: string) => {
+    const p = presence(data.skuMonths[sku]);
+    if (p) setMonthsAt({sku, month: p.last});
+  };
   const showForm = (itemCode: string, spot: FormSpot | null) => spot && setFormAt({page: spot.page, itemCode});
 
   // Rows per page is a per-viewer convenience: remembered in this browser only.
@@ -140,7 +157,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const from = (safePage - 1) * size;
   const slice = <T,>(xs: T[]) => xs.slice(from, from + size);
 
-  const act: Act = (key, fn, okText, onOk) => {
+  const act: Act = (key, fn, okText, onOk, onErr) => {
     setBusy(key);
     setNotice(null);
     start(async () => {
@@ -150,7 +167,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         setNotice({kind: 'ok', text: okText});
         onOk?.();
         router.refresh();
-      } else setNotice({kind: 'err', text: res.error});
+      } else {
+        setNotice({kind: 'err', text: res.error});
+        onErr?.();
+      }
     });
   };
 
@@ -170,6 +190,39 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
     setPage(1);
     setSort(DEFAULT_SORT);
   };
+  // From an activity entry to that SKU or item, in whichever view it is in now.
+  const jumpTo = (e: ActivityEvent) => {
+    let view: SkuStatus | null = null;
+    if (e.target === 'sku') view = (Object.keys(lists) as Array<keyof typeof lists>).find((v) => lists[v].some((r) => r.skuCode === e.key)) ?? null;
+    else if (noMatchItems.some((i) => i.itemCode === e.key)) view = 'formOnly';
+    else if (data.decommissioned.some((i) => i.itemCode === e.key)) view = 'decommissioned';
+    else {
+      // A linked item: find it by its Watsons SKU.
+      const r = lists.linked.find((x) => x.linked?.itemCode === e.key);
+      if (r) return (pick('linked'), setQuery(r.skuCode));
+      const s2 = lists.check.find((x) => x.suggestion?.itemCode === e.key);
+      if (s2) return (pick('check'), setQuery(s2.skuCode));
+    }
+    if (!view) return;
+    pick(view);
+    setQuery(e.key);
+    requestAnimationFrame(() => document.getElementById('sku-list-top')?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'}));
+  };
+  // Arriving from the activity page (?find=sku:CODE or item:CODE): go to it, then drop the param.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const findParam = searchParams.get('find');
+  useEffect(() => {
+    if (!findParam) return;
+    const m = /^(sku|item):(.+)$/.exec(findParam);
+    if (m) jumpTo({id: 'find', at: '', by: null, kind: 'note', text: '', target: m[1] as 'sku' | 'item', key: m[2]});
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('find');
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, {scroll: false});
+    // Only on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findParam]);
   const tag = SKU_TAGS[filter];
   const TabIcon = TAB_ICON[filter];
 
@@ -182,10 +235,14 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
 
       {/* Three jobs, one card each (Hick's Law): a card filters the table below. Everything
           else (linked, rejected, no units sold) is reached from "For your records". */}
-      <section aria-label="What needs a decision" className="grid grid-cols-3 gap-2 sm:gap-4">
+      {/* Cards and the numbers on the left (75%), recent activity on the right (25%); stacked on smaller screens. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] xl:items-stretch">
+      <div className="flex min-w-0 flex-col gap-4">
+      <section aria-label="What needs a decision" className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
         <ActionCard view="check" value={counts.check} title="Check Coop’s match" sub="Approve or reject each one" active={filter === 'check'} onPick={pick} />
         <ActionCard view="choose" value={counts.choose} title="Choose our item" sub="Pick it from our items" active={filter === 'choose'} onPick={pick} />
         <ActionCard view="formOnly" value={counts.formOnly} title="Sold at Watsons?" sub="On our forms, no Watsons SKU yet" active={filter === 'formOnly'} onPick={pick} />
+        <ActionCard view="linked" value={counts.linked} title="Linked" sub="Done: their sales count" active={filter === 'linked'} onPick={pick} />
       </section>
 
       <NumbersTable
@@ -212,6 +269,11 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         }
       />
 
+      <WatsonsMonthsPanel data={data.skuMonths} onOpenMonth={(month) => setMonthsAt({sku: null, month})} />
+      </div>
+      <RecentActivity events={data.activity} onJump={jumpTo} />
+      </div>
+
       <div className="flex items-start gap-3 rounded-xl px-4 py-3" style={{background: tint(tag.tone, 8)}}>
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" style={{background: tint(tag.tone, 18), color: toneVar(tag.tone)}}>
           <TabIcon aria-hidden className="size-3.5" />
@@ -224,7 +286,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div id="sku-list-top" className="flex scroll-mt-24 flex-wrap items-center justify-between gap-3">
         <div className="relative max-md:w-full">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -281,6 +343,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
               <ItemRow
                 key={i.itemCode}
                 i={i}
+                note={data.notes[i.itemCode] ?? null}
+                decision={data.decisions[`item:${i.itemCode}`]}
                 decommissioned={filter === 'decommissioned'}
                 company={company}
                 canEdit={canEdit}
@@ -302,7 +366,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
           </div>
           <ul className="divide-y">
             {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={pending} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} />
+              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} months={presence(data.skuMonths[r.skuCode])} monthsTotal={monthList.length} onShowMonths={showMonths} />
             ))}
           </ul>
         </div>
@@ -321,6 +385,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
       )}
 
       {formAt && data.formPages.length > 0 && <FormPageDialog pages={data.formPages} at={formAt} onClosed={() => setFormAt(null)} />}
+      {monthsAt && <WatsonsMonthDialog data={data.skuMonths} skus={skuInfo} at={monthsAt} onClosed={() => setMonthsAt(null)} />}
     </div>
   );
 }
@@ -391,7 +456,22 @@ function SortHead({label, k, sort, onSort, right = false}: {label: string; k: So
   );
 }
 
-const CARD_TONE: Record<'check' | 'choose' | 'formOnly', Tone> = {check: 'warn', choose: 'crit', formOnly: 'info'};
+/** The record that a decision was undone: what, who decided it, who undid it and when. */
+function UndoneLine({decision}: {decision: DecisionInfo}) {
+  return (
+    <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={`${decisionLabel(decision)} by ${decision.by ?? 'someone'}, undone by ${decision.undoneBy ?? 'someone'}`}>
+      <RotateCcw className="size-3 shrink-0" aria-hidden />
+      <span className="truncate">
+        Undone: {decisionLabel(decision)}
+        {decision.by ? ` by ${decision.by}` : ''}
+        {decision.undoneBy ? ` · undone by ${decision.undoneBy}` : ''}
+        {decision.undoneAt ? `, ${day(decision.undoneAt)}` : ''}
+      </span>
+    </p>
+  );
+}
+
+const CARD_TONE: Record<'check' | 'choose' | 'formOnly' | 'linked', Tone> = {check: 'warn', choose: 'crit', formOnly: 'info', linked: 'good'};
 
 /** One job on the page: its count, what it is and what to do. Pressed while it's the table's filter. */
 function ActionCard({
@@ -402,7 +482,7 @@ function ActionCard({
   active,
   onPick,
 }: {
-  view: 'check' | 'choose' | 'formOnly';
+  view: 'check' | 'choose' | 'formOnly' | 'linked';
   value: number;
   title: string;
   sub: string;
@@ -515,6 +595,8 @@ function NumbersTable({rows, totals, filter, onPick, footnote}: {rows: NumbersRo
  */
 function ItemRow({
   i,
+  note,
+  decision,
   decommissioned,
   company,
   canEdit,
@@ -524,6 +606,8 @@ function ItemRow({
   onShowForm,
 }: {
   i: SkuLinkItem | DecommissionedItem;
+  note: ItemNote | null;
+  decision?: DecisionInfo;
   decommissioned: boolean;
   company: string;
   canEdit: boolean;
@@ -532,13 +616,73 @@ function ItemRow({
   act: Act;
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // One panel at a time: a note (for checking, or anything) or decommissioning; they're separate.
+  const [panel, setPanel] = useState<'note' | 'decom' | null>(null);
   const [remark, setRemark] = useState('');
+  const [text, setText] = useState('');
+  // Saving a note is optimistic: the note shows the moment Save is pressed ("Saving…", then
+  // "Saved" when the server confirms) while the page reloads behind it; if it fails, the
+  // note is taken back and the panel reopens. `removed` hides a note being removed.
+  const [optimistic, setOptimistic] = useState<ItemNote | 'removed' | null>(null);
+  const [undoOpen, setUndoOpen] = useState(false);
+  const [undoing, setUndoing] = useState<'saving' | 'saved' | null>(null);
+  const decisionKey = `${decision?.id ?? ''}|${decision?.undoneAt ?? ''}`;
+  const [seenDecision, setSeenDecision] = useState(decisionKey);
+  if (decisionKey !== seenDecision) {
+    // The reloaded page shows the undo: drop the "Undoing…" state.
+    setSeenDecision(decisionKey);
+    if (undoing === 'saved') setUndoing(null);
+  }
+  // On Decommissioned, "Bring back" already undoes a decommission; no second button.
+  const canUndo = Boolean(decision && !decision.undoneAt && !(decommissioned && decision.action === 'decommissioned'));
+  const undo = () => {
+    if (!decision) return;
+    setUndoing('saving');
+    act(
+      i.itemCode,
+      () => undoDecisionAction({company, id: decision.id}),
+      `Undone: ${decisionLabel(decision)}.`,
+      () => setUndoing((u) => (u ? 'saved' : u)),
+      () => setUndoing(null),
+    );
+  };
+  const [saving, setSaving] = useState<'saving' | 'saved' | null>(null);
+  useEffect(() => {
+    // The reloaded page has caught up: drop the stand-in.
+    if (optimistic === 'removed' ? !note : optimistic && note?.text === optimistic.text) {
+      setOptimistic(null);
+      setSaving(null);
+    }
+  }, [note, optimistic]);
+  const shown = optimistic === 'removed' ? null : (optimistic ?? note);
+  const saveNote = (value: string | null) => {
+    const previous = optimistic;
+    setOptimistic(value ? {text: value.trim(), by: null, at: new Date().toISOString()} : 'removed');
+    setSaving(value ? 'saving' : null);
+    setPanel(null);
+    act(
+      i.itemCode,
+      () => saveItemNoteAction({company, item: i.itemCode, note: value}),
+      value ? `Note saved for ${i.itemCode}.` : `Note removed from ${i.itemCode}.`,
+      () => setSaving((st) => (st ? 'saved' : st)),
+      () => {
+        setOptimistic(previous);
+        setSaving(null);
+        if (value) setPanel('note');
+      },
+    );
+  };
   const done = () => {
-    setOpen(false);
+    setPanel(null);
     setRemark('');
   };
+  const openNote = () => {
+    setText(shown?.text ?? '');
+    setPanel((p) => (p === 'note' ? null : 'note'));
+  };
   const d = decommissioned ? (i as DecommissionedItem) : null;
+  const input =
+    'min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
   return (
     <li className="transition-colors duration-150 hover:bg-muted/30">
       <div className={cn('grid gap-1.5 px-6 py-4 md:items-center md:gap-8', canEdit ? ITEM_COLS_EDIT : ITEM_COLS)}>
@@ -551,11 +695,41 @@ function ItemRow({
             <span aria-hidden>·</span>
             <FormSpotLink spot={i.formSpot} onClick={() => onShowForm(i.itemCode, i.formSpot)} />
           </p>
+          {shown && panel !== 'note' && (
+            <p
+              key={saving ? 'pending' : 'note'}
+              className="flex min-w-0 max-w-xl items-start gap-1.5 rounded-md px-2 py-1 text-xs motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200"
+              style={{background: 'color-mix(in oklab, var(--status-warn) 12%, transparent)'}}
+              title={`${shown.text}${shown.by ? ` · ${shown.by}` : ''} · ${day(shown.at)}`}
+            >
+              <NotebookPen className="mt-0.5 size-3 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+              <span className="flex min-w-0 flex-col">
+                <span className="line-clamp-2">{shown.text}</span>
+                {saving ? (
+                  <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground" role="status">
+                    {saving === 'saving' ? (
+                      <>
+                        <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> Saving…
+                      </>
+                    ) : (
+                      <>
+                        <Check className="size-3" style={{color: 'var(--status-good)'}} aria-hidden /> Saved
+                      </>
+                    )}
+                    {/* Who and when fill in once the page reloads. */}
+                    <span className="h-2 w-20 rounded-full bg-foreground/10 motion-safe:animate-pulse" aria-hidden />
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">{[shown.by, day(shown.at)].filter(Boolean).join(' · ')}</span>
+                )}
+              </span>
+            </p>
+          )}
           {d && (
             <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={d.remark ?? undefined}>
-              <MessageSquare className="size-3 shrink-0" aria-hidden />
+              <Archive className="size-3 shrink-0" aria-hidden />
               <span className="truncate">
-                {[d.at && day(d.at), d.by].filter(Boolean).join(' · ')}
+                Decommissioned {[d.at && day(d.at), d.by].filter(Boolean).join(' · ')}
                 {d.remark ? ` · “${d.remark}”` : ''}
               </span>
             </p>
@@ -563,24 +737,76 @@ function ItemRow({
         </div>
         <span className="truncate text-sm text-muted-foreground">{i.productLine ?? 'Other'}</span>
         <span className="text-sm tabular-nums md:text-right">{i.price != null ? `₱${n(i.price)}` : '—'}</span>
-        {canEdit &&
-          (d ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="justify-self-start"
-              disabled={disabled}
-              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
-            >
-              <ArchiveRestore className="size-3.5" /> {busy ? 'Saving…' : 'Bring back'}
+        {canEdit && undoing && (
+          <span role="status" className="inline-flex items-center gap-1.5 justify-self-start rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {undoing === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="size-3.5" aria-hidden />}
+            {undoing === 'saving' ? 'Undoing…' : 'Undone'}
+          </span>
+        )}
+        {canEdit && !undoing && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant={panel === 'note' ? 'secondary' : 'ghost'} onClick={openNote} aria-expanded={panel === 'note'} disabled={saving === 'saving'}>
+              <NotebookPen className="size-3.5" /> {shown ? 'Edit note' : 'Add note'}
             </Button>
-          ) : (
-            <Button size="sm" variant={open ? 'secondary' : 'outline'} className="justify-self-start" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              <Archive className="size-3.5" /> Mark as decommissioned
-            </Button>
-          ))}
+            {d ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
+              >
+                <ArchiveRestore className="size-3.5" /> {busy && panel === null ? 'Saving…' : 'Bring back'}
+              </Button>
+            ) : (
+              <Button size="sm" variant={panel === 'decom' ? 'secondary' : 'outline'} onClick={() => setPanel((p) => (p === 'decom' ? null : 'decom'))} aria-expanded={panel === 'decom'}>
+                <Archive className="size-3.5" /> Mark as decommissioned
+              </Button>
+            )}
+            {canUndo && decision && (
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setUndoOpen(true)} title={`Undo: ${decisionLabel(decision)}`}>
+                <RotateCcw className="size-3.5" /> Undo
+              </Button>
+            )}
+          </div>
+        )}
       </div>
-      {open && canEdit && !d && (
+      {decision?.undoneAt && !undoing && (
+        <div className="px-6 pb-3 -mt-2">
+          <UndoneLine decision={decision} />
+        </div>
+      )}
+      {undoOpen && decision && (
+        <UndoDialog decision={decision} subject={`${itemText(i)} · ${i.itemCode}`} onConfirm={undo} onClosed={() => setUndoOpen(false)} />
+      )}
+      {panel === 'note' && canEdit && (
+        <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
+          <p className="text-xs text-muted-foreground">A note for this item, for example to check it later. It doesn’t change anything else; only the latest note is kept.</p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={REMARK_MAX}
+            rows={2}
+            autoFocus
+            placeholder="For example, “check with Justin” or “maybe the Watsons name LIP PNCL”"
+            aria-label={`Note for ${i.itemCode}`}
+            className={input}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={!text.trim() || text.trim() === shown?.text} onClick={() => saveNote(text)}>
+              <NotebookPen className="size-3.5" /> Save note
+            </Button>
+            {shown && (
+              <Button size="sm" variant="outline" onClick={() => saveNote(null)}>
+                Remove note
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setPanel(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {panel === 'decom' && canEdit && !d && (
         <div className="flex flex-col gap-2.5 bg-muted/30 px-6 pt-1 pb-5">
           <p className="text-xs text-muted-foreground">No longer made or sold. It leaves SKU matching and restock, and can be brought back from Decommissioned.</p>
           <textarea
@@ -591,7 +817,7 @@ function ItemRow({
             autoFocus
             placeholder="Why? For example, “discontinued in 2025” (optional)"
             aria-label={`Remarks for ${i.itemCode}`}
-            className="min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+            className={input}
           />
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -645,6 +871,22 @@ function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize
   );
 }
 
+/** The decision's state in place of the buttons: a spinner while saving, a check once saved. */
+function DecisionChip({outcome}: {outcome: {doing: string; done: string; tone: Tone; state: 'saving' | 'saved'}}) {
+  const saved = outcome.state === 'saved';
+  return (
+    <span
+      role="status"
+      key={outcome.state}
+      className="inline-flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
+      style={{color: saved ? toneVar(outcome.tone) : 'var(--muted-foreground)', background: `color-mix(in oklab, ${saved ? toneVar(outcome.tone) : 'var(--muted-foreground)'} 13%, transparent)`}}
+    >
+      {saved ? <Check className="size-3.5 shrink-0" aria-hidden /> : <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />}
+      <span className="truncate">{saved ? outcome.done : outcome.doing}</span>
+    </span>
+  );
+}
+
 function SkuRow({
   r,
   company,
@@ -655,6 +897,10 @@ function SkuRow({
   act,
   onShowForm,
   quiet = false,
+  decision,
+  months,
+  monthsTotal = 0,
+  onShowMonths,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -666,13 +912,43 @@ function SkuRow({
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
   /** Nothing to decide here (no units sold), so the action is offered, not pushed. */
   quiet?: boolean;
+  /** The latest decision on this SKU, for Undo (or the record that it was undone). */
+  decision?: DecisionInfo;
+  /** Which monthly Watsons files this SKU is in (f2f), for the pointer under its code. */
+  months?: Presence | null;
+  monthsTotal?: number;
+  onShowMonths?: (sku: string) => void;
 }) {
   const status = skuStatus(r);
+  const [undoOpen, setUndoOpen] = useState(false);
   const [remark, setRemark] = useState('');
   const [item, setItem] = useState('');
   const [open, setOpen] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
-  const shown = r.linked ?? r.suggestion;
+  // A decision shows at once: the buttons give way to a chip ("Approving…", then
+  // "Approved" when the server confirms) while the page reloads and the row moves to its
+  // new list. A failure brings the buttons back with the error.
+  const [outcome, setOutcome] = useState<{doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem; state: 'saving' | 'saved'} | null>(null);
+  const rowKey = `${r.linked?.itemCode ?? ''}|${r.suggestion?.itemCode ?? ''}|${r.review?.action ?? ''}|${r.review?.remark ?? ''}`;
+  const [seenKey, setSeenKey] = useState(rowKey);
+  if (rowKey !== seenKey) {
+    // The reloaded row has caught up: drop the chip.
+    setSeenKey(rowKey);
+    if (outcome?.state === 'saved') setOutcome(null);
+  }
+  const decide = (fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, chip: {doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem}) => {
+    setOutcome({...chip, state: 'saving'});
+    done();
+    act(
+      sku,
+      fn,
+      okText,
+      () => setOutcome((o) => (o ? {...o, state: 'saved'} : o)),
+      () => setOutcome(null),
+    );
+  };
+  // While a link or approval is saving, show the item it is being linked to.
+  const shown = outcome?.item ?? r.linked ?? r.suggestion;
   const sku = r.skuCode;
   const choosing = status === 'choose' || status === 'rejected';
   const done = () => {
@@ -689,12 +965,16 @@ function SkuRow({
 
   return (
     <li>
-      <div className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}>
+      <div
+        className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}
+        style={outcome ? {background: `color-mix(in oklab, ${toneVar(outcome.tone)} 6%, transparent)`} : undefined}
+      >
         <div className="flex min-w-0 flex-col gap-1">
           <p className="truncate text-sm font-medium" title={r.name}>
             {watsonsName(r.name)}
           </p>
           <p className="text-xs text-muted-foreground tabular-nums">{sku}</p>
+          {months && onShowMonths && <MonthsPointer p={months} total={monthsTotal} onClick={() => onShowMonths(sku)} />}
         </div>
 
         <div className="flex min-w-0 flex-col gap-1">
@@ -742,14 +1022,14 @@ function SkuRow({
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {canEdit && status === 'check' && r.suggestion && (
+          {outcome && <DecisionChip outcome={outcome} />}
+          {!outcome && canEdit && status === 'check' && r.suggestion && (
             <>
               <Button
                 size="sm"
                 disabled={disabled}
                 onClick={() =>
-                  act(
-                    sku,
+                  decide(
                     () =>
                       approveSuggestionAction({
                         company,
@@ -758,19 +1038,18 @@ function SkuRow({
                         remark,
                       }),
                     `Approved. ${sku} is now linked to ${r.suggestion!.itemCode}.`,
-                    done,
+                    {doing: 'Approving…', done: `Approved · linked to ${r.suggestion!.itemCode}`, tone: 'good', remark},
                   )
                 }
               >
-                <Check className="size-3.5" /> {busy ? 'Saving…' : 'Approve'}
+                <Check className="size-3.5" /> Approve
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={disabled}
                 onClick={() =>
-                  act(
-                    sku,
+                  decide(
                     () =>
                       rejectSuggestionAction({
                         company,
@@ -779,7 +1058,7 @@ function SkuRow({
                         remark,
                       }),
                     `Rejected. Coop won't suggest ${r.suggestion!.itemCode} for ${sku} again.`,
-                    done,
+                    {doing: 'Rejecting…', done: `Rejected ${r.suggestion!.itemCode}`, tone: 'crit', remark},
                   )
                 }
               >
@@ -798,12 +1077,12 @@ function SkuRow({
               </Button>
             </>
           )}
-          {canEdit && choosing && (
+          {!outcome && canEdit && choosing && (
             <Button size="sm" variant={open ? 'secondary' : quiet ? 'outline' : 'default'} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
               <Link2 className="size-3.5" /> Choose item
             </Button>
           )}
-          {canEdit && status === 'linked' && (
+          {!outcome && canEdit && status === 'linked' && (
             <Button
               size="icon-sm"
               variant="ghost"
@@ -816,10 +1095,16 @@ function SkuRow({
               <MoreHorizontal className="size-4" />
             </Button>
           )}
-          {note && !open && (
-            <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={note}>
+          {!outcome && canEdit && decision && !decision.undoneAt && (
+            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setUndoOpen(true)} title={`Undo: ${decisionLabel(decision)}`}>
+              <RotateCcw className="size-3.5" /> Undo
+            </Button>
+          )}
+          {!outcome && decision?.undoneAt && <UndoneLine decision={decision} />}
+          {(outcome?.remark?.trim() || note) && !open && (
+            <p className="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={outcome?.remark?.trim() || note || undefined}>
               <MessageSquare className="size-3 shrink-0" />
-              <span className="truncate">{note}</span>
+              <span className="truncate">{outcome?.remark?.trim() || note}</span>
             </p>
           )}
         </div>
@@ -844,7 +1129,7 @@ function SkuRow({
             />
             <div className="flex flex-wrap items-center gap-2">
               {choosing && (
-                <Button size="sm" disabled={disabled || !item} onClick={() => act(sku, () => linkSkuAction({company, sku, item, remark}), `Linked ${sku} to ${item}.`, done)}>
+                <Button size="sm" disabled={disabled || !item} onClick={() => decide(() => linkSkuAction({company, sku, item, remark}), `Linked ${sku} to ${item}.`, {doing: `Linking to ${item}…`, done: `Linked to ${item}`, tone: 'good', remark, item: items.find((x) => x.itemCode === item)})}>
                   <Link2 className="size-3.5" /> {busy ? 'Saving…' : 'Link'}
                 </Button>
               )}
@@ -854,7 +1139,7 @@ function SkuRow({
                     size="sm"
                     variant="destructive"
                     disabled={disabled}
-                    onClick={() => act(sku, () => unlinkSkuAction({company, sku, remark}), `Unlinked ${sku}. Coop won't match it to ${r.linked!.itemCode} again.`, done)}
+                    onClick={() => decide(() => unlinkSkuAction({company, sku, remark}), `Unlinked ${sku}. Coop won't match it to ${r.linked!.itemCode} again.`, {doing: 'Unlinking…', done: `Unlinked ${r.linked!.itemCode}`, tone: 'crit', remark})}
                   >
                     <Unlink className="size-3.5" /> {busy ? 'Saving…' : 'Confirm unlink'}
                   </Button>
@@ -868,7 +1153,7 @@ function SkuRow({
                   size="sm"
                   variant="outline"
                   disabled={disabled || !remark.trim()}
-                  onClick={() => act(sku, () => saveRemarkAction({company, sku, remark}), 'Remark saved.', done)}
+                  onClick={() => decide(() => saveRemarkAction({company, sku, remark}), 'Remark saved.', {doing: 'Saving remark…', done: 'Remark saved', tone: 'info', remark})}
                 >
                   Save remark only
                 </Button>
@@ -881,6 +1166,14 @@ function SkuRow({
           </div>
           <ReviewNote r={r} />
         </div>
+      )}
+      {undoOpen && decision && (
+        <UndoDialog
+          decision={decision}
+          subject={`Watsons SKU ${sku} · ${watsonsName(r.name)}`}
+          onConfirm={() => decide(() => undoDecisionAction({company, id: decision.id}), `Undone: ${decisionLabel(decision)}.`, {doing: 'Undoing…', done: 'Undone', tone: 'info'})}
+          onClosed={() => setUndoOpen(false)}
+        />
       )}
     </li>
   );

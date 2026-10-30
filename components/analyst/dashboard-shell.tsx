@@ -139,11 +139,14 @@ export function DashboardShell({
   const current = digests.find((d) => d.window_from === currentWeek) ?? digests[0];
   const currentRange = current ? fmtRange(current.window_from, current.window_to, current.digest.window.label) : '';
   // Dates picked on the Sales page (any span, or all time): the switcher says so instead of naming one week.
-  const rangeMode = pathname === '/' && Boolean(searchParams.get('channel')) && (searchParams.get('span') === 'all' || Boolean(searchParams.get('from') && searchParams.get('to')));
-  const periodLabel = rangeMode ? (searchParams.get('span') === 'all' ? 'All time' : 'Custom span') : currentRange;
+  // With no week, dates or span in the link, Sales opens on All time (app/page.tsx), so that counts as range mode too.
+  const noPeriod = !searchParams.get('week') && !searchParams.get('from') && !searchParams.get('to') && !searchParams.get('span');
+  const allTime = searchParams.get('span') === 'all' || noPeriod;
+  const rangeMode = pathname === '/' && Boolean(searchParams.get('channel')) && (allTime || Boolean(searchParams.get('from') && searchParams.get('to')));
+  const periodLabel = rangeMode ? (allTime ? 'All time' : 'Custom span') : currentRange;
   // What the chat says it is answering about: the picked span (not the selected week) while dates are picked.
   const spanBounds = {firstDay: firstDigestDay(digests) ?? phDay(Date.now()), todayDay: phDay(Date.now())};
-  const scopeLabel = rangeMode ? spanScopeLabel({from: searchParams.get('from') ?? undefined, to: searchParams.get('to') ?? undefined, span: searchParams.get('span') ?? undefined}, spanBounds) ?? currentRange : currentRange;
+  const scopeLabel = rangeMode ? spanScopeLabel({from: searchParams.get('from') ?? undefined, to: searchParams.get('to') ?? undefined, span: allTime ? 'all' : searchParams.get('span') ?? undefined}, spanBounds) ?? currentRange : currentRange;
 
   // The reporting-period picker only makes sense in period-scoped analytics views —
   // hide it on the home brief ("/" with no channel), Settings, Business Health
