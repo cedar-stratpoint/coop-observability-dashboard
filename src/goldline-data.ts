@@ -205,9 +205,9 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
 }
 
 /** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
- *  Goes through the upsert_sales RPC, which encrypts the peso figures into
- *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql);
- *  the plain gross_retail / net_of_vat never reach the table. */
+ *  Goes through the upsert_sales RPC, which encrypts the peso figures and units into
+ *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql,
+ *  s3_sales_units_encryption.sql); none of the three reach the table in plain. */
 export async function upsertSales(
   companyId: string,
   rows: PosSaleRow[],

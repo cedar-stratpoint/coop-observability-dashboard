@@ -5,7 +5,10 @@
 -- Watsons SKU, a month-tabs view of each file, a "Watsons files by month" summary). This
 -- sums sales per SKU per month: units and how many stores. One jsonb value, so a client
 -- read is never cut at PostgREST's row cap: {"<sku>": [["YYYY-MM-01", units, stores], ...]}.
--- Units only (plain); the encrypted money is not touched.
+-- Units only; the money is not read.
+--
+-- Once s3_sales_units_encryption.sql is applied, re-run s3 after this file: units are
+-- encrypted there and s3 holds the decrypting sku_months (s2 then drops plain units).
 
 create or replace function public.sku_months(p_company text)
 returns jsonb
