@@ -6,7 +6,7 @@ import {parseGoldlinePos} from '@/src/goldline-csv';
 import {readWatsonsWorkbook} from '@/src/goldline-pos-xlsx';
 import {applyWatsonsMonth} from '@/src/goldline-watsons-data';
 import {runChecks} from '@/src/goldline-checks-data';
-import {glTags} from '@/src/goldline-ref-data';
+import {expireSalesTotals, glTags} from '@/src/goldline-ref-data';
 import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
@@ -248,10 +248,12 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       emit({type: 'stage', stage: 'saving'});
       const committed = await upsertSales(companyId, rows, {start, end}, uploadId);
       await setUploadStatus(uploadId, 'committed');
+      expireSalesTotals(companyId); // sales totals changed
       await runChecks(companyId).catch((e) => console.error('runChecks after CSV upload', msg(e)));
       return json({uploadId, status: 'committed', rowsCommitted: committed, warnings: errors});
     } catch (e) {
       console.error('goldline upload: sales commit failed', e);
+      expireSalesTotals(companyId); // some rows may be in already
       await setUploadStatus(uploadId, 'failed', {rejectReason: 'Could not save sales rows.'});
       return json({uploadId, status: 'failed', error: 'Could not save sales rows. Please try again.'}, 500);
     }
@@ -282,9 +284,11 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       await runChecks(companyId).catch((e) => console.error('runChecks after Watsons upload', msg(e)));
       revalidateTag(glTags.stores(companyId), {expire: 0});
       revalidateTag(glTags.catalog(companyId), {expire: 0});
+      expireSalesTotals(companyId); // sales totals changed
       return json({uploadId, status: 'committed', rowsCommitted: summary.salesRows, watsons: summary, warnings: wb.errors});
     } catch (e) {
       console.error('goldline upload: Watsons month failed', msg(e));
+      expireSalesTotals(companyId); // some rows may have changed already
       await setUploadStatus(uploadId, 'failed', {rejectReason: 'Could not save this month of sales. Please try again.', errorDetail: msg(e)});
       return json({uploadId, status: 'failed', error: 'Could not save this month of sales. Please try again.'}, 500);
     }

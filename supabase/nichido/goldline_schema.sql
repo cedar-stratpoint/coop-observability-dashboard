@@ -565,6 +565,51 @@ alter table public.products add column if not exists retired_remark text;
 do $$ begin
   alter table public.products add constraint products_retired_remark_len check (retired_remark is null or char_length(retired_remark) <= 500);
 exception when duplicate_object then null; end $$;
+-- f2d (Oct 29): the latest note on one of our form items (SKU linking's "Sold at Watsons?").
+create table if not exists public.item_notes (
+  company_id  text not null references public.companies(id) on delete cascade,
+  item_code   text not null,
+  note        text not null check (char_length(note) between 1 and 500),
+  note_by     text,
+  note_at     timestamptz not null default now(),
+  primary key (company_id, item_code)
+);
+alter table public.item_notes enable row level security;
+revoke all on public.item_notes from anon, authenticated;
+-- f2e (Oct 29): every SKU linking decision with the rows it changed, for Undo (trail kept).
+create table if not exists public.sku_decision_log (
+  id          bigint generated always as identity primary key,
+  company_id  text not null references public.companies(id) on delete cascade,
+  target      text not null check (target in ('sku', 'item')),
+  key         text not null,
+  action      text not null check (action in ('approved', 'rejected', 'linked', 'unlinked', 'remark', 'decommissioned', 'restored', 'note')),
+  summary     text,
+  done_by     text,
+  done_at     timestamptz not null default now(),
+  before      jsonb not null,
+  after       jsonb not null,
+  undone_by   text,
+  undone_at   timestamptz
+);
+create index if not exists sku_decision_log_latest on public.sku_decision_log (company_id, target, key, id desc);
+alter table public.sku_decision_log enable row level security;
+revoke all on public.sku_decision_log from anon, authenticated;
+-- f2f (Oct 29): per Watsons SKU, units and stores in each monthly file (one jsonb value).
+create or replace function public.sku_months(p_company text)
+returns jsonb
+language sql stable security invoker set search_path = public
+as $$
+  select coalesce(jsonb_object_agg(sku_code, months), '{}'::jsonb)
+  from (
+    select sku_code, jsonb_agg(jsonb_build_array(m, units, stores) order by m) as months
+    from (
+      select sku_code, date_trunc('month', period_start)::date as m, coalesce(sum(units), 0)::bigint as units, count(distinct store_code)::int as stores
+      from sales where company_id = p_company group by 1, 2
+    ) x group by sku_code
+  ) y;
+$$;
+revoke all on function public.sku_months(text) from public, anon, authenticated;
+grant execute on function public.sku_months(text) to service_role;
 do $$ begin
   alter table public.products add constraint products_category_check
     check (category is null or category in ('eyes', 'lips', 'face', 'other'));

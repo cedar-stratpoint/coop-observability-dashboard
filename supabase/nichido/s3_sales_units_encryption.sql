@@ -357,8 +357,8 @@ $$;
 revoke all on function public.forecast_item_history(text, text, date[], text[]) from public, anon, authenticated;
 grant execute on function public.forecast_item_history(text, text, date[], text[]) to service_role;
 
--- Per SKU, per month: units and stores selling. Was on Staging with no file in the repo and
--- no caller in the app; kept working rather than dropped.
+-- Per SKU, per month: units and stores selling (f2f_sku_months.sql, SKU linking's
+-- Watsons-files-by-month view). Same output as f2f.
 create or replace function public.sku_months(p_company text)
 returns jsonb
 language sql stable security definer set search_path = public, pg_temp

@@ -1,6 +1,6 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
-import {getGlCatalog, getGlStores} from './goldline-ref-data';
+import {getGlCatalog, getGlStores, getSalesRollup} from './goldline-ref-data';
 import {buildOverview, last12Months, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
 
 // Read-only analytics for a Goldline-style tenant: store + SKU rollups derived
@@ -65,19 +65,11 @@ const EMPTY: GoldlineAnalytics = {
 /** One company's store + SKU sales rollups and headline summary. */
 export async function getGoldlineAnalytics(companyId: string): Promise<GoldlineAnalytics> {
   if (!configured()) return EMPTY;
-  const supa = db();
 
   // Sums are done in the database (sales_rollup) — never the whole sales history
-  // shipped to the app. The store list comes from the per-company cache.
-  const [cachedStores, rollup] = await Promise.all([getGlStores(companyId), supa.rpc('sales_rollup', {p_company: companyId})]);
-  if (rollup.error) throw new Error(`sales_rollup failed: ${rollup.error.message}`);
+  // shipped to the app — and cached per company until sales change (getSalesRollup).
+  const [cachedStores, r] = await Promise.all([getGlStores(companyId), getSalesRollup(companyId)]);
   const storeRows: GlStore[] = cachedStores.map((s) => ({store_code: s.store_code, name: s.name, region: s.region, area: s.area, status: s.status}));
-  const r = (rollup.data ?? {}) as {
-    byStore?: Array<{store_code: string; units: unknown; gross: unknown; net: unknown; sku_count: unknown}>;
-    bySku?: Array<{sku_code: string; units: unknown; gross: unknown; net: unknown}>;
-    periodStart?: string | null;
-    periodEnd?: string | null;
-  };
   const perStore = new Map((r.byStore ?? []).map((x) => [x.store_code, {units: num(x.units), gross: num(x.gross), net: num(x.net), skuCount: num(x.sku_count)}]));
   const perSku = new Map((r.bySku ?? []).map((x) => [x.sku_code, {units: num(x.units), gross: num(x.gross), net: num(x.net)}]));
   let gross = 0;

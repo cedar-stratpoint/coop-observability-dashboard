@@ -17,6 +17,7 @@ import {loadSalesRange} from '@/src/sales-range-load';
 import {SalesRangeView} from '@/components/analyst/sales-range-view';
 import {getMarketplaceDaily} from '@/src/marketplace-daily-data';
 import {overlayShopeeFacts} from '@/src/shopee-facts-overlay';
+import {getShopeeSyncStatus} from '@/src/shopee-sync-data';
 
 export const dynamic = 'force-dynamic'; // reflect the latest archive when live
 
@@ -62,6 +63,15 @@ async function offlineDailyProgress(): Promise<DailyProgress | null> {
   }
 }
 
+// The Shopee sync card's first status. Fail-soft like the offline readers: any error just leaves the card out.
+async function shopeeSyncStatus() {
+  try {
+    return await getShopeeSyncStatus();
+  } catch {
+    return null;
+  }
+}
+
 export default async function Page(props: {searchParams: Promise<{week?: string; channel?: string; from?: string; to?: string; span?: string}>}) {
   await requireZoomyData(); // Zoomy-only overview — bounce a non-Zoomy viewer to /uploads
   const searchParams = await props.searchParams;
@@ -93,11 +103,14 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
   const initial = ALL_CHANNELS.includes(ch as Channel) ? [ch as Channel] : DEFAULT_CHANNELS;
   // ?from&to (PH days) or ?span=all widen this same page past the selected week: totals, ad spend, ROAS and top products for any
   // dates, built from every stored digest (src/sales-range.ts). With no dates the weekly view below is unchanged.
-  const span = {from: searchParams.from, to: searchParams.to, span: searchParams.span};
+  // Sales opens on All time; a week, dates or a span in the link are optional narrowings.
+  const narrowed = Boolean(searchParams.week || searchParams.from || searchParams.to || searchParams.span);
+  const span = {from: searchParams.from, to: searchParams.to, span: narrowed ? searchParams.span : 'all'};
   if (isRangeRequest(span)) {
-    return <SalesRangeView view={await loadSalesRange(span, digests)} initialChannels={initial} />;
+    const [view, syncStatus] = await Promise.all([loadSalesRange(span, digests), shopeeSyncStatus()]);
+    return <SalesRangeView view={view} initialChannels={initial} shopeeSync={{status: syncStatus, at: new Date().toISOString()}} />;
   }
-  const [offline, daily] = await Promise.all([offlineCompare({from: row.window_from, to: row.window_to}), getMarketplaceDaily()]);
+  const [offline, daily, syncStatus] = await Promise.all([offlineCompare({from: row.window_from, to: row.window_to}), getMarketplaceDaily(), shopeeSyncStatus()]);
   // Shopee figures come from the imported daily facts when every day of the week has one, so this view agrees with the date-range view.
   const shopee = overlayShopeeFacts(row, daily);
   const moved = shopee.facts != null && shopee.published != null && shopee.facts !== shopee.published;
@@ -108,7 +121,7 @@ export default async function Page(props: {searchParams: Promise<{week?: string;
           Shopee sales use the imported daily report (₱{shopee.facts!.toLocaleString()}). The digest published ₱{shopee.published!.toLocaleString()}.
         </p>
       )}
-      <ChannelOverview brief={getBrief()} row={shopee.row} priorRow={priorRow} initialChannels={initial} offline={offline} />
+      <ChannelOverview brief={getBrief()} row={shopee.row} priorRow={priorRow} initialChannels={initial} offline={offline} shopeeSync={{status: syncStatus, at: new Date().toISOString()}} />
     </>
   );
 }

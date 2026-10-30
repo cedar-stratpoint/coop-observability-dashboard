@@ -11,6 +11,10 @@ import {ShopeeIcon, LazadaIcon} from './brand-icons';
 import {InfoTip} from './info-tip';
 import {SegmentedControl} from './segmented-control';
 import {SalesRangeAsk} from './sales-range-ask';
+import {ShopeeSyncCard} from './shopee-sync-card';
+import {useShopeeSyncStatus} from './use-shopee-sync-status';
+import {cardVisible} from '../../src/shopee-sync/card-model';
+import type {ShopeeSyncStatus} from '../../src/shopee-sync-data';
 import {adsTotals, sumTotals, type ProductRow, type SalesRangeView as View} from '../../src/sales-range';
 import {compareSpans, pctLabel, type Delta} from '../../src/sales-range-compare';
 import type {SeriesBucket} from '../../src/sales-range-series';
@@ -114,7 +118,8 @@ function bucketValue(b: SeriesBucket, metric: TimeMetric, selected: readonly Cha
   return {v, partial: reasons.length > 0, why: reasons.length ? `Partial: ${reasons.join('; ')}.` : null};
 }
 
-export function SalesRangeView({view, initialChannels = ['shopee', 'lazada', 'website', 'offline']}: {view: View; initialChannels?: Channel[]}) {
+export function SalesRangeView({view, initialChannels = ['shopee', 'lazada', 'website', 'offline'], shopeeSync}: {view: View; initialChannels?: Channel[]; shopeeSync?: {status: ShopeeSyncStatus | null; at: string}}) {
+  const sync = useShopeeSyncStatus(shopeeSync?.status ?? null, shopeeSync?.at ?? new Date(0).toISOString());
   const [selected, setSelected] = useState<Channel[]>(initialChannels);
   const [metric, setMetric] = useState<Metric>('revenue');
   const [productTab, setProductTab] = useState<'website' | 'shopee' | 'lazada'>('website');
@@ -203,6 +208,8 @@ export function SalesRangeView({view, initialChannels = ['shopee', 'lazada', 'we
           })}
         </div>
       </div>
+
+      {selected.includes('shopee') && sync.status && cardVisible(sync.status, sync.now) && <ShopeeSyncCard status={sync.status} now={sync.now} refresh={sync.refresh} />}
 
       <div className="grid grid-cols-2 gap-x-0 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi label="Total revenue" value={totals.revenue === null ? 'No data' : money(totals.revenue)} tag={noData ? undefined : <Tag kind={exact ? 'ex' : 'wk'}>{exact ? 'Exact' : 'Partial'}</Tag>} hint={HINTS.revenue} delta={comparison?.deltas.revenue} vs={vs} />
