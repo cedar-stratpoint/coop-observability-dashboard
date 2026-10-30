@@ -1,5 +1,7 @@
 -- F2 · Store scope (Nichido project). Additive and safe to re-run.
 -- Run on Nichido STAGING (Nichido-Supabase-Staging) first; PROD after review.
+-- Once s3_sales_units_encryption.sql is applied, re-run s3 after this file: s3 holds the
+-- decrypting versions of the sales readers below (units are encrypted, then dropped by s2).
 --
 -- Decided Oct 26 (S2): a store is out of scope when it sold nothing in the last 3
 -- loaded months of POS Sales Data; admins can switch any store back on (or off).
