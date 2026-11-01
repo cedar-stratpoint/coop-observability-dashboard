@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {cardVisible, loginLine, noWorkerText, serverLine, statusMeta, stepsFor, syncButton} from '../src/shopee-sync/card-model';
 import {buildSyncStatus, type ShopeeSyncStatus, type SyncJobView} from '../src/shopee-sync/status';
-import {FIRST_CHECK, FRESH_CHECK, NEEDS_ADMIN} from '../src/shopee-sync/service';
+import {NEEDS_ADMIN} from '../src/shopee-sync/service';
 import type {Heartbeat, Job} from '../src/shopee-sync/types';
 
 // The card on the one cloud worker: login state first, then the server (asleep, waking, online), and an admin-only way in.
@@ -21,10 +21,10 @@ describe('login on the status', () => {
     expect(s.workerOnline).toBe(false);
     expect(s.canSync).toMatchObject({ok: true});
   });
-  it('is unknown before the first check, and Sync waits for it', () => {
+  it('is unknown before the first check, and Sync still works (the press wakes the worker, which checks)', () => {
     const s = build({heartbeat: cloud({loginState: null, loginCheckedAt: null, lastSeen: null})});
     expect(s.login).toEqual({state: 'unknown', checkedAt: null, ageSeconds: null, stale: false});
-    expect(s.canSync).toEqual({ok: false, reason: FIRST_CHECK});
+    expect(s.canSync).toMatchObject({ok: true});
   });
   it('disables Sync and says an admin must sign in for needs_password and signed_out', () => {
     for (const loginState of ['needs_password', 'signed_out'] as const) {
@@ -137,10 +137,10 @@ describe('cardVisible for an admin', () => {
 
 describe('a stored Ready login does not last forever', () => {
   const H = 3600;
-  it('older than 24 hours it is unknown: Sync waits for a fresh check, and the card keeps the age', () => {
+  it('older than 24 hours it is unknown but Sync stays pressable (the worker re-checks on claim), and the card keeps the age', () => {
     const stale = build({heartbeat: cloud({loginCheckedAt: ago(24 * H + 60)})});
     expect(stale.login).toEqual({state: 'unknown', checkedAt: ago(24 * H + 60), ageSeconds: 24 * H + 60, stale: true});
-    expect(stale.canSync).toEqual({ok: false, reason: FRESH_CHECK});
+    expect(stale.canSync).toMatchObject({ok: true});
     const fresh = build({heartbeat: cloud({loginCheckedAt: ago(24 * H - 60)})});
     expect(fresh.login).toMatchObject({state: 'ready', stale: false});
     expect(fresh.canSync).toMatchObject({ok: true});
