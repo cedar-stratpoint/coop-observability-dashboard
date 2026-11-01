@@ -39,19 +39,20 @@ describe('requestSync', () => {
     expect(r).toEqual({ok: false, error: 'The cloud worker has not connected yet.'});
     expect(store.jobs).toHaveLength(0);
   });
-  it('waits for a first check, and refuses while the login needs an admin', async () => {
+  it('does not wait for a first check, and refuses while the login needs an admin', async () => {
     await heartbeat(null);
-    expect(await requestSync(deps(), 'a@x.com')).toEqual({ok: false, error: 'Waiting for the first login check'});
+    expect(await requestSync(deps(), 'a@x.com')).toMatchObject({ok: true});
+    store.jobs.length = 0;
     await heartbeat('needs_password');
     expect(await requestSync(deps(), 'a@x.com')).toMatchObject({ok: false, error: expect.stringMatching(/admin/)});
     await heartbeat('signed_out');
     expect(await requestSync(deps(), 'a@x.com')).toMatchObject({ok: false, error: expect.stringMatching(/admin/)});
     expect(store.jobs).toHaveLength(0);
   });
-  it('treats a Ready check older than 24 hours as unknown', async () => {
+  it('still queues a job when the Ready check is older than 24 hours (the worker re-checks on claim)', async () => {
     await heartbeat();
     clock = new Date(clock.getTime() + 25 * 3_600_000);
-    expect(await requestSync(deps(), 'a@x.com')).toEqual({ok: false, error: 'Waiting for a fresh login check'});
+    expect(await requestSync(deps(), 'a@x.com')).toMatchObject({ok: true});
   });
   it('refuses a second sync while one is queued or running, and during cooldown', async () => {
     await heartbeat();

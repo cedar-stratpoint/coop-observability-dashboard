@@ -36,8 +36,6 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 /** Whether `who` may press Sync now: the days it would load, or the plain reason it may not. Pure; the card and the action both use it. */
 export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
 export const NO_WORKER = 'The cloud worker has not connected yet.';
-export const FIRST_CHECK = 'Waiting for the first login check';
-export const FRESH_CHECK = 'Waiting for a fresh login check';
 
 export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number; refresh: boolean} | Fail {
   const missing = missingClosedDays(i.loadedDays, i.now);
@@ -45,13 +43,11 @@ export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbe
   const refresh = missing.days.length === 0;
   const days = refresh ? [latestClosedDay(i.now)] : missing.days;
   const more = missing.more;
-  // Sync needs the last known Shopee login to be ready (the cloud worker's checker, which survives the server sleeping).
+  // A known-bad login needs an admin. An old or never-taken check does NOT block: the box may be asleep, so the press must be able to wake it,
+  // and the worker re-checks the login itself when it claims the job (pausing for a sign-in if it is not ready).
   const login = cloudLogin(i.heartbeat, i.now);
-  if (login.state !== 'ready') {
-    if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
-    if (login.hasWorker) return fail(login.stale ? FRESH_CHECK : FIRST_CHECK);
-    return fail(NO_WORKER);
-  }
+  if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
+  if (!login.hasWorker) return fail(NO_WORKER);
   const blocked = startBlock(i.now, i.jobs);
   return blocked ? fail(blocked) : {ok: true, days, more, refresh};
 }
