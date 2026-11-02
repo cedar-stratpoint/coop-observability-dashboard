@@ -50,7 +50,7 @@ async function gate(req: Request, d: ApiDeps, workerOk = false): Promise<{denied
 }
 /**
  * A worker may touch a file only when its filename period EQUALS a window the server issued for its job and, when `type` is given, the report type
- * is one that window carries (past7: the 3 daily files; week: all 5). A missing period, an unissued window or an unknown type (null) is refused.
+ * is one that window carries (day: sales_overview; week: all 5). A missing period, an unissued window or an unknown type (null) is refused.
  */
 export function periodIsWindow(from: string | null | undefined, to: string | null | undefined, windows: readonly SyncWindow[], type?: ReportType | null): boolean {
   if (!from || !to || type === null) return false;
