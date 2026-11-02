@@ -13,7 +13,7 @@ const WAKE = 'wake-secret-for-tests';
 let store: FakeSyncStore;
 let clock: Date;
 const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED});
-const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, ...o});
+const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, loadLoadedDays: async () => LOADED, ...o});
 const post = (path: string, body: unknown, token?: string) =>
   new Request(`https://coop.example/api/shopee/sync/${path}`, {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...(token ? {authorization: `Bearer ${token}`} : {})}});
 const claim = (body: unknown) => handleClaim(post('claim', body, WORKER), api());

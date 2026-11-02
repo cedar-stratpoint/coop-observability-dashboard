@@ -17,6 +17,18 @@ beforeEach(() => {
   loaded = [...LOADED];
 });
 
+describe('requestSync and the window cap (SYN-09)', () => {
+  it('keeps only the days the 4 windows cover and counts the rest as waiting', async () => {
+    await heartbeat();
+    loaded = ['2026-09-21']; // 22 Sep .. 26 Oct missing: weeks of 21 Sep (partly), 28 Sep, 5, 12, 19 Oct and past7
+    const r = await requestSync(deps(), 'a@x.com');
+    if (!r.ok) throw new Error(r.error);
+    expect(r.job.days[0]).toBe('2026-09-22');
+    expect(r.job.days.at(-1)).toBe('2026-10-18'); // the week of 19 Oct and past7 did not fit
+    expect(r.job.days.some((d) => d >= '2026-10-19')).toBe(false);
+  });
+});
+
 describe('requestSync', () => {
   it('creates a job with every missing closed day, computed by the server', async () => {
     await heartbeat();

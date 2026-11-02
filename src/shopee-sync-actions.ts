@@ -54,7 +54,7 @@ export async function confirmSyncReview(jobId: string): Promise<ActionResult> {
   if (!c.ok) return c;
   try {
     const r = await confirmReview(c.deps, supabaseImportStore(posClient()), c.viewer, String(jobId));
-    if (r.ok) revalidateDigestArchive();
+    revalidateDigestArchive(); // the runs were applied even when a day is still missing and the job ended as failed
     return r;
   } catch (e) {
     console.error('confirmSyncReview failed', e);

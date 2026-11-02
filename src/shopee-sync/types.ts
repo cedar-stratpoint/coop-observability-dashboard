@@ -26,8 +26,11 @@ export interface Heartbeat {
 }
 /** What the worker reports for one day of a job. */
 export type DayState = 'loaded' | 'review' | 'failed' | 'skipped';
+/** What the worker reports for one file of one window (progress key `<from>..<to>/<type>`); `unchanged` = the import found nothing new in it. */
+export type FileState = DayState | 'unchanged';
+export const FILE_STATES: readonly FileState[] = ['loaded', 'unchanged', 'review', 'failed', 'skipped'];
 export interface DayResult {
-  state: DayState;
+  state: FileState;
   importId?: string;
   note?: string;
 }
