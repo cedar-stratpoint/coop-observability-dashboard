@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-02 — Owner switch to lift the Monday quiet window for staging tests
+Found on staging: pressing Sync on a Monday between 08:30 and 11:00 Manila time queues the job but the server hands the worker nothing, and the card just says "Waiting for the worker". The window is deliberate (the weekly export uses the same Seller Centre login), but it left no way to test on a Monday morning. Decision: `SHOPEE_SYNC_QUIET_WINDOW=off` (server env, unset by default and in production) lifts it; anything else keeps it. It is an owner's switch: only set it when the weekly export is not running.
+
 ## 2026-11-02 — An old login check no longer locks Sync
 Found on staging: after the box slept 3 days, Retry was greyed out with "Waiting for a fresh login check", but only the worker (asleep) can refresh that check, so nothing could ever wake it. Decision: only a known-bad login (needs password, signed out) or a worker that never connected blocks Sync. A stale or never-taken check does not: the press queues the job, the wake Lambda starts the box, and the worker re-checks the login when it claims the job (pausing for a sign-in if it is not ready). Removed the `FIRST_CHECK` / `FRESH_CHECK` gates in `syncGate`.
 

@@ -18,7 +18,9 @@ export const QUIET_END_MIN = 11 * 60;
 
 export type JobLike = Pick<Job, 'id' | 'status' | 'createdAt' | 'heartbeatAt'> & {awaitingSince?: string | null; claimedAt?: string | null};
 
-export function inQuietWindow(now: Date): boolean {
+/** SHOPEE_SYNC_QUIET_WINDOW=off lifts the Monday window (owner switch for staging tests only; unset in production). */
+export function inQuietWindow(now: Date, env: Record<string, string | undefined> = process.env): boolean {
+  if (env.SHOPEE_SYNC_QUIET_WINDOW === 'off') return false;
   const ph = new Date(now.getTime() + 8 * 3_600_000);
   if (ph.getUTCDay() !== 1) return false;
   const min = ph.getUTCHours() * 60 + ph.getUTCMinutes();

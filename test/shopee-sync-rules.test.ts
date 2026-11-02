@@ -77,3 +77,15 @@ describe('staleSweep for a job waiting on a sign-in with no awaiting_since', () 
     expect(staleSweep(now, [waiting(ago(59))])).toEqual([]);
   });
 });
+
+describe('SHOPEE_SYNC_QUIET_WINDOW=off', () => {
+  const monday9 = new Date('2026-11-02T01:00:00Z'); // 09:00 Manila on a Monday
+  it('is inside the window by default and when unset', () => {
+    expect(inQuietWindow(monday9, {})).toBe(true);
+    expect(inQuietWindow(monday9, {SHOPEE_SYNC_QUIET_WINDOW: 'on'})).toBe(true);
+  });
+  it('lifts the window only when set to exactly "off"', () => {
+    expect(inQuietWindow(monday9, {SHOPEE_SYNC_QUIET_WINDOW: 'off'})).toBe(false);
+    expect(startBlock(monday9, [])).not.toBeNull(); // the real env is unset in tests
+  });
+});
