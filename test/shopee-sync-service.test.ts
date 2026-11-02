@@ -71,11 +71,10 @@ describe('requestSync', () => {
     clock = new Date(clock.getTime() + 6 * 60_000);
     expect((await requestSync(deps(), 'a@x.com')).ok).toBe(true);
   });
-  it('refuses in the Monday quiet window', async () => {
+  it('does not refuse on Monday morning', async () => {
     await heartbeat();
     clock = at('2026-10-26T09:00:00');
-    const r = await requestSync(deps(), 'a@x.com');
-    expect(!r.ok && r.error).toMatch(/monday/i);
+    expect((await requestSync(deps(), 'a@x.com')).ok).toBe(true);
   });
   it('sweeps a stale queued job first, so an unclaimed one does not block everyone forever', async () => {
     await heartbeat();

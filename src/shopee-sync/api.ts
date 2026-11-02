@@ -3,7 +3,7 @@
 // SHOPEE_SYNC_WORKER_TOKEN, sent as `Authorization: Bearer`. No field anywhere carries a Shopee password or code: unknown request fields are dropped, never stored.
 import {createHash, timingSafeEqual} from 'node:crypto';
 import type {SyncStore} from './store';
-import {inQuietWindow, isOnline} from './rules';
+import {isOnline} from './rules';
 import {sweepJobs} from './service';
 import {isActive, LOGIN_STATES, type DayResult, type DayState, type Job, type JobStatus, type LoginState, type WorkerReport} from './types';
 
@@ -65,7 +65,7 @@ export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Respons
     await d.store.transitionJob(active.id, [active.status], {heartbeatAt: now.toISOString()}); // a poll is also a heartbeat
     return reply({job: null, activeJobId: active.id});
   }
-  if (hb.loginState !== 'ready' || inQuietWindow(now)) return reply({job: null});
+  if (hb.loginState !== 'ready') return reply({job: null});
   const pick = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
   const claimed = pick ? await d.store.claimJob(pick.id, now) : null;
   return reply({job: claimed ? toWire(claimed) : null});

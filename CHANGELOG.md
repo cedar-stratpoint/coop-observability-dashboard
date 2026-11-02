@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-02 — Removed the Monday quiet window
+Owner decision: the manual Sync replaces Vince's weekly Shopee export, so nobody runs it by hand on Mondays any more. The 08:30 to 11:00 Manila hold existed only to keep Sync away from that export (same Seller Centre login). Found on staging when a Monday-morning job sat "Queued" with a healthy worker. Deleted `inQuietWindow`, its two checks (starting a sync, handing a job to the worker) and their tests. No env switch was added.
+
 ## 2026-11-02 — An old login check no longer locks Sync
 Found on staging: after the box slept 3 days, Retry was greyed out with "Waiting for a fresh login check", but only the worker (asleep) can refresh that check, so nothing could ever wake it. Decision: only a known-bad login (needs password, signed out) or a worker that never connected blocks Sync. A stale or never-taken check does not: the press queues the job, the wake Lambda starts the box, and the worker re-checks the login when it claims the job (pausing for a sign-in if it is not ready). Removed the `FIRST_CHECK` / `FRESH_CHECK` gates in `syncGate`.
 

@@ -1,18 +1,8 @@
 import {describe, expect, it} from 'vitest';
-import {COOLDOWN_MS, DAILY_CAP, isOnline, inQuietWindow, startBlock, staleSweep, type JobLike} from '../src/shopee-sync/rules';
+import {COOLDOWN_MS, DAILY_CAP, isOnline, startBlock, staleSweep, type JobLike} from '../src/shopee-sync/rules';
 
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
 const job = (o: Partial<JobLike> = {}): JobLike => ({id: 'j', status: 'done', createdAt: '2026-10-20T00:00:00Z', heartbeatAt: null, ...o});
-
-describe('quiet window', () => {
-  it('is Monday 08:30 to 11:00 Manila time', () => {
-    expect(inQuietWindow(at('2026-10-26T08:29:59'))).toBe(false);
-    expect(inQuietWindow(at('2026-10-26T08:30:00'))).toBe(true);
-    expect(inQuietWindow(at('2026-10-26T10:59:59'))).toBe(true);
-    expect(inQuietWindow(at('2026-10-26T11:00:00'))).toBe(false);
-    expect(inQuietWindow(at('2026-10-27T09:00:00'))).toBe(false); // Tuesday
-  });
-});
 
 describe('startBlock', () => {
   const now = at('2026-10-27T14:00:00');
@@ -35,8 +25,8 @@ describe('startBlock', () => {
     expect(startBlock(now, six)).toMatch(/6|daily|today/i);
     expect(startBlock(at('2026-10-28T14:00:00'), six)).toBeNull();
   });
-  it('blocks in the Monday quiet window', () => {
-    expect(startBlock(at('2026-10-26T09:00:00'), [])).toMatch(/monday|quiet/i);
+  it('no longer blocks on Monday morning (the weekly export is replaced by Sync)', () => {
+    expect(startBlock(at('2026-10-26T09:00:00'), [])).toBeNull();
   });
 });
 

@@ -124,28 +124,11 @@ describe('claim', () => {
   });
 });
 
-describe('the Monday quiet window blocks starting, never finishing', () => {
-  // The server refuses to START or CLAIM a sync in 08:30 to 11:00 Monday; one already running is allowed to finish.
-  it('lets a job claimed before 08:30 keep polling and reporting through the window, while a new claim waits', async () => {
-    clock = at('2026-10-26T08:25:00');
+describe('Monday morning is not special any more (Sync replaces the weekly export)', () => {
+  it('hands a queued job to the worker at 09:00 Monday and lets a new one queue', async () => {
+    clock = at('2026-10-26T09:00:00');
     const job = await queued();
     expect((await claim()).job).toMatchObject({id: job.id});
-    clock = at('2026-10-26T08:34:00');
-    expect(await claim()).toEqual({job: null, activeJobId: job.id});
-    const prog = await handleProgress(post('progress', {jobId: job.id, status: 'running', days: {[job.days[0]]: {state: 'loaded'}}}, WORKER), api());
-    expect(prog.status).toBe(200);
-    expect((await handleProgress(post('progress', {jobId: job.id, status: 'done'}, WORKER), api())).status).toBe(200);
-    expect((await store.getJob(job.id))?.status).toBe('done');
-  });
-  it('does not hand a queued job to the worker inside the window, and does not queue a new one', async () => {
-    clock = at('2026-10-26T08:25:00');
-    const job = await queued();
-    clock = at('2026-10-26T08:40:00');
-    expect((await claim()).job).toBeNull();
-    expect((await store.getJob(job.id))?.status).toBe('queued');
-    await store.transitionJob(job.id, ['queued'], {status: 'expired', finishedAt: clock.toISOString()});
-    const again = await requestSync(sd(), 'a@x.com');
-    expect(again.ok === false && again.error).toMatch(/Monday/);
   });
 });
 
