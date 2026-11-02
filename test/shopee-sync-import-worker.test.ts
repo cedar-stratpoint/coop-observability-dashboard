@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {handleApply, handleCoverage, handlePlan, handleUndo} from '../src/shopee-import/api';
+import {markLoadedProgress} from '../src/shopee-sync/service';
 import {workerAuthFor} from '../src/shopee-sync/worker-auth';
 import type {Job} from '../src/shopee-sync/types';
 import {salesOverviewFile, week} from './support/shopee-fixture';
@@ -24,7 +25,8 @@ async function setup(opts: {days?: string[] | null; status?: Job['status']} = {}
     await sync.claimJob(job.id, NOW);
     if (opts.status && opts.status !== 'running') await sync.transitionJob(job.id, ['running'], {status: opts.status});
   }
-  return {sync, token, store, deps: {store, token: IMPORT_TOKEN as string | undefined, now: () => NOW, workerAuth: workerAuthFor(sync, WORKER_TOKEN)}};
+  const deps = {store, token: IMPORT_TOKEN as string | undefined, now: () => NOW, workerAuth: workerAuthFor(sync, WORKER_TOKEN, () => NOW), afterWorkerApply: async (jobId: string) => markLoadedProgress(sync, jobId, await store.loadLoadedDays())};
+  return {sync, token, store, deps};
 }
 async function planReq(token: string, files: {name: string; bytes: Buffer}[], fields: Record<string, string> = {}) {
   const form = new FormData();
@@ -46,12 +48,15 @@ describe('the worker secret is only good for its own running job', () => {
     expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
     expect(store.runs.find((r) => r.importId === id)?.status).toBe('staged');
   });
-  it('refuses a file outside the job days (plan and apply), writing nothing', async () => {
+  // Changed deliberately (SYN-09): the old check was "every day is a job day". A file whose period is not an issued window is refused; the week of the fixture is now
+  // an issued window for a job holding 18 Oct, so this test asks for a different period (19-25 Oct, not a window of that job).
+  it('refuses a file whose period is not an issued window (plan and apply), writing nothing', async () => {
     const {token, deps, store} = await setup({days: ['2026-10-18']});
-    const res = await handlePlan(await planReq(token, [await daily()]), deps);
+    const other = {name: 'sales_overview_20261019-20261025.xlsx', bytes: await salesOverviewFile(week('2026-10-19', [1, 2, 3, 4, 5, 6, 7]))};
+    const res = await handlePlan(await planReq(token, [other]), deps);
     expect(res.status).toBe(403);
     expect(store.runs).toHaveLength(0);
-    const planned = await (await handlePlan(await planReq(IMPORT_TOKEN, [await daily()]), deps)).json();
+    const planned = await (await handlePlan(await planReq(IMPORT_TOKEN, [other]), deps)).json();
     const id = planned.results[0].importId;
     expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
     expect(store.runs.find((r) => r.importId === id)?.status).toBe('staged');
@@ -90,14 +95,16 @@ describe('the import API with the worker secret', () => {
     expect(res.status).toBe(403);
     expect(store.runs).toHaveLength(0);
   });
-  it('refuses every other report type, and the whole request if any file is one, with nothing written', async () => {
+  // Changed deliberately (SYN-09): other report types are no longer refused outright; they are allowed when the window carries them (see 'the five files' below).
+  // What stays refused: an unknown file name, and the whole request if any one file is refused, with nothing written.
+  it('refuses an unknown file name, and the whole request if any file is refused, with nothing written', async () => {
     const {token, deps, store} = await setup();
-    const other = {name: 'traffic_20261012-20261018.xlsx', bytes: Buffer.from('x')};
+    const other = {name: 'orders_20261012-20261018.xlsx', bytes: Buffer.from('x')};
     const res = await handlePlan(await planReq(token, [await daily(), other]), deps);
     expect(res.status).toBe(403);
     expect(store.runs).toHaveLength(0);
   });
-  it('refuses to apply a run that is not a plain sales_overview, before applying any', async () => {
+  it('refuses to apply a restated run or a run outside an issued window, before applying any', async () => {
     const {token, deps, store} = await setup();
     const planned = await (await handlePlan(await planReq(IMPORT_TOKEN, [await daily()]), deps)).json();
     const id = planned.results[0].importId;
@@ -106,7 +113,7 @@ describe('the import API with the worker secret', () => {
     expect(res.status).toBe(403);
     expect(store.runs.find((r) => r.importId === id)?.status).toBe('staged');
     store.runs.find((r) => r.importId === id)!.restated = false;
-    store.runs.find((r) => r.importId === id)!.reportType = 'traffic';
+    store.runs.find((r) => r.importId === id)!.periodTo = '2026-10-17'; // no longer equal to an issued window
     expect((await handleApply(json(token, {importIds: [id]}), deps)).status).toBe(403);
   });
   it('refuses to apply a run its own job did not plan (an admin-planned or another job\'s run), writing nothing', async () => {
@@ -150,5 +157,118 @@ describe('the import API with the worker secret', () => {
     const id = planned.results[0].importId;
     await handleApply(json(IMPORT_TOKEN, {importIds: [id]}), deps);
     expect((await handleUndo(json(IMPORT_TOKEN, {importId: id, reason: 'r'}), deps)).status).toBe(200);
+  });
+});
+
+// ── SYN-09: windows ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// NOW is Tue 27 Oct 11:00 PH, so yesterday is 26 Oct and the past 7 days are 20-26 Oct.
+const FILES = {
+  sales_overview: (p: string) => `sales_overview_${p}.xlsx`,
+  traffic: (p: string) => `traffic_overview_${p}.xlsx`,
+  product_overview: (p: string) => `productoverview_${p}.xlsx`,
+  sku_detail: (p: string) => `parentskudetail_${p}.xlsx`,
+  ads: (p: string) => `Shopee-Ads-Overall-Data-Report-${p.slice(6, 8)}_${p.slice(4, 6)}_${p.slice(0, 4)}-${p.slice(15, 17)}_${p.slice(13, 15)}_${p.slice(9, 13)}.csv`,
+} as const;
+const junk = (name: string) => ({name, bytes: Buffer.from('not a real export')});
+const WEEK_P = '20261012-20261018';
+const PAST_P = '20261020-20261026';
+const mixedDays = [...WEEK, '2026-10-21']; // a week window (12-18 Oct) plus past7 (20-26 Oct)
+
+describe('the five files per issued window', () => {
+  it('a week window accepts all five types in one request (each file is planned, not refused)', async () => {
+    const {token, deps} = await setup();
+    const files = [FILES.sales_overview, FILES.traffic, FILES.product_overview, FILES.ads, FILES.sku_detail].map((f) => junk(f(WEEK_P)));
+    const res = await handlePlan(await planReq(token, files), deps);
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toHaveLength(5);
+  });
+  it('a past7 window accepts the 3 daily files, with the right file per window kind', async () => {
+    const {token, deps} = await setup({days: mixedDays});
+    for (const f of [FILES.sales_overview, FILES.traffic, FILES.product_overview]) expect((await handlePlan(await planReq(token, [junk(f(PAST_P))]), deps)).status).toBe(200);
+    for (const f of [FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(WEEK_P))]), deps)).status).toBe(200);
+  });
+  it('refuses ads or sku_detail for a past7 window (the wrong type for that window), writing nothing', async () => {
+    const {token, deps, store} = await setup({days: mixedDays});
+    for (const f of [FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(PAST_P))]), deps)).status).toBe(403);
+    expect(store.runs).toHaveLength(0);
+  });
+  it('refuses a window the server did not issue for this job', async () => {
+    const {token, deps, store} = await setup();
+    expect((await handlePlan(await planReq(token, [junk(FILES.traffic('20261005-20261011'))]), deps)).status).toBe(403);
+    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403); // no recent day in this job, so no past7 window
+    expect(store.runs).toHaveLength(0);
+  });
+  it('a restate is refused for every type, and a null period is refused', async () => {
+    const {token, deps, store} = await setup();
+    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(WEEK_P))], {restate: 'because'}), deps)).status).toBe(403);
+    expect((await handlePlan(await planReq(token, [junk('traffic_overview.xlsx')]), deps)).status).toBe(403);
+    expect(store.runs).toHaveLength(0);
+  });
+  it('a sixth file fails the request, and so does a second file of one type', async () => {
+    const {token, deps, store} = await setup({days: mixedDays});
+    const five = [FILES.sales_overview, FILES.traffic, FILES.product_overview, FILES.ads, FILES.sku_detail].map((f) => junk(f(WEEK_P)));
+    expect((await handlePlan(await planReq(token, [...five, junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403);
+    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(WEEK_P)), junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403);
+    expect(store.runs).toHaveLength(0);
+  });
+  it('apply: refuses a run of a type the window does not carry, and one stamped by another job; nothing is applied', async () => {
+    const {token, deps, store} = await setup({days: mixedDays});
+    const mk = async (name: string, by: string) => {
+      const id = await store.createRun({reportType: 'ads', channel: 'shopee', periodFrom: '2026-10-20', periodTo: '2026-10-26', sourceFilename: name, sha256: name, rowCount: 1, status: 'staged', checks: {}, plan: null, importedBy: by});
+      return id;
+    };
+    const jobId = (await sync_jobId(deps));
+    const wrongType = await mk('a.csv', `sync:${jobId}`);
+    expect((await handleApply(json(token, {importIds: [wrongType]}), deps)).status).toBe(403);
+    store.runs.find((r) => r.importId === wrongType)!.periodFrom = '2026-10-12';
+    store.runs.find((r) => r.importId === wrongType)!.periodTo = '2026-10-18';
+    store.runs.find((r) => r.importId === wrongType)!.importedBy = 'sync:another-job';
+    expect((await handleApply(json(token, {importIds: [wrongType]}), deps)).status).toBe(403);
+    expect(store.runs.find((r) => r.importId === wrongType)?.status).toBe('staged');
+    store.runs.find((r) => r.importId === wrongType)!.importedBy = `sync:${jobId}`;
+    expect((await handleApply(json(token, {importIds: [wrongType]}), deps)).status).toBe(200);
+  });
+  it('apply: more than five ids is refused', async () => {
+    const {token, deps} = await setup();
+    expect((await handleApply(json(token, {importIds: ['1', '2', '3', '4', '5', '6']}), deps)).status).toBe(403);
+  });
+});
+async function sync_jobId(deps: {workerAuth: (b: string) => Promise<{jobId: string | null} | null>}): Promise<string> {
+  const g = await deps.workerAuth(WORKER_TOKEN);
+  return g?.jobId as string;
+}
+
+describe('only_new and refresh', () => {
+  const full = async (vals: number[]) => ({name: `sales_overview_${PAST_P}.xlsx`, bytes: await salesOverviewFile(week('2026-10-20', vals))});
+  it('a worker sales plan is forced to only_new: a loaded day with different figures is left alone', async () => {
+    const {token, deps, store} = await setup({days: ['2026-10-20', '2026-10-21']});
+    const first = await (await handlePlan(await planReq(IMPORT_TOKEN, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
+    await handleApply(json(IMPORT_TOKEN, {importIds: [first.results[0].importId]}), deps);
+    const again = await (await handlePlan(await planReq(token, [await full([10, 20, 30, 40, 50, 60, 70])], {only_new: 'false'}), deps)).json();
+    expect(again.results[0].status).toBe('nothing_to_do');
+    expect(store.runs.filter((r) => r.status === 'staged')).toHaveLength(0);
+  });
+  it('a refresh job (one day, already loaded) plans normally, so a changed day can update', async () => {
+    const {token, deps} = await setup({days: ['2026-10-26']});
+    const first = await (await handlePlan(await planReq(IMPORT_TOKEN, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
+    await handleApply(json(IMPORT_TOKEN, {importIds: [first.results[0].importId]}), deps);
+    const again = await (await handlePlan(await planReq(token, [await full([1, 2, 3, 4, 5, 6, 8])]), deps)).json();
+    expect(again.results[0].status).toBe('staged');
+    expect(again.results[0].changed.length + again.results[0].flags.length).toBeGreaterThan(0);
+  });
+  it('a refresh-shaped job whose day is NOT loaded is an ordinary job: only_new stays on', async () => {
+    const {token, deps} = await setup({days: ['2026-10-26']});
+    const r = await (await handlePlan(await planReq(token, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
+    expect(r.results[0]).toMatchObject({status: 'staged', newDays: 7});
+  });
+});
+
+describe('after an apply the job days that now exist are marked loaded', () => {
+  it('stamps progress[day] = loaded for job days present in the archive', async () => {
+    const {token, deps, sync} = await setup();
+    const planned = await (await handlePlan(await planReq(token, [await daily()]), deps)).json();
+    await handleApply(json(token, {importIds: [planned.results[0].importId]}), deps);
+    const job = (await sync.recentJobs(1))[0];
+    for (const d of WEEK) expect(job.progress[d]?.state).toBe('loaded');
   });
 });
