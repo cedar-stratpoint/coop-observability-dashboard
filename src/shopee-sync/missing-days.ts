@@ -4,6 +4,8 @@ import {weeksCoverage} from '../shopee-import/coverage';
 
 export const MAX_SYNC_DAYS = 31;
 export const FINALITY_CUTOFF_HOUR_PH = 6;
+/** How far back (days before yesterday, inclusive of yesterday: 35 days in all) By Week can reasonably reach. Older gaps are left for the Monday import. */
+export const REACHABLE_DAYS = 35;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
@@ -18,16 +20,23 @@ export interface MissingDays {
   days: string[];
   /** Missing closed days that did not fit in this job; the next press picks them up. */
   more: number;
+  /** Missing closed days older than REACHABLE_DAYS: never put in a job, left for the Monday import. */
+  unreachable: number;
 }
+
+const yesterdayPh = (now: Date): string => new Date(Date.parse(`${phDay(now)}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+/** The oldest day a sync may still be asked to load. */
+export const oldestReachable = (now: Date): string => new Date(Date.parse(`${yesterdayPh(now)}T00:00:00Z`) - (REACHABLE_DAYS - 1) * DAY).toISOString().slice(0, 10);
 
 /** With nothing loaded at all there is no first week to measure from, so nothing is reported missing. */
 export function missingClosedDays(loadedDays: readonly string[], now: Date): MissingDays {
-  const yesterday = new Date(Date.parse(`${phDay(now)}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
-  const all = weeksCoverage(loadedDays, yesterday)
+  const oldest = oldestReachable(now);
+  const closed = weeksCoverage(loadedDays, yesterdayPh(now))
     .flatMap((w) => w.missing)
     .filter((d) => now.getTime() >= finalFrom(d))
     .sort();
-  return {days: all.slice(0, MAX_SYNC_DAYS), more: Math.max(0, all.length - MAX_SYNC_DAYS)};
+  const all = closed.filter((d) => d >= oldest);
+  return {days: all.slice(0, MAX_SYNC_DAYS), more: Math.max(0, all.length - MAX_SYNC_DAYS), unreachable: closed.length - all.length};
 }
 
 /** The newest day that is already final: yesterday (PH) once it passes 06:00 PH today, else the day before. What a refresh press re-exports when nothing is missing. */

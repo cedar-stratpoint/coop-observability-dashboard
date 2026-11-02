@@ -5,6 +5,8 @@ import {createHash, timingSafeEqual} from 'node:crypto';
 import {reportsByWeek, weeksCoverage} from './coverage';
 import {classifyFile} from './files';
 import {applyRun, planFile, undoRun, type ImportStore} from './pipeline';
+import type {ReportType} from './types';
+import {MAX_FILES_PER_WINDOW, type SyncWindow} from '../shopee-sync/windows';
 
 export interface ApiDeps {
   store: ImportStore;
@@ -37,14 +39,13 @@ async function gate(req: Request, d: ApiDeps, workerOk = false): Promise<{denied
   if (a === 'not_configured' && !(bearer && d.workerAuth)) return {denied: reply({error: 'The import API is not configured on this deployment.'}, 503), worker: false, days: none, jobId: null};
   return {denied: reply({error: 'Unauthorized.'}, 401), worker: false, days: none, jobId: null};
 }
-/** Every day from..to is one of `days` (a worker may only load days of its own running job). Unreadable or absurdly long periods are refused. */
-export function periodWithin(from: string | null | undefined, to: string | null | undefined, days: ReadonlySet<string>): boolean {
-  if (!from || !to || days.size === 0) return false;
-  const a = Date.parse(`${from}T00:00:00Z`);
-  const b = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(a) || Number.isNaN(b) || b < a || (b - a) / 86_400_000 > 62) return false;
-  for (let t = a; t <= b; t += 86_400_000) if (!days.has(new Date(t).toISOString().slice(0, 10))) return false;
-  return true;
+/**
+ * A worker may touch a file only when its filename period EQUALS a window the server issued for its job and, when `type` is given, the report type
+ * is one that window carries (past7: the 3 daily files; week: all 5). A missing period, an unissued window or an unknown type (null) is refused.
+ */
+export function periodIsWindow(from: string | null | undefined, to: string | null | undefined, windows: readonly SyncWindow[], type?: ReportType | null): boolean {
+  if (!from || !to || type === null) return false;
+  return windows.some((w) => w.from === from && w.to === to && (type === undefined || w.files.includes(type)));
 }
 /** How a run planned by a sync worker is marked, so only that job may apply it. */
 export const syncStamp = (jobId: string): string => `sync:${jobId}`;
