@@ -21,9 +21,13 @@ describe('startBlock', () => {
     expect(startBlock(now, [job({createdAt: old})])).toBeNull();
   });
   it('blocks after 6 syncs on the same Philippine day, not on the next', () => {
-    const six = Array.from({length: DAILY_CAP}, (_, i) => job({id: `j${i}`, createdAt: `2026-10-27T0${i}:00:00Z`})); // PH 08:00..13:00 on the 27th
+    const six = Array.from({length: DAILY_CAP}, (_, i) => job({id: `j${i}`, createdAt: `2026-10-27T0${i}:00:00Z`, claimedAt: `2026-10-27T0${i}:01:00Z`})); // PH 08:00..13:00 on the 27th
     expect(startBlock(now, six)).toMatch(/6|daily|today/i);
     expect(startBlock(at('2026-10-28T14:00:00'), six)).toBeNull();
+  });
+  it('does not count syncs nobody claimed (expired or cancelled while queued) toward the daily limit', () => {
+    const six = Array.from({length: DAILY_CAP}, (_, i) => job({id: `j${i}`, status: 'expired', createdAt: `2026-10-27T0${i}:00:00Z`}));
+    expect(startBlock(now, six)).toBeNull();
   });
   it('no longer blocks on Monday morning (the weekly export is replaced by Sync)', () => {
     expect(startBlock(at('2026-10-26T09:00:00'), [])).toBeNull();

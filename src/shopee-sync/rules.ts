@@ -21,7 +21,8 @@ export function startBlock(now: Date, jobs: readonly JobLike[]): string | null {
   const last = Math.max(0, ...jobs.map((j) => Date.parse(j.createdAt)));
   if (now.getTime() - last < COOLDOWN_MS) return `Please wait ${Math.ceil((COOLDOWN_MS - (now.getTime() - last)) / 60_000)} more minute(s) after the last sync.`;
   const today = phDay(now);
-  if (jobs.filter((j) => phDay(new Date(j.createdAt)) === today).length >= DAILY_CAP) return `The daily limit of ${DAILY_CAP} syncs is used up. It resets at midnight Manila time.`;
+  // Only syncs a worker actually started count: a job nobody claimed (expired, cancelled while queued) costs nothing and must not lock Sync.
+  if (jobs.filter((j) => j.claimedAt && phDay(new Date(j.createdAt)) === today).length >= DAILY_CAP) return `The daily limit of ${DAILY_CAP} syncs is used up. It resets at midnight Manila time.`;
   return null;
 }
 

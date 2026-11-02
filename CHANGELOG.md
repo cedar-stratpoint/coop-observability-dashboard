@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-02 — The daily Sync limit counts only syncs a worker started
+
+A job nobody claimed (expired, or cancelled while still queued) costs no Shopee or Claude time, yet it counted toward the 6-a-day limit and locked Retry after a day of stuck wake-ups. The limit now counts only claimed jobs. The other rules (one in flight, 10-minute cooldown) are unchanged.
+
 ## 2026-11-02 — Removed the Monday quiet window
 Owner decision: the manual Sync replaces Vince's weekly Shopee export, so nobody runs it by hand on Mondays any more. The 08:30 to 11:00 Manila hold existed only to keep Sync away from that export (same Seller Centre login). Found on staging when a Monday-morning job sat "Queued" with a healthy worker. Deleted `inQuietWindow`, its two checks (starting a sync, handing a job to the worker) and their tests. No env switch was added.
 ## 2026-11-03 — Sync windows follow Vince's export: week or day, and the By Day file now imports (SYN-09)
