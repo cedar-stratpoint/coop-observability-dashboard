@@ -4,8 +4,9 @@
 import {createHash, timingSafeEqual} from 'node:crypto';
 import type {SyncStore} from './store';
 import {isOnline} from './rules';
-import {sweepJobs} from './service';
-import {isActive, LOGIN_STATES, type DayResult, type DayState, type Job, type JobStatus, type LoginState, type WorkerReport} from './types';
+import {remainingDays, stillMissingMessage, sweepJobs} from './service';
+import {issuedWindows, MAX_FILES_PER_WINDOW} from './windows';
+import {isActive, LOGIN_STATES, FILE_STATES, type DayResult, type DayState, type FileState, type Job, type JobStatus, type LoginState, type WorkerReport} from './types';
 
 export interface SyncApiDeps {
   store: SyncStore;
@@ -14,6 +15,8 @@ export interface SyncApiDeps {
   workerToken?: string | null;
   /** SHOPEE_SYNC_WAKE_TOKEN (env only), for the wake route. Null or unset: the route answers 401 to everyone. */
   wakeToken?: string | null;
+  /** Days that have figures in the archive (the same list the import coverage uses): a worker's `done` is checked against it, so Done means no closed day is missing. */
+  loadLoadedDays: () => Promise<string[]>;
 }
 
 const reply = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
@@ -52,7 +55,8 @@ export function readReport(b: Record<string, unknown>, now: Date): WorkerReport 
   if (remote && typeof remote.ready === 'boolean') out.remoteReady = remote.ready;
   return out;
 }
-const toWire = (j: Job) => ({id: j.id, days: j.days, status: j.status});
+/** `windows` are derived from the days as of creation (stable for the job's life, and always accepted by the import routes); `days` stays for older workers. */
+const toWire = (j: Job) => ({id: j.id, days: j.days, windows: issuedWindows(j.days, j.createdAt, new Date(j.createdAt)), status: j.status});
 
 export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Response> {
   const gate = workerGate(req, d);
@@ -82,6 +86,7 @@ const FROM: Record<string, readonly JobStatus[]> = {
 };
 const ENDS = new Set<string>(['done', 'review', 'failed']);
 const DAY_STATES: readonly DayState[] = ['loaded', 'review', 'failed', 'skipped'];
+const FILE_KEY = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})\/([a-z_]+)$/;
 const clip = (v: unknown, n: number): string | undefined => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : undefined);
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
@@ -108,16 +113,41 @@ export async function handleProgress(req: Request, d: SyncApiDeps): Promise<Resp
       if (importId) importIds.add(importId);
     }
   }
-  const now = d.now().toISOString();
-  const ending = status !== undefined && ENDS.has(status);
-  const updated = await d.store.transitionJob(job.id, status ? FROM[status] : [job.status], {
-    ...(status && {status}),
+  if (b.files !== undefined) {
+    // Per-file results, keyed "<from>..<to>/<type>", kept in the same progress object (no schema change): the window must be one issued for this job and the type one it carries.
+    if (!b.files || typeof b.files !== 'object' || Array.isArray(b.files)) return reply({error: 'files must be an object keyed "<from>..<to>/<type>".'}, 400);
+    const windows = issuedWindows(job.days, job.createdAt, d.now());
+    for (const [key, raw] of Object.entries(b.files as Record<string, unknown>)) {
+      const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+      const m = FILE_KEY.exec(key);
+      if (!m || !windows.some((w) => w.from === m[1] && w.to === m[2] && (w.files as readonly string[]).includes(m[3]))) return reply({error: `${key} is not a file of a window issued for this job.`}, 400);
+      if (typeof r.state !== 'string' || !(FILE_STATES as readonly string[]).includes(r.state)) return reply({error: `Unknown state for ${key}.`}, 400);
+      const importId = typeof r.importId === 'string' && ID.test(r.importId) ? r.importId : undefined;
+      progress[key] = {state: r.state as FileState, ...(importId && {importId}), ...(clip(r.note, 200) && {note: clip(r.note, 200)})};
+      if (importId) importIds.add(importId);
+    }
+    if (importIds.size > issuedWindows(job.days, job.createdAt, d.now()).length * MAX_FILES_PER_WINDOW) return reply({error: 'Too many imports for the windows of this job.'}, 400);
+  }
+  const nowDate = d.now();
+  const now = nowDate.toISOString();
+  let end: {status: JobStatus; error?: string} | null = status ? {status} : null;
+  if (status === 'done') {
+    // Done means no closed day of the job is missing. Recompute from the archive; the days that now exist are marked loaded either way.
+    const loaded = await d.loadLoadedDays();
+    const have = new Set(loaded);
+    for (const day of job.days) if (have.has(day) && progress[day]?.state !== 'loaded') progress[day] = {...progress[day], state: 'loaded'};
+    const still = remainingDays(job, loaded, nowDate);
+    if (still.length > 0) end = {status: 'failed', error: stillMissingMessage(still, progress)};
+  }
+  const ending = end !== null && ENDS.has(end.status);
+  const updated = await d.store.transitionJob(job.id, end ? FROM[end.status] : [job.status], {
+    ...(end && {status: end.status}),
     heartbeatAt: now,
     progress,
     importIds: [...importIds],
-    ...(status === 'failed' && {error: clip(b.error, 300) ?? 'worker reported a failure'}),
+    ...(end?.status === 'failed' && {error: end.error ?? clip(b.error, 300) ?? 'worker reported a failure'}),
     ...(ending && {finishedAt: now}),
-    ...(status === 'awaiting_verification' && job.status !== 'awaiting_verification' && {awaitingSince: now}),
+    ...(end?.status === 'awaiting_verification' && job.status !== 'awaiting_verification' && {awaitingSince: now}),
   });
   if (!updated) return reply({error: 'The job changed while reporting. Poll again.', stop: true}, 409);
   await d.store.touchHeartbeat(readReport(b, d.now()), d.now()); // every progress call is a heartbeat too

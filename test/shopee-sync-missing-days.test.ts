@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {MAX_SYNC_DAYS, latestClosedDay, missingClosedDays, phDay} from '../src/shopee-sync/missing-days';
+import {MAX_SYNC_DAYS, REACHABLE_DAYS, latestClosedDay, missingClosedDays, phDay} from '../src/shopee-sync/missing-days';
 
 // PH = UTC+8. 2026-10-26 is a Monday.
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
@@ -35,13 +35,23 @@ describe('missingClosedDays', () => {
     expect(missingClosedDays([], at('2026-10-26T12:00:00')).days).toEqual([]);
   });
 
+  // Changed deliberately (SYN-09): days older than REACHABLE_DAYS (35) are no longer put in a job, so the cap test uses a gap inside that reach.
   it('caps one job at 31 days, oldest first, and reports how many more wait', () => {
-    const r = missingClosedDays(['2026-08-03'], at('2026-10-26T12:00:00'));
+    const r = missingClosedDays(['2026-09-21'], at('2026-10-26T12:00:00'));
     expect(MAX_SYNC_DAYS).toBe(31);
     expect(r.days).toHaveLength(31);
-    expect(r.days[0]).toBe('2026-08-04');
-    expect(r.more).toBeGreaterThan(0);
-    expect(r.days.length + r.more).toBe(83); // 4 Aug .. 25 Oct
+    expect(r.days[0]).toBe('2026-09-22');
+    expect(r.more).toBe(3);
+    expect(r.days.length + r.more).toBe(34); // 22 Sep .. 25 Oct
+    expect(r.unreachable).toBe(0);
+  });
+
+  it('leaves days older than 35 days for the Monday import and reports them, never in a job', () => {
+    expect(REACHABLE_DAYS).toBe(35);
+    const r = missingClosedDays(['2026-08-03'], at('2026-10-26T12:00:00')); // yesterday 25 Oct: reach starts 21 Sep
+    expect(r.days[0]).toBe('2026-09-21');
+    expect(r.unreachable).toBe(48); // 4 Aug .. 20 Sep
+    expect(r.days.length + r.more).toBe(35);
   });
 });
 

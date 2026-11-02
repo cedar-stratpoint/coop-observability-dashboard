@@ -10,7 +10,7 @@ export interface WeekCoverage {
 const DAY = 86_400_000;
 const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 const ms = (d: string): number => Date.parse(`${d}T00:00:00Z`);
-const mondayOf = (d: string): string => iso(ms(d) - ((new Date(ms(d)).getUTCDay() + 6) % 7) * DAY);
+export const mondayOf = (d: string): string => iso(ms(d) - ((new Date(ms(d)).getUTCDay() + 6) % 7) * DAY);
 
 /** From the first loaded week to the week of `through` (default: the last loaded day). */
 export function weeksCoverage(loadedDays: readonly string[], through?: string): WeekCoverage[] {
