@@ -85,7 +85,7 @@ describe('the one shared secret (SHOPEE_SYNC_WORKER_TOKEN)', () => {
     expect(await auth(WORKER)).toEqual({windows: [], jobId: null, singleDay: null});
     const job = await queued();
     await claim();
-    expect(await auth(WORKER)).toMatchObject({jobId: job.id, singleDay: null, windows: [{kind: 'week', from: '2026-10-19', to: '2026-10-25'}, {kind: 'past7', from: '2026-10-20', to: '2026-10-26', files: ['sales_overview', 'traffic', 'product_overview']}]});
+    expect(await auth(WORKER)).toMatchObject({jobId: job.id, singleDay: null, windows: [{kind: 'week', from: '2026-10-19', to: '2026-10-25'}, {kind: 'day', from: '2026-10-26', to: '2026-10-26', files: ['sales_overview']}]});
   });
 });
 
@@ -97,7 +97,7 @@ describe('claim', () => {
   it('hands the oldest queued job to the worker once its login is Ready, and sets it running', async () => {
     const job = await queued();
     const b = await claim();
-    expect(b.job).toMatchObject({id: job.id, days: job.days, windows: [{kind: 'week', from: '2026-10-19', to: '2026-10-25'}, {kind: 'past7', from: '2026-10-20', to: '2026-10-26'}]});
+    expect(b.job).toMatchObject({id: job.id, days: job.days, windows: [{kind: 'week', from: '2026-10-19', to: '2026-10-25'}, {kind: 'day', from: '2026-10-26', to: '2026-10-26', files: ['sales_overview']}]});
     expect(await store.getJob(job.id)).toMatchObject({status: 'running', claimedAt: clock.toISOString()});
   });
   it('hands out nothing while the login is not Ready', async () => {
@@ -180,7 +180,7 @@ describe('progress', () => {
 });
 
 describe('progress: files and the completeness check (SYN-09, SYN-12)', () => {
-  const WEEK_FILE = '2026-10-20..2026-10-26/traffic';
+  const WEEK_FILE = '2026-10-19..2026-10-25/traffic';
   async function running(days?: string[]) {
     await claim();
     const r = await requestSync(sd(), 'a@x.com');
@@ -192,24 +192,24 @@ describe('progress: files and the completeness check (SYN-09, SYN-12)', () => {
 
   it('stores per-file results next to the per-day ones, validated against the issued windows and their types', async () => {
     const job = await running();
-    const ok = await prog({jobId: job.id, status: 'running', days: {[job.days[0]]: {state: 'loaded'}}, files: {[WEEK_FILE]: {state: 'unchanged', importId: 'imp-9'}, '2026-10-20..2026-10-26/sales_overview': {state: 'review'}}});
+    const ok = await prog({jobId: job.id, status: 'running', days: {[job.days[0]]: {state: 'loaded'}}, files: {[WEEK_FILE]: {state: 'unchanged', importId: 'imp-9'}, '2026-10-26..2026-10-26/sales_overview': {state: 'review'}}});
     expect(ok.status).toBe(200);
-    expect(await store.getJob(job.id)).toMatchObject({importIds: ['imp-9'], progress: {[job.days[0]]: {state: 'loaded'}, [WEEK_FILE]: {state: 'unchanged'}, '2026-10-20..2026-10-26/sales_overview': {state: 'review'}}});
+    expect(await store.getJob(job.id)).toMatchObject({importIds: ['imp-9'], progress: {[job.days[0]]: {state: 'loaded'}, [WEEK_FILE]: {state: 'unchanged'}, '2026-10-26..2026-10-26/sales_overview': {state: 'review'}}});
   });
   it('refuses a files key for a window not issued, a type the window lacks, a bad key, or a bad state; nothing changes', async () => {
     const job = await running();
-    for (const files of [{'2026-10-05..2026-10-11/traffic': {state: 'loaded'}}, {'2026-10-20..2026-10-26/ads': {state: 'loaded'}}, {'nonsense': {state: 'loaded'}}, {[WEEK_FILE]: {state: 'exploded'}}, [WEEK_FILE]]) {
+    for (const files of [{'2026-10-05..2026-10-11/traffic': {state: 'loaded'}}, {'2026-10-26..2026-10-26/ads': {state: 'loaded'}}, {'nonsense': {state: 'loaded'}}, {[WEEK_FILE]: {state: 'exploded'}}, [WEEK_FILE]]) {
       expect((await prog({jobId: job.id, status: 'running', files})).status).toBe(400);
     }
     expect((await store.getJob(job.id))?.progress).toEqual({});
   });
   it('caps the import ids at windows x 5', async () => {
-    const job = await running(['2026-10-21', '2026-10-22']); // one past7 window
-    const files = Object.fromEntries(['sales_overview', 'traffic', 'product_overview'].map((t, i) => [`2026-10-20..2026-10-26/${t}`, {state: 'loaded', importId: `id-${i}`}]));
-    expect((await prog({jobId: job.id, files})).status).toBe(200);
-    for (let i = 0; i < 3; i++) await prog({jobId: job.id, days: {[job.days[0]]: {state: 'loaded', importId: `more-${i}`}}});
-    const res = await prog({jobId: job.id, files: {[WEEK_FILE]: {state: 'loaded', importId: 'one-too-many'}}});
-    expect(res.status).toBe(400); // 1 window x 5 = 5 ids; 3 + 3 already there, plus this one
+    const job = await running(['2026-10-26']); // one day window
+    const DAY_FILE = '2026-10-26..2026-10-26/sales_overview';
+    expect((await prog({jobId: job.id, files: {[DAY_FILE]: {state: 'loaded', importId: 'id-0'}}})).status).toBe(200);
+    for (let i = 0; i < 4; i++) await prog({jobId: job.id, days: {[job.days[0]]: {state: 'loaded', importId: `more-${i}`}}});
+    const res = await prog({jobId: job.id, files: {[DAY_FILE]: {state: 'loaded', importId: 'one-too-many'}}});
+    expect(res.status).toBe(400); // 1 window x 5 = 5 ids; 5 already there, plus this one
   });
   it('done with a day still missing ends the job as failed with "Still missing: ..." (no new status)', async () => {
     const job = await running();

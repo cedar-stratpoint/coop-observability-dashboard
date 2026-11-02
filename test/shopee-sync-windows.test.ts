@@ -1,79 +1,83 @@
 import {describe, expect, it} from 'vitest';
 import {periodIsWindow} from '../src/shopee-import/api';
-import {MAX_WINDOWS, windowPlan, windowsFor} from '../src/shopee-sync/windows';
+import {MAX_DAY_WINDOWS, MAX_WEEK_WINDOWS, windowPlan, windowsFor} from '../src/shopee-sync/windows';
 
-// 2026-10-26 is a Monday. "now" = Tue 27 Oct 12:00 PH, so yesterday Y = Mon 26 Oct and past 7 = 20..26 Oct.
+// "now" = Tue 27 Oct 12:00 PH, so yesterday Y = Mon 26 Oct (a Monday: the week of 26 Oct is open).
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
 const NOW = at('2026-10-27T12:00:00');
 const range = (from: string, n: number) => Array.from({length: n}, (_, i) => new Date(Date.parse(`${from}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10));
-const DAILY = ['sales_overview', 'traffic', 'product_overview'];
+const SALES = ['sales_overview'];
 const FIVE = ['sales_overview', 'traffic', 'product_overview', 'ads', 'sku_detail'];
+const day = (d: string) => ({kind: 'day', from: d, to: d, files: SALES});
 
 describe('windowsFor', () => {
-  it('all days inside the last 7: one past7 window with the 3 daily files', () => {
-    expect(windowsFor(range('2026-10-20', 7), NOW)).toEqual([{kind: 'past7', from: '2026-10-20', to: '2026-10-26', files: DAILY}]);
+  it('all 7 days of a closed week missing: one week window with the 5 files', () => {
+    expect(windowsFor(range('2026-10-19', 7), NOW)).toEqual([{kind: 'week', from: '2026-10-19', to: '2026-10-25', files: FIVE}]);
   });
-  it('a refresh job (one latest closed day) is a single past7', () => {
-    expect(windowsFor(['2026-10-26'], NOW)).toEqual([{kind: 'past7', from: '2026-10-20', to: '2026-10-26', files: DAILY}]);
+  it('a refresh job (one latest closed day) is a single day window, sales only', () => {
+    expect(windowsFor(['2026-10-26'], NOW)).toEqual([day('2026-10-26')]);
   });
-  it('the current incomplete week stays inside past7 (never a week window, so no Ads or SKU)', () => {
-    const w = windowsFor(['2026-10-26'], at('2026-10-28T12:00:00')); // Y = Tue 27 Oct
-    expect(w.map((x) => x.kind)).toEqual(['past7']);
-    expect(windowsFor(['2026-10-26', '2026-10-27'], at('2026-10-28T12:00:00'))[0]).toMatchObject({from: '2026-10-21', to: '2026-10-27'});
+  it('the open current week is one day window per day (never a week, so no Ads or SKU)', () => {
+    const w = windowsFor(['2026-10-26', '2026-10-27'], at('2026-10-28T12:00:00')); // Y = Tue 27 Oct
+    expect(w).toEqual([day('2026-10-26'), day('2026-10-27')]);
   });
-  it('a gap across two older weeks plus the last 7: two weeks (all five files), then past7 last', () => {
-    const days = ['2026-10-07', '2026-10-14', '2026-10-15', '2026-10-21'];
-    expect(windowsFor(days, NOW)).toEqual([
-      {kind: 'week', from: '2026-10-05', to: '2026-10-11', files: FIVE},
-      {kind: 'week', from: '2026-10-12', to: '2026-10-18', files: FIVE},
-      {kind: 'past7', from: '2026-10-20', to: '2026-10-26', files: DAILY},
-    ]);
+  it('a week with only some days missing is one day window per missing day', () => {
+    expect(windowsFor(['2026-10-20', '2026-10-22'], NOW)).toEqual([day('2026-10-20'), day('2026-10-22')]);
   });
-  it('a week window is one per week, however many of its days are missing', () => {
-    expect(windowsFor(range('2026-10-05', 5), NOW)).toHaveLength(1);
+  it('a week whose 7 days are missing but whose Sunday is after yesterday is days, not a week', () => {
+    expect(windowsFor(range('2026-10-19', 6), at('2026-10-25T12:00:00')).map((w) => w.kind)).toEqual(Array(6).fill('day')); // Y = Sat 24 Oct
   });
-  it('older days: one week per week (the By Week reach itself is missing-days.ts REACHABLE_DAYS)', () => {
-    const w = windowsFor(['2026-09-23'], NOW);
-    expect(w).toEqual([{kind: 'week', from: '2026-09-21', to: '2026-09-27', files: FIVE}]);
+  it('a full missing week plus a partial one: the week first (all five files), then the days', () => {
+    const days = [...range('2026-10-12', 7), '2026-10-20', '2026-10-21', '2026-10-26'];
+    expect(windowsFor(days, NOW)).toEqual([{kind: 'week', from: '2026-10-12', to: '2026-10-18', files: FIVE}, day('2026-10-20'), day('2026-10-21'), day('2026-10-26')]);
   });
-  it('a 31-day input spanning 5 weeks is capped at 4 windows, oldest kept, the newest dropped and reported', () => {
-    const days = range('2026-09-25', 31); // 25 Sep .. 25 Oct
+  it('a week window is one per week', () => {
+    expect(windowsFor(range('2026-10-05', 14), NOW).map((w) => w.from)).toEqual(['2026-10-05', '2026-10-12']);
+  });
+  it('days are capped at 7, nearest to today kept, the older ones dropped and reported', () => {
+    const days = ['2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-20'];
     const p = windowPlan(days, NOW);
-    expect(MAX_WINDOWS).toBe(4);
-    expect(p.windows).toHaveLength(4);
-    expect(p.windows.map((w) => w.from)).toEqual(['2026-09-21', '2026-09-28', '2026-10-05', '2026-10-12']);
-    expect(p.dropped).toEqual(range('2026-10-19', 7)); // 19..25 Oct: the week of 19 Oct and the past7 window are both over the cap
+    expect(MAX_DAY_WINDOWS).toBe(7);
+    expect(p.windows.map((w) => w.from)).toEqual(days.slice(2));
+    expect(p.dropped).toEqual(days.slice(0, 2));
+  });
+  it('weeks are capped at 4, nearest to today kept, the oldest dropped and reported', () => {
+    const days = range('2026-09-21', 35); // 21 Sep .. 25 Oct: five full weeks
+    const p = windowPlan(days, NOW);
+    expect(MAX_WEEK_WINDOWS).toBe(4);
+    expect(p.windows.map((w) => w.from)).toEqual(['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19']);
+    expect(p.dropped).toEqual(range('2026-09-21', 7));
     expect(windowsFor(days, NOW)).toEqual(p.windows);
   });
-  it('under the cap nothing is dropped', () => {
+  it('days after yesterday are never in a window', () => {
+    expect(windowPlan(['2026-10-27'], NOW)).toEqual({windows: [], dropped: ['2026-10-27']});
+  });
+  it('under the caps nothing is dropped', () => {
     expect(windowPlan(['2026-10-07', '2026-10-21'], NOW).dropped).toEqual([]);
   });
   it('an empty list has no windows', () => {
     expect(windowsFor([], NOW)).toEqual([]);
   });
-  it('cross-midnight: the same days give different past7 windows an hour apart, so validation takes the union', () => {
-    const before = at('2026-10-27T23:30:00');
-    const after = at('2026-10-28T00:30:00');
-    expect(windowsFor(['2026-10-26'], before)[0]).toMatchObject({from: '2026-10-20', to: '2026-10-26'});
-    expect(windowsFor(['2026-10-26'], after)[0]).toMatchObject({from: '2026-10-21', to: '2026-10-27'});
+  it('the windows of a closed week do not depend on the clock, so validation at creation and at call time agree', () => {
+    const days = range('2026-10-12', 7);
+    expect(windowsFor(days, at('2026-10-27T23:30:00'))).toEqual(windowsFor(days, at('2026-10-28T00:30:00')));
   });
 });
 
 describe('periodIsWindow', () => {
-  const windows = windowsFor(['2026-10-07', '2026-10-21'], NOW);
+  const windows = windowsFor([...range('2026-10-05', 7), '2026-10-21'], NOW);
   it('accepts a period equal to an issued window with a type that window allows', () => {
     expect(periodIsWindow('2026-10-05', '2026-10-11', windows)).toBe(true);
     expect(periodIsWindow('2026-10-05', '2026-10-11', windows, 'ads')).toBe(true);
-    expect(periodIsWindow('2026-10-20', '2026-10-26', windows, 'traffic')).toBe(true);
+    expect(periodIsWindow('2026-10-21', '2026-10-21', windows, 'sales_overview')).toBe(true);
   });
-  it('refuses ads and sku_detail for a past7 window', () => {
-    expect(periodIsWindow('2026-10-20', '2026-10-26', windows, 'ads')).toBe(false);
-    expect(periodIsWindow('2026-10-20', '2026-10-26', windows, 'sku_detail')).toBe(false);
+  it('refuses every type but sales_overview for a day window', () => {
+    for (const t of ['traffic', 'product_overview', 'ads', 'sku_detail'] as const) expect(periodIsWindow('2026-10-21', '2026-10-21', windows, t)).toBe(false);
   });
   it('refuses a period that is only inside a window, only overlapping, or not issued', () => {
     expect(periodIsWindow('2026-10-06', '2026-10-11', windows)).toBe(false);
     expect(periodIsWindow('2026-10-05', '2026-10-12', windows)).toBe(false);
-    expect(periodIsWindow('2026-10-21', '2026-10-21', windows)).toBe(false);
+    expect(periodIsWindow('2026-10-21', '2026-10-22', windows)).toBe(false);
     expect(periodIsWindow('2026-10-12', '2026-10-18', windows)).toBe(false);
   });
   it('refuses a missing period, no windows, and an unknown type', () => {

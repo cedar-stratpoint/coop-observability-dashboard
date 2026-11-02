@@ -17,15 +17,18 @@ beforeEach(() => {
   loaded = [...LOADED];
 });
 
+const range = (from: string, n: number) => Array.from({length: n}, (_, i) => new Date(Date.parse(`${from}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10));
+
 describe('requestSync and the window cap (SYN-09)', () => {
   it('keeps only the days the 4 windows cover and counts the rest as waiting', async () => {
     await heartbeat();
-    loaded = ['2026-09-21']; // 22 Sep .. 26 Oct missing: weeks of 21 Sep (partly), 28 Sep, 5, 12, 19 Oct and past7
+    // Missing: 8 scattered days in three older weeks, the full week of 19 Oct, and 26 Oct. That is 9 single days against a cap of 7:
+    // the newest 7 stay and the 2 oldest (23 and 24 Sep) wait. The one full week fits under the cap of 4.
+    const missing = ['2026-09-23', '2026-09-24', '2026-09-30', '2026-10-01', '2026-10-07', '2026-10-08', '2026-10-14', '2026-10-15'];
+    loaded = range('2026-09-21', 28).filter((d) => !missing.includes(d)); // 21 Sep .. 18 Oct
     const r = await requestSync(deps(), 'a@x.com');
     if (!r.ok) throw new Error(r.error);
-    expect(r.job.days[0]).toBe('2026-09-22');
-    expect(r.job.days.at(-1)).toBe('2026-10-18'); // the week of 19 Oct and past7 did not fit
-    expect(r.job.days.some((d) => d >= '2026-10-19')).toBe(false);
+    expect(r.job.days).toEqual([...missing.slice(2), ...range('2026-10-19', 8)]);
   });
 });
 

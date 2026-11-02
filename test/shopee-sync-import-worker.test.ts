@@ -161,7 +161,7 @@ describe('the import API with the worker secret', () => {
 });
 
 // ── SYN-09: windows ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// NOW is Tue 27 Oct 11:00 PH, so yesterday is 26 Oct and the past 7 days are 20-26 Oct.
+// NOW is Tue 27 Oct 11:00 PH, so yesterday is 26 Oct.
 const FILES = {
   sales_overview: (p: string) => `sales_overview_${p}.xlsx`,
   traffic: (p: string) => `traffic_overview_${p}.xlsx`,
@@ -171,8 +171,8 @@ const FILES = {
 } as const;
 const junk = (name: string) => ({name, bytes: Buffer.from('not a real export')});
 const WEEK_P = '20261012-20261018';
-const PAST_P = '20261020-20261026';
-const mixedDays = [...WEEK, '2026-10-21']; // a week window (12-18 Oct) plus past7 (20-26 Oct)
+const DAY_P = '20261021-20261021';
+const mixedDays = [...WEEK, '2026-10-21']; // a week window (12-18 Oct) plus a day window (21 Oct)
 
 describe('the five files per issued window', () => {
   it('a week window accepts all five types in one request (each file is planned, not refused)', async () => {
@@ -182,20 +182,20 @@ describe('the five files per issued window', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).results).toHaveLength(5);
   });
-  it('a past7 window accepts the 3 daily files, with the right file per window kind', async () => {
+  it('a day window accepts sales_overview, and the week window the other files', async () => {
     const {token, deps} = await setup({days: mixedDays});
-    for (const f of [FILES.sales_overview, FILES.traffic, FILES.product_overview]) expect((await handlePlan(await planReq(token, [junk(f(PAST_P))]), deps)).status).toBe(200);
-    for (const f of [FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(WEEK_P))]), deps)).status).toBe(200);
+    expect((await handlePlan(await planReq(token, [junk(FILES.sales_overview(DAY_P))]), deps)).status).toBe(200);
+    for (const f of [FILES.traffic, FILES.product_overview, FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(WEEK_P))]), deps)).status).toBe(200);
   });
-  it('refuses ads or sku_detail for a past7 window (the wrong type for that window), writing nothing', async () => {
+  it('refuses traffic, product, ads or sku_detail for a day window (the wrong type for that window), writing nothing', async () => {
     const {token, deps, store} = await setup({days: mixedDays});
-    for (const f of [FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(PAST_P))]), deps)).status).toBe(403);
+    for (const f of [FILES.traffic, FILES.product_overview, FILES.ads, FILES.sku_detail]) expect((await handlePlan(await planReq(token, [junk(f(DAY_P))]), deps)).status).toBe(403);
     expect(store.runs).toHaveLength(0);
   });
   it('refuses a window the server did not issue for this job', async () => {
     const {token, deps, store} = await setup();
     expect((await handlePlan(await planReq(token, [junk(FILES.traffic('20261005-20261011'))]), deps)).status).toBe(403);
-    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403); // no recent day in this job, so no past7 window
+    expect((await handlePlan(await planReq(token, [junk(FILES.sales_overview(DAY_P))]), deps)).status).toBe(403); // no 21 Oct in this job, so no day window
     expect(store.runs).toHaveLength(0);
   });
   it('a restate is refused for every type, and a null period is refused', async () => {
@@ -207,14 +207,14 @@ describe('the five files per issued window', () => {
   it('a sixth file fails the request, and so does a second file of one type', async () => {
     const {token, deps, store} = await setup({days: mixedDays});
     const five = [FILES.sales_overview, FILES.traffic, FILES.product_overview, FILES.ads, FILES.sku_detail].map((f) => junk(f(WEEK_P)));
-    expect((await handlePlan(await planReq(token, [...five, junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403);
-    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(WEEK_P)), junk(FILES.traffic(PAST_P))]), deps)).status).toBe(403);
+    expect((await handlePlan(await planReq(token, [...five, junk(FILES.sales_overview(DAY_P))]), deps)).status).toBe(403);
+    expect((await handlePlan(await planReq(token, [junk(FILES.traffic(WEEK_P)), junk(FILES.traffic(WEEK_P))]), deps)).status).toBe(403);
     expect(store.runs).toHaveLength(0);
   });
   it('apply: refuses a run of a type the window does not carry, and one stamped by another job; nothing is applied', async () => {
     const {token, deps, store} = await setup({days: mixedDays});
     const mk = async (name: string, by: string) => {
-      const id = await store.createRun({reportType: 'ads', channel: 'shopee', periodFrom: '2026-10-20', periodTo: '2026-10-26', sourceFilename: name, sha256: name, rowCount: 1, status: 'staged', checks: {}, plan: null, importedBy: by});
+      const id = await store.createRun({reportType: 'ads', channel: 'shopee', periodFrom: '2026-10-21', periodTo: '2026-10-21', sourceFilename: name, sha256: name, rowCount: 1, status: 'staged', checks: {}, plan: null, importedBy: by});
       return id;
     };
     const jobId = (await sync_jobId(deps));
@@ -239,9 +239,10 @@ async function sync_jobId(deps: {workerAuth: (b: string) => Promise<{jobId: stri
 }
 
 describe('only_new and refresh', () => {
-  const full = async (vals: number[]) => ({name: `sales_overview_${PAST_P}.xlsx`, bytes: await salesOverviewFile(week('2026-10-20', vals))});
+  const full = async (vals: number[]) => ({name: `sales_overview_${WEEK_P}.xlsx`, bytes: await salesOverviewFile(week('2026-10-12', vals))});
+  const oneDay = async (v: number) => ({name: 'sales_overview_20261026-20261026.xlsx', bytes: await salesOverviewFile(week('2026-10-26', [v]))});
   it('a worker sales plan is forced to only_new: a loaded day with different figures is left alone', async () => {
-    const {token, deps, store} = await setup({days: ['2026-10-20', '2026-10-21']});
+    const {token, deps, store} = await setup();
     const first = await (await handlePlan(await planReq(IMPORT_TOKEN, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
     await handleApply(json(IMPORT_TOKEN, {importIds: [first.results[0].importId]}), deps);
     const again = await (await handlePlan(await planReq(token, [await full([10, 20, 30, 40, 50, 60, 70])], {only_new: 'false'}), deps)).json();
@@ -250,16 +251,16 @@ describe('only_new and refresh', () => {
   });
   it('a refresh job (one day, already loaded) plans normally, so a changed day can update', async () => {
     const {token, deps} = await setup({days: ['2026-10-26']});
-    const first = await (await handlePlan(await planReq(IMPORT_TOKEN, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
+    const first = await (await handlePlan(await planReq(IMPORT_TOKEN, [await oneDay(7)]), deps)).json();
     await handleApply(json(IMPORT_TOKEN, {importIds: [first.results[0].importId]}), deps);
-    const again = await (await handlePlan(await planReq(token, [await full([1, 2, 3, 4, 5, 6, 8])]), deps)).json();
+    const again = await (await handlePlan(await planReq(token, [await oneDay(8)]), deps)).json();
     expect(again.results[0].status).toBe('staged');
     expect(again.results[0].changed.length + again.results[0].flags.length).toBeGreaterThan(0);
   });
   it('a refresh-shaped job whose day is NOT loaded is an ordinary job: only_new stays on', async () => {
     const {token, deps} = await setup({days: ['2026-10-26']});
-    const r = await (await handlePlan(await planReq(token, [await full([1, 2, 3, 4, 5, 6, 7])]), deps)).json();
-    expect(r.results[0]).toMatchObject({status: 'staged', newDays: 7});
+    const r = await (await handlePlan(await planReq(token, [await oneDay(7)]), deps)).json();
+    expect(r.results[0]).toMatchObject({status: 'staged', newDays: 1});
   });
 });
 

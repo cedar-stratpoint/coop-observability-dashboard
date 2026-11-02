@@ -53,7 +53,7 @@ describe('confirmReview', () => {
 describe('confirmReview: mixed set and completeness (SYN-09, SYN-12)', () => {
   const who = {email: 'a@x.com', isAdmin: false};
   it('applies a mixed set of sales and a daily snapshot run planned for issued windows', async () => {
-    const id = await imports.createRun({reportType: 'traffic', channel: 'shopee', periodFrom: '2026-10-20', periodTo: '2026-10-26', sourceFilename: 't.xlsx', sha256: 't', rowCount: 1, status: 'staged', checks: {}, plan: null, importedBy: `sync:${jobId}`});
+    const id = await imports.createRun({reportType: 'traffic', channel: 'shopee', periodFrom: '2026-10-19', periodTo: '2026-10-25', sourceFilename: 't.xlsx', sha256: 't', rowCount: 1, status: 'staged', checks: {}, plan: null, importedBy: `sync:${jobId}`});
     await sync.transitionJob(jobId, ['review'], {importIds: [imports.runs[0].importId, id]});
     expect(await confirmReview(deps(), imports, who, jobId)).toEqual({ok: true});
     expect(imports.runs.find((r) => r.importId === id)?.status).toBe('accepted');
@@ -80,11 +80,12 @@ describe('confirmReview only applies what belongs to the job', () => {
     imports.runs[0].restated = true;
     await refuses();
   });
-  // Changed deliberately (SYN-09): a non-sales run is no longer refused by type; it is refused when its window does not carry that type (ads is not a past7 file).
+  // Changed deliberately (SYN-09): a non-sales run is no longer refused by type; it is refused when its window does not carry that type (ads is not a day-window file).
   it('refuses a run whose type the window does not carry', async () => {
+    sync.jobs[0].days = ['2026-10-19', '2026-10-20']; // two day windows, which carry sales_overview only
     imports.runs[0].reportType = 'ads';
-    imports.runs[0].periodFrom = '2026-10-20';
-    imports.runs[0].periodTo = '2026-10-26'; // the past7 window, which carries the 3 daily files only
+    imports.runs[0].periodFrom = '2026-10-19';
+    imports.runs[0].periodTo = '2026-10-19';
     await refuses();
   });
   it('refuses a run whose period is outside the job days', async () => {

@@ -42,7 +42,7 @@ export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbe
   const missing = missingClosedDays(i.loadedDays, i.now);
   // Nothing missing is not a reason to refuse: the press still runs the whole process on the latest closed day, and the import decides whether it changed.
   const refresh = missing.days.length === 0;
-  // The job holds only what its windows cover (MAX_WINDOWS): newer days that do not fit wait for the next press and are counted in `more`.
+  // The job holds only what its windows cover (MAX_WEEK_WINDOWS and MAX_DAY_WINDOWS): newer days that do not fit wait for the next press and are counted in `more`.
   const plan = windowPlan(refresh ? [latestClosedDay(i.now)] : missing.days, i.now);
   const days = (refresh ? [latestClosedDay(i.now)] : missing.days).filter((d) => !plan.dropped.includes(d));
   const more = missing.more + plan.dropped.length;
