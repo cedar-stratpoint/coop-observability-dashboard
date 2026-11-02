@@ -148,3 +148,14 @@ describe('progressBar', () => {
     expect(progressBar(job({status: 'expired', days}))).toBeNull();
   });
 });
+
+describe('per-file progress keys (SYN-09) do not count as days', () => {
+  const files = {'2026-10-19..2026-10-25/ads': {state: 'loaded' as const}};
+  it('progressBar counts only day keys', () => {
+    expect(progressBar(job({status: 'running', days: ['2026-10-19', '2026-10-20'], progress: files}))).toEqual({value: null, label: '0 of 2 days'});
+  });
+  it('stepsFor treats a job with only file keys as not yet importing when it fails', () => {
+    const only = stepsFor(job({status: 'failed', progress: files})).find((x) => x.state === 'bad');
+    expect(only?.label).toBe('Exporting from Shopee');
+  });
+});

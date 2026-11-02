@@ -130,7 +130,7 @@ export function stepsFor(j: SyncJobView): Step[] {
   const names = ['Requested', 'Exporting from Shopee', ...(verify ? ['Admin signs in'] : []), 'Importing orders', 'Done'];
   const imp = names.indexOf('Importing orders');
   const exp = 1;
-  const failedAt = Object.keys(j.progress).length > 0 ? imp : exp;
+  const failedAt = j.days.some((d) => j.progress[d]) ? imp : exp; // day keys only: per-file keys ("<from>..<to>/<type>") are not days
   const at: Record<JobStatus, number> = {queued: 0, running: exp, awaiting_verification: 2, importing: imp, review: imp, done: names.length, failed: failedAt, expired: 0};
   const cur = at[j.status];
   return names.map((label, i) => ({label, state: j.status === 'failed' && i === cur ? 'bad' : i < cur ? 'done' : i === cur ? 'now' : 'todo'}));
