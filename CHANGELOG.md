@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Nichido Phase 0 (part 1): shuffled-scan page classifier + form segmentation
+
+Groundwork for ingesting the real handwritten inventory scans, which arrive as one big multi-store, multi-period, multi-version PDF with pages shuffled and about half upside-down (see `../PLAN.md`, task NICH-17). This part adds the pure, tested building blocks; it does not yet change the upload route, and the extractor is untouched (still the V1/V2 three-location shape — version-aware extraction is Phase 1). Staging scope, additive only.
+
+- **Classifier prompt + schema** (`src/goldline-extract.ts`): `buildPageClassifyPrompt()` / `PAGE_CLASSIFY_SCHEMA` read ONE page and return its printed page number, kind (inventory / sales / blank), orientation (0 or 180), form version (legacy / v1 / v2 / unknown, read from the PRINTED column headers not the handwriting), and the per-page handwritten header (store, period, consultant). New `FORM_VERSIONS` / `PAGE_KINDS` constants. The old `buildPageDetectPrompt` stays for now.
+- **Segmentation** (`src/goldline-segment.ts`, pure): `groupIntoForms()` sorts shuffled classified pages into `{store · period · version · page}` form groups, surfacing present/missing inventory pages, duplicate pages, parked page-6 sales reports, dropped blanks, and anomaly flags (duplicate-pages, incomplete, unknown-store/version, and period flags). Period handling keeps a partial cut-off (e.g. "9–15") distinct and flags "Sept 16–31"-style invalid days rather than collapsing or silently fixing. `duplicatePages()` gives the flat intra-bundle duplicate list.
+- **Orientation** (`src/goldline-orient.ts`): `rotatePdf180()` / `applyOrientation()` rotate an upside-down page upright before extraction (pdf-lib, adds 180° so existing rotation is preserved).
+- **Live call** (`src/goldline-extract-run.ts`): `classifyPage()` wraps the classifier call (20s budget, never throws on a bad read — coerces to unknown/null so the page still groups and gets flagged).
+- Tests: `test/goldline-segment.test.ts`, `test/goldline-orient.test.ts` (16 cases).
+
 ## 2026-11-03 — Faster navigation: cache the slow Goldline page reads, add loading skeletons
 
 Navigating between pages took 4 to 5 seconds. Profiled against the real databases: two page readers decrypt tens of thousands of sales rows on every load with no caching. The Overview (home) reader measured ~2.9 s and the SKU linking page's Watsons month-by-month breakdown kept /stock/skus at ~2.9 s. By contrast the Stores page, which already caches its decrypted totals, was ~0.1 s, proving the fix.

@@ -4,10 +4,13 @@ import {
   buildSystemPrompt,
   buildManifestPrompt,
   buildPageDetectPrompt,
+  buildPageClassifyPrompt,
   EXTRACTION_SCHEMA,
   PAGE_DETECT_SCHEMA,
+  PAGE_CLASSIFY_SCHEMA,
   EXTRACT_MODEL,
 } from './goldline-extract';
+import {sanitizeClassification, type PageClassification} from './goldline-segment';
 import type {WriterProfile} from './goldline-writer-data';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
@@ -102,6 +105,34 @@ export async function detectPage(pdfBase64: string): Promise<number> {
   const parsed = parseJsonContent(res) as {page?: unknown};
   const n = typeof parsed.page === 'number' ? Math.trunc(parsed.page) : 0;
   return n >= 0 && n <= 6 ? n : 0;
+}
+
+/**
+ * Phase 0 classifier for ONE shuffled scan page: page number, kind, orientation,
+ * form version, and the per-page handwritten header (store / period / consultant) —
+ * without transcribing counts. Feeds goldline-segment's grouping so a multi-store,
+ * multi-version, rotated bundle can be sorted before extraction. Cheap, low-token,
+ * and never throws on a bad read: sanitizeClassification coerces to 'unknown'/null so
+ * the page still groups (and gets flagged) instead of sinking the batch.
+ */
+export async function classifyPage(pdfBase64: string): Promise<PageClassification> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const client = goldlineClient();
+  const params = {
+    model: EXTRACT_MODEL,
+    max_tokens: 500,
+    system: buildPageClassifyPrompt(),
+    output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
+    // A document-only user turn is rejected (400); always pair the PDF with text.
+    messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: 'Classify this page. Return JSON only.'}]}],
+  };
+  // Same 20s budget as detectPage — it replaces detect in the Phase 0 path, so the
+  // request timeout math (classify + extract < route maxDuration) is unchanged.
+  const res = (await client.messages.create(
+    params as unknown as Parameters<typeof client.messages.create>[0],
+    {timeout: 20_000},
+  )) as {content?: Array<{type: string; text?: string}>};
+  return sanitizeClassification(parseJsonContent(res));
 }
 
 /**
