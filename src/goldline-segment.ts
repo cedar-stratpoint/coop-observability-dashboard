@@ -30,7 +30,9 @@ export type ClassifiedPage = PageClassification & {id: string};
 /** All the ids seen for one inventory page number within a form (length > 1 = dup). */
 export type PageSlot = {page: number; ids: string[]};
 
-/** One store+period+version form, assembled from its scattered pages. */
+/** One store+period+version form, assembled from its scattered pages. Built from
+ *  INVENTORY pages only — sales/blank/unplaceable pages are partitioned out by
+ *  segmentBundle, so they never create a junk "unknown" form. */
 export type FormGroup = {
   key: string;
   store_code: string | null;
@@ -42,10 +44,23 @@ export type FormGroup = {
   present: number[]; // inventory page numbers present (1–5)
   missing: number[]; // inventory pages 1–5 not present
   duplicates: PageSlot[]; // slots whose ids.length > 1
-  salesIds: string[]; // page-6 sales report pages, parked (out of scope)
-  blankIds: string[]; // bleed-through / blank pages, dropped
   flags: string[]; // see FORM_FLAGS below
 };
+
+/** The whole bundle partitioned: inventory forms, plus the pages set aside. */
+export type BundleSegmentation = {
+  forms: FormGroup[];
+  sales: ClassifiedPage[]; // page-6 sales reports, parked (out of scope)
+  blanks: ClassifiedPage[]; // bleed-through / blank back sides, dropped
+  unplaceable: ClassifiedPage[]; // looked like a form page but had no usable page number
+};
+
+/** True for a page that can be slotted into a form: an item page (1–5) that isn't a
+ *  sales report or a blank. A 'unknown'-kind page with a good page number still
+ *  counts (the model was unsure of the kind, not the page). */
+export function isInventoryPage(c: Pick<PageClassification, 'kind' | 'page'>): boolean {
+  return c.kind !== 'sales' && c.kind !== 'blank' && c.page >= 1 && c.page <= 5;
+}
 
 /** Stable flag strings a FormGroup can carry (surfaced on the triage board). */
 export const FORM_FLAGS = {
@@ -57,6 +72,7 @@ export const FORM_FLAGS = {
   periodUnparsed: 'period-unparsed',
   periodInvalidDay: 'period-invalid-day',
   periodPartial: 'period-partial',
+  periodMismatch: 'period-mismatch', // pages in one form reported different exact dates
 } as const;
 
 const KIND_SET = new Set<string>(PAGE_KINDS);
@@ -113,11 +129,25 @@ export function normalizeStoreCode(raw: string | null): string | null {
   return s === '' ? null : s;
 }
 
-/** A stable period string for keying. Keeps the actual dates — a partial "9–15" is
- *  NOT collapsed into "1–15" (that would hide a real anomaly and create false dups). */
+/** A verbatim period string (actual dates) for display / exact comparison. */
 export function canonicalPeriod(start: string | null, end: string | null): string {
   if (!start && !end) return 'unknown-period';
   return `${start ?? '?'}..${end ?? '?'}`;
+}
+
+/**
+ * A period bucket for GROUPING: `YYYY-MM-H1|H2` (first half = starts before the
+ * 16th, second half = 16th on). This is deliberately coarse so a one-digit date
+ * misread or a genuine partial cut-off ("Sep 9–15") still lands in the right form
+ * instead of splitting off its own group — validation showed handwritten dates are
+ * misread often enough to over-split otherwise. The ACTUAL dates are preserved on
+ * the group and still flagged (periodFlags); this only decides co-grouping.
+ */
+export function periodBucket(start: string | null, end: string | null): string {
+  const base = parseYmd(start) ?? parseYmd(end);
+  if (!base) return 'unknown-period';
+  const half = base.d < 16 ? 'H1' : 'H2';
+  return `${base.y}-${String(base.m).padStart(2, '0')}-${half}`;
 }
 
 function parseYmd(s: string | null): {y: number; m: number; d: number} | null {
@@ -150,9 +180,10 @@ export function periodFlags(start: string | null, end: string | null): string[] 
   return flags;
 }
 
-/** The key identifying one FORM (its five pages share it): store · period · version. */
+/** The key identifying one FORM (its five pages share it): store · period-bucket ·
+ *  version. Uses the coarse half-month bucket so date misreads don't over-split. */
 export function formKey(c: Pick<PageClassification, 'store_code' | 'period_start' | 'period_end' | 'version'>): string {
-  return [c.store_code ?? 'unknown-store', canonicalPeriod(c.period_start, c.period_end), c.version].join('|');
+  return [c.store_code ?? 'unknown-store', periodBucket(c.period_start, c.period_end), c.version].join('|');
 }
 
 /** The key identifying one PAGE within a form: form key · page number. Two pages
@@ -162,9 +193,31 @@ export function pageKey(c: Pick<PageClassification, 'store_code' | 'period_start
 }
 
 /**
- * Sort classified pages into form groups. Inventory pages are bucketed by page
- * number (duplicates surfaced); the page-6 sales report is parked; blanks are set
- * aside. Each group reports present/missing inventory pages and anomaly flags.
+ * Partition a whole bundle: group the INVENTORY pages into forms, and set aside the
+ * sales reports, blanks, and any form-like page with no usable page number. Sales
+ * and blank pages never create a form group (they carry no reliable store/period/
+ * version), so a packet's parked pages can't masquerade as an "unknown" form.
+ */
+export function segmentBundle(pages: ClassifiedPage[]): BundleSegmentation {
+  const sales: ClassifiedPage[] = [];
+  const blanks: ClassifiedPage[] = [];
+  const unplaceable: ClassifiedPage[] = [];
+  const inventory: ClassifiedPage[] = [];
+
+  for (const c of pages) {
+    if (c.kind === 'sales' || c.page === 6) sales.push(c);
+    else if (c.kind === 'blank') blanks.push(c);
+    else if (isInventoryPage(c)) inventory.push(c);
+    else unplaceable.push(c); // form-like but no usable page number → manual assign
+  }
+
+  return {forms: groupIntoForms(inventory), sales, blanks, unplaceable};
+}
+
+/**
+ * Group INVENTORY pages into forms by {store · period · version}. Pass only item
+ * pages (use segmentBundle to partition first). Each group reports present/missing
+ * inventory pages, duplicates, and anomaly flags.
  */
 export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
   const groups = new Map<string, FormGroup>();
@@ -183,8 +236,6 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
         present: [],
         missing: [],
         duplicates: [],
-        salesIds: [],
-        blankIds: [],
         flags: [],
       };
       groups.set(key, g);
@@ -192,24 +243,20 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
     return g;
   };
 
+  // Distinct exact (start..end) reads seen across each form's member pages, so a
+  // within-form date disagreement (one page misread) can be surfaced.
+  const periodReads = new Map<string, Set<string>>();
+
   for (const c of pages) {
+    if (!isInventoryPage(c)) continue; // defensive: only item pages form groups
     const g = ensure(c);
-    if (c.kind === 'sales' || c.page === 6) {
-      g.salesIds.push(c.id);
-      continue;
-    }
-    if (c.kind === 'blank') {
-      g.blankIds.push(c.id);
-      continue;
-    }
-    // Inventory (or unknown-but-numbered) page. Only 1–5 are real item pages.
-    if (c.page >= 1 && c.page <= 5) {
-      const slot = g.slots.find((s) => s.page === c.page);
-      if (slot) slot.ids.push(c.id);
-      else g.slots.push({page: c.page, ids: [c.id]});
-    } else {
-      // No usable page number — park as blank so it surfaces for manual assignment.
-      g.blankIds.push(c.id);
+    const slot = g.slots.find((s) => s.page === c.page);
+    if (slot) slot.ids.push(c.id);
+    else g.slots.push({page: c.page, ids: [c.id]});
+    if (c.period_start || c.period_end) {
+      const set = periodReads.get(g.key) ?? new Set<string>();
+      set.add(canonicalPeriod(c.period_start, c.period_end));
+      periodReads.set(g.key, set);
     }
   }
 
@@ -218,18 +265,19 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
     g.present = g.slots.map((s) => s.page);
     g.missing = INVENTORY_PAGES.filter((p) => !g.present.includes(p));
     g.duplicates = g.slots.filter((s) => s.ids.length > 1);
-    g.flags = formFlagsFor(g);
+    g.flags = formFlagsFor(g, (periodReads.get(g.key)?.size ?? 0) > 1);
   }
 
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-function formFlagsFor(g: FormGroup): string[] {
+function formFlagsFor(g: FormGroup, periodMismatch: boolean): string[] {
   const flags: string[] = [];
   if (g.duplicates.length > 0) flags.push(FORM_FLAGS.duplicatePages);
   if (g.missing.length > 0) flags.push(FORM_FLAGS.incomplete);
   if (g.version === 'unknown') flags.push(FORM_FLAGS.unknownVersion);
   if (!g.store_code) flags.push(FORM_FLAGS.unknownStore);
+  if (periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
   for (const f of periodFlags(g.period_start, g.period_end)) flags.push(f);
   return flags;
 }
