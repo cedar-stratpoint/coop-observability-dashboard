@@ -242,17 +242,26 @@ export function buildSystemPrompt(): string {
   ].join('\n');
 }
 
-/** The per-page manifest text (item codes + column meanings). Cached per page. */
-export function buildManifestPrompt(page: number): string {
+/** The per-page manifest text (item codes + column meanings) for the THREE-LOCATION
+ *  layouts (V1, V2). They share the same five fields and row-math (ending = stockroom
+ *  + drawer + selling); only the printed Delivery-column POSITION differs — col 4
+ *  (after the three counts) on V1, first (before them) on V2 — so the prompt states
+ *  the right order while the returned field names stay identical. Cached per page. */
+export function buildManifestPrompt(page: number, version: 'v1' | 'v2' = 'v1'): string {
   const items = MANIFESTS[page];
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
   }
   const list = items.map((i) => `${i.code} ${i.product}`).join(' · ');
+  const order = version === 'v2'
+    ? '  delivery (col1, FIRST) · stockroom (col2) · drawer (col3) · selling_area (col4) · ending_on_hand (col5)'
+    : '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)';
   return [
-    `PAGE ${page} of ${PAGE_COUNT}. Columns, left to right (handwritten int or null):`,
-    '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)',
-    '  total_value (col6) is DERIVED — leave null.',
+    `PAGE ${page} of ${PAGE_COUNT}. Form version ${version.toUpperCase()}. Columns, left to right (handwritten int or null):`,
+    order,
+    '  total_value (last col) is DERIVED — leave null.',
+    'ending_on_hand = stockroom + drawer + selling_area; delivery is separate (not part of it).',
+    'Map each cell by its PRINTED column meaning above, not by any handwritten sub-label.',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
     'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,

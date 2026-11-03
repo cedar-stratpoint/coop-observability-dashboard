@@ -11,6 +11,13 @@ import {
   EXTRACT_MODEL,
 } from './goldline-extract';
 import {sanitizeClassification, type PageClassification} from './goldline-segment';
+import {
+  buildLegacyManifestPrompt,
+  LEGACY_EXTRACTION_SCHEMA,
+  legacyRowToCore,
+  type LegacyExtractedRow,
+} from './goldline-legacy-extract';
+import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
@@ -33,6 +40,10 @@ export type ExtractedRow = {
   // F3 · cells the reader couldn't read cleanly, so erasures can be counted (plan §06 b).
   // `written` keeps what was on the paper when the reader chose another reading.
   marks?: CellMark[] | null;
+  // Phase 1 · Legacy-only fields (beginning, begin_plus_delivery, deducted_pcs) that
+  // have no three-location column; kept here so they survive into the extraction jsonb
+  // (and later the inventory sidecar). Null/absent for v1/v2.
+  extra?: Record<string, number | null> | null;
 };
 
 export type CellMark = {
@@ -146,14 +157,26 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
 
 /**
  * Read ONE scanned inventory page with Claude Vision against the fixed template.
- * Throws on: no key, a page with no manifest, no text/invalid JSON, or an `{error}`
- * response (page_mismatch / unreadable). The caller marks the upload failed and
- * surfaces the reason to the reviewer.
+ * Version-aware (Phase 1): V1/V2 share the three-location schema (the prompt just
+ * states the Delivery-column position); LEGACY uses the 7-column deducted schema and
+ * its rows are mapped to the common core {delivery, ending_on_hand} with the deducted
+ * fields kept in each row's `extra` sidecar. Throws on: no key, a page with no
+ * manifest, no text/invalid JSON, or an `{error}` response. The caller marks the
+ * upload failed and surfaces the reason to the reviewer.
  */
-export async function extractInventoryPage(pdfBase64: string, page: number, profile?: WriterProfile): Promise<ExtractedPage> {
+export async function extractInventoryPage(
+  pdfBase64: string,
+  page: number,
+  profile?: WriterProfile,
+  version: FormVersion = 'v1',
+): Promise<ExtractedPage> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const isLegacy = version === 'legacy';
   const system = buildSystemPrompt();
-  const manifest = buildManifestPrompt(page); // throws if this page has no manifest yet
+  // Unknown version falls back to v1 (the current default three-location layout).
+  const manifest = isLegacy
+    ? buildLegacyManifestPrompt(page)
+    : buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1');
 
   const client = goldlineClient();
   const params = {
@@ -165,7 +188,7 @@ export async function extractInventoryPage(pdfBase64: string, page: number, prof
     // under the model's minimum cacheable size, which is harmless).
     system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
     // Structured output — the first text block is valid JSON matching the schema.
-    output_config: {format: {type: 'json_schema', schema: EXTRACTION_SCHEMA}},
+    output_config: {format: {type: 'json_schema', schema: isLegacy ? LEGACY_EXTRACTION_SCHEMA : EXTRACTION_SCHEMA}},
     // Note: no `thinking` param. Sonnet 5 rejects `{type:'disabled'}` with a 400
     // ("send {type:'between_tools'} instead"); for a pure, no-tools extraction we
     // just omit it and let the model default. Keep it omitted unless we add tools.
@@ -185,6 +208,25 @@ export async function extractInventoryPage(pdfBase64: string, page: number, prof
   if (parsed && typeof parsed === 'object' && 'error' in parsed) {
     throw new Error(`Extraction declined: ${String((parsed as {error: unknown}).error)}`);
   }
+
+  // Legacy: validate + map its deducted rows into the common core shape before the
+  // usual guard, so the rest of the pipeline sees a normal ExtractedPage.
+  if (isLegacy) {
+    if (!isLegacyPage(parsed)) {
+      throw new Error('Extraction JSON did not match the expected Legacy page shape');
+    }
+    const p = parsed as LegacyPage;
+    return {
+      store_code: typeof p.store_code === 'string' ? p.store_code : '',
+      store_name: p.store_name ?? undefined,
+      period_start: p.period_start ?? null,
+      period_end: p.period_end ?? null,
+      consultant: p.consultant ?? null,
+      rows: p.rows.map(legacyRowToCore),
+      reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
+    };
+  }
+
   // Don't trust output_config to have been honored: validate the shape before it
   // reaches the review queue, so malformed JSON fails loud instead of persisting.
   if (!isExtractedPage(parsed)) {
@@ -212,6 +254,25 @@ function referenceBlocks(profile?: WriterProfile) {
 function readText(manifest: string, profile?: WriterProfile): string {
   const lead = profile?.reference ? 'The scan just above is the page to read now.' : null;
   return [lead, profile?.notes ?? null, manifest].filter(Boolean).join('\n\n');
+}
+
+/** The raw Legacy page shape (header + legacy rows) before mapping to core. */
+type LegacyPage = {
+  store_code?: string | null;
+  store_name?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  consultant?: string | null;
+  rows: LegacyExtractedRow[];
+};
+
+/** Runtime guard for a Legacy extraction: a rows array of {item_code} objects. */
+function isLegacyPage(v: unknown): v is LegacyPage {
+  if (!v || typeof v !== 'object') return false;
+  const p = v as {store_code?: unknown; rows?: unknown};
+  if (p.store_code != null && typeof p.store_code !== 'string') return false;
+  if (!Array.isArray(p.rows)) return false;
+  return p.rows.every((r) => r && typeof r === 'object' && typeof (r as {item_code?: unknown}).item_code === 'string');
 }
 
 /** Minimal runtime guard: a rows array of {item_code} objects (store_code is optional —
