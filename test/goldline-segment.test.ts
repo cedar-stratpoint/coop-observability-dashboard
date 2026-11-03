@@ -1,8 +1,10 @@
 import {describe, expect, it} from 'vitest';
 import {
+  applyStoreRegistry,
   canonicalPeriod,
   clampPage,
   duplicatePages,
+  editDistance,
   FORM_FLAGS,
   formKey,
   groupIntoForms,
@@ -14,6 +16,7 @@ import {
   periodBucket,
   periodFlags,
   sanitizeClassification,
+  snapStoreCode,
   type ClassifiedPage,
 } from '../src/goldline-segment';
 
@@ -147,6 +150,64 @@ describe('groupIntoForms', () => {
     expect(forms.length).toBe(1);
     expect(forms[0].present).toEqual([1, 2]);
     expect(forms[0].flags).toContain(FORM_FLAGS.periodMismatch); // disagreement surfaced
+  });
+});
+
+describe('snapStoreCode', () => {
+  const known = ['473', '5300', '891', '854'];
+  it('trusts an exact known code', () => {
+    expect(snapStoreCode('473', known)).toMatchObject({code: '473', status: 'exact'});
+    expect(snapStoreCode('#473 ', known)).toMatchObject({code: '473', status: 'exact'});
+  });
+  it('auto-corrects a unique near miss (the real validation case)', () => {
+    expect(snapStoreCode('472', known)).toMatchObject({code: '473', status: 'corrected', from: '472'});
+    expect(snapStoreCode('173', known)).toMatchObject({code: '473', status: 'corrected', from: '173'});
+  });
+  it('does NOT override a candidate that is itself a valid store', () => {
+    expect(snapStoreCode('854', known)).toMatchObject({code: '854', status: 'exact'});
+  });
+  it('leaves an ambiguous near miss for the reviewer', () => {
+    // equidistant from two known codes → ambiguous, keep raw, offer candidates
+    const r = snapStoreCode('5301', ['5300', '5302']);
+    expect(r.status).toBe('ambiguous');
+    expect(r.code).toBe('5301');
+    expect(r.candidates).toEqual(expect.arrayContaining(['5300', '5302']));
+  });
+  it('reports unknown when nothing is close', () => {
+    expect(snapStoreCode('9999', known).status).toBe('unknown');
+  });
+  it('is a no-op with an empty registry and handles missing', () => {
+    expect(snapStoreCode('473', [])).toMatchObject({code: '473', status: 'unknown'});
+    expect(snapStoreCode(null, known)).toMatchObject({code: null, status: 'missing'});
+  });
+  it('editDistance basics', () => {
+    expect(editDistance('473', '472')).toBe(1);
+    expect(editDistance('473', '473')).toBe(0);
+    expect(editDistance('', 'ab')).toBe(2);
+  });
+});
+
+describe('applyStoreRegistry + grouping', () => {
+  it('merges a misread store into the real form and flags the correction', () => {
+    const known = ['473'];
+    const pages = applyStoreRegistry(
+      [
+        page({id: 'a', store_code: '473', page: 1}),
+        page({id: 'b', store_code: '472', page: 2}), // misread of 473
+      ],
+      known,
+    );
+    const forms = groupIntoForms(pages);
+    expect(forms.length).toBe(1);
+    expect(forms[0].store_code).toBe('473');
+    expect(forms[0].present).toEqual([1, 2]);
+    expect(forms[0].flags).toContain(FORM_FLAGS.storeCorrected);
+  });
+  it('flags an unmatched store but still groups it', () => {
+    const pages = applyStoreRegistry([page({id: 'a', store_code: '9999', page: 1})], ['473']);
+    const forms = groupIntoForms(pages);
+    expect(forms[0].store_code).toBe('9999');
+    expect(forms[0].flags).toContain(FORM_FLAGS.storeUnmatched);
   });
 });
 
