@@ -7,6 +7,11 @@ import {
   effectiveEventId,
   resolveOrderEvents,
   overlappingEvent,
+  currentEventIds,
+  untaggedOnEventDays,
+  eventFilterScope,
+  eventsCoveringOrder,
+  DEFAULT_ORDERS_FILTER,
   featuredEvent,
   eventTimeState,
   eventMatchesQuery,
@@ -519,10 +524,11 @@ describe('stockAlerts', () => {
 
 describe('parseOrdersFilter', () => {
   it('defaults unknown/blank params to no filter', () => {
-    expect(parseOrdersFilter({})).toEqual({method: 'all', status: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null});
+    expect(parseOrdersFilter({})).toEqual({method: 'all', status: 'all', event: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null});
     expect(parseOrdersFilter({method: 'bitcoin', status: 'huh', from: 'never'})).toEqual({
       method: 'all',
       status: 'all',
+      event: 'all',
       startDate: null,
       endDate: null,
       minPrice: null,
@@ -540,6 +546,7 @@ describe('parseOrdersFilter', () => {
     })).toEqual({
       method: 'gcash',
       status: 'voided',
+      event: 'all',
       startDate: '2026-09-01T00:00:00.000Z',
       endDate: '2026-09-09T23:59:59.999Z',
       minPrice: 50,
@@ -570,11 +577,12 @@ describe('parseOrdersFilter', () => {
 
 describe('isFilterActive', () => {
   it('is false only for the all-defaults filter', () => {
-    expect(isFilterActive({method: 'all', status: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(false);
-    expect(isFilterActive({method: 'cash', status: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(true);
-    expect(isFilterActive({method: 'all', status: 'voided', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(true);
-    expect(isFilterActive({method: 'all', status: 'all', startDate: '2026-09-01T00:00:00.000Z', endDate: null, minPrice: null, maxPrice: null})).toBe(true);
-    expect(isFilterActive({method: 'all', status: 'all', startDate: null, endDate: null, minPrice: 20, maxPrice: null})).toBe(true);
+    expect(isFilterActive({method: 'all', status: 'all', event: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(false);
+    expect(isFilterActive({method: 'cash', status: 'all', event: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(true);
+    expect(isFilterActive({method: 'all', status: 'voided', event: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(true);
+    expect(isFilterActive({method: 'all', status: 'all', event: 'all', startDate: '2026-09-01T00:00:00.000Z', endDate: null, minPrice: null, maxPrice: null})).toBe(true);
+    expect(isFilterActive({method: 'all', status: 'all', event: 'all', startDate: null, endDate: null, minPrice: 20, maxPrice: null})).toBe(true);
+    expect(isFilterActive({method: 'all', status: 'all', event: 'untagged', startDate: null, endDate: null, minPrice: null, maxPrice: null})).toBe(true);
   });
 });
 
@@ -585,7 +593,7 @@ describe('filterOrders', () => {
     order({id: 'legacy', created_at: '2026-08-01T10:00:00.000Z', total: 500, payment_method: null}),
     order({id: 'card', created_at: '2026-09-07T09:00:00.000Z', total: 900, payment_method: 'card'}),
   ];
-  const base = {method: 'all', status: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null};
+  const base = {method: 'all', status: 'all', event: 'all', startDate: null, endDate: null, minPrice: null, maxPrice: null};
 
   it('matches cash including legacy null rows', () => {
     const ids = filterOrders(orders, {...base, method: 'cash'}).map((o) => o.id);
@@ -624,6 +632,59 @@ describe('filterOrders', () => {
   it('combines filters (AND)', () => {
     const ids = filterOrders(orders, {...base, minPrice: 200, maxPrice: 400}).map((o) => o.id);
     expect(ids).toEqual(['gcash']);
+  });
+});
+
+describe('event filter (Transactions)', () => {
+  function evt(over: Partial<PosEvent> & {event_id: string}): PosEvent {
+    return {
+      name: over.event_id, venue: null, city: null, organizer: null,
+      starts_on: null, ends_on: null, opening_cash: null, cash_note: null,
+      closing_cash: null, status: 'active', created_by: null, created_at: null,
+      updated_at: null, ...over,
+    };
+  }
+  const day17 = '2026-09-17T04:00:00.000Z'; // Manila 2026-09-17
+
+  it('parseOrdersFilter reads the event param (uuid / untagged / default all)', () => {
+    expect(parseOrdersFilter({event: 'A'}).event).toBe('A');
+    expect(parseOrdersFilter({event: 'untagged'}).event).toBe('untagged');
+    expect(parseOrdersFilter({}).event).toBe('all');
+    expect(parseOrdersFilter({event: '  '}).event).toBe('all');
+  });
+
+  it('filterOrders filters by event_id and by untagged', () => {
+    const orders = [
+      order({id: 'a1', created_at: day17, event_id: 'A'}),
+      order({id: 'b1', created_at: day17, event_id: 'B'}),
+      order({id: 'none', created_at: day17, event_id: null}),
+    ];
+    expect(filterOrders(orders, {...DEFAULT_ORDERS_FILTER, event: 'A'}).map((o) => o.id)).toEqual(['a1']);
+    expect(filterOrders(orders, {...DEFAULT_ORDERS_FILTER, event: 'untagged'}).map((o) => o.id)).toEqual(['none']);
+    expect(filterOrders(orders, {...DEFAULT_ORDERS_FILTER, event: 'all'}).map((o) => o.id)).toEqual(['a1', 'b1', 'none']);
+  });
+
+  it('eventFilterScope: todays live events by default, selected range when a date is set', () => {
+    const events = [
+      evt({event_id: 'live1', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+      evt({event_id: 'live2', starts_on: '2026-09-17', ends_on: '2026-09-18'}),
+      evt({event_id: 'past', starts_on: '2026-09-10', ends_on: '2026-09-10'}),
+    ];
+    // Default (no date filter): events covering today.
+    expect(eventFilterScope(events, DEFAULT_ORDERS_FILTER, '2026-09-17').map((e) => e.event_id).sort())
+      .toEqual(['live1', 'live2']);
+    // A date range selected: events overlapping that range (by Manila day).
+    const ranged = {...DEFAULT_ORDERS_FILTER, startDate: '2026-09-10T00:00:00.000Z', endDate: '2026-09-10T15:59:59.000Z'};
+    expect(eventFilterScope(events, ranged, '2026-09-17').map((e) => e.event_id)).toEqual(['past']);
+  });
+
+  it('eventsCoveringOrder returns the events whose range covers the order day', () => {
+    const events = [
+      evt({event_id: 'A', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+      evt({event_id: 'B', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+      evt({event_id: 'other', starts_on: '2026-09-18', ends_on: '2026-09-18'}),
+    ];
+    expect(eventsCoveringOrder({created_at: day17}, events).map((e) => e.event_id).sort()).toEqual(['A', 'B']);
   });
 });
 
@@ -764,6 +825,59 @@ describe('effectiveEventId / resolveOrderEvents', () => {
     const oneDay = [event({event_id: 'b', starts_on: '2026-09-20', ends_on: null})];
     expect(overlappingEvent(oneDay, '2026-09-20', '2026-09-20')?.event_id).toBe('b');
     expect(overlappingEvent(oneDay, '2026-09-21', '2026-09-21')).toBeNull();
+  });
+});
+
+describe('multi-event attribution, pinning, and untagged bucket', () => {
+  function ev(over: Partial<PosEvent> & {event_id: string}): PosEvent {
+    return {
+      name: over.event_id, venue: null, city: null, organizer: null,
+      starts_on: null, ends_on: null, opening_cash: null, cash_note: null,
+      closing_cash: null, status: 'active', created_by: null, created_at: null,
+      updated_at: null, ...over,
+    };
+  }
+  const day17 = '2026-09-17T04:00:00.000Z'; // 2026-09-17 Manila
+  const twoSameDay = [
+    ev({event_id: 'a', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+    ev({event_id: 'b', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+  ];
+
+  it('effectiveEventId does NOT guess when two events cover the day (stays null)', () => {
+    expect(effectiveEventId({event_id: null, created_at: day17}, twoSameDay)).toBeNull();
+  });
+  it('effectiveEventId still auto-attributes on an unambiguous (single-event) day', () => {
+    const one = [ev({event_id: 'a', starts_on: '2026-09-17', ends_on: '2026-09-17'})];
+    expect(effectiveEventId({event_id: null, created_at: day17}, one)).toBe('a');
+  });
+  it('resolveOrderEvents leaves an ambiguous-day untagged sale untagged', () => {
+    const orders = [order({id: '1', created_at: day17, event_id: null})];
+    expect(resolveOrderEvents(orders, twoSameDay)[0].event_id).toBeNull();
+  });
+
+  it('currentEventIds returns every live event, newest start first', () => {
+    const events = [
+      ev({event_id: 'early', starts_on: '2026-09-15', ends_on: '2026-09-18'}),
+      ev({event_id: 'late', starts_on: '2026-09-17', ends_on: '2026-09-17'}),
+      ev({event_id: 'past', starts_on: '2026-09-10', ends_on: '2026-09-11'}),
+    ];
+    // Both 'early' and 'late' cover the 17th; the later-starting one sorts first.
+    expect(currentEventIds(events, '2026-09-17')).toEqual(['late', 'early']);
+    expect(currentEventIds(events, '2026-09-20')).toEqual([]);
+  });
+
+  it('untaggedOnEventDays collects only null-event sales on event-covered days', () => {
+    const events = [ev({event_id: 'a', starts_on: '2026-09-17', ends_on: '2026-09-17'})];
+    const orders = [
+      order({id: 'onDayUntagged', created_at: day17, event_id: null}),       // counts
+      order({id: 'onDayTagged', created_at: day17, event_id: 'a'}),          // tagged, skip
+      order({id: 'offDay', created_at: '2026-09-20T04:00:00.000Z', event_id: null}), // walk-in, skip
+      {...order({id: 'voided', created_at: day17, event_id: null}), status: 'voided'}, // voided, skip
+    ];
+    expect(untaggedOnEventDays(orders, events).map((o) => o.id)).toEqual(['onDayUntagged']);
+  });
+  it('untaggedOnEventDays returns nothing when there are no dated events', () => {
+    expect(untaggedOnEventDays([order({id: '1', created_at: day17, event_id: null})], [])).toEqual([]);
   });
 });
 

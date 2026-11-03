@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Promote multi-event to prod
+Multi-event ships to production, hand-reconciled onto the already-shipped prod event/transaction redesign (a straight cherry-pick of the staging commits would have fought the redesign, so only the multi-event semantics were re-applied). The paired POS release and the Coop prod Supabase migration (`qkxbwzdxhwcbwgriwipi`) went out alongside this.
+
+**Schedule overlapping / same-day events.** The event form's overlap check is now a neutral "runs alongside" note instead of a Save blocker; `upsertEventAction` drops the stale 23514 overlap-error path. Every event live today is pinned to the top of the Events list (there can be more than one), driven by `currentEventIds`.
+
+**Attribute, filter and reassign by event.** Read-time attribution (`effectiveEventId`) only date-stamps a sale on an unambiguous single-event day; ambiguous days stay untagged for the POS to stamp explicitly. The Transactions tab gains an Event filter (event / untagged / all, server-side in `getPosOrdersPage`, shown only when the scope has 2+ events) and a per-sale `OrderEventBadge` that doubles as the reassign control on ambiguous days, via `reassignOrderEventAction` (the `set_pos_order_event` RPC, service_role). Revenue subtotal now handles the untagged (`event_id IS NULL`) filter so the Untagged view totals correctly.
+
+Verified: full suite 3590 passing, production build clean.
+
 ## v1.19.4 (2026-11-03): faster navigation, cache the slow Goldline reads (prod release)
 Ships the navigation perf fix to prod. The Overview (home) and SKU linking pages decrypted tens of thousands of sales rows on every load with no caching (~2.9 s each); they now reuse the same per-company sales cache and return in about 0.1 to 0.2 seconds on repeat navigation. Also adds instant loading skeletons to the pages that lacked one. Code only; no database change. Typechecked and the full test suite passes.
 

@@ -87,6 +87,7 @@ export interface PosBundleDef {
 export interface PosOrdersFilter {
   method: string; // 'all' | 'cash' | 'gcash' | 'maya' | 'card' | ...
   status: string; // 'all' | 'completed' | 'voided'
+  event: string; // 'all' | an event_id | 'untagged' (null event_id). Only surfaced when a day has 2+ events.
   // Inclusive from/to instants (ISO). The client converts the picked calendar
   // days into absolute instants using the viewer's timezone (start-of-day →
   // end-of-day), so the filter matches the local times shown in the list.
