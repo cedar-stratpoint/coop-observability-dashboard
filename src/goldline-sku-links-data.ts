@@ -3,7 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {categoryFromSubclass} from './goldline-pos-xlsx';
 import {relinkWatsons} from './goldline-watsons-data';
-import {getSalesRollup} from './goldline-ref-data';
+import {getSalesRollup, cachedSalesView} from './goldline-ref-data';
 import type {MatchTier} from './goldline-sku-match';
 import {formSpots, watsonsName, type FormSpot} from './goldline-sku-tags';
 import {MANIFESTS} from './goldline-extract';
@@ -136,6 +136,22 @@ export async function getSkuActivity(companyId: string): Promise<ActivityEvent[]
   return activityFrom(log, reviews, notes, products, chain);
 }
 
+// The Watsons month-by-month SKU breakdown (sku_months) decrypts every sales row per
+// month, so it's cached per company and keyed to the committed sales files, like the
+// rollup. Throws on error so a transient failure isn't cached (the caller catches it).
+function getSkuMonths(companyId: string): Promise<SkuMonths> {
+  return cachedSalesView(
+    companyId,
+    ['sku-months'],
+    async () => {
+      const r = await db().rpc('sku_months', {p_company: companyId});
+      if (r.error) throw new Error(`sku_months failed: ${r.error.message}`);
+      return ((r.data as SkuMonths | null) ?? {}) as SkuMonths;
+    },
+    ['sales'], // pure chain-sales; a catalog edit or a linking decision must not drop it
+  );
+}
+
 export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
   const empty: SkuLinkData = {rows: [], unlinkedItems: [], decommissioned: [], notes: {}, decisions: {}, activity: [], skuMonths: {}, formPages: [], totals: {units: 0, linkedUnits: 0, suggestedUnits: 0}};
   if (!nichidoConfigured()) return empty;
@@ -177,16 +193,12 @@ export async function getSkuLinkData(companyId: string): Promise<SkuLinkData> {
       return [] as LogRow[];
     }),
     // Month by month is a nicety too: without it the pointers and the panel just don't show.
-    Promise.resolve(supa.rpc('sku_months', {p_company: companyId})).then(
-      (r) => {
-        if (r.error) console.error('sku_months failed', r.error.message);
-        return ((r.data as SkuMonths | null) ?? {}) as SkuMonths;
-      },
-      (e) => {
-        console.error('sku_months failed', e);
-        return {} as SkuMonths;
-      },
-    ),
+    // Cached (it decrypts each month's rows, like the rollup) and caught here so a transient
+    // failure isn't what gets cached.
+    getSkuMonths(companyId).catch((e) => {
+      console.error('sku_months failed', e);
+      return {} as SkuMonths;
+    }),
   ]);
   const reviewBySku = new Map(
     reviews.map((r) => [
