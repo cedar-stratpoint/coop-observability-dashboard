@@ -381,6 +381,9 @@ export type ReviewedInventoryRow = {
   selling_area: number | null;
   delivery: number | null;
   ending_on_hand: number | null;
+  // Phase 1 · Legacy-only sidecar (beginning / begin_plus_delivery / deducted_pcs),
+  // carried verbatim into inventory.extra. Absent/null for v1/v2 rows.
+  extra?: Record<string, number | null> | null;
 };
 
 /**
@@ -776,6 +779,8 @@ export async function commitBatch(input: {
         selling_area: r.selling_area,
         delivery: r.delivery,
         ending_on_hand: r.ending_on_hand,
+        // Legacy sidecar (null for v1/v2); commit_batch writes it to inventory.extra.
+        extra: r.extra ?? null,
       })),
     })),
   });
