@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Nichido Phase 1 (part 1): version-aware extraction (V1 / V2 / Legacy)
+
+Builds on Phase 0 (page classification). The extractor was hardcoded to the three-location layout; it now reads against the DETECTED form version. See `../PLAN.md` (NICH-17). Staging scope, additive.
+
+- **V1 / V2** share the same five fields and row-math (`ending = stockroom + drawer + selling`); only the printed Delivery-column position differs (V1 col 4, V2 first). `buildManifestPrompt(page, version)` states the right order so a V2 delivery-first scan isn't mis-slotted; the returned field names are unchanged. The prompt also tells the reader to map by the printed column meaning, not any handwritten sub-label.
+- **Legacy** (the 7-column "deducted" form) gets its own path (`src/goldline-legacy-extract.ts`, pure): `buildLegacyManifestPrompt` + `LEGACY_EXTRACTION_SCHEMA` read beginning / delivery / begin+delivery / deducted-pcs / ending; `legacyRowToCore()` maps each row to the common core `{delivery, ending_on_hand}` (the three location counts are null) with the deducted fields kept in a per-row `extra` sidecar; `legacyRowMathOff()` validates the form's own printed identities (`col3 = col1 + col2`, `col6 = col3 − col4`) so Legacy is checkable despite having no three-location sum. It only checks an identity when all its inputs are present (no blank-vs-zero false flags).
+- **Runner** (`src/goldline-extract-run.ts`): `extractInventoryPage(pdf, page, profile, version)` dispatches by version (unknown → v1 fallback); `ExtractedRow.extra` carries the Legacy sidecar into the extraction jsonb. **Route** passes `cls.version` from the Phase 0 classifier.
+- **Validated on the real scan**: Legacy page (store 473, Sep 1–15) extracted 43 rows with correct item codes and a clean self-check (0 false mismatches). Dev harness `scripts/nichido-legacy-check.ts` (no DB).
+- Tests: `test/goldline-legacy-extract.test.ts` (9). 133 goldline tests green, tsc clean. Not yet wired to the commit/sidecar DB column (Phase 1 part 2).
+
 ## 2026-11-03 — Nichido Phase 0 (part 1): shuffled-scan page classifier + form segmentation
 
 Groundwork for ingesting the real handwritten inventory scans, which arrive as one big multi-store, multi-period, multi-version PDF with pages shuffled and about half upside-down (see `../PLAN.md`, task NICH-17). This part adds the pure, tested building blocks; it does not yet change the upload route, and the extractor is untouched (still the V1/V2 three-location shape — version-aware extraction is Phase 1). Staging scope, additive only.
