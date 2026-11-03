@@ -106,6 +106,61 @@ export async function setUploadStatus(
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
 }
 
+/**
+ * Phase 0 — persist a page's classifier output on its upload row (additive columns),
+ * plus the semantic `page_key` used for duplicate / re-upload detection. Best-effort:
+ * callers should not fail the upload if this write errors (classification is metadata,
+ * not the extracted counts).
+ */
+export async function saveClassification(input: {
+  uploadId: string;
+  pageNo: number;
+  pageKind: string;
+  orientation: 0 | 180;
+  formVersion: string;
+  pageKey: string | null;
+  classification: unknown;
+}): Promise<void> {
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .update({
+      page_no: input.pageNo,
+      page_kind: input.pageKind,
+      orientation: input.orientation,
+      form_version: input.formVersion,
+      page_key: input.pageKey,
+      classification: input.classification,
+      classified_at: new Date().toISOString(),
+    })
+    .eq('id', input.uploadId);
+  if (res.error) throw new Error(`uploads classification update failed: ${res.error.message}`);
+}
+
+/**
+ * Phase 0 — prior uploads for this company sharing the same semantic `page_key`
+ * (a duplicate within the bundle or a re-upload of a page seen before). Newest first,
+ * excluding the current upload. The caller FLAGS these; it never auto-drops.
+ */
+export async function findDuplicatePageKey(
+  companyId: string,
+  pageKey: string,
+  excludeUploadId: string,
+): Promise<Array<{id: string; status: string; created_at: string}>> {
+  if (!pageKey) return [];
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .select('id,status,created_at')
+    .eq('company_id', companyId)
+    .eq('page_key', pageKey)
+    .neq('id', excludeUploadId)
+    .order('created_at', {ascending: false})
+    .limit(10);
+  if (res.error) throw new Error(`uploads duplicate check failed: ${res.error.message}`);
+  return (res.data ?? []) as Array<{id: string; status: string; created_at: string}>;
+}
+
 /** What deleting an upload will take with it — shown in the confirmation before the
  *  user commits to it. `inventoryRows` are the inventory counts this scan is still
  *  the source of (a later scan that overwrote a count owns it instead). */
