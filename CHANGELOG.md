@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido Phase 2 (part 2b/2c): store-change guard + Legacy values in review
+
+Finishing the Phase 2 review slices (see `../PLAN.md`, NICH-17). Both additive, no schema change.
+
+- **Store-change guard** (`storeConflict` in `src/upload-batch.ts`): a batch is one store's form, so its pages should read one store. Phase 0 persists each page's detected/snapped store; `getBatchPages` now carries it, `batchReadiness` blocks "Commit all pages" when pages read different stores, and `batch-review.tsx` shows a clay banner listing the stores + a per-page store breakdown (so the stray page is obvious), pointing at split / remove. This complements the existing auto-split (`splitBatchIntoForms`) for shuffled scans the page-number heuristic can't cleanly separate. Tests + banner screenshot-verified.
+- **Legacy values in review** (`review-rows.tsx`): a Legacy form's `extra` sidecar (beginning / begin+delivery / deducted-pcs, Phase 1) now shows as a read-only context line under the item code in both the table and phone card — "Beginning 20 · +Delivery 25 · Deducted 8" — only for Legacy rows. Purely additive display.
+- Note on the rest: **partial commit / resume needs no new work** — drafts already persist and restore per batch (`src/review-draft.ts`), and an incomplete form already commits ("add the rest later"); cherry-picking a subset of uploaded pages is intentionally excluded by the per-form-atomic commit. 151 tests green, tsc + design detector clean.
+
 ## 2026-11-03 — Nichido Phase 2 (part 2a): duplicate / re-upload value diff
 
 When a scanned page shares the Phase 0 `page_key` with an earlier upload (a re-upload, or a page scanned twice), the review page now shows WHAT differs so the reviewer can decide which copy to keep. Flag-only, never blocks. See `../PLAN.md`, NICH-17. Additive, no schema change.
