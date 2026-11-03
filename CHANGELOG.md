@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.19.3 (2026-11-03): branded error, 404 and global-error pages (prod release)
+Ships Coop-branded error screens to prod, replacing Next's bare "This page couldn't load" fallback (the same screen prod showed during the v1.19.1 timeout incident). Code only; no database change. Verified in the browser in light and dark, and typechecked.
+
+## 2026-11-03 — Branded error pages replace the bare Vercel fallback
+A crashed page used to fall through to Next's default global-error screen (black canvas, "This page couldn't load"), since the app carried no error boundaries. Added three on-brand screens in the Coop identity (bone canvas, forest-green accent, Inter wordmark + Newsreader serif): `app/error.tsx` catches page-level render/data errors and renders inside the dashboard shell so the nav stays usable; `app/not-found.tsx` is the 404; `app/global-error.tsx` replaces the root layout when it is the layout itself that fails, so it is fully self-contained (inlined styles, light/dark via `prefers-color-scheme`, system serif fallback) and no longer depends on `globals.css` or the fonts the dead layout would have loaded. Both boundaries use Next 16's `retry` prop (not the older `reset`) and surface the error digest in a subtle mono line.
+
 ## v1.19.2 (2026-10-29): sales totals cache hardened (prod fix)
 Ships the hardening (below) to prod: cached sales totals follow the committed sales files, refresh after a failed upload or delete, and stay put through SKU linking decisions. Code only; no database change. SKU linking's decision trail was re-checked end to end on Staging.
 
