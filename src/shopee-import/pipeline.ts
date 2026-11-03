@@ -37,6 +37,8 @@ export interface Run {
   rowCount: number;
   plan: PlanRecord | null;
   restated: boolean;
+  /** Who planned it: 'api', a person, or `sync:<jobId>` for a Shopee sync worker's job. */
+  importedBy: string | null;
   /** The gate results and, for the four snapshot reports, the figures that identify the file. */
   checks: Record<string, unknown>;
 }
