@@ -380,7 +380,9 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     // The writer profile: an earlier reviewed copy of this page + notes from past
     // corrections, learned from this database's committed scans (empty on any error).
     const profile = await getWriterProfile(companyId, page, batchStore, ctx.storeScope);
-    const extracted = await extractInventoryPage(extractB64, page, profile);
+    // Phase 1: extract against the detected form version (legacy uses the 7-column
+    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1.
+    const extracted = await extractInventoryPage(extractB64, page, profile, cls.version);
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
     if (outPdf.length) {
