@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {buildSyncStatus} from '../src/shopee-sync/status';
 import type {Heartbeat, Job} from '../src/shopee-sync/types';
+import {exactReports} from './support/shopee-sync-reports';
 
 const now = new Date('2026-10-27T06:00:00Z'); // PH Tuesday 14:00
 const LOADED = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
@@ -8,7 +9,7 @@ const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
 const beat = (o: Partial<Heartbeat> = {}): Heartbeat => ({lastSeen: ago(10), loginState: 'ready', loginCheckedAt: ago(30), remoteReady: false, ...o});
 const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'a@x.com', days: ['2026-10-19'], status: 'done', claimedAt: ago(5000), heartbeatAt: null, importIds: [], error: null, createdAt: ago(5000), finishedAt: ago(4000), progress: {}, awaitingSince: null, ...o});
 const REMOTE = 'https://browser.example.com';
-const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'a@x.com', isAdmin: false}, now, heartbeat: beat(), remoteUrl: REMOTE, jobs: [], loadedDays: LOADED, ...o});
+const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'a@x.com', isAdmin: false}, now, heartbeat: beat(), remoteUrl: REMOTE, jobs: [], loadedDays: LOADED, reportPeriods: exactReports(LOADED), ...o});
 
 describe('buildSyncStatus', () => {
   it('has no worker until it has sent a heartbeat', () => {
@@ -36,7 +37,8 @@ describe('buildSyncStatus', () => {
   it('explains why Sync is off: login not Ready, a sync in flight; with nothing missing it is a refresh, not off', () => {
     expect(build({heartbeat: beat({loginState: 'needs_password'})}).canSync).toMatchObject({ok: false, reason: expect.stringMatching(/admin/)});
     expect(build({jobs: [job({status: 'running', createdAt: ago(60)})]}).canSync).toMatchObject({ok: false, reason: expect.stringMatching(/already/)});
-    expect(build({loadedDays: [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)]}).canSync).toEqual({ok: true, days: 1, refresh: true});
+    const all = [...LOADED, ...['19', '20', '21', '22', '23', '24', '25', '26'].map((d) => `2026-10-${d}`)];
+    expect(build({loadedDays: all, reportPeriods: exactReports(all)}).canSync).toEqual({ok: true, days: 1, refresh: true});
   });
   it('currentJob is the queued or running one (team-wide), lastJob the newest finished one', () => {
     const running = job({id: 'r', status: 'running', createdAt: ago(60)});

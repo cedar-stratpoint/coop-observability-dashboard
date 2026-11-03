@@ -3,6 +3,7 @@ import {cardVisible, loginLine, noWorkerText, serverLine, statusMeta, stepsFor, 
 import {buildSyncStatus, type ShopeeSyncStatus, type SyncJobView} from '../src/shopee-sync/status';
 import {NEEDS_ADMIN} from '../src/shopee-sync/service';
 import type {Heartbeat, Job} from '../src/shopee-sync/types';
+import {exactReports} from './support/shopee-sync-reports';
 
 // The card on the one cloud worker: login state first, then the server (asleep, waking, online), and an admin-only way in.
 const now = new Date('2026-10-27T06:00:00Z'); // PH Tuesday 14:00
@@ -12,7 +13,7 @@ const ADMIN = 'owner@x.com';
 const REMOTE = 'https://browser.example.com';
 const cloud = (o: Partial<Heartbeat> = {}): Heartbeat => ({lastSeen: ago(7200), loginState: 'ready', loginCheckedAt: ago(7200), remoteReady: true, ...o});
 const job = (o: Partial<Job> = {}): Job => ({id: 'j1', requestedBy: 'u@x.com', days: ['2026-10-19'], status: 'queued', claimedAt: null, heartbeatAt: null, importIds: [], error: null, createdAt: ago(60), finishedAt: null, progress: {}, awaitingSince: null, ...o});
-const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'u@x.com', isAdmin: false}, now, heartbeat: cloud(), remoteUrl: REMOTE, jobs: [], loadedDays: LOADED, ...o});
+const build = (o: Partial<Parameters<typeof buildSyncStatus>[0]> = {}) => buildSyncStatus({viewer: {email: 'u@x.com', isAdmin: false}, now, heartbeat: cloud(), remoteUrl: REMOTE, jobs: [], loadedDays: LOADED, reportPeriods: exactReports(LOADED), ...o});
 
 describe('login on the status', () => {
   it('carries the last known login with its check time and age, and keeps it while the server sleeps', () => {

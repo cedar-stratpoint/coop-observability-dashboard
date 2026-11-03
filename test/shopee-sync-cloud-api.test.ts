@@ -3,6 +3,7 @@ import {handleClaim, handleProgress, handleWake, type SyncApiDeps} from '../src/
 import {requestSync, type SyncDeps} from '../src/shopee-sync/service';
 import {AWAITING_EXPIRY_MS} from '../src/shopee-sync/rules';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
+import {exactReports} from './support/shopee-sync-reports';
 
 // The one cloud worker: it reports its Shopee login (ready / needs_password / signed_out) and whether its remote browser is up on every poll,
 // it serves whoever pressed Sync, and a Lambda wakes it through a token route. Nothing here carries a Shopee password.
@@ -12,8 +13,8 @@ const WORKER = 'worker-secret-for-tests';
 const WAKE = 'wake-secret-for-tests';
 let store: FakeSyncStore;
 let clock: Date;
-const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED});
-const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, loadLoadedDays: async () => LOADED, ...o});
+const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => LOADED, loadReportPeriods: async () => exactReports(LOADED)});
+const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, loadLoadedDays: async () => LOADED, loadReportPeriods: async () => exactReports(LOADED), ...o});
 const post = (path: string, body: unknown, token?: string) =>
   new Request(`https://coop.example/api/shopee/sync/${path}`, {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...(token ? {authorization: `Bearer ${token}`} : {})}});
 const claim = (body: unknown) => handleClaim(post('claim', body, WORKER), api());

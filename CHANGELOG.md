@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Shopee Sync also loads a closed week's missing Ads and SKU files
+
+A week whose 7 sales days were all loaded but whose Ads file was never imported (staging: 19-25 Oct, after a worker bug failed the file once) was never retried: "missing" only looked at sales days and a week window only existed when all 7 days were missing. Pressing Sync or Retry now queues that week.
+
+**Decision: encode it in the job's days, not in new storage.** No SQL, no new config. The 7 (already loaded) days of such a week go into `job.days`, and the existing derivation turns them into a `week` window. What the worker is told to export is trimmed at claim time (`wireWindows`) to the report files that are really missing, so a loaded week costs one or two exports (about $0.15 each), not five. The import routes keep accepting the week's full set (a superset, harmless: re-importing the same bytes answers unchanged).
+
+**Overlap rule (the safety net).** Ads and SKU are stored per exact window and the Sales page keeps only the newest Ads window, dropping an older overlapping one whole. So a week is requested only when NO accepted Ads (or SKU) window touches any of its 7 days, read from the same accepted report periods the import coverage uses. An exact copy counts as loaded; an overlapping non-exact window counts as "not ours to fix" and is never requested.
+
+**Done means nothing is missing, reports included.** A worker `done` and a confirmed review now also check the job's weeks for missing Ads/SKU and end as failed with `Still missing reports: <from>..<to>/<type>` (Retry loads them). Side effect on purpose: a full-week job whose Ads export failed no longer ends as done. Missing sales days still come first; a report week is added only when the 31-day job size and the 4-week / 7-day window caps still hold, otherwise it waits for the next press. Traffic and Product Overview are left to the Monday import. The button reads "Sync ads for 1 week" when that is all it will do.
+
 ## 2026-11-03 — Faster navigation: cache the slow Goldline page reads, add loading skeletons
 
 Navigating between pages took 4 to 5 seconds. Profiled against the real databases: two page readers decrypt tens of thousands of sales rows on every load with no caching. The Overview (home) reader measured ~2.9 s and the SKU linking page's Watsons month-by-month breakdown kept /stock/skus at ~2.9 s. By contrast the Stores page, which already caches its decrypted totals, was ~0.1 s, proving the fix.

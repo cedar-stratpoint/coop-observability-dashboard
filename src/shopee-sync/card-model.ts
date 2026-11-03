@@ -43,8 +43,15 @@ export const cardVisible = (s: ShopeeSyncStatus | null, _now?: Date): boolean =>
 /** The small "Behind" tag on the Shopee chip. */
 export const behindTag = (s: ShopeeSyncStatus | null): boolean => Boolean(s && !s.mock && s.missingDays.length > 0);
 
+function syncLabel(c: {days: number; refresh?: boolean; reportWeeks?: number}): string {
+  if (c.refresh) return 'Sync latest data';
+  const weeks = c.reportWeeks ?? 0;
+  const salesDays = c.days - weeks * 7;
+  return `Sync ${[salesDays > 0 && plural(salesDays, 'missing day'), weeks > 0 && `ads for ${plural(weeks, 'week')}`].filter(Boolean).join(' and ')}`;
+}
+
 export function syncButton(s: ShopeeSyncStatus): {label: string; disabled: boolean; reason: string | null} {
-  if (s.canSync.ok) return {label: s.canSync.refresh ? 'Sync latest data' : `Sync ${plural(s.canSync.days, 'missing day')}`, disabled: false, reason: null};
+  if (s.canSync.ok) return {label: syncLabel(s.canSync), disabled: false, reason: null};
   const other = s.currentJob && !s.currentJob.mine;
   return {label: 'Sync Shopee', disabled: true, reason: other ? 'Waiting for another sync to finish.' : s.canSync.reason};
 }

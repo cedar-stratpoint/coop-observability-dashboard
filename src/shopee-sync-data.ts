@@ -20,6 +20,6 @@ export async function getShopeeSyncStatus(): Promise<ShopeeSyncStatus | null> {
     return {signedInAs: viewer.email, isAdmin: viewer.isAdmin, mock: true, worker: null, login: {state: 'unknown', checkedAt: null, ageSeconds: null, stale: false}, workerOnline: false, remoteReady: false, remoteUrl: null, currentJob: null, lastJob: null, missingDays: [], moreMissing: 0, canSync: {ok: false, reason: MOCK_REASON}};
   }
   const now = d.now();
-  const [jobs, heartbeat, loadedDays] = await Promise.all([sweepJobs(d.store, now), d.store.getHeartbeat(), d.loadLoadedDays()]);
-  return buildSyncStatus({viewer, now, heartbeat, remoteUrl: d.remoteUrl ?? null, jobs, loadedDays});
+  const [jobs, heartbeat, loadedDays, reportPeriods] = await Promise.all([sweepJobs(d.store, now), d.store.getHeartbeat(), d.loadLoadedDays(), d.loadReportPeriods()]);
+  return buildSyncStatus({viewer, now, heartbeat, remoteUrl: d.remoteUrl ?? null, jobs, loadedDays, reportPeriods});
 }

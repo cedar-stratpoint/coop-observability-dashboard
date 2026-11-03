@@ -2,6 +2,7 @@
 import {missingClosedDays} from './missing-days';
 import {cloudLogin, sameEmail} from './routing';
 import {isOnline, staleSweep} from './rules';
+import type {ReportPeriod} from '../shopee-import/pipeline';
 import {syncGate} from './service';
 import {isActive, type DayResult, type Heartbeat, type Job, type JobStatus, type LoginState} from './types';
 
@@ -51,7 +52,7 @@ export interface ShopeeSyncStatus {
   missingDays: string[];
   /** Missing closed days beyond the 31 one job can carry. */
   moreMissing: number;
-  canSync: {ok: true; days: number; refresh?: boolean} | {ok: false; reason: string};
+  canSync: {ok: true; days: number; refresh?: boolean; /** Closed weeks whose sales are in but whose Ads/SKU files this sync will load. */ reportWeeks?: number} | {ok: false; reason: string};
 }
 
 export interface StatusInput {
@@ -62,6 +63,7 @@ export interface StatusInput {
   remoteUrl: string | null;
   jobs: readonly Job[];
   loadedDays: readonly string[];
+  reportPeriods: readonly ReportPeriod[];
 }
 
 export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
@@ -76,7 +78,7 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
   const sorted = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const current = sorted.find((j) => j.status === 'queued' || isActive(j.status));
   const last = sorted.find((j) => j.status !== 'queued' && !isActive(j.status));
-  const gate = syncGate({now: i.now, jobs, heartbeat: i.heartbeat, loadedDays: i.loadedDays});
+  const gate = syncGate({now: i.now, jobs, heartbeat: i.heartbeat, loadedDays: i.loadedDays, reportPeriods: i.reportPeriods});
   const cl = cloudLogin(i.heartbeat, i.now);
   const online = isOnline(i.heartbeat?.lastSeen ?? null, i.now);
   const waited = jobs.some((j) => (j.status === 'queued' && i.now.getTime() - Date.parse(j.createdAt) > WAKE_GRACE_MS) || (j.status === 'expired' && j.error === 'worker offline' && i.now.getTime() - Date.parse(j.finishedAt ?? j.createdAt) < 3_600_000));
@@ -94,6 +96,6 @@ export function buildSyncStatus(i: StatusInput): ShopeeSyncStatus {
     lastJob: last ? view(last) : null,
     missingDays: missing.days,
     moreMissing: missing.more,
-    canSync: gate.ok ? {ok: true, days: gate.days.length, ...(gate.refresh ? {refresh: true} : {})} : {ok: false, reason: gate.error},
+    canSync: gate.ok ? {ok: true, days: gate.days.length, ...(gate.refresh ? {refresh: true} : {}), ...(gate.reportWeeks.length ? {reportWeeks: gate.reportWeeks.length} : {})} : {ok: false, reason: gate.error},
   };
 }

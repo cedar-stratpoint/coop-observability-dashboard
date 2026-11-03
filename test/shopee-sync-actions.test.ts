@@ -12,13 +12,14 @@ vi.mock('@/auth', () => ({auth: async () => (session.email ? {user: {email: sess
 vi.mock('../src/company', () => ({fetchMemberships: async () => memberships.rows}));
 vi.mock('../src/pos-data', () => ({usingPosMock: () => state.mock, posClient: () => ({})}));
 vi.mock('../src/shopee-sync/server', () => ({
-  shopeeSyncDeps: () => ({store: state.store, now: () => new Date('2026-10-27T06:00:00Z'), loadLoadedDays: async () => state.loaded, remoteUrl: 'https://browser.example.com'}),
+  shopeeSyncDeps: () => ({store: state.store, now: () => new Date('2026-10-27T06:00:00Z'), loadLoadedDays: async () => state.loaded, loadReportPeriods: async () => exactReports(state.loaded), remoteUrl: 'https://browser.example.com'}),
   revalidateDigestArchive: vi.fn(),
 }));
 
 import * as actions from '../src/shopee-sync-actions';
 import {cancelSyncJob, createSyncJob} from '../src/shopee-sync-actions';
 import {getShopeeSyncStatus} from '../src/shopee-sync-data';
+import {exactReports} from './support/shopee-sync-reports';
 
 let store: FakeSyncStore;
 const when = new Date('2026-10-27T05:59:50Z');

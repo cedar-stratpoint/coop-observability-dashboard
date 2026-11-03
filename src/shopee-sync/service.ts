@@ -1,9 +1,10 @@
 // The rules of the sync as plain functions over SyncStore: press Sync, cancel, confirm a review, and the stale-job sweep.
 // The server actions (src/shopee-sync-actions.ts) and the worker routes (api.ts) are thin shells around these; authentication is theirs.
 import {periodIsWindow, syncStamp} from '../shopee-import/api';
-import {applyRun, type ImportStore} from '../shopee-import/pipeline';
+import {applyRun, type ImportStore, type ReportPeriod} from '../shopee-import/pipeline';
 import type {SyncStore} from './store';
-import {latestClosedDay, missingClosedDays, oldestReachable} from './missing-days';
+import {latestClosedDay, missingClosedDays, MAX_SYNC_DAYS, oldestReachable} from './missing-days';
+import {missingReportWeeks, remainingReports, weekDays} from './missing-reports';
 import {cloudLogin, sameEmail} from './routing';
 import {startBlock, staleSweep} from './rules';
 import {isActive, type DayResult, type Heartbeat, type Job} from './types';
@@ -14,6 +15,8 @@ export interface SyncDeps {
   now: () => Date;
   /** Days that have figures in the archive (the same list the import coverage uses). */
   loadLoadedDays: () => Promise<string[]>;
+  /** Period of every accepted Ads / SKU / Traffic / Product file: tells which closed weeks still lack their weekly reports. */
+  loadReportPeriods: () => Promise<ReportPeriod[]>;
   /** SHOPEE_SYNC_REMOTE_URL, already checked (https, SHOPEE_SYNC_REMOTE_HOSTS). The card hands it to a Coop Admin only. */
   remoteUrl?: string | null;
 }
@@ -38,21 +41,34 @@ export async function sweepJobs(store: SyncStore, now: Date): Promise<Job[]> {
 export const NEEDS_ADMIN = 'Shopee needs an admin to sign in. Please ask an admin.';
 export const NO_WORKER = 'The cloud worker has not connected yet.';
 
-export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]}): {ok: true; days: string[]; more: number; refresh: boolean} | Fail {
+export function syncGate(i: {now: Date; jobs: readonly Job[]; heartbeat: Heartbeat | null; loadedDays: readonly string[]; reportPeriods: readonly ReportPeriod[]}): {ok: true; days: string[]; more: number; refresh: boolean; reportWeeks: string[]} | Fail {
   const missing = missingClosedDays(i.loadedDays, i.now);
+  const reportWeeks = missingReportWeeks(i.loadedDays, i.reportPeriods, i.now);
   // Nothing missing is not a reason to refuse: the press still runs the whole process on the latest closed day, and the import decides whether it changed.
-  const refresh = missing.days.length === 0;
+  const refresh = missing.days.length === 0 && reportWeeks.length === 0;
   // The job holds only what its windows cover (MAX_WEEK_WINDOWS and MAX_DAY_WINDOWS): newer days that do not fit wait for the next press and are counted in `more`.
-  const plan = windowPlan(refresh ? [latestClosedDay(i.now)] : missing.days, i.now);
-  const days = (refresh ? [latestClosedDay(i.now)] : missing.days).filter((d) => !plan.dropped.includes(d));
-  const more = missing.more + plan.dropped.length;
+  const wanted = refresh ? [latestClosedDay(i.now)] : missing.days;
+  const plan = windowPlan(wanted, i.now);
+  let days = wanted.filter((d) => !plan.dropped.includes(d));
+  let more = missing.more + plan.dropped.length;
+  // Weeks whose sales are all in but whose Ads/SKU are not: the 7 (loaded) days of the week make a week window. Missing sales come first, so a week is added
+  // (newest first) only if the job still fits the day budget and nothing already planned is pushed out by the window caps.
+  const reports: string[] = [];
+  for (const monday of [...reportWeeks].reverse()) {
+    const trial = [...new Set([...days, ...weekDays(monday)])].sort();
+    if (trial.length <= MAX_SYNC_DAYS && windowPlan(trial, i.now).dropped.length === 0) {
+      days = trial;
+      reports.push(monday);
+    } else more += 7;
+  }
+  reports.sort();
   // A known-bad login needs an admin. An old or never-taken check does NOT block: the box may be asleep, so the press must be able to wake it,
   // and the worker re-checks the login itself when it claims the job (pausing for a sign-in if it is not ready).
   const login = cloudLogin(i.heartbeat, i.now);
   if (login.state === 'needs_password' || login.state === 'signed_out') return fail(NEEDS_ADMIN);
   if (!login.hasWorker) return fail(NO_WORKER);
   const blocked = startBlock(i.now, i.jobs);
-  return blocked ? fail(blocked) : {ok: true, days, more, refresh};
+  return blocked ? fail(blocked) : {ok: true, days, more, refresh, reportWeeks: reports};
 }
 
 /**
@@ -67,10 +83,12 @@ export function remainingDays(job: Pick<Job, 'days'>, loadedDays: readonly strin
 
 const SHOWN_DAYS = 10;
 /** "Still missing: 2026-10-20, 2026-10-21" (long lists are cut), plus the non-sales files that failed, named by window and type. */
-export function stillMissingMessage(days: readonly string[], progress: Record<string, DayResult>): string {
+export function stillMissingMessage(days: readonly string[], progress: Record<string, DayResult>, reports: readonly string[] = []): string {
   const failedFiles = Object.entries(progress).filter(([k, v]) => k.includes('/') && v.state === 'failed').map(([k]) => k);
   const list = days.length > SHOWN_DAYS ? `${days.slice(0, SHOWN_DAYS).join(', ')} and ${days.length - SHOWN_DAYS} more` : days.join(', ');
-  return `Still missing: ${list}.${failedFiles.length ? ` Failed files: ${failedFiles.join(', ')}.` : ''}`;
+  const head = days.length ? `Still missing: ${list}.` : '';
+  const files = reports.length ? `${head ? ' ' : ''}Still missing reports: ${reports.join(', ')}.` : '';
+  return `${head}${files}${failedFiles.length ? ` Failed files: ${failedFiles.join(', ')}.` : ''}`;
 }
 
 /** Marks every job day that now has figures in the archive as loaded, so the card counts it. Never downgrades; days without figures are left as they are. */
@@ -93,7 +111,7 @@ export async function requestSync(d: SyncDeps, email: string): Promise<{ok: true
   const who = email.trim().toLowerCase();
   const now = d.now();
   const jobs = await sweepJobs(d.store, now);
-  const gate = syncGate({now, jobs, heartbeat: await d.store.getHeartbeat(), loadedDays: await d.loadLoadedDays()});
+  const gate = syncGate({now, jobs, heartbeat: await d.store.getHeartbeat(), loadedDays: await d.loadLoadedDays(), reportPeriods: await d.loadReportPeriods()});
   if (!gate.ok) return gate;
   const job = await d.store.createJob({requestedBy: who, days: gate.days}, now);
   return job === 'conflict' ? fail('A Shopee sync is already queued or running. Wait for it to finish.') : {ok: true, job};
@@ -129,12 +147,14 @@ export async function confirmReview(d: SyncDeps, imports: ImportStore, who: Acto
     const r = await applyRun(imports, id);
     if (!r.ok) return fail(r.message);
   }
-  // Done means no closed day of the job is missing: the same check as when the worker reports done. A day still missing ends the job as failed (Retry loads the rest).
+  // Done means no closed day and no weekly report of the job is missing: the same check as when the worker reports done. Anything still missing ends the job as failed (Retry loads the rest).
   const now = d.now();
-  const still = remainingDays(job, await d.loadLoadedDays(), now);
-  if (still.length > 0) {
-    const failed = await d.store.transitionJob(jobId, ['review'], {status: 'failed', error: stillMissingMessage(still, job.progress), finishedAt: now.toISOString()});
-    return failed ? fail(`Applied, but some days are still missing: ${still.join(', ')}. Press Retry to load them.`) : fail('That sync changed while you were confirming it. Refresh and try again.');
+  const loaded = await d.loadLoadedDays();
+  const still = remainingDays(job, loaded, now);
+  const stillReports = remainingReports(job.days, loaded, await d.loadReportPeriods(), now);
+  if (still.length > 0 || stillReports.length > 0) {
+    const failed = await d.store.transitionJob(jobId, ['review'], {status: 'failed', error: stillMissingMessage(still, job.progress, stillReports), finishedAt: now.toISOString()});
+    return failed ? fail(`Applied, but some data is still missing: ${[...still, ...stillReports].join(', ')}. Press Retry to load it.`) : fail('That sync changed while you were confirming it. Refresh and try again.');
   }
   const ended = await d.store.transitionJob(jobId, ['review'], {status: 'done', error: null});
   return ended ? {ok: true} : fail('That sync changed while you were confirming it. Refresh and try again.');

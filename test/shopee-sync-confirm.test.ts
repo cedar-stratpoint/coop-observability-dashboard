@@ -5,13 +5,14 @@ import type {Job} from '../src/shopee-sync/types';
 import {salesOverviewFile, week} from './support/shopee-fixture';
 import {FakeStore} from './support/shopee-fake-store';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
+import {exactReports} from './support/shopee-sync-reports';
 
 const now = new Date('2026-10-27T06:00:00Z');
 let sync: FakeSyncStore;
 let imports: FakeStore;
 let jobId: string;
 // Changed deliberately (SYN-12): confirmReview now runs the completeness check after applying, so loadedDays follows what the fake archive holds.
-const deps = (): SyncDeps => ({store: sync, now: () => now, loadLoadedDays: () => imports.loadLoadedDays()});
+const deps = (): SyncDeps => ({store: sync, now: () => now, loadLoadedDays: () => imports.loadLoadedDays(), loadReportPeriods: async () => exactReports(await imports.loadLoadedDays())});
 
 beforeEach(async () => {
   sync = new FakeSyncStore();
