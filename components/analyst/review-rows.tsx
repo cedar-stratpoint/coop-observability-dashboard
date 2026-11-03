@@ -41,6 +41,19 @@ function marksText(r: ExtractedRow): string | null {
   return m.map((x) => `${MARK_LABEL[x.mark] ?? x.mark}: ${FIELD_LABEL[x.field] ?? x.field}${x.written ? ` (written ${x.written})` : ''}`).join(' · ');
 }
 
+/** The deducted-model values Legacy forms carry in `extra` (no three-location split),
+ *  as a read-only context line "Beginning 20 · +Delivery 25 · Deducted 8" — shown only
+ *  for a Legacy row (v1/v2 have no `extra`). Blank values are omitted. */
+function legacyExtraText(r: ExtractedRow): string | null {
+  const e = r.extra;
+  if (!e) return null;
+  const bits: string[] = [];
+  if (e.beginning != null) bits.push(`Beginning ${e.beginning}`);
+  if (e.begin_plus_delivery != null) bits.push(`+Delivery ${e.begin_plus_delivery}`);
+  if (e.deducted_pcs != null) bits.push(`Deducted ${e.deducted_pcs}`);
+  return bits.length ? bits.join(' · ') : null;
+}
+
 export function reviewRowEl(index: number): HTMLElement | null {
   const all = document.querySelectorAll<HTMLElement>(`[data-review-row="${index}"]`);
   for (const el of all) if (el.offsetParent !== null) return el;
@@ -130,6 +143,7 @@ export function ReviewRows({
           )}
           {r.alt && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
           {marksText(r) && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
+          {legacyExtraText(r) && <span className="block text-[11px] text-muted-foreground/80 tabular-nums">{legacyExtraText(r)}</span>}
         </td>
         {COLS.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
@@ -194,6 +208,7 @@ export function ReviewRows({
             {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
             {r.alt && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
             {marksText(r) && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
+            {legacyExtraText(r) && <span className="block text-xs text-muted-foreground/80 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
