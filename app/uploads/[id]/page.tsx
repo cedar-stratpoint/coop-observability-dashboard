@@ -2,9 +2,11 @@ import {notFound, redirect} from 'next/navigation';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {catalogForCodes, formPageStrip, getBatch, getExtraction, getUpload, listStores} from '@/src/goldline-data';
+import {duplicateMatchFor} from '@/src/goldline-triage-data';
 import {MANIFESTS} from '@/src/goldline-extract';
 import {committedSnapshotFor} from '@/src/goldline-inventory-data';
 import {UploadReview} from '@/components/analyst/upload-review';
+import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,8 +54,19 @@ export default async function Page(props: {params: Promise<{id: string}>}) {
   const [catalog, pageStrip, stores] = extraction
     ? await Promise.all([catalogForCodes(ctx.companyId, codes), formPageStrip(ctx.companyId, upload.id), listStores(ctx.companyId)])
     : [{}, null, []];
+  // Phase 2: a re-upload / duplicate of the same form page, with a count diff. Only
+  // meaningful while this page is still under review (not after it's committed itself).
+  const duplicate = upload.kind === 'inventory_pdf' && upload.status === 'needs_review'
+    ? await duplicateMatchFor(ctx.companyId, upload.id)
+    : null;
   return (
-    <UploadReview
+    <div className="flex flex-col gap-4">
+      {duplicate && (
+        <div className="mx-auto w-full max-w-[112rem] px-4 pt-6 lg:px-8">
+          <DuplicateBanner match={duplicate} />
+        </div>
+      )}
+      <UploadReview
       company={ctx.companyId}
       canEdit={canEditData(ctx.role)}
       upload={upload}
@@ -65,5 +78,6 @@ export default async function Page(props: {params: Promise<{id: string}>}) {
       pageStrip={pageStrip}
       stores={stores}
     />
+    </div>
   );
 }

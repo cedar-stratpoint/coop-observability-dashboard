@@ -2,6 +2,7 @@ import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -132,6 +133,77 @@ export async function triageBoard(companyId: string): Promise<TriageResult> {
     totals: {forms: forms.length, inventoryPages, sales: sales.length, blank: blanks.length, unplaceable: unplaceable.length},
     mock: false,
   };
+}
+
+/** A prior upload of the same page, with the row-level diff against the current one. */
+export type DuplicateMatch = {
+  uploadId: string;
+  filename: string;
+  status: string;
+  createdAt: string;
+  committed: boolean;
+  diff: ExtractionDiff | null; // null if either side has no extraction to compare
+};
+
+/**
+ * Phase 2 — for an upload that shares a page_key with earlier uploads (a re-upload or
+ * an in-bundle duplicate), return the most recent prior one plus a diff of its extracted
+ * counts against this upload's. Flag-only: the reviewer decides which to keep. Empty
+ * when the upload has no page_key or no prior match.
+ */
+export async function duplicateMatchFor(companyId: string, uploadId: string): Promise<DuplicateMatch | null> {
+  if (!nichidoConfigured()) return null;
+  const supa = nichidoDb();
+  const self = await supa.from('uploads').select('page_key').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  if (self.error) throw new Error(`uploads read failed: ${self.error.message}`);
+  const pageKey = (self.data as {page_key: string | null} | null)?.page_key ?? null;
+  if (!pageKey) return null;
+
+  const priors = await supa
+    .from('uploads')
+    .select('id,filename,status,created_at')
+    .eq('company_id', companyId)
+    .eq('page_key', pageKey)
+    .neq('id', uploadId)
+    .order('created_at', {ascending: false})
+    .limit(1);
+  if (priors.error) throw new Error(`uploads duplicate read failed: ${priors.error.message}`);
+  const prior = (priors.data ?? [])[0] as {id: string; filename: string; status: string; created_at: string} | undefined;
+  if (!prior) return null;
+
+  const [curExt, priorExt] = await Promise.all([
+    readRows(supa, companyId, uploadId),
+    readRows(supa, companyId, prior.id),
+  ]);
+  const diff = curExt && priorExt ? diffExtractions(curExt, priorExt) : null;
+
+  return {
+    uploadId: prior.id,
+    filename: prior.filename,
+    status: prior.status,
+    createdAt: prior.created_at,
+    committed: prior.status === 'committed',
+    diff,
+  };
+}
+
+/** The extraction rows (for the diff) of one upload, or null if none staged. */
+async function readRows(
+  supa: ReturnType<typeof nichidoDb>,
+  companyId: string,
+  uploadId: string,
+): Promise<DiffRow[] | null> {
+  const res = await supa
+    .from('extractions')
+    .select('rows')
+    .eq('company_id', companyId)
+    .eq('upload_id', uploadId)
+    .order('page', {ascending: true})
+    .limit(1)
+    .maybeSingle();
+  if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
+  const rows = (res.data as {rows?: {rows?: DiffRow[]}} | null)?.rows?.rows;
+  return Array.isArray(rows) ? rows : null;
 }
 
 // ── Mock: the real Sept bundle, so the board renders populated with no DB ───────────

@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Nichido Phase 2 (part 2a): duplicate / re-upload value diff
+
+When a scanned page shares the Phase 0 `page_key` with an earlier upload (a re-upload, or a page scanned twice), the review page now shows WHAT differs so the reviewer can decide which copy to keep. Flag-only, never blocks. See `../PLAN.md`, NICH-17. Additive, no schema change.
+
+- **Pure diff** `src/goldline-dup-diff.ts` (`diffExtractions`): compares the five count fields of two reads of the same page by item code, returning changed / added / removed items with from (prior) → to (current) per field, and an `identical` flag. Tests `test/goldline-dup-diff.test.ts` (4).
+- **Reader** `duplicateMatchFor()` (`src/goldline-triage-data.ts`): finds the most recent prior upload with the same `page_key`, reads both extractions, and returns the match + diff.
+- **UI** `components/analyst/duplicate-banner.tsx`: a banner on `/uploads/[id]` for a page still under review — "already committed / uploaded on <date>", an identical-copy note or "N items differ", a link to the earlier copy, and an expandable diff table (old value struck through, new value bold). Coop `--status-*` tones (green identical, amber differs). 142 goldline tests green, tsc + design detector clean; screenshot-verified.
+
 ## 2026-11-03 — Nichido Phase 2 (part 1): scan triage board
 
 The store-day triage board that turns a shuffled, multi-store upload into reviewable forms (see `../PLAN.md`, NICH-17). Reads the Phase 0/1 classification already persisted on `uploads` and groups it with the shared, tested `segmentBundle`. New read-only surface; no schema change.
