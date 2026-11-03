@@ -1,6 +1,6 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
-import {getGlCatalog, getGlStores, getSalesRollup} from './goldline-ref-data';
+import {getGlCatalog, getGlStores, getSalesRollup, cachedSalesView} from './goldline-ref-data';
 import {buildOverview, last12Months, type GoldlineOverview, type OverviewSaleRow} from './goldline-overview';
 
 // Read-only analytics for a Goldline-style tenant: store + SKU rollups derived
@@ -133,7 +133,14 @@ export type GoldlineOverviewData = {
 
 /** Everything the Overview page needs for one company: name, live-store count,
  *  and the window/delta/category rollups (see goldline-overview.ts). */
-export async function getGoldlineOverviewData(companyId: string): Promise<GoldlineOverviewData> {
+export function getGoldlineOverviewData(companyId: string): Promise<GoldlineOverviewData> {
+  if (!configured()) return Promise.resolve({companyName: companyId, storesLive: 0, overview: buildOverview([], new Map()), trend: []});
+  // Cached per company, keyed by the committed sales files: the decrypting sums below
+  // dominate the page's time and change only on an upload / catalog / store edit.
+  return cachedSalesView(companyId, ['overview'], () => loadGoldlineOverviewData(companyId));
+}
+
+async function loadGoldlineOverviewData(companyId: string): Promise<GoldlineOverviewData> {
   const empty = buildOverview([], new Map());
   if (!configured()) return {companyName: companyId, storesLive: 0, overview: empty, trend: []};
   const supa = db();
