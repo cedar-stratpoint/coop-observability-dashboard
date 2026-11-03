@@ -1,0 +1,177 @@
+import 'server-only';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
+import {fetchAllRows} from './pos-fetch-paginate';
+import {segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import type {FormVersion} from './goldline-extract';
+
+// Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
+// upload route persisted on `uploads` (page_no, page_kind, orientation, form_version,
+// classification jsonb, page_key), regroups the shuffled bundle into store · period ·
+// version forms with the shared, tested `segmentBundle`, and shapes it for the board.
+// Server-only, Nichido project. Mock fallback mirrors the real Sept scan so the board
+// renders populated with the Supabase env unset.
+
+/** One store-day form as the board shows it: identity + page coverage + flags + the
+ *  per-page upload state so the card can link into review and show progress. */
+export type TriageForm = {
+  key: string;
+  storeCode: string | null;
+  storeName: string | null;
+  consultant: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  version: FormVersion;
+  present: number[];
+  missing: number[];
+  duplicates: Array<{page: number; count: number}>;
+  flags: string[];
+  uploadIds: string[];
+  batchId: string | null;
+  needsReview: number; // pages awaiting human review
+  committed: number; // pages already committed
+};
+
+/** A page set aside by the bundle: the page-6 sales report or a blank back side. */
+export type ParkedPage = {uploadId: string; filename: string; kind: 'sales' | 'blank' | 'unplaceable'};
+
+export type TriageResult = {
+  configured: boolean;
+  forms: TriageForm[];
+  parked: ParkedPage[];
+  totals: {forms: number; inventoryPages: number; sales: number; blank: number; unplaceable: number};
+  mock: boolean;
+};
+
+type UploadClsRow = {
+  id: string;
+  filename: string;
+  status: string;
+  batch_id: string | null;
+  page_no: number | null;
+  page_kind: string | null;
+  orientation: number | null;
+  form_version: string | null;
+  classification: Record<string, unknown> | null;
+};
+
+/** Map a persisted upload row to the ClassifiedPage shape `segmentBundle` consumes.
+ *  Prefers the top-level classifier columns; store/period/consultant come from the
+ *  classification jsonb (using the snapped store code the grouping was keyed on). */
+function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
+  const c = (u.classification ?? {}) as Record<string, unknown>;
+  const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  return {
+    id: u.id,
+    page: typeof u.page_no === 'number' ? u.page_no : 0,
+    kind: (u.page_kind as ClassifiedPage['kind']) ?? 'unknown',
+    orientation: u.orientation === 180 ? 180 : 0,
+    version: (u.form_version as FormVersion) ?? 'unknown',
+    store_code: str(snap.code) ?? str(c.store_code),
+    store_name: str(c.store_name),
+    period_start: str(c.period_start),
+    period_end: str(c.period_end),
+    consultant: str(c.consultant),
+    confidence: typeof c.confidence === 'number' ? c.confidence : 0,
+  };
+}
+
+function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>): TriageForm {
+  const ids = g.slots.flatMap((s) => s.ids);
+  const rows = ids.map((id) => byId.get(id)).filter((r): r is UploadClsRow => Boolean(r));
+  const first = rows[0]?.classification as Record<string, unknown> | undefined;
+  const batchIds = new Set(rows.map((r) => r.batch_id).filter(Boolean));
+  return {
+    key: g.key,
+    storeCode: g.store_code,
+    storeName: (first?.store_name as string) ?? null,
+    consultant: (first?.consultant as string) ?? null,
+    periodStart: g.period_start,
+    periodEnd: g.period_end,
+    version: g.version,
+    present: g.present,
+    missing: g.missing,
+    duplicates: g.duplicates.map((d) => ({page: d.page, count: d.ids.length})),
+    flags: g.flags,
+    uploadIds: ids,
+    batchId: batchIds.size === 1 ? [...batchIds][0] : null,
+    needsReview: rows.filter((r) => r.status === 'needs_review').length,
+    committed: rows.filter((r) => r.status === 'committed').length,
+  };
+}
+
+/** Build the triage board for a company from its classified inventory-PDF uploads. */
+export async function triageBoard(companyId: string): Promise<TriageResult> {
+  if (!nichidoConfigured()) return mockTriage();
+  const supa = nichidoDb();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa
+      .from('uploads')
+      .select('id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification')
+      .eq('company_id', companyId)
+      .eq('kind', 'inventory_pdf')
+      .not('classified_at', 'is', null)
+      .order('created_at', {ascending: false})
+      .range(from, to),
+  )) as unknown as UploadClsRow[];
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const {forms, sales, blanks, unplaceable} = segmentBundle(rows.map(toClassifiedPage));
+
+  const parked: ParkedPage[] = [
+    ...sales.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'sales' as const})),
+    ...blanks.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'blank' as const})),
+    ...unplaceable.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'unplaceable' as const})),
+  ];
+  const inventoryPages = forms.reduce((n, g) => n + g.slots.reduce((m, s) => m + s.ids.length, 0), 0);
+
+  return {
+    configured: true,
+    forms: forms.map((g) => toTriageForm(g, byId)),
+    parked,
+    totals: {forms: forms.length, inventoryPages, sales: sales.length, blank: blanks.length, unplaceable: unplaceable.length},
+    mock: false,
+  };
+}
+
+// ── Mock: the real Sept bundle, so the board renders populated with no DB ───────────
+function mockTriage(): TriageResult {
+  const f = (p: Partial<TriageForm> & Pick<TriageForm, 'storeCode' | 'consultant' | 'version' | 'periodStart' | 'periodEnd'>): TriageForm => ({
+    key: `${p.storeCode}|${p.periodStart}|${p.version}`,
+    storeName: null,
+    present: [1, 2, 3, 4, 5],
+    missing: [],
+    duplicates: [],
+    flags: [],
+    uploadIds: [],
+    batchId: null,
+    needsReview: 5,
+    committed: 0,
+    ...p,
+  });
+  const forms: TriageForm[] = [
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'legacy',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', missing: [], flags: [], needsReview: 5}),
+    f({storeCode: null, storeName: 'Robinsons dept store', consultant: 'Alyza Mae Beral', version: 'v1',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', flags: ['unknown-store'], needsReview: 5}),
+    f({storeCode: '854', storeName: 'Gaisano Mall Davao', consultant: 'Vanessa Diamante', version: 'v1',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', duplicates: [{page: 2, count: 2}], flags: ['duplicate-pages'], needsReview: 5}),
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
+      periodStart: '2026-09-16', periodEnd: '2026-09-30', present: [1, 2, 4, 5], missing: [3], flags: ['incomplete', 'store-corrected'], needsReview: 4}),
+    f({storeCode: '5300', storeName: 'SM Sta Rosa', consultant: 'Ma. Sofia Lucero', version: 'v1',
+      periodStart: '2026-09-09', periodEnd: '2026-09-15', flags: ['period-mismatch', 'period-partial'], needsReview: 5}),
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
+      periodStart: '2026-10-01', periodEnd: '2026-10-15', flags: ['store-corrected'], needsReview: 2, committed: 3}),
+  ];
+  return {
+    configured: false,
+    forms,
+    parked: [
+      {uploadId: 'm-s1', filename: 'Scan p3 (sales report).pdf', kind: 'sales'},
+      {uploadId: 'm-s2', filename: 'Scan p6 (sales report).pdf', kind: 'sales'},
+      {uploadId: 'm-b1', filename: 'Scan p45 (blank back).pdf', kind: 'blank'},
+    ],
+    totals: {forms: forms.length, inventoryPages: 29, sales: 2, blank: 1, unplaceable: 0},
+    mock: true,
+  };
+}

@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Nichido Phase 2 (part 1): scan triage board
+
+The store-day triage board that turns a shuffled, multi-store upload into reviewable forms (see `../PLAN.md`, NICH-17). Reads the Phase 0/1 classification already persisted on `uploads` and groups it with the shared, tested `segmentBundle`. New read-only surface; no schema change.
+
+- **`/uploads/triage`** (`app/uploads/triage/page.tsx` + `components/analyst/triage-board.tsx`): cards grouped by period (half-month heading), one per store form, each showing the consultant/store, a colour-coded version pill (Legacy / V1 / V2), a 5-cell page-coverage strip (present / missing / duplicate shown with a red ring), and the segmentation flags as chips (missing pages, duplicate pages, store not matched / auto-corrected, dates disagree, partial cut-off). A "Set aside" section lists parked sales reports and blanks. Matches the Coop design system (shadcn cards, `--status-*` tokens); version colours are kept separate from the semantic status set. "Scan triage" link added to the Uploads header.
+- **Reader** `src/goldline-triage-data.ts` (`triageBoard`): selects the classification columns, maps each upload to a `ClassifiedPage`, runs `segmentBundle`, and shapes forms + parked pages + totals. Mock fallback mirrors the real September bundle so the board renders populated with the Supabase env unset.
+- **Pure format** `src/goldline-triage-format.ts`: version labels/colours, flag labels + severity tone, and period text using "to" (house copy rule, no dashes). Tests `test/goldline-triage-format.test.ts` (7). 138 goldline tests green, tsc + design detector clean.
+- Verified with headless screenshots (desktop + mobile) against the mock bundle; mobile shell behaviour matches the existing `/uploads` page. Next (Phase 2 part 2): wire the store-change guard + per-page reassign, surface the duplicate value-diff, and thread the Legacy `extra` sidecar through review.
+
 ## 2026-11-03 — Nichido Phase 1 (part 1): version-aware extraction (V1 / V2 / Legacy)
 
 Builds on Phase 0 (page classification). The extractor was hardcoded to the three-location layout; it now reads against the DETECTED form version. See `../PLAN.md` (NICH-17). Staging scope, additive.
