@@ -708,6 +708,8 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
 export type BatchPage = {
   upload: UploadRow;
   extraction: ExtractionRecord | null;
+  /** Phase 0 detected/snapped store for this page, for the store-change guard. */
+  detectedStore: string | null;
 };
 
 /** The batch's uploads with their staged readings, oldest first. Company-scoped. */
@@ -716,14 +718,24 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
   const supa = db();
   const ups = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,classification')
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})
     .limit(50); // pagination-ok: a batch is capped at 20 files (UI) — 50 is a hard ceiling
   if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
-  const uploads = (ups.data ?? []) as UploadRow[];
-  if (!uploads.length) return [];
+  const rawUploads = (ups.data ?? []) as Array<UploadRow & {classification?: Record<string, unknown> | null}>;
+  if (!rawUploads.length) return [];
+  // Phase 0 store the page's detected/snapped store in classification; carry it so the
+  // review can flag a batch whose pages read different stores (store-change guard).
+  const detectedStore = new Map<string, string | null>();
+  for (const u of rawUploads) {
+    const c = u.classification ?? {};
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const code = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    detectedStore.set(u.id, code);
+  }
+  const uploads = rawUploads.map(({classification: _c, ...u}) => u) as UploadRow[];
   const ext = await supa
     .from('extractions')
     .select('upload_id,page,status,doc_confidence,rows')
@@ -736,7 +748,7 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
       {page: e.page, status: e.status, docConfidence: e.doc_confidence, data: e.rows} as ExtractionRecord,
     ]),
   );
-  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null}));
+  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null, detectedStore: detectedStore.get(upload.id) ?? null}));
 }
 
 /**

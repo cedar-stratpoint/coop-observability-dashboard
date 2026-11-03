@@ -9,7 +9,25 @@ export const FORM_PAGES = [1, 2, 3, 4, 5] as const;
 export const MAX_BATCH_FILES = 250;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-export type BatchPageInfo = {uploadId: string; page: number | null; flagged: number; resolved: number; status: string};
+export type BatchPageInfo = {uploadId: string; page: number | null; flagged: number; resolved: number; status: string; detectedStore?: string | null};
+
+/**
+ * Store-change guard (Phase 2): a batch is ONE store's form, so its pages should all
+ * read the same store. Returns the distinct detected store codes and whether they
+ * conflict (more than one distinct non-null code). Pages with no detected store don't
+ * count against agreement — only a genuine second store is a conflict. A misread that
+ * Phase 0 couldn't snap shows as its own code here, which is exactly what should be
+ * surfaced before it commits to the wrong store.
+ */
+export function storeConflict(pages: Array<{detectedStore?: string | null}>): {stores: string[]; conflict: boolean} {
+  const seen = new Set<string>();
+  for (const p of pages) {
+    const s = p.detectedStore?.trim();
+    if (s) seen.add(s);
+  }
+  const stores = [...seen].sort();
+  return {stores, conflict: stores.length > 1};
+}
 
 /** Pages in form order (unknown page last), then by upload order. */
 export function orderPages<T extends {page: number | null}>(pages: T[]): T[] {
@@ -46,6 +64,11 @@ export function batchReadiness(input: {
   if (pages.some((p) => p.status === 'processing')) return {ready: false, reason: 'Wait for every page to finish reading.'};
   const dup = batchCoverage(reviewable).duplicates;
   if (dup.length) return {ready: false, reason: `Page ${dup.join(', ')} was uploaded twice. Remove the extra copy.`};
+  // Store-change guard: pages that read different stores shouldn't commit together.
+  const conflict = storeConflict(reviewable);
+  if (conflict.conflict) {
+    return {ready: false, reason: `These pages read different stores (${conflict.stores.join(', ')}). Split them into one form per store, or remove the stray page.`};
+  }
   if (!input.storeCode.trim()) return {ready: false, reason: 'Enter the store code.'};
   if (!ISO.test(input.periodStart) || !ISO.test(input.periodEnd)) return {ready: false, reason: 'Enter the period this count covers.'};
   if (input.periodStart > input.periodEnd) return {ready: false, reason: 'The period end must be on or after its start.'};
