@@ -192,7 +192,7 @@ export function readSalesRollup(companyId: string, opts: {fresh?: boolean} = {})
  * even if a slow refresh that began before the change finishes after it (it lands under
  * the old key). A few dozen rows, read on each load.
  */
-async function salesVersion(companyId: string): Promise<string> {
+export async function salesVersion(companyId: string): Promise<string> {
   const rows = (await fetchAllRows('uploads', (from, to) =>
     db()
       .from('uploads')
@@ -236,4 +236,43 @@ export async function getSalesRollup(companyId: string): Promise<SalesRollup> {
 export function expireSalesTotals(companyId: string): void {
   rollupMemo.delete(companyId);
   revalidateTag(glTags.sales(companyId), {expire: 0});
+}
+
+/**
+ * Cache a read-only, sales-derived page reader per company. The headline cost on these
+ * pages is decrypting tens of thousands of sales rows to sum them (Overview was ~2.8 s
+ * uncached); the result changes only when sales, the catalog or the store list change.
+ * Keyed by the committed sales files (salesVersion) so an upload refreshes it at once,
+ * and tagged with sales + catalog + stores so a catalog/store/upload write expires it
+ * too (those write paths already revalidate these tags). Kept for up to the sales window
+ * otherwise; sales changed outside the app show within that window.
+ *
+ * `keyParts` must capture every input the loader varies on (item code, store scope, the
+ * Manila date for day-sensitive reads). ONLY for readers whose result is sales-derived
+ * and never reads the inventory counts or shipments — Overview and the Watsons month-by-
+ * month breakdown qualify. NOT the product page, action feed, or inventory board: those
+ * read `inventory`/`shipments`, which change on an inventory-scan upload or a restock that
+ * revalidates paths but not these tags, so a tag-keyed cache would serve stale counts.
+ * Caching those needs an inventory-version key and a bust on the scan-commit path (a
+ * separate, larger change).
+ *
+ * `tags` picks which writes expire the entry. Default `sales` + `catalog` + `stores` fits
+ * a view that embeds catalog/store data (Overview's product-line groupings and live-store
+ * count). Pass `['sales']` for a pure chain-sales view (sku_months) so a catalog edit — or
+ * a SKU linking decision, which revalidates the catalog tag — doesn't needlessly drop it.
+ */
+export function cachedSalesView<T>(
+  companyId: string,
+  keyParts: Array<string | null | undefined>,
+  load: () => Promise<T>,
+  tags: Array<'sales' | 'catalog' | 'stores'> = ['sales', 'catalog', 'stores'],
+): Promise<T> {
+  if (!configured()) return load();
+  return (async () => {
+    const version = await salesVersion(companyId);
+    return unstable_cache(load, ['gl-sales-view', companyId, version, ...keyParts.map((k) => k ?? '')], {
+      tags: tags.map((t) => glTags[t](companyId)),
+      revalidate: SALES_REVALIDATE_SECONDS,
+    })();
+  })();
 }

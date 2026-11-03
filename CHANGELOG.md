@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Faster navigation: cache the slow Goldline page reads, add loading skeletons
+
+Navigating between pages took 4 to 5 seconds. Profiled against the real databases: two page readers decrypt tens of thousands of sales rows on every load with no caching. The Overview (home) reader measured ~2.9 s and the SKU linking page's Watsons month-by-month breakdown kept /stock/skus at ~2.9 s. By contrast the Stores page, which already caches its decrypted totals, was ~0.1 s, proving the fix.
+
+**Cache the decrypting reads.** Added `cachedSalesView()` in `goldline-ref-data.ts`, mirroring the sales-totals cache: it keeps a reader's result per company, keyed to the committed sales files, so a sales upload refreshes it at once, and tagged so a catalog, store or upload edit expires it too. Wrapped the Overview reader (sales + catalog + store tags, since it shows product-line groupings and the live-store count) and the Watsons month-by-month read (sales tag only, so a catalog edit or a SKU linking decision does not needlessly drop it). Both now return in about 0.1 to 0.2 seconds on repeat navigation, a 25 to 30x drop. Only sales-derived reads that never touch the inventory counts are cached; the product page, action feed and inventory board read counts that change on a scan upload and need an inventory-version key first (tracked as a follow-up).
+
+**Instant skeletons.** Added loading placeholders to the pages that lacked one (Business Health, Inventory, Flags, Offline Sales, Contacts, Reports, Repricer, Traffic, Settings, Lazada, Sales, Products, Website CRM, Admin, SKU linking), reusing the existing page skeleton. A navigation now shows an immediate placeholder, prefetched as the link comes into view, instead of the old page freezing while the server renders.
+
 ## 2026-11-03 — Branded error pages replace the bare Vercel fallback
 
 A crashed page used to fall through to Next's default global-error screen (black canvas, "This page couldn't load"), since the app carried no error boundaries. Added three on-brand screens in the Coop identity (bone canvas, forest-green accent, Inter wordmark + Newsreader serif): `app/error.tsx` catches page-level render/data errors and renders inside the dashboard shell so the nav stays usable; `app/not-found.tsx` is the 404; `app/global-error.tsx` replaces the root layout when it is the layout itself that fails, so it is fully self-contained (inlined styles, light/dark via `prefers-color-scheme`, system serif fallback) and no longer depends on `globals.css` or the fonts the dead layout would have loaded. Both boundaries use Next 16's `retry` prop (not the older `reset`) and surface the error digest in a subtle mono line.
