@@ -112,7 +112,15 @@ export function UploadsView({
   return (
     <div className={GL_PAGE}>
       <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
+          <Link
+            href="/uploads/triage"
+            className="h-9 shrink-0 rounded-md border border-border bg-background px-3 text-sm leading-9 transition-colors hover:border-foreground/25"
+          >
+            Scan triage
+          </Link>
+        </div>
         <p className="text-sm text-muted-foreground">
           Add a store&apos;s inventory form (every page at once), a POS sales export, or a month of Watsons POS Sales Data.
           Scans are read automatically and wait for your review; sales are saved right away.
