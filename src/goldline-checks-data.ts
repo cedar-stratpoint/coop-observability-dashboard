@@ -1,6 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
+import {salesUnits} from './goldline-sales-units';
 import {
   DEFAULT_SETTINGS,
   monthBounds,
@@ -95,16 +96,7 @@ async function loadInputs(companyId: string, stores?: string[]) {
   ]);
 
   // POS units only for counted stores and the months they were counted in.
-  const sales = (await fetchAllRows('sales', (from, to) =>
-    supa
-      .from('sales')
-      .select('store_code,sku_code,period_start,period_end,units')
-      .eq('company_id', companyId)
-      .in('store_code', counted)
-      .gte('period_start', `${months[0]}-01`)
-      .order('id')
-      .range(from, to),
-  )) as unknown as SaleRow[];
+  const sales: SaleRow[] = await salesUnits(companyId, {fromStart: `${months[0]}-01`, stores: counted});
   // A store has POS data for a month only when it has whole-month rows for it (a Watsons
   // file, or a CSV covering the 1st to the last day). Partial-period CSVs don't count.
   const wholeMonth = sales.filter((r) => {
