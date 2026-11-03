@@ -8,7 +8,7 @@ import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/gol
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
-import {batchCoverage, batchReadiness, FORM_PAGES} from '@/src/upload-batch';
+import {batchCoverage, batchReadiness, storeConflict, FORM_PAGES} from '@/src/upload-batch';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
@@ -31,6 +31,7 @@ export type BatchReviewPage = {
   extraction: ExtractionRecord | null;
   productNames: Record<string, string>;
   scanUrl: string | null;
+  detectedStore: string | null;
 };
 
 type PageState = {
@@ -149,9 +150,12 @@ export function BatchReview({
       flagged: flags.length,
       resolved: flags.filter((i) => state[p.upload.id]?.resolved.has(i)).length,
       status: p.upload.status,
+      detectedStore: p.detectedStore,
     };
   });
   const readiness = batchReadiness({storeCode, periodStart, periodEnd, pages: pageInfo});
+  // Store-change guard: which pages read which store, so a mixed-store batch is flagged.
+  const storeGuard = storeConflict(pageInfo.filter((p) => p.status === 'needs_review'));
 
   const tab = Math.max(0, pages.findIndex((p) => p.upload.id === tabId));
   const setTab = (k: number) => {
@@ -384,6 +388,26 @@ export function BatchReview({
               )}
             </p>
           ) : null}
+          {storeGuard.conflict && (
+            <div
+              className="flex flex-col gap-1.5 rounded-lg px-3 py-2.5 text-xs"
+              style={{color: toneText('var(--status-crit)'), background: 'color-mix(in oklab, var(--status-crit) 10%, transparent)'}}
+            >
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <AlertTriangle className="size-3.5" aria-hidden /> These pages read different stores: {storeGuard.stores.join(', ')}.
+              </span>
+              <span className="text-muted-foreground">
+                A batch is one store&apos;s form. Split it into one form per store, or remove the page that doesn&apos;t belong, before you commit.
+              </span>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                {pages.filter((p) => p.detectedStore).map((p) => (
+                  <span key={p.upload.id} className="text-muted-foreground tabular-nums">
+                    Page {p.page ?? '?'}: <span className="text-foreground">{p.detectedStore}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
