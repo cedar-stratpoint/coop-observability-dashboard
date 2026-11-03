@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {groupForms, scanOrder, scanPosition} from '../src/upload-batch';
+import {batchReadiness, groupForms, scanOrder, scanPosition, storeConflict, type BatchPageInfo} from '../src/upload-batch';
 
 describe('scanPosition', () => {
   it('reads where a split page sat in its scan', () => {
@@ -35,5 +35,36 @@ describe('groupForms', () => {
   });
   it('keeps a page scanned twice in its form (the review asks to remove the copy)', () => {
     expect(groupForms(pages(1, 2, 2, 3)).length).toBe(1);
+  });
+});
+
+describe('storeConflict', () => {
+  it('is no conflict when stores agree or are unread', () => {
+    expect(storeConflict([{detectedStore: '473'}, {detectedStore: '473'}, {detectedStore: null}]).conflict).toBe(false);
+    expect(storeConflict([{detectedStore: null}, {detectedStore: undefined}]).conflict).toBe(false);
+  });
+  it('flags a genuine second store and lists both', () => {
+    const r = storeConflict([{detectedStore: '473'}, {detectedStore: '5300'}, {detectedStore: '473'}]);
+    expect(r.conflict).toBe(true);
+    expect(r.stores).toEqual(['473', '5300']);
+  });
+});
+
+describe('batchReadiness store-change guard', () => {
+  const info = (p: Partial<BatchPageInfo>): BatchPageInfo => ({uploadId: 'u', page: 1, flagged: 0, resolved: 0, status: 'needs_review', ...p});
+  it('blocks commit when pages read different stores', () => {
+    const r = batchReadiness({
+      storeCode: '473', periodStart: '2026-09-01', periodEnd: '2026-09-15',
+      pages: [info({uploadId: 'a', page: 1, detectedStore: '473'}), info({uploadId: 'b', page: 2, detectedStore: '5300'})],
+    });
+    expect(r.ready).toBe(false);
+    if (!r.ready) expect(r.reason).toMatch(/different stores/);
+  });
+  it('is ready when stores agree and everything else passes', () => {
+    const r = batchReadiness({
+      storeCode: '473', periodStart: '2026-09-01', periodEnd: '2026-09-15',
+      pages: [info({uploadId: 'a', page: 1, detectedStore: '473'}), info({uploadId: 'b', page: 2, detectedStore: '473'})],
+    });
+    expect(r.ready).toBe(true);
   });
 });
