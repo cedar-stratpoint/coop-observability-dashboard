@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.20.0 (2026-11-03): Shopee Sync button and card (prod release)
+Ships the Shopee Sync to prod, taken from `staging` as a Shopee-only change on top of `main` (a full staging promotion would have dropped the prod releases v1.19.2 to v1.19.4, since the two branches diverged on 2026-10-05). The Sales page opens on All time and shows the Sync card; Sync works out the closed days that are missing, queues one job, and the cloud worker (separate repo `shopee-worker`) exports the Shopee files and sends each one to the server's import routes. The card shows progress and ends Done only when no closed day or week report is missing. Windows follow the owner's rule: a full missing Monday to Sunday week runs By Week (all five files), a shorter gap runs By Day (`sales_overview`). A closed week whose Ads or SKU file is missing is requested on its own. The daily limit counts only jobs a worker claimed. Needs `supabase/shopee_sync.sql` applied by hand on PROD first, and the worker and wake tokens in the prod env (`SHOPEE_SYNC_WORKER_TOKEN`, `SHOPEE_SYNC_WAKE_TOKEN`). Detail of each change is in the staging entries (SYN-09 to SYN-13). No other behaviour changes.
+
 ## v1.19.4 (2026-11-03): faster navigation, cache the slow Goldline reads (prod release)
 Ships the navigation perf fix to prod. The Overview (home) and SKU linking pages decrypted tens of thousands of sales rows on every load with no caching (~2.9 s each); they now reuse the same per-company sales cache and return in about 0.1 to 0.2 seconds on repeat navigation. Also adds instant loading skeletons to the pages that lacked one. Code only; no database change. Typechecked and the full test suite passes.
 

@@ -13,11 +13,11 @@ const orNull = (v: unknown): number | null => (v === null || v === undefined ? n
 
 type RunRow = {
   import_id: string; report_type: ReportType; period_from: string; period_to: string; source_filename: string; sha256: string;
-  status: Run['status']; row_count: number; plan: PlanRecord | null; restated: boolean; checks: Record<string, unknown> | null;
+  status: Run['status']; row_count: number; plan: PlanRecord | null; restated: boolean; checks: Record<string, unknown> | null; imported_by: string | null;
 };
 const BUCKET = 'shopee-imports';
-const toRun = (r: RunRow): Run => ({importId: r.import_id, reportType: r.report_type, periodFrom: r.period_from, periodTo: r.period_to, sourceFilename: r.source_filename, sha256: r.sha256, status: r.status, rowCount: r.row_count, plan: r.plan, restated: r.restated, checks: r.checks ?? {}});
-const RUN_COLS = 'import_id,report_type,period_from,period_to,source_filename,sha256,status,row_count,plan,restated,checks';
+const toRun = (r: RunRow): Run => ({importId: r.import_id, reportType: r.report_type, periodFrom: r.period_from, periodTo: r.period_to, sourceFilename: r.source_filename, sha256: r.sha256, status: r.status, rowCount: r.row_count, plan: r.plan, restated: r.restated, importedBy: r.imported_by, checks: r.checks ?? {}});
+const RUN_COLS = 'import_id,report_type,period_from,period_to,source_filename,sha256,status,row_count,plan,restated,checks,imported_by';
 
 function fail(what: string, error: {message: string} | null): void {
   if (error) throw new Error(`${what}: ${error.message}`);
