@@ -1,13 +1,14 @@
 import {beforeEach, describe, expect, it} from 'vitest';
 import {cancelSync, requestSync, type SyncDeps} from '../src/shopee-sync/service';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
+import {exactReports} from './support/shopee-sync-reports';
 
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
 const LOADED = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
 let store: FakeSyncStore;
 let clock: Date;
 let loaded: string[];
-const deps = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => loaded});
+const deps = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => loaded, loadReportPeriods: async () => exactReports(loaded)});
 /** The worker's last heartbeat: what it reported about the Shopee login. */
 const heartbeat = async (login: 'ready' | 'needs_password' | 'signed_out' | null = 'ready') => store.touchHeartbeat(login ? {login: {state: login, checkedAt: clock.toISOString()}} : {}, clock);
 

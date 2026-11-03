@@ -3,6 +3,7 @@ import {handleClaim, handleProgress, handleWake, secretMatches, type SyncApiDeps
 import {requestSync, type SyncDeps} from '../src/shopee-sync/service';
 import {workerAuthFor} from '../src/shopee-sync/worker-auth';
 import {FakeSyncStore} from './support/shopee-sync-fake-store';
+import {exactReports} from './support/shopee-sync-reports';
 
 const at = (phIso: string) => new Date(`${phIso}+08:00`);
 const WORKER = 'worker-secret-for-tests';
@@ -10,11 +11,12 @@ const WAKE = 'wake-secret-for-tests';
 const ready = () => ({login: {state: 'ready', checkedAt: clock.toISOString()}});
 let store: FakeSyncStore;
 let clock: Date;
-const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18']});
+const WEEK1 = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'];
+const sd = (): SyncDeps => ({store, now: () => clock, loadLoadedDays: async () => WEEK1, loadReportPeriods: async () => exactReports(WEEK1)});
 // Changed deliberately (SYN-12): a worker's `done` is now checked against the loaded days, so the default archive here has every day of the jobs below loaded;
 // the tests of the check itself override `loadLoadedDays`.
 const EVERYTHING = ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26'];
-const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, loadLoadedDays: async () => EVERYTHING, ...o});
+const api = (o: Partial<SyncApiDeps> = {}): SyncApiDeps => ({store, now: () => clock, workerToken: WORKER, wakeToken: WAKE, loadLoadedDays: async () => EVERYTHING, loadReportPeriods: async () => exactReports(EVERYTHING), ...o});
 const post = (path: string, body: unknown, token?: string) =>
   new Request(`https://coop.example/api/shopee/sync/${path}`, {method: 'POST', body: JSON.stringify(body), headers: {'content-type': 'application/json', ...(token ? {authorization: `Bearer ${token}`} : {})}});
 const claim = async (body: unknown = ready(), token: string | undefined = WORKER) => (await handleClaim(post('claim', body, token), api())).json();

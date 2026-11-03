@@ -4,6 +4,8 @@
 import {createHash, timingSafeEqual} from 'node:crypto';
 import type {SyncStore} from './store';
 import {isOnline} from './rules';
+import type {ReportPeriod} from '../shopee-import/pipeline';
+import {remainingReports, wireWindows} from './missing-reports';
 import {remainingDays, stillMissingMessage, sweepJobs} from './service';
 import {issuedWindows, MAX_FILES_PER_WINDOW} from './windows';
 import {isActive, LOGIN_STATES, FILE_STATES, type DayResult, type DayState, type FileState, type Job, type JobStatus, type LoginState, type WorkerReport} from './types';
@@ -17,6 +19,8 @@ export interface SyncApiDeps {
   wakeToken?: string | null;
   /** Days that have figures in the archive (the same list the import coverage uses): a worker's `done` is checked against it, so Done means no closed day is missing. */
   loadLoadedDays: () => Promise<string[]>;
+  /** Period of every accepted Ads / SKU / Traffic / Product file: a claim hands the worker only the weekly reports still missing, and `done` is checked against it. */
+  loadReportPeriods: () => Promise<ReportPeriod[]>;
 }
 
 const reply = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}});
@@ -56,7 +60,7 @@ export function readReport(b: Record<string, unknown>, now: Date): WorkerReport 
   return out;
 }
 /** `windows` are derived from the days as of creation (stable for the job's life, and always accepted by the import routes); `days` stays for older workers. */
-const toWire = (j: Job) => ({id: j.id, days: j.days, windows: issuedWindows(j.days, j.createdAt, new Date(j.createdAt)), status: j.status});
+const toWire = (j: Job, loaded: readonly string[], periods: readonly ReportPeriod[]) => ({id: j.id, days: j.days, windows: wireWindows(issuedWindows(j.days, j.createdAt, new Date(j.createdAt)), loaded, periods), status: j.status});
 
 export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Response> {
   const gate = workerGate(req, d);
@@ -72,7 +76,7 @@ export async function handleClaim(req: Request, d: SyncApiDeps): Promise<Respons
   if (hb.loginState !== 'ready') return reply({job: null});
   const pick = jobs.filter((j) => j.status === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
   const claimed = pick ? await d.store.claimJob(pick.id, now) : null;
-  return reply({job: claimed ? toWire(claimed) : null});
+  return reply({job: claimed ? toWire(claimed, await d.loadLoadedDays(), await d.loadReportPeriods()) : null});
 }
 
 // Where each status may be reached from. done, failed and review end the job.
@@ -137,7 +141,8 @@ export async function handleProgress(req: Request, d: SyncApiDeps): Promise<Resp
     const have = new Set(loaded);
     for (const day of job.days) if (have.has(day) && progress[day]?.state !== 'loaded') progress[day] = {...progress[day], state: 'loaded'};
     const still = remainingDays(job, loaded, nowDate);
-    if (still.length > 0) end = {status: 'failed', error: stillMissingMessage(still, progress)};
+    const stillReports = remainingReports(job.days, loaded, await d.loadReportPeriods(), nowDate);
+    if (still.length > 0 || stillReports.length > 0) end = {status: 'failed', error: stillMissingMessage(still, progress, stillReports)};
   }
   const ending = end !== null && ENDS.has(end.status);
   const updated = await d.store.transitionJob(job.id, end ? FROM[end.status] : [job.status], {

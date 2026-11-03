@@ -13,7 +13,7 @@ const DAY = 24 * HOUR;
 export const phDay = (now: Date): string => new Date(now.getTime() + 8 * HOUR).toISOString().slice(0, 10);
 
 /** The instant from which `day` counts as final: 06:00 PH on the following day. */
-const finalFrom = (day: string): number => Date.parse(`${day}T00:00:00+08:00`) + DAY + FINALITY_CUTOFF_HOUR_PH * HOUR;
+export const finalFrom = (day: string): number => Date.parse(`${day}T00:00:00+08:00`) + DAY + FINALITY_CUTOFF_HOUR_PH * HOUR;
 
 export interface MissingDays {
   /** Oldest first, at most MAX_SYNC_DAYS. */
@@ -24,7 +24,7 @@ export interface MissingDays {
   unreachable: number;
 }
 
-const yesterdayPh = (now: Date): string => new Date(Date.parse(`${phDay(now)}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
+export const yesterdayPh = (now: Date): string => new Date(Date.parse(`${phDay(now)}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
 /** The oldest day a sync may still be asked to load. */
 export const oldestReachable = (now: Date): string => new Date(Date.parse(`${yesterdayPh(now)}T00:00:00Z`) - (REACHABLE_DAYS - 1) * DAY).toISOString().slice(0, 10);
 
