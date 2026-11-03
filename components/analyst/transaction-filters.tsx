@@ -4,14 +4,14 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {Popover} from '@base-ui/react/popover';
-import {CalendarDays, Check, ChevronDown, CircleDot, SlidersHorizontal, Wallet, X, type LucideIcon} from 'lucide-react';
+import {CalendarDays, CalendarRange, Check, ChevronDown, CircleDot, SlidersHorizontal, Wallet, X, type LucideIcon} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {Button} from '@/components/ui/button';
 import {RangeSlider} from '@/components/ui/slider';
 import {Calendar, type DateRange} from '@/components/ui/calendar';
 import {formatPeso} from '@/src/pos-format';
 import {ORDER_METHOD_FILTERS, ORDER_STATUS_FILTERS} from '@/src/pos-sales-compute';
-import type {PosOrdersFilter, PriceBounds} from '@/src/pos-sales-types';
+import type {PosEvent, PosOrdersFilter, PriceBounds} from '@/src/pos-sales-types';
 
 type HrefWith = (patch: Record<string, string | null>) => string;
 type Router = ReturnType<typeof useRouter>;
@@ -19,11 +19,11 @@ type Router = ReturnType<typeof useRouter>;
 const POPUP =
   'z-50 origin-[var(--transform-origin)] rounded-lg border bg-popover text-popover-foreground shadow-md outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0';
 
-const CLEARED = {method: null, status: null, from: null, to: null, min: null, max: null};
+const CLEARED = {method: null, status: null, event: null, from: null, to: null, min: null, max: null};
 
 /**
  * Filter bar above the transactions list. Hick's law: the bar shows only a few
- * stable category triggers (Method, Date, Price, Status) and keeps each
+ * stable category triggers (Method, Date, Price, Status, Event) and keeps each
  * one's choices behind its own dropdown until asked for. What's applied reads
  * back as a row of removable pills plus Clear all, so the active state never
  * has to be decoded from the controls themselves.
@@ -32,7 +32,17 @@ const CLEARED = {method: null, status: null, from: null, to: null, min: null, ma
  * server re-queries a filtered, paginated slice; the bar reads back from those
  * same params, so it's shareable and survives a refresh.
  */
-export function TransactionFilters({filter, bounds}: {filter: PosOrdersFilter; bounds: PriceBounds}) {
+export function TransactionFilters({
+  filter,
+  bounds,
+  eventOptions,
+  showEventFilter,
+}: {
+  filter: PosOrdersFilter;
+  bounds: PriceBounds;
+  eventOptions: PosEvent[];
+  showEventFilter: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -49,7 +59,15 @@ export function TransactionFilters({filter, bounds}: {filter: PosOrdersFilter; b
     return qs ? `${pathname}?${qs}` : pathname;
   }
 
+  const eventName = (ev: PosEvent) => ev.venue?.trim() || ev.name || 'Untitled event';
   const labelOf = (list: {value: string; label: string}[], v: string) => list.find((x) => x.value === v)?.label ?? v;
+  const eventLabel =
+    filter.event === 'untagged'
+      ? 'Untagged'
+      : (() => {
+          const ev = eventOptions.find((e) => e.event_id === filter.event);
+          return ev ? eventName(ev) : 'Unknown event';
+        })();
 
   const dateActive = filter.startDate != null || filter.endDate != null;
   const priceActive = filter.minPrice != null || filter.maxPrice != null;
@@ -62,6 +80,7 @@ export function TransactionFilters({filter, bounds}: {filter: PosOrdersFilter; b
   if (priceActive) pills.push({key: 'price', category: 'Price', value: priceLabel(filter), remove: {min: null, max: null}});
   if (filter.status !== 'all')
     pills.push({key: 'status', category: 'Status', value: labelOf(ORDER_STATUS_FILTERS, filter.status), remove: {status: null}});
+  if (filter.event !== 'all') pills.push({key: 'event', category: 'Event', value: eventLabel, remove: {event: null}});
 
   /** The "All" row of a constant list becomes a null ("any") option. */
   const anyFirst = (list: {value: string; label: string}[], anyLabel: string) =>
@@ -86,6 +105,20 @@ export function TransactionFilters({filter, bounds}: {filter: PosOrdersFilter; b
           selected={filter.status === 'all' ? null : filter.status}
           hrefFor={(v) => hrefWith({status: v})}
         />
+        {showEventFilter && (
+          <OptionMenu
+            icon={CalendarRange}
+            label="Event"
+            options={[
+              {value: null, label: 'All events'},
+              ...eventOptions.map((e) => ({value: e.event_id, label: eventName(e)})),
+              {value: 'untagged', label: 'Untagged'},
+            ]}
+            selected={filter.event === 'all' ? null : filter.event}
+            hrefFor={(v) => hrefWith({event: v})}
+            width="w-60"
+          />
+        )}
       </div>
 
       {pills.length > 0 && (
@@ -147,7 +180,7 @@ function TriggerContent({icon: Icon, label, active}: {icon: LucideIcon; label: s
   );
 }
 
-/** A single-choice dropdown (Method, Status): picking a row applies it. */
+/** A single-choice dropdown (Method, Status, Event): picking a row applies it. */
 function OptionMenu({
   icon,
   label,

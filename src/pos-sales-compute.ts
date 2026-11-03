@@ -119,22 +119,55 @@ export function eventRollups(events: PosEvent[], orders: PosOrder[]): EventRollu
 /**
  * The event a sale effectively belongs to for Coop reporting. A POS-stamped
  * event_id is authoritative and kept as-is; an untagged sale (event_id null) is
- * attributed by its Manila calendar date — if a dated event's starts_on..ends_on
- * covers that day it becomes that event's, else it stays a walk-in (null). Single
- * bound = that one day; on the (write-blocked) chance two events cover a day, the
- * later-starting one wins — the same rule as featuredEvent / the POS's
- * pickEventForDate. Read-time only: this never writes pos_orders.event_id, so the
- * DB row and the POS app still show the original stamp.
+ * attributed by its Manila calendar date ONLY when exactly one dated event covers
+ * that day. Now that overlapping / same-day events are allowed, a date no longer
+ * uniquely identifies an event, so an ambiguous day (two or more events) is left
+ * untagged rather than guessed — the POS stamps event_id explicitly at checkout,
+ * and anything still blank can be reassigned from the dashboard. Single bound =
+ * that one day. Read-time only: never writes pos_orders.event_id.
  */
 export function effectiveEventId(order: {event_id: string | null; created_at: string}, events: PosEvent[]): string | null {
   if (order.event_id) return order.event_id;
   const day = manilaDayKey(order.created_at);
   const from = (e: PosEvent) => (e.starts_on ?? e.ends_on) as string;
   const to = (e: PosEvent) => (e.ends_on ?? e.starts_on) as string;
-  const covering = events
-    .filter((e) => (e.starts_on || e.ends_on) && from(e) <= day && day <= to(e))
-    .sort((a, b) => from(b).localeCompare(from(a)));
-  return covering[0]?.event_id ?? null;
+  const covering = events.filter((e) => (e.starts_on || e.ends_on) && from(e) <= day && day <= to(e));
+  // Only auto-attribute on an unambiguous day; two or more events covering the day
+  // stays untagged (don't guess which one the sale belonged to).
+  return covering.length === 1 ? covering[0].event_id : null;
+}
+
+/**
+ * Every event whose dates cover today (Manila), newest start first. All live
+ * events are pinned to the top of the events list and spotlighted, since
+ * overlapping / same-day events are now allowed (there can be more than one).
+ */
+export function currentEventIds(events: PosEvent[], todayKey: string): string[] {
+  const from = (e: PosEvent) => (e.starts_on ?? e.ends_on) as string;
+  const to = (e: PosEvent) => (e.ends_on ?? e.starts_on) as string;
+  return events
+    .filter((e) => (e.starts_on || e.ends_on) && from(e) <= todayKey && todayKey <= to(e))
+    .sort((a, b) => from(b).localeCompare(from(a)))
+    .map((e) => e.event_id);
+}
+
+/**
+ * Null-event sales that fall on a day some event covers — the ones likely needing
+ * a manual event assignment. The POS normally tags these at checkout, but an
+ * ambiguous same-day pick or a legacy/offline sale can leave one blank. Walk-ins
+ * on true non-event days are excluded (those are legitimately untagged). Voided
+ * excluded. Feeds the dashboard's "Untagged" bucket + reassign control.
+ */
+export function untaggedOnEventDays(orders: PosOrder[], events: PosEvent[]): PosOrder[] {
+  const dated = events.filter((e) => e.starts_on || e.ends_on);
+  if (dated.length === 0) return [];
+  const from = (e: PosEvent) => (e.starts_on ?? e.ends_on) as string;
+  const to = (e: PosEvent) => (e.ends_on ?? e.starts_on) as string;
+  return orders.filter((o) => {
+    if (isVoided(o) || o.event_id) return false;
+    const day = manilaDayKey(o.created_at);
+    return dated.some((e) => from(e) <= day && day <= to(e));
+  });
 }
 
 /**
@@ -153,11 +186,11 @@ export function resolveOrderEvents<T extends {event_id: string | null; created_a
 }
 
 /**
- * The first event whose dates clash with a proposed [startsOn, endsOn] range, or
- * null if the range is free. Mirrors the DB overlap guard exactly (single bound =
- * that one day via coalesce; ranges intersect when each starts on/before the
- * other ends), so the form can warn live before upsert_pos_event rejects it. Pass
- * selfId when editing so an event never clashes with itself.
+ * The first existing event whose dates intersect a proposed [startsOn, endsOn]
+ * range, or null if none. Overlapping / same-day events are allowed now (no DB
+ * guard), so this is no longer a blocker — the form uses it to show a neutral
+ * "runs alongside <event>" note so the scheduler knows another event shares the
+ * day. Single bound = that one day; pass selfId when editing to skip itself.
  */
 export function overlappingEvent(events: PosEvent[], startsOn: string | null, endsOn: string | null, selfId?: string): PosEvent | null {
   if (!startsOn && !endsOn) return null;
@@ -177,8 +210,9 @@ export function overlappingEvent(events: PosEvent[], startsOn: string | null, en
  * Pick the event to spotlight on the Offline Sales home: the one covering today
  * ('current'), else the nearest future one by start date ('upcoming'), else null.
  * Uses the same single-bound-as-one-day semantics as POS detection, and ignores
- * events with no dates. Overlaps shouldn't happen (blocked at write), but if two
- * cover today the later-starting one wins, deterministically.
+ * events with no dates. When more than one event covers today (same-day events are
+ * allowed), the later-starting one is the single home spotlight; the events page
+ * pins every live event via currentEventIds.
  */
 export function featuredEvent(events: PosEvent[], todayKey: string): FeaturedEvent | null {
   const dated = events.filter((e) => e.starts_on || e.ends_on);
@@ -689,11 +723,46 @@ export function topBundles(orders: PosOrder[], limit = 5): TopBundle[] {
 export const DEFAULT_ORDERS_FILTER: PosOrdersFilter = {
   method: 'all',
   status: 'all',
+  event: 'all',
   startDate: null,
   endDate: null,
   minPrice: null,
   maxPrice: null,
 };
+
+/**
+ * The events in scope for the Transactions Event filter, per the show rule: when a
+ * date range is selected, the events overlapping that range; otherwise the events
+ * live today. The filter is only shown (and worth showing) when this returns 2+.
+ * All dated events count (including closed ones), since a closed event's sales are
+ * still in the list. Manila day keys throughout.
+ */
+export function eventFilterScope(events: PosEvent[], filter: PosOrdersFilter, todayKey: string): PosEvent[] {
+  const dated = events.filter((e) => e.starts_on || e.ends_on);
+  const from = (e: PosEvent) => (e.starts_on ?? e.ends_on) as string;
+  const to = (e: PosEvent) => (e.ends_on ?? e.starts_on) as string;
+  if (filter.startDate || filter.endDate) {
+    const lo = filter.startDate ? manilaDayKey(filter.startDate) : null;
+    const hi = filter.endDate ? manilaDayKey(filter.endDate) : null;
+    const rangeLo = (lo ?? hi) as string;
+    const rangeHi = (hi ?? lo) as string;
+    return dated.filter((e) => from(e) <= rangeHi && rangeLo <= to(e));
+  }
+  return dated.filter((e) => from(e) <= todayKey && todayKey <= to(e));
+}
+
+/**
+ * The dated events whose range covers a given order's Manila day. These are the
+ * plausible events a sale could belong to, so the reassign control offers exactly
+ * these (plus Untagged), and only makes the badge interactive when there are 2+
+ * (an unambiguous day has nothing to switch to).
+ */
+export function eventsCoveringOrder(order: {created_at: string}, events: PosEvent[]): PosEvent[] {
+  const day = manilaDayKey(order.created_at);
+  const from = (e: PosEvent) => (e.starts_on ?? e.ends_on) as string;
+  const to = (e: PosEvent) => (e.ends_on ?? e.starts_on) as string;
+  return events.filter((e) => (e.starts_on || e.ends_on) && from(e) <= day && day <= to(e));
+}
 
 /** Methods offered as filter chips (mirrors the POS cart Pay control order). */
 export const ORDER_METHOD_FILTERS: {value: string; label: string}[] = [
@@ -729,6 +798,7 @@ export function parseInstantParam(raw: string | undefined): string | null {
 export function parseOrdersFilter(sp: {
   method?: string;
   status?: string;
+  event?: string;
   from?: string;
   to?: string;
   min?: string;
@@ -736,6 +806,10 @@ export function parseOrdersFilter(sp: {
 }): PosOrdersFilter {
   const method = ORDER_METHOD_FILTERS.some((m) => m.value === sp.method) ? (sp.method as string) : 'all';
   const status = ORDER_STATUS_FILTERS.some((s) => s.value === sp.status) ? (sp.status as string) : 'all';
+  // event is an event_id (uuid) or the literal 'untagged'; anything else (incl.
+  // blank) means no event filter. An unknown id simply matches nothing, which is
+  // harmless. Visibility of the control is decided separately (eventFilterScope).
+  const event = sp.event && sp.event.trim() !== '' ? sp.event.trim() : 'all';
   let startDate = parseInstantParam(sp.from);
   let endDate = parseInstantParam(sp.to);
   // A reversed range is a user error; swap so it always reads earliest → latest.
@@ -748,12 +822,12 @@ export function parseOrdersFilter(sp: {
   if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
     [minPrice, maxPrice] = [maxPrice, minPrice];
   }
-  return {method, status, startDate, endDate, minPrice, maxPrice};
+  return {method, status, event, startDate, endDate, minPrice, maxPrice};
 }
 
 /** True when any filter is narrowing the results (used to show a Reset). */
 export function isFilterActive(f: PosOrdersFilter): boolean {
-  return f.method !== 'all' || f.status !== 'all' || f.startDate != null || f.endDate != null || f.minPrice != null || f.maxPrice != null;
+  return f.method !== 'all' || f.status !== 'all' || f.event !== 'all' || f.startDate != null || f.endDate != null || f.minPrice != null || f.maxPrice != null;
 }
 
 /** A null payment_method is a legacy row; the UI reads it as Cash, so match it. */
@@ -768,6 +842,8 @@ export function filterOrders(orders: PosOrder[], f: PosOrdersFilter): PosOrder[]
   return orders.filter((o) => {
     if (!methodMatches(o.payment_method, f.method)) return false;
     if (f.status !== 'all' && o.status !== f.status) return false;
+    if (f.event === 'untagged') { if (o.event_id != null) return false; }
+    else if (f.event !== 'all' && o.event_id !== f.event) return false;
     if (f.startDate && o.created_at < f.startDate) return false;
     if (f.endDate && o.created_at > f.endDate) return false;
     if (f.minPrice != null && o.total < f.minPrice) return false;

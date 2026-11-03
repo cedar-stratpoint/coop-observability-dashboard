@@ -4,7 +4,7 @@ import {useEffect, useId, useMemo, useRef, useState, useTransition, type ReactNo
 import {createPortal} from 'react-dom';
 import {useRouter} from 'next/navigation';
 import {Popover} from '@base-ui/react/popover';
-import {CalendarDays, ChevronDown, Loader2, TriangleAlert, X} from 'lucide-react';
+import {CalendarDays, ChevronDown, Info, Loader2, X} from 'lucide-react';
 import type {PosEvent} from '@/src/pos-sales-types';
 import {datesInRange, overlappingEvent} from '@/src/pos-sales-compute';
 import {upsertEventAction, type EventInput} from '@/src/pos-events-actions';
@@ -52,9 +52,9 @@ type Errors = Partial<Record<'name' | 'dates' | 'opening' | 'closing' | 'form', 
  * page) stays in view behind it. Create a new bazaar or edit an existing one,
  * writing through upsertEventAction. Fields are grouped (Event, Where, When,
  * Cash, and Close-out when editing). Dates use the shared range Calendar with
- * future days enabled. Events may not overlap (upsertEventAction enforces it), so
- * a date clash shows a live warning and blocks Save before the DB guard does.
- * `initial` present = edit mode.
+ * future days enabled. Overlapping / same-day events are allowed, so a date clash
+ * is a neutral "runs alongside" note, not a blocker (the POS cashier picks which
+ * event each sale belongs to). `initial` present = edit mode.
  * Esc or the backdrop closes it; Cmd/Ctrl+Enter saves.
  */
 export function EventForm({initial, events = [], onDone}: {initial?: PosEvent; events?: PosEvent[]; onDone: () => void}) {
@@ -81,9 +81,9 @@ export function EventForm({initial, events = [], onDone}: {initial?: PosEvent; e
   const endsOn = range.end ?? range.start;
   const dayCount = useMemo(() => (startsOn ? datesInRange(startsOn, endsOn).length : 0), [startsOn, endsOn]);
 
-  // Live overlap check: warn the moment the dates clash with another event, before
-  // Save hits the DB guard. Same rule the server enforces (overlappingEvent).
-  const clash = useMemo(
+  // Informational: another event already covers these dates. Overlap is allowed,
+  // so this is just a heads-up, never a blocker.
+  const alongside = useMemo(
     () => overlappingEvent(events, startsOn, endsOn, initial?.event_id),
     [events, startsOn, endsOn, initial?.event_id],
   );
@@ -113,7 +113,6 @@ export function EventForm({initial, events = [], onDone}: {initial?: PosEvent; e
     if ('error' in opening) next.opening = opening.error;
     const closing = parseOptionalAmount(closingCash);
     if ('error' in closing) next.closing = closing.error;
-    if (clash) next.dates = 'Pick dates that do not overlap another event.';
     setErrors(next);
     if (Object.keys(next).length > 0 || 'error' in opening || 'error' in closing) {
       if (next.name) nameRef.current?.focus();
@@ -279,13 +278,13 @@ export function EventForm({initial, events = [], onDone}: {initial?: PosEvent; e
                   </Popover.Portal>
                 </Popover.Root>
               </Field>
-              {clash && (
-                <p role="alert" className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                  <TriangleAlert className="mt-px size-3.5 shrink-0" />
+              {alongside && (
+                <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                  <Info className="mt-px size-3.5 shrink-0" />
                   <span>
-                    Those dates overlap &ldquo;{clash.name}&rdquo;
-                    {formatEventDates(clash.starts_on, clash.ends_on) ? ` (${formatEventDates(clash.starts_on, clash.ends_on)})` : ''}.
-                    Pick a range that does not clash.
+                    Runs alongside &ldquo;{alongside.name}&rdquo;
+                    {formatEventDates(alongside.starts_on, alongside.ends_on) ? ` (${formatEventDates(alongside.starts_on, alongside.ends_on)})` : ''}.
+                    That&rsquo;s fine. The POS cashier picks which event each sale belongs to.
                   </span>
                 </p>
               )}
@@ -389,7 +388,7 @@ export function EventForm({initial, events = [], onDone}: {initial?: PosEvent; e
               </button>
               <button
                 type="submit"
-                disabled={pending || Boolean(clash)}
+                disabled={pending}
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-[opacity,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-60"
               >
                 {pending && <Loader2 className="size-3.5 animate-spin" />}

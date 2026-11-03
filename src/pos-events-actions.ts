@@ -26,9 +26,10 @@ export type EventInput = {
 
 /**
  * Create or edit a bazaar event from Coop, through the SECURITY DEFINER
- * upsert_pos_event RPC (the single write path; it also enforces the no-overlap
- * rule). Online-only, mirrors the other pos_* server actions. Revalidates the
- * events + offline-sales surfaces so the change shows on next render.
+ * upsert_pos_event RPC (the single write path). Overlapping / same-day events are
+ * allowed; the cashier declares which event a sale belongs to on the POS.
+ * Online-only, mirrors the other pos_* server actions. Revalidates the events +
+ * offline-sales surfaces so the change shows on next render.
  */
 export async function upsertEventAction(input: EventInput): Promise<ActionResult> {
   if (usingPosMock()) {
@@ -62,15 +63,7 @@ export async function upsertEventAction(input: EventInput): Promise<ActionResult
   if (input.closing_cash !== undefined) p_event.closing_cash = input.closing_cash;
 
   const {data, error} = await posClient().rpc('upsert_pos_event', {p_event});
-  if (error) {
-    // The overlap guard raises check_violation (23514) as "…overlap an existing
-    // event: <name>". Surface it plainly, naming the clashing event when we can.
-    if (error.code === '23514' || /overlap/i.test(error.message)) {
-      const who = /overlap[^:]*:\s*(.+)$/i.exec(error.message)?.[1]?.trim();
-      return {ok: false, error: who ? `Those dates overlap "${who}". Pick a range that does not clash.` : 'Those dates overlap another event. Pick a range that does not clash.'};
-    }
-    return {ok: false, error: error.message};
-  }
+  if (error) return {ok: false, error: error.message};
 
   // Persist the read-time attribution: attach untagged sales whose date now falls
   // in this event's range, so the DB (and the POS app) match Coop's reporting. The
@@ -104,6 +97,31 @@ export async function closeEventAction(eventId: string, closingCash: number | nu
 
   revalidatePath('/offline-sales/events');
   revalidatePath('/offline-sales');
+  revalidateTag(POS_TAGS.events, 'max');
+  return {ok: true};
+}
+
+/**
+ * Correct a sale's event attribution (multi-event): move an order to a different
+ * event, or untag it (pass null). Goes through the SECURITY DEFINER
+ * set_pos_order_event RPC. Used by the dashboard reassign control when the POS
+ * tagged a sale to the wrong same-day event. Online-only.
+ */
+export async function reassignOrderEventAction(orderId: string, eventId: string | null): Promise<ActionResult> {
+  if (usingPosMock()) {
+    return {ok: false, error: 'Running in mock mode. Set the Supabase pos_* env to reassign sales.'};
+  }
+  if (!orderId) return {ok: false, error: 'Missing order.'};
+
+  const {error} = await posClient().rpc('set_pos_order_event', {
+    p_order_id: orderId,
+    p_event_id: eventId,
+  });
+  if (error) return {ok: false, error: error.message};
+
+  revalidatePath('/offline-sales/events');
+  revalidatePath('/offline-sales');
+  revalidateTag(POS_TAGS.orders, 'max');
   revalidateTag(POS_TAGS.events, 'max');
   return {ok: true};
 }

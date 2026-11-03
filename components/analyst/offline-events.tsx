@@ -78,10 +78,10 @@ export function OfflineEventsView({
   const [pageSize, setPageSize] = useState<PageSize>(12);
   useEffect(() => { setPage(1); }, [query, when, sort, pageSize]);
 
-  // Every event, for the form's live overlap check.
+  // Every event, for the form's live "runs alongside" note.
   const allEvents = useMemo(() => rollups.map((r) => r.event), [rollups]);
 
-  // The event live today, if any (pinned first with a highlight ring).
+  // Which events are live today (same-day events allowed, so there can be several).
   const currentSet = useMemo(() => new Set(currentEventIds), [currentEventIds]);
 
   // Filter + sort, then pin every live event to the top so they stay on page 1.

@@ -13,6 +13,15 @@ Dates are local working dates (GMT+8). Newest first.
 ## v1.20.0 (2026-11-03): Shopee Sync button and card (prod release)
 Ships the Shopee Sync to prod, taken from `staging` as a Shopee-only change on top of `main` (a full staging promotion would have dropped the prod releases v1.19.2 to v1.19.4, since the two branches diverged on 2026-10-05). The Sales page opens on All time and shows the Sync card; Sync works out the closed days that are missing, queues one job, and the cloud worker (separate repo `shopee-worker`) exports the Shopee files and sends each one to the server's import routes. The card shows progress and ends Done only when no closed day or week report is missing. Windows follow the owner's rule: a full missing Monday to Sunday week runs By Week (all five files), a shorter gap runs By Day (`sales_overview`). A closed week whose Ads or SKU file is missing is requested on its own. The daily limit counts only jobs a worker claimed. Needs `supabase/shopee_sync.sql` applied by hand on PROD first, and the worker and wake tokens in the prod env (`SHOPEE_SYNC_WORKER_TOKEN`, `SHOPEE_SYNC_WAKE_TOKEN`). Detail of each change is in the staging entries (SYN-09 to SYN-13). No other behaviour changes.
 
+## 2026-11-03 — Promote multi-event to prod
+Multi-event ships to production, hand-reconciled onto the already-shipped prod event/transaction redesign (a straight cherry-pick of the staging commits would have fought the redesign, so only the multi-event semantics were re-applied). The paired POS release and the Coop prod Supabase migration (`qkxbwzdxhwcbwgriwipi`) went out alongside this.
+
+**Schedule overlapping / same-day events.** The event form's overlap check is now a neutral "runs alongside" note instead of a Save blocker; `upsertEventAction` drops the stale 23514 overlap-error path. Every event live today is pinned to the top of the Events list (there can be more than one), driven by `currentEventIds`.
+
+**Attribute, filter and reassign by event.** Read-time attribution (`effectiveEventId`) only date-stamps a sale on an unambiguous single-event day; ambiguous days stay untagged for the POS to stamp explicitly. The Transactions tab gains an Event filter (event / untagged / all, server-side in `getPosOrdersPage`, shown only when the scope has 2+ events) and a per-sale `OrderEventBadge` that doubles as the reassign control on ambiguous days, via `reassignOrderEventAction` (the `set_pos_order_event` RPC, service_role). Revenue subtotal now handles the untagged (`event_id IS NULL`) filter so the Untagged view totals correctly.
+
+Verified: full suite 3590 passing, production build clean.
+
 ## v1.19.4 (2026-11-03): faster navigation, cache the slow Goldline reads (prod release)
 Ships the navigation perf fix to prod. The Overview (home) and SKU linking pages decrypted tens of thousands of sales rows on every load with no caching (~2.9 s each); they now reuse the same per-company sales cache and return in about 0.1 to 0.2 seconds on repeat navigation. Also adds instant loading skeletons to the pages that lacked one. Code only; no database change. Typechecked and the full test suite passes.
 
