@@ -24,8 +24,9 @@ export type PageClassification = {
   confidence: number;
 };
 
-/** A classified page tagged with its upload id, so groups can name exact pages. */
-export type ClassifiedPage = PageClassification & {id: string};
+/** A classified page tagged with its upload id, so groups can name exact pages.
+ *  `store_snap` is attached by applyStoreRegistry once the known-store list is known. */
+export type ClassifiedPage = PageClassification & {id: string; store_snap?: StoreSnap};
 
 /** All the ids seen for one inventory page number within a form (length > 1 = dup). */
 export type PageSlot = {page: number; ids: string[]};
@@ -68,6 +69,8 @@ export const FORM_FLAGS = {
   incomplete: 'incomplete',
   unknownVersion: 'unknown-version',
   unknownStore: 'unknown-store',
+  storeCorrected: 'store-corrected', // OCR code snapped to a known store
+  storeUnmatched: 'store-unmatched', // OCR code not in the registry, reviewer must pick
   periodMissing: 'period-missing',
   periodUnparsed: 'period-unparsed',
   periodInvalidDay: 'period-invalid-day',
@@ -127,6 +130,82 @@ export function normalizeStoreCode(raw: string | null): string | null {
   if (!raw) return null;
   const s = raw.replace(/^#/, '').replace(/\s+/g, ' ').trim();
   return s === '' ? null : s;
+}
+
+/** Levenshtein edit distance (small strings — store codes are ≤5 chars). */
+export function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({length: n + 1}, (_, j) => j);
+  let curr = new Array<number>(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+export type StoreSnap = {
+  /** The code to use for keying: the matched/corrected code, or the raw candidate
+   *  when nothing matched (so grouping still works, just flagged). */
+  code: string | null;
+  status: 'exact' | 'corrected' | 'ambiguous' | 'unknown' | 'missing';
+  /** The raw candidate, when it differs from `code` (status 'corrected'). */
+  from?: string;
+  /** Nearest known codes to offer the reviewer when not auto-resolved. */
+  candidates?: string[];
+};
+
+/**
+ * Reconcile a (possibly misread) store code against the known store registry.
+ * Validation showed handwritten codes are misread at high confidence ("473"→"472"),
+ * so we snap to a known code — but NEVER override a candidate that is itself a valid
+ * store (a real "472" is trusted). Only a candidate that is NOT in the registry and
+ * sits within `maxDistance` of exactly one known code is auto-corrected; anything
+ * else is left for the reviewer with nearby candidates.
+ */
+export function snapStoreCode(candidate: string | null, known: Iterable<string>, maxDistance = 1): StoreSnap {
+  const code = normalizeStoreCode(candidate);
+  if (!code) return {code: null, status: 'missing'};
+  const knownSet = new Set<string>();
+  for (const k of known) {
+    const n = normalizeStoreCode(k);
+    if (n) knownSet.add(n);
+  }
+  if (knownSet.size === 0) return {code, status: 'unknown'}; // no registry to check against
+  if (knownSet.has(code)) return {code, status: 'exact'}; // trust a valid code as written
+
+  // Rank known codes by edit distance; auto-correct only on a unique nearest ≤ max.
+  const ranked = [...knownSet]
+    .map((k) => ({k, d: editDistance(code, k)}))
+    .sort((a, b) => a.d - b.d);
+  const best = ranked[0].d;
+  const nearest = ranked.filter((r) => r.d === best).map((r) => r.k);
+  if (best <= maxDistance && nearest.length === 1) {
+    return {code: nearest[0], status: 'corrected', from: code};
+  }
+  const candidates = ranked.filter((r) => r.d <= maxDistance + 1).slice(0, 5).map((r) => r.k);
+  return {code, status: nearest.length > 1 && best <= maxDistance ? 'ambiguous' : 'unknown', candidates};
+}
+
+/**
+ * Resolve every page's store code against the known registry before grouping, so a
+ * misread "472" and the real "473" land in the same form. Returns new pages with
+ * `store_code` set to the resolved code and `store_snap` recording how it resolved
+ * (for the triage board + flags). With an empty registry it's a no-op pass-through.
+ */
+export function applyStoreRegistry(pages: ClassifiedPage[], known: Iterable<string>): ClassifiedPage[] {
+  const knownSet = [...known];
+  return pages.map((p) => {
+    const snap = snapStoreCode(p.store_code, knownSet);
+    return {...p, store_code: snap.code, store_snap: snap};
+  });
 }
 
 /** A verbatim period string (actual dates) for display / exact comparison. */
@@ -246,6 +325,8 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
   // Distinct exact (start..end) reads seen across each form's member pages, so a
   // within-form date disagreement (one page misread) can be surfaced.
   const periodReads = new Map<string, Set<string>>();
+  // Snap statuses seen across a form's pages, to flag corrected / unmatched stores.
+  const snapStatuses = new Map<string, Set<StoreSnap['status']>>();
 
   for (const c of pages) {
     if (!isInventoryPage(c)) continue; // defensive: only item pages form groups
@@ -258,6 +339,11 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
       set.add(canonicalPeriod(c.period_start, c.period_end));
       periodReads.set(g.key, set);
     }
+    if (c.store_snap) {
+      const set = snapStatuses.get(g.key) ?? new Set<StoreSnap['status']>();
+      set.add(c.store_snap.status);
+      snapStatuses.set(g.key, set);
+    }
   }
 
   for (const g of groups.values()) {
@@ -265,19 +351,24 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
     g.present = g.slots.map((s) => s.page);
     g.missing = INVENTORY_PAGES.filter((p) => !g.present.includes(p));
     g.duplicates = g.slots.filter((s) => s.ids.length > 1);
-    g.flags = formFlagsFor(g, (periodReads.get(g.key)?.size ?? 0) > 1);
+    g.flags = formFlagsFor(g, {
+      periodMismatch: (periodReads.get(g.key)?.size ?? 0) > 1,
+      snaps: snapStatuses.get(g.key) ?? new Set(),
+    });
   }
 
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-function formFlagsFor(g: FormGroup, periodMismatch: boolean): string[] {
+function formFlagsFor(g: FormGroup, extra: {periodMismatch: boolean; snaps: Set<StoreSnap['status']>}): string[] {
   const flags: string[] = [];
   if (g.duplicates.length > 0) flags.push(FORM_FLAGS.duplicatePages);
   if (g.missing.length > 0) flags.push(FORM_FLAGS.incomplete);
   if (g.version === 'unknown') flags.push(FORM_FLAGS.unknownVersion);
   if (!g.store_code) flags.push(FORM_FLAGS.unknownStore);
-  if (periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
+  if (extra.snaps.has('corrected')) flags.push(FORM_FLAGS.storeCorrected);
+  if (extra.snaps.has('unknown') || extra.snaps.has('ambiguous')) flags.push(FORM_FLAGS.storeUnmatched);
+  if (extra.periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
   for (const f of periodFlags(g.period_start, g.period_end)) flags.push(f);
   return flags;
 }
