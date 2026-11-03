@@ -120,7 +120,9 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
   const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
-    max_tokens: 500,
+    // 800 (not 500): a truncated response yields unterminated JSON, which we'd rather
+    // not hit at all — the classify output is tiny, so the headroom is cheap.
+    max_tokens: 800,
     system: buildPageClassifyPrompt(),
     output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
     // A document-only user turn is rejected (400); always pair the PDF with text.
@@ -132,7 +134,14 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
     params as unknown as Parameters<typeof client.messages.create>[0],
     {timeout: 20_000},
   )) as {content?: Array<{type: string; text?: string}>};
-  return sanitizeClassification(parseJsonContent(res));
+  // Degrade, don't throw: a malformed/truncated JSON response becomes an all-unknown
+  // classification (page 0, kind/version unknown, confidence 0), so ONE unreadable
+  // page is flagged for manual placement instead of sinking the whole bundle.
+  try {
+    return sanitizeClassification(parseJsonContent(res));
+  } catch {
+    return sanitizeClassification({});
+  }
 }
 
 /**

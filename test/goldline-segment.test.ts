@@ -6,10 +6,12 @@ import {
   FORM_FLAGS,
   formKey,
   groupIntoForms,
+  segmentBundle,
   normalizeKind,
   normalizeOrientation,
   normalizeStoreCode,
   normalizeVersion,
+  periodBucket,
   periodFlags,
   sanitizeClassification,
   type ClassifiedPage,
@@ -60,8 +62,16 @@ describe('normalizers', () => {
 });
 
 describe('period', () => {
-  it('keeps a partial cut-off distinct from the standard one (no collapse)', () => {
-    expect(canonicalPeriod('2026-09-09', '2026-09-15')).not.toBe(canonicalPeriod('2026-09-01', '2026-09-15'));
+  it('canonicalPeriod keeps the verbatim dates for display', () => {
+    expect(canonicalPeriod('2026-09-09', '2026-09-15')).toBe('2026-09-09..2026-09-15');
+    expect(canonicalPeriod(null, null)).toBe('unknown-period');
+  });
+  it('periodBucket groups a partial and the standard cut-off together (half-month)', () => {
+    expect(periodBucket('2026-09-09', '2026-09-15')).toBe('2026-09-H1');
+    expect(periodBucket('2026-09-01', '2026-09-15')).toBe('2026-09-H1');
+    expect(periodBucket('2026-09-16', '2026-09-30')).toBe('2026-09-H2');
+    expect(periodBucket('2026-09-16', '2026-09-31')).toBe('2026-09-H2'); // invalid day still buckets
+    expect(periodBucket(null, null)).toBe('unknown-period');
   });
   it('flags clean / partial / invalid-day / missing / unparsed', () => {
     expect(periodFlags('2026-09-01', '2026-09-15')).toEqual([]);
@@ -73,14 +83,15 @@ describe('period', () => {
   });
 });
 
-describe('groupIntoForms', () => {
-  it('sorts a shuffled, rotated, multi-store set into forms', () => {
+describe('segmentBundle', () => {
+  it('sorts a shuffled, rotated, multi-store set into forms + parked pages', () => {
     const pages = [
       page({id: 'a', page: 2}),
       page({id: 'b', page: 1, orientation: 180}), // upside-down still groups
       page({id: 'c', page: 1}), // duplicate of page 1
-      page({id: 'd', kind: 'sales', page: 6}), // parked
+      page({id: 'd', kind: 'sales', page: 6}), // parked, no junk form
       page({id: 'e', kind: 'blank', page: 0}), // dropped
+      page({id: 'u', kind: 'inventory', page: 0}), // form-like but unnumbered
       page({
         id: 'f',
         store_code: '5300',
@@ -90,16 +101,18 @@ describe('groupIntoForms', () => {
         page: 3,
       }),
     ];
-    const forms = groupIntoForms(pages);
+    const {forms, sales, blanks, unplaceable} = segmentBundle(pages);
+    // Two real forms only — the sales page does NOT create a third "unknown" group.
     expect(forms.length).toBe(2);
+    expect(sales.map((p) => p.id)).toEqual(['d']);
+    expect(blanks.map((p) => p.id)).toEqual(['e']);
+    expect(unplaceable.map((p) => p.id)).toEqual(['u']);
 
     const leon = forms.find((g) => g.store_code === '473')!;
     expect(leon.present).toEqual([1, 2]);
     expect(leon.missing).toEqual([3, 4, 5]);
     expect(leon.duplicates.map((d) => d.page)).toEqual([1]);
     expect(leon.duplicates[0].ids.slice().sort()).toEqual(['b', 'c']);
-    expect(leon.salesIds).toEqual(['d']);
-    expect(leon.blankIds).toEqual(['e']);
     expect(leon.flags).toContain(FORM_FLAGS.duplicatePages);
     expect(leon.flags).toContain(FORM_FLAGS.incomplete);
 
@@ -107,7 +120,9 @@ describe('groupIntoForms', () => {
     expect(sofia.present).toEqual([3]);
     expect(sofia.flags).toContain(FORM_FLAGS.periodPartial);
   });
+});
 
+describe('groupIntoForms', () => {
   it('flags unknown store and version', () => {
     const forms = groupIntoForms([page({id: 'x', store_code: null, version: 'unknown', page: 1})]);
     expect(forms[0].flags).toContain(FORM_FLAGS.unknownStore);
@@ -121,6 +136,17 @@ describe('groupIntoForms', () => {
     ]);
     expect(forms.length).toBe(2);
     expect(formKey(forms[0]) === formKey(forms[1])).toBe(false);
+  });
+
+  it('merges a partial-date misread into the same form (half-month key)', () => {
+    // Real case: Sofia #5300 v1, one page read "09-01..15", another "09-09..15".
+    const forms = groupIntoForms([
+      page({id: 'p1', store_code: '5300', version: 'v1', page: 1, period_start: '2026-09-01', period_end: '2026-09-15'}),
+      page({id: 'p2', store_code: '5300', version: 'v1', page: 2, period_start: '2026-09-09', period_end: '2026-09-15'}),
+    ]);
+    expect(forms.length).toBe(1);
+    expect(forms[0].present).toEqual([1, 2]);
+    expect(forms[0].flags).toContain(FORM_FLAGS.periodMismatch); // disagreement surfaced
   });
 });
 
