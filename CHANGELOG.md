@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-03 — Branded error pages replace the bare Vercel fallback
+
+A crashed page used to fall through to Next's default global-error screen (black canvas, "This page couldn't load"), since the app carried no error boundaries. Added three on-brand screens in the Coop identity (bone canvas, forest-green accent, Inter wordmark + Newsreader serif): `app/error.tsx` catches page-level render/data errors and renders inside the dashboard shell so the nav stays usable; `app/not-found.tsx` is the 404; `app/global-error.tsx` replaces the root layout when it is the layout itself that fails, so it is fully self-contained (inlined styles, light/dark via `prefers-color-scheme`, system serif fallback) and no longer depends on `globals.css` or the fonts the dead layout would have loaded. Both boundaries use Next 16's `retry` prop (not the older `reset`) and surface the error digest in a subtle mono line.
+
 ## 2026-10-30 — Goldline sales units encrypted at rest too (Nichido), phase 2 of Oct 27
 - **What changed:** `sales.units` joins the peso figures in the one per-row ciphertext: `sales.amounts_enc` now holds `gross|net|units` (same Vault key `goldline_sales_key`, same AES-256-CBC, random IV per row). Store/SKU codes and periods stay plain. Decided now because units were the last sales figure left readable; the Oct 27 entry had deferred them because so much SQL reads them.
 - **One ciphertext, not a second column:** a reader decrypts each row once and splits it, so `sales_rollup` and `sales_by_sku` cost the same as before. Readers that used only plain units now pay one decrypt per row they touch: measured on Staging, decrypting all 472,604 rows takes ~1.0 s, so `store_scope` goes from ~0.65 s to roughly 1.7 s. The forecast functions decrypt only the requested months' rows.
