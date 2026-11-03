@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.19.4 (2026-11-03): faster navigation, cache the slow Goldline reads (prod release)
+Ships the navigation perf fix to prod. The Overview (home) and SKU linking pages decrypted tens of thousands of sales rows on every load with no caching (~2.9 s each); they now reuse the same per-company sales cache and return in about 0.1 to 0.2 seconds on repeat navigation. Also adds instant loading skeletons to the pages that lacked one. Code only; no database change. Typechecked and the full test suite passes.
+
+## 2026-11-03 — Faster navigation: cache the slow Goldline page reads, add loading skeletons
+Navigating between pages took 4 to 5 seconds. Profiled against the real databases: two page readers decrypt tens of thousands of sales rows on every load with no caching. The Overview (home) reader measured ~2.9 s and the SKU linking page's Watsons month-by-month breakdown kept /stock/skus at ~2.9 s. By contrast the Stores page, which already caches its decrypted totals, was ~0.1 s, proving the fix.
+
+**Cache the decrypting reads.** Added `cachedSalesView()` in `goldline-ref-data.ts`, mirroring the sales-totals cache: it keeps a reader's result per company, keyed to the committed sales files, so a sales upload refreshes it at once, and tagged so a catalog, store or upload edit expires it too. Wrapped the Overview reader (sales + catalog + store tags, since it shows product-line groupings and the live-store count) and the Watsons month-by-month read (sales tag only, so a catalog edit or a SKU linking decision does not needlessly drop it). Both now return in about 0.1 to 0.2 seconds on repeat navigation, a 25 to 30x drop. Only sales-derived reads that never touch the inventory counts are cached; the product page, action feed and inventory board read counts that change on a scan upload and need an inventory-version key first (tracked as a follow-up).
+
+**Instant skeletons.** Added loading placeholders to the pages that lacked one (Business Health, Inventory, Flags, Offline Sales, Contacts, Reports, Repricer, Traffic, Settings, Lazada, Sales, Products, Website CRM, Admin, SKU linking), reusing the existing page skeleton. A navigation now shows an immediate placeholder, prefetched as the link comes into view, instead of the old page freezing while the server renders.
+
 ## v1.19.3 (2026-11-03): branded error, 404 and global-error pages (prod release)
 Ships Coop-branded error screens to prod, replacing Next's bare "This page couldn't load" fallback (the same screen prod showed during the v1.19.1 timeout incident). Code only; no database change. Verified in the browser in light and dark, and typechecked.
 
