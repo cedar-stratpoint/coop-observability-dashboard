@@ -73,3 +73,20 @@ describe('prompts', () => {
     expect(() => buildLegacyManifestPrompt(6)).toThrow(/manifest/);
   });
 });
+
+import {rowBandFor} from '../src/goldline-extract';
+
+describe('rowBandFor', () => {
+  it('returns a band inside the page for an item on it', () => {
+    const b = rowBandFor('FBPP01', 1)!; // first item on page 1 → near the top of the grid
+    expect(b).not.toBeNull();
+    expect(b.top).toBeGreaterThanOrEqual(0);
+    expect(b.top + b.height).toBeLessThanOrEqual(1);
+    const last = rowBandFor('6in1PSLFBI', 1)!; // last item → lower than the first
+    expect(last.top).toBeGreaterThan(b.top);
+  });
+  it('is null for an item not on the page, or a page with no manifest', () => {
+    expect(rowBandFor('NOPE', 1)).toBeNull();
+    expect(rowBandFor('FBPP01', 6)).toBeNull(); // page 6 is the sales report, no manifest
+  });
+});

@@ -1,7 +1,7 @@
 'use client';
 
 import {useMemo} from 'react';
-import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
+import {Check, ChevronLeft, ChevronRight, Crosshair, Search} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
 import {groupByFamily, type CatalogLite} from '@/src/review-workbench';
@@ -78,7 +78,21 @@ type Props = {
   onCell: (index: number, key: ColKey, raw: string) => void;
   onResolve: (index: number) => void;
   onStep: (dir: 1 | -1) => void;
+  /** Open the enlarged scan pointing at this item's row (the "Show in scan" button).
+   *  Absent when there's no scan to point at. */
+  onLocate?: (itemCode: string) => void;
 };
+
+/** The one-line "why this row is doubtful": the reader's cell marks and/or the
+ *  alternative reading, combined so a flagged row shows a single reason, not three
+ *  stacked amber lines. */
+function reasonText(r: ExtractedRow): string | null {
+  const parts: string[] = [];
+  const m = marksText(r);
+  if (m) parts.push(m);
+  if (r.alt) parts.push(`Maybe: ${r.alt}`);
+  return parts.length ? parts.join(' · ') : null;
+}
 
 export function ReviewRows({
   rows,
@@ -95,6 +109,7 @@ export function ReviewRows({
   onCell,
   onResolve,
   onStep,
+  onLocate,
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   const q = query.trim().toLowerCase();
@@ -135,15 +150,38 @@ export function ReviewRows({
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
-        <td className="py-1.5 pr-3 align-top">
-          <span className="font-mono text-xs">{r.item_code}</span>
-          {productNames[r.item_code] && <span className="block max-w-[14rem] truncate text-xs text-muted-foreground">{productNames[r.item_code]}</span>}
-          {view === 'needs' && catalog[r.item_code]?.productLine && (
-            <span className="block max-w-[14rem] truncate text-[11px] text-muted-foreground/80">{catalog[r.item_code]?.productLine}</span>
-          )}
-          {r.alt && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
-          {marksText(r) && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
-          {legacyExtraText(r) && <span className="block text-[11px] text-muted-foreground/80 tabular-nums">{legacyExtraText(r)}</span>}
+        <td className="py-3 pr-3 align-top">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {/* Primary: code + name. */}
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-xs font-medium">{r.item_code}</span>
+                {productNames[r.item_code] && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code]}</span>}
+              </div>
+              {view === 'needs' && catalog[r.item_code]?.productLine && (
+                <span className="mt-0.5 block max-w-[16rem] truncate text-[11px] text-muted-foreground/70">{catalog[r.item_code]?.productLine}</span>
+              )}
+              {/* Secondary: one reason line (marks + alt combined), then the Legacy
+                  deducted context as a quieter tertiary line. */}
+              {reasonText(r) && (
+                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r)}</span>
+              )}
+              {legacyExtraText(r) && (
+                <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
+              )}
+            </div>
+            {onLocate && (
+              <button
+                type="button"
+                onClick={() => onLocate(r.item_code)}
+                title="Show this item on the scan"
+                aria-label={`Show ${r.item_code} on the scan`}
+                className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 transition-[color,opacity,background-color] hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Crosshair className="size-3.5" />
+              </button>
+            )}
+          </div>
         </td>
         {COLS.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
@@ -204,11 +242,10 @@ export function ReviewRows({
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <span className="font-mono text-xs">{r.item_code}</span>
+            <span className="font-mono text-xs font-medium">{r.item_code}</span>
             {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
-            {r.alt && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
-            {marksText(r) && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
-            {legacyExtraText(r) && <span className="block text-xs text-muted-foreground/80 tabular-nums">{legacyExtraText(r)}</span>}
+            {reasonText(r) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r)}</span>}
+            {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
