@@ -43,7 +43,7 @@ export type TriageResult = {
   mock: boolean;
 };
 
-type UploadClsRow = {
+export type UploadClsRow = {
   id: string;
   filename: string;
   status: string;
@@ -55,10 +55,20 @@ type UploadClsRow = {
   classification: Record<string, unknown> | null;
 };
 
+/** The `uploads` columns a classification mapping needs — the shared select string so
+ *  the triage board and the batch split read the same shape. */
+export const UPLOAD_CLS_COLS = 'id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification';
+
+/** The consultant (BA) a page read, from its classification jsonb (null if absent). */
+export function consultantOf(u: UploadClsRow): string | null {
+  const c = (u.classification ?? {}) as Record<string, unknown>;
+  return typeof c.consultant === 'string' && c.consultant.trim() !== '' ? c.consultant.trim() : null;
+}
+
 /** Map a persisted upload row to the ClassifiedPage shape `segmentBundle` consumes.
  *  Prefers the top-level classifier columns; store/period/consultant come from the
  *  classification jsonb (using the snapped store code the grouping was keyed on). */
-function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
+export function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
   const c = (u.classification ?? {}) as Record<string, unknown>;
   const snap = (c.store_snap ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
@@ -108,7 +118,7 @@ export async function triageBoard(companyId: string): Promise<TriageResult> {
   const rows = (await fetchAllRows('uploads', (from, to) =>
     supa
       .from('uploads')
-      .select('id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification')
+      .select(UPLOAD_CLS_COLS)
       .eq('company_id', companyId)
       .eq('kind', 'inventory_pdf')
       .not('classified_at', 'is', null)

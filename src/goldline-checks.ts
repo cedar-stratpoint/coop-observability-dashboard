@@ -46,6 +46,11 @@ export type CountRow = {
   ending_on_hand: number | null;
   consultant: string | null;
   source_upload_id: string | null;
+  // Phase 1/3 · the form layout the row was read from, and the Legacy-only deducted
+  // values (beginning / begin_plus_delivery / deducted_pcs) that have no three-location
+  // column. Absent for older rows (treated as v1 / three-location).
+  form_version?: string | null;
+  extra?: Record<string, number | null> | null;
 };
 export type Adjustment = {store_code: string; item_code: string; period_end: string; qty: number};
 export type CellMark = {field: string; mark: 'overwritten' | 'unclear' | 'straddle'; written?: string | null};
@@ -97,13 +102,34 @@ export function allowedGap(posSold: number, s: CheckSettings = DEFAULT_SETTINGS)
   return Math.max(s.gapMinUnits, s.gapPct * Math.abs(posSold));
 }
 
+/** A numeric field from the Legacy `extra` sidecar, or null. */
+function extraNum(r: CountRow, key: string): number | null {
+  const v = r.extra?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 /**
- * Row math, only when an ending is written and at least one part is. The ending
- * (column 5) is stockroom + drawer + selling area; the delivery column (4) is not
- * part of it (Justin, Q23, answered Oct 27).
+ * Row math, only when an ending is written and the inputs are. Version-aware:
+ * - V1 / V2 (and older rows): ending (col 5) = stockroom + drawer + selling area; the
+ *   delivery column is not part of it (Justin, Q23, answered Oct 27).
+ * - Legacy (7-column deducted, counts live in `extra`): ending = beginning + delivery
+ *   − deducted (using the written "beginning + delivery" when present, else computing
+ *   it), so Legacy forms are validated even though they have no three-location split.
+ * Returns the written ending vs the expected one, or null when consistent / not enough
+ * inputs to check.
  */
 export function rowMathOff(r: CountRow): {written: number; counted: number} | null {
   if (r.ending_on_hand == null) return null;
+  if (r.form_version === 'legacy') {
+    const bd = extraNum(r, 'begin_plus_delivery');
+    const dp = extraNum(r, 'deducted_pcs');
+    const b = extraNum(r, 'beginning');
+    let expected: number | null = null;
+    if (bd != null && dp != null) expected = bd - dp;
+    else if (b != null && r.delivery != null && dp != null) expected = b + r.delivery - dp;
+    if (expected == null) return null; // not enough of the deducted inputs to check
+    return r.ending_on_hand === expected ? null : {written: r.ending_on_hand, counted: expected};
+  }
   const parts = [r.stockroom, r.drawer, r.selling_area];
   if (parts.every((p) => p == null)) return null;
   const counted = parts.reduce<number>((a, p) => a + (p ?? 0), 0);
