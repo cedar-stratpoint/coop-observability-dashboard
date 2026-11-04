@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Uploads: paginate the grouped tiles and let rows size (12/24/36, 10/20/50)
+
+The grouped Uploads view showed every tile at once; with 41 uploads that is a long scroll. Added pagination to both views: **tiles paginate 12 / 24 / 36 per page**, **rows (All files, and a group's files) paginate 10 / 20 / 50**, with a per-page selector that switches label and options by view. Changing the page size or leaving a group's drill-in resets to page 1.
+
 ## 2026-11-04 — Uploads: a grouped view + date filter, so a 98-page drop is one tile not 98 rows
 
 Uploading a multi-page scan filled the Files inbox with one row per page (a 98-page drop = 98 rows, 22 pages of pagination) and files from different drops mixed together. Added a **Grouped / All files** toggle to `/uploads`:
