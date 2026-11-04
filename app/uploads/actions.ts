@@ -1,7 +1,7 @@
 'use server';
 
-import {revalidatePath} from 'next/cache';
-import {expireSalesTotals} from '@/src/goldline-ref-data';
+import {revalidatePath, revalidateTag} from 'next/cache';
+import {expireSalesTotals, glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
 import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
@@ -114,6 +114,7 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
     // A sales file's rows are gone with it, so the cached sales totals are too.
     if (upload && upload.kind !== 'inventory_pdf') expireSalesTotals(ctx.companyId);
     await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath('/stock');
     revalidatePath('/overview');
@@ -187,6 +188,7 @@ export async function commitReview(input: {
     await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath(`/uploads/${input.uploadId}`);
     revalidatePath('/flags');
@@ -329,6 +331,7 @@ export async function commitBatchAction(input: {
     await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath(`/uploads/batch/${input.batchId}`);
     revalidatePath('/stock');
@@ -362,6 +365,7 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
   try {
     const session = await auth();
     const forms = await splitBatchIntoForms(ctx.companyId, input.batchId, session?.user?.email ?? null);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     return {ok: true, forms};
   } catch (e) {
