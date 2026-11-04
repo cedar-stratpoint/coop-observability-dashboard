@@ -1,7 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {applyStoreRegistry, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import {knownStoreCodes} from './goldline-store-registry';
 import {uploadSource} from './goldline-upload-groups';
@@ -55,11 +55,19 @@ export type UploadClsRow = {
   orientation: number | null;
   form_version: string | null;
   classification: Record<string, unknown> | null;
+  created_at: string;
 };
 
 /** The `uploads` columns a classification mapping needs — the shared select string so
- *  the triage board and the batch split read the same shape. */
-export const UPLOAD_CLS_COLS = 'id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification';
+ *  the triage board and the batch split read the same shape. `created_at` gives the
+ *  scan order, which the blank-store contiguity grouping needs. */
+export const UPLOAD_CLS_COLS = 'id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification,created_at';
+
+/** Pages in scan order (oldest first) — the order a scan's pages were uploaded, which
+ *  the contiguity grouping reads to cut blank-store runs into forms. */
+export function inScanOrder(rows: UploadClsRow[]): UploadClsRow[] {
+  return [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+}
 
 /** The consultant (BA) a page read, from its classification jsonb (null if absent). */
 export function consultantOf(u: UploadClsRow): string | null {
@@ -139,7 +147,10 @@ export async function triageBoard(companyId: string, opts?: {source?: string}): 
   // grouping — so neither a drifted store code ("DS 5300") nor a misread year spins a
   // page off into its own fake form. Snapped pages are flagged on their form.
   const known = await knownStoreCodes(companyId);
-  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(applyStoreRegistry(rows.map(toClassifiedPage), known)));
+  // Scan order first (blank-store runs need it), snap stores, then cut blank runs into
+  // forms, then reconcile years, then group.
+  const pages = assignBlankFormRuns(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known));
+  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(pages));
 
   const parked: ParkedPage[] = [
     ...sales.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'sales' as const})),

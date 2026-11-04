@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Split unreadable-store pages into one form per scan run
+
+Groundwork for the guided "which store?" step. When a scan has pages whose store the OCR couldn't read, they used to collapse into a single "needs a store" group keyed only by period and version, so one card could mix several different stores that all read blank, which would make a one-tap store assignment mislabel them. Now store-less pages are cut into forms by **scan contiguity**: a physical form is five consecutive pages scanned together, so a new run starts whenever the page number resets or the version changes (`assignBlankFormRuns`, pure + unit-tested). Both grouping paths, the batch split and the triage/forms view, read pages in scan order (`created_at`) and apply it after the store re-snap. Each "needs a store" card is now one real form, which is what the upcoming store picker will assign to. Readable stores are untouched; they still group by store.
+
 ## 2026-11-05 — A "forms found in this scan" view, straight from the Uploads drop
 
 Phase 3 (b): the per-scan forms view. Opening a scan drop from Uploads ("See forms in this scan") now shows that scan's pages sorted into store forms, the same redesigned cards as the triage inbox but scoped to one drop, led by "N forms across M stores in this scan, sorted so the ones that need you come first." New route `/uploads/scan/[source]`; `triageBoard(companyId, {source})` filters the company's classified pages to the scan by its source name (reuses `uploadSource`, no extra query); the board grew an optional `scan` prop for the per-scan header. This is the shared forms surface we unified on, now reachable two ways, company-wide inbox and per-scan. Next: auto-split on upload-complete and the guided "which store?" step for the unreadable cards.
