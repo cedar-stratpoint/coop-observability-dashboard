@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Review UX: grouped page tabs, calmer review rows, and a "show in scan" locator
+
+Three Hick's-Law / eyestrain fixes to the batch review screen.
+
+- **Page tabs grouped by page number** (`batch-review.tsx`): a big pile (many stores, unknown pages) was a wall of ~50 near-identical "Page N" pills. Now it reads as a few labelled rows — Page 1 to 5, each with compact copy chips that show only their status (the row header carries the number) — and the noisy "Unknown" pages collapse behind a disclosure.
+- **Calmer review row** (`review-rows.tsx`): the ITEM cell stacked code, name, product line, "Maybe…", marks and the Legacy deducted line all at once. Now it's a clear hierarchy with real whitespace: code + name primary, a single combined reason line (marks + alt), then the Legacy context as a quiet tertiary line.
+- **"Show in scan" locator** (new): a crosshair button per row opens the enlarged scan with an **approximate highlight band** over the item's row, animated in. The band is computed from the fixed template + the item's printed order (`rowBandFor` in `goldline-extract.ts`) — no pixel coordinates are captured, so it points at the right row-area, not a pixel-exact box (the lightbox labels it "approximate"). Pure `rowBandFor` is unit-tested.
+- tsc + design detector clean; grouped tabs + modernized rows screenshot-verified (50-page pile → 5 rows + collapsed Unknown).
+
 ## 2026-11-04 — Uploads: a grouped view + date filter, so a 98-page drop is one tile not 98 rows
 
 Uploading a multi-page scan filled the Files inbox with one row per page (a 98-page drop = 98 rows, 22 pages of pagination) and files from different drops mixed together. Added a **Grouped / All files** toggle to `/uploads`:

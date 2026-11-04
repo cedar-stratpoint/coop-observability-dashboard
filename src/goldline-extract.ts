@@ -203,6 +203,32 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
 export const PAGE_COUNT = 6;
 export const INVENTORY_PAGES = [1, 2, 3, 4, 5];
 
+/**
+ * Approximate vertical band (top + height as fractions of the page, 0–1) for an item
+ * row on its printed page. The form is a fixed template and `MANIFESTS[page]` lists
+ * the items in printed order, so a SKU's position is its index within the manifest,
+ * mapped into the grid's content area. This is an APPROXIMATION — the printed grid
+ * also has family-header rows we don't model, so the band is a few rows tall to cover
+ * the drift, not a pixel-exact box. Returns null when the item isn't on the page.
+ */
+export function rowBandFor(itemCode: string, page: number): {top: number; height: number} | null {
+  const items = MANIFESTS[page];
+  if (!items) return null;
+  const idx = items.findIndex((i) => i.code === itemCode);
+  if (idx < 0) return null;
+  // The item grid occupies roughly the middle of the page: ~14% header/title at the
+  // top, ~6% total row + note at the bottom. Spread the manifest across that area.
+  const GRID_TOP = 0.14;
+  const GRID_BOTTOM = 0.94;
+  const span = GRID_BOTTOM - GRID_TOP;
+  const center = GRID_TOP + (span * (idx + 0.5)) / items.length;
+  // A band a few manifest-rows tall, so the real row (shifted by unmodeled family
+  // headers) falls inside it. Clamped to the page.
+  const height = Math.min(0.12, Math.max(0.05, (span / items.length) * 4));
+  const top = Math.max(0, Math.min(1 - height, center - height / 2));
+  return {top, height};
+}
+
 /** The fixed system role + global guardrails (same every call — prompt-cached). */
 export function buildSystemPrompt(): string {
   return [
