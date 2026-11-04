@@ -7,131 +7,141 @@ import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {GL_PAGE} from '@/src/goldline-ui';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
-import {
-  fmtTriagePeriod,
-  FLAG_LABEL,
-  flagTone,
-  periodHeading,
-  periodSortKey,
-  VERSION_COLOR,
-  VERSION_LABEL,
-} from '@/src/goldline-triage-format';
+import {fmtTriagePeriod, FLAG_LABEL, flagTone, VERSION_LABEL} from '@/src/goldline-triage-format';
 
 const INVENTORY_PAGES = [1, 2, 3, 4, 5];
 const TONE_VAR = {good: 'var(--status-good)', warn: 'var(--status-warn)', crit: 'var(--status-crit)', info: 'var(--primary)'} as const;
+type Tone = keyof typeof TONE_VAR;
 
-function chip(tone: keyof typeof TONE_VAR) {
+function tint(tone: Tone) {
   return {color: toneText(TONE_VAR[tone]), background: `color-mix(in oklab, ${TONE_VAR[tone]} 14%, transparent)`};
 }
 
-/** A single store-day form card. */
+/**
+ * One form's state, as the inbox reads it. Order (rank) and colour agree: the hard
+ * blocker (no store, can't file at all) is most urgent, then missing pages, then ready,
+ * then already committed. A store the OCR couldn't read — or read as a code not in the
+ * registry — is the thing a human must resolve, so it sorts to the very top.
+ */
+type FormStatus = {rank: number; tone: Tone; label: string};
+function statusOf(f: TriageForm): FormStatus {
+  if (f.committed > 0 && f.needsReview === 0) return {rank: 3, tone: 'good', label: 'Committed'};
+  if (!f.storeCode || f.flags.includes('store-unmatched')) return {rank: 0, tone: 'crit', label: 'Needs a store'};
+  if (f.missing.length > 0) return {rank: 1, tone: 'warn', label: `Missing ${f.missing.length === 1 ? 'page' : 'pages'} ${f.missing.join(', ')}`};
+  return {rank: 2, tone: 'good', label: 'Ready'};
+}
+
+/** A single store-form card: a status stripe, the store it belongs to, its period and BA,
+ *  which of pages 1 to 5 came through, and one clear state. Click opens it to review. */
 function FormCard({form}: {form: TriageForm}) {
+  const s = statusOf(form);
   const dupPages = new Set(form.duplicates.map((d) => d.page));
-  const done = form.committed > 0 && form.needsReview === 0;
   const href = form.batchId ? `/uploads/batch/${form.batchId}` : form.uploadIds[0] ? `/uploads/${form.uploadIds[0]}` : '#';
+  const unreadable = !form.storeCode;
+  // Flags worth showing on the card, minus the ones the status pill already says.
+  const extraFlags = form.flags.filter((fl) => fl !== 'unknown-store' && fl !== 'store-unmatched' && fl !== 'incomplete');
 
   return (
     <Link
       href={href}
-      className="group block rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+      className="group relative block overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-heading text-sm font-semibold tracking-tight">{form.consultant ?? 'Unknown consultant'}</div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'Store not matched')}
-            {form.storeName && form.storeCode ? <span className="tabular-nums"> · {form.storeCode}</span> : null}
+      <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{background: TONE_VAR[s.tone]}} />
+      <div className="flex flex-col gap-3 p-4 pt-[18px]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={cn('truncate font-heading text-sm font-semibold tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
+              {form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'Store not readable')}
+              {form.storeName && form.storeCode ? <span className="font-mono text-xs font-normal text-muted-foreground"> · {form.storeCode}</span> : null}
+            </div>
+            <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
           </div>
+          <span className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" style={tint(s.tone)}>
+            {s.label}
+          </span>
         </div>
-        <span
-          className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-          style={{color: '#fff', background: VERSION_COLOR[form.version]}}
-        >
-          {VERSION_LABEL[form.version]}
-        </span>
-      </div>
 
-      {/* Page coverage: 5 cells, filled = present, hollow = missing, ring = duplicate */}
-      <div className="mt-3.5 flex items-center gap-1.5" aria-label="Page coverage">
-        {INVENTORY_PAGES.map((p) => {
-          const present = form.present.includes(p);
-          const dup = dupPages.has(p);
-          return (
-            <span
-              key={p}
-              title={`Page ${p}${dup ? ' (duplicate)' : present ? '' : ' (missing)'}`}
-              className={cn(
-                'flex h-6 min-w-0 flex-1 items-center justify-center rounded-md text-[10px] font-medium tabular-nums',
-                present ? 'text-foreground' : 'text-muted-foreground/60',
-              )}
-              style={
-                dup
-                  ? {...chip('crit'), boxShadow: `inset 0 0 0 1.5px ${TONE_VAR.crit}`}
-                  : present
-                    ? {background: 'color-mix(in oklab, var(--status-good) 16%, transparent)', color: toneText(TONE_VAR.good)}
-                    : {background: 'var(--muted)', boxShadow: 'inset 0 0 0 1px var(--border)'}
-              }
-            >
-              {p}
-            </span>
-          );
-        })}
-      </div>
+        {form.consultant ? <div className="truncate text-xs text-muted-foreground">BA · {form.consultant}</div> : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {done ? (
-          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={chip('good')}>
-            Committed
+        {/* Page coverage: 5 cells, filled = present, dashed = missing, ring = duplicate. */}
+        <div className="flex items-center gap-1.5" aria-label="Page coverage">
+          {INVENTORY_PAGES.map((p) => {
+            const present = form.present.includes(p);
+            const dup = dupPages.has(p);
+            return (
+              <span
+                key={p}
+                title={`Page ${p}${dup ? ' (duplicate)' : present ? '' : ' (missing)'}`}
+                className="flex h-7 min-w-0 flex-1 items-center justify-center rounded-md font-mono text-[11px] font-medium tabular-nums"
+                style={
+                  dup
+                    ? {...tint('crit'), boxShadow: `inset 0 0 0 1.5px ${TONE_VAR.crit}`}
+                    : present
+                      ? {background: 'color-mix(in oklab, var(--status-good) 16%, transparent)', color: toneText(TONE_VAR.good)}
+                      : {color: 'var(--muted-foreground)', boxShadow: 'inset 0 0 0 1px var(--border)', opacity: 0.6}
+                }
+              >
+                {p}
+              </span>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">{VERSION_LABEL[form.version]}</span>
+            {extraFlags.map((fl) => (
+              <span key={fl} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium" style={tint(flagTone(fl))}>
+                {FLAG_LABEL[fl] ?? fl}
+              </span>
+            ))}
+          </div>
+          <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+            {s.rank === 0 ? 'Confirm store →' : 'Review →'}
           </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums" style={chip(form.missing.length ? 'warn' : 'good')}>
-            {form.present.length} of 5 pages
-          </span>
-        )}
-        {form.flags.map((fl) => (
-          <span key={fl} className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium" style={chip(flagTone(fl))}>
-            {FLAG_LABEL[fl] ?? fl}
-          </span>
-        ))}
+        </div>
       </div>
     </Link>
   );
 }
 
-export function TriageBoard({data, company}: {data: TriageResult; company: string}) {
-  const groups = useMemo(() => {
-    const by = new Map<string, {heading: string; sort: string; forms: TriageForm[]}>();
-    for (const f of data.forms) {
-      const sort = periodSortKey(f.periodStart, f.periodEnd);
-      const g = by.get(sort) ?? {heading: periodHeading(f.periodStart, f.periodEnd), sort, forms: []};
-      g.forms.push(f);
-      by.set(sort, g);
+export function TriageBoard({data}: {data: TriageResult; company: string}) {
+  const {forms, counts, stores} = useMemo(() => {
+    const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
+    withStatus.sort(
+      (a, b) =>
+        a.s.rank - b.s.rank ||
+        (b.f.periodStart ?? '').localeCompare(a.f.periodStart ?? '') ||
+        (a.f.storeCode ?? 'zzz').localeCompare(b.f.storeCode ?? 'zzz', undefined, {numeric: true}),
+    );
+    const counts = {ready: 0, needsStore: 0, incomplete: 0, committed: 0};
+    for (const {s} of withStatus) {
+      if (s.rank === 0) counts.needsStore++;
+      else if (s.rank === 1) counts.incomplete++;
+      else if (s.rank === 2) counts.ready++;
+      else counts.committed++;
     }
-    // Latest period first; a form with no readable period (sort key '9999') always
-    // sinks to the bottom rather than floating to the top in a descending sort.
-    const list = [...by.values()];
-    for (const g of list) {
-      g.forms.sort((a, b) => (a.storeCode ?? 'zzz').localeCompare(b.storeCode ?? 'zzz') || a.version.localeCompare(b.version));
-    }
-    return list.sort((a, b) => {
-      const aNo = a.sort === '9999';
-      const bNo = b.sort === '9999';
-      if (aNo !== bNo) return aNo ? 1 : -1;
-      return b.sort.localeCompare(a.sort);
-    });
+    const stores = new Set(data.forms.map((f) => f.storeCode).filter(Boolean)).size;
+    return {forms: withStatus.map((w) => w.f), counts, stores};
   }, [data.forms]);
 
   const t = data.totals;
+  const n = forms.length;
 
   return (
     <div className={GL_PAGE}>
-      <header className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="font-heading text-xl font-semibold tracking-tight">Scan triage</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Uploaded pages, sorted into store forms by period and version. Open a card to review and commit its counts.
-            </p>
+            {n > 0 ? (
+              <p className="mt-1 text-[15px] text-muted-foreground">
+                <span className="font-semibold text-foreground">{n}</span> {n === 1 ? 'form' : 'forms'} across{' '}
+                <span className="font-semibold text-foreground">{stores}</span> {stores === 1 ? 'store' : 'stores'}, sorted so the ones that need you come first.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-sm text-muted-foreground">Uploaded pages, sorted into store forms. Open a card to review and commit its counts.</p>
+            )}
           </div>
           <Link
             href="/uploads"
@@ -140,13 +150,17 @@ export function TriageBoard({data, company}: {data: TriageResult; company: strin
             All uploads
           </Link>
         </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
-          <span><span className="font-medium text-foreground">{t.forms}</span> forms</span>
-          <span><span className="font-medium text-foreground">{t.inventoryPages}</span> inventory pages</span>
-          {t.sales > 0 && <span>{t.sales} sales {t.sales === 1 ? 'report' : 'reports'} set aside</span>}
-          {t.blank > 0 && <span>{t.blank} blank dropped</span>}
-          {t.unplaceable > 0 && <span className="text-amber-700 dark:text-amber-300">{t.unplaceable} to place by hand</span>}
-        </div>
+
+        {n > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {counts.needsStore > 0 && <StatBadge tone="crit" n={counts.needsStore} label="need a store" />}
+            {counts.incomplete > 0 && <StatBadge tone="warn" n={counts.incomplete} label="incomplete" />}
+            {counts.ready > 0 && <StatBadge tone="good" n={counts.ready} label="ready" />}
+            {counts.committed > 0 && <StatBadge tone="good" muted n={counts.committed} label="committed" />}
+            {t.sales > 0 && <span className="text-xs text-muted-foreground">· {t.sales} sales {t.sales === 1 ? 'sheet' : 'sheets'} set aside</span>}
+            {t.unplaceable > 0 && <span className="text-xs text-[color:var(--status-warn)]">· {t.unplaceable} to place by hand</span>}
+          </div>
+        )}
       </header>
 
       {data.mock && (
@@ -155,7 +169,7 @@ export function TriageBoard({data, company}: {data: TriageResult; company: strin
         </div>
       )}
 
-      {data.forms.length === 0 ? (
+      {n === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-1 px-6 py-14 text-center">
             <p className="font-heading text-sm font-semibold">No scanned forms yet</p>
@@ -165,19 +179,9 @@ export function TriageBoard({data, company}: {data: TriageResult; company: strin
           </CardContent>
         </Card>
       ) : (
-        <div className="flex flex-col gap-7">
-          {groups.map((g) => (
-            <section key={g.sort} className="flex flex-col gap-3">
-              <div className="flex items-baseline justify-between gap-3 border-b border-border pb-1.5">
-                <h2 className="font-heading text-sm font-semibold tracking-tight">{g.heading}</h2>
-                <span className="text-xs text-muted-foreground tabular-nums">{g.forms.length} {g.forms.length === 1 ? 'form' : 'forms'}</span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {g.forms.map((f) => (
-                  <FormCard key={f.key} form={f} />
-                ))}
-              </div>
-            </section>
+        <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {forms.map((f) => (
+            <FormCard key={f.key} form={f} />
           ))}
         </div>
       )}
@@ -203,5 +207,17 @@ export function TriageBoard({data, company}: {data: TriageResult; company: strin
         </section>
       )}
     </div>
+  );
+}
+
+function StatBadge({tone, n, label, muted}: {tone: Tone; n: number; label: string; muted?: boolean}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+      style={muted ? {color: 'var(--muted-foreground)', background: 'var(--muted)'} : tint(tone)}
+    >
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: muted ? 'var(--muted-foreground)' : TONE_VAR[tone]}} />
+      <span className="font-semibold tabular-nums">{n}</span> {label}
+    </span>
   );
 }
