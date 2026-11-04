@@ -107,7 +107,18 @@ export function TriageBoard({data, company}: {data: TriageResult; company: strin
       g.forms.push(f);
       by.set(sort, g);
     }
-    return [...by.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+    // Latest period first; a form with no readable period (sort key '9999') always
+    // sinks to the bottom rather than floating to the top in a descending sort.
+    const list = [...by.values()];
+    for (const g of list) {
+      g.forms.sort((a, b) => (a.storeCode ?? 'zzz').localeCompare(b.storeCode ?? 'zzz') || a.version.localeCompare(b.version));
+    }
+    return list.sort((a, b) => {
+      const aNo = a.sort === '9999';
+      const bNo = b.sort === '9999';
+      if (aNo !== bNo) return aNo ? 1 : -1;
+      return b.sort.localeCompare(a.sort);
+    });
   }, [data.forms]);
 
   const t = data.totals;
