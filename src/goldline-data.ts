@@ -4,7 +4,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
-import {applyStoreRegistry, reconcileYears, segmentBundle} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
@@ -708,8 +708,10 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
   // classifier left raw ("DS 5300", "5360", a misread "472") collapses into the real
   // store's form instead of each variant spinning off its own. snapStoreCode trusts a
   // code that is itself a registered store, so genuinely different stores stay apart.
+  // Then cut store-less pages into per-scan runs (uploads already read oldest-first) so a
+  // blank-store form stays one physical form instead of merging several unreadable stores.
   const known = await knownStoreCodes(companyId);
-  const {forms} = segmentBundle(reconcileYears(applyStoreRegistry(uploads.map(toClassifiedPage), known)));
+  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(applyStoreRegistry(uploads.map(toClassifiedPage), known))));
   if (forms.length === 0) return []; // no inventory pages to group (all parked)
   const split = forms.length > 1; // a genuine multi-store / multi-period scan
 

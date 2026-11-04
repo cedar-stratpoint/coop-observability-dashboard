@@ -32,6 +32,10 @@ export type ClassifiedPage = PageClassification & {
   /** Set by reconcileYears when this page's (OCR-misread) year was snapped to the
    *  bundle's dominant year; keeps the original for the flag / undo. */
   year_snapped?: {from: number; to: number};
+  /** Set by assignBlankFormRuns on a store-less page: the scan run it belongs to, so a
+   *  blank-store form groups by its physical run instead of collapsing every unreadable
+   *  page into one bucket. Ignored once a store is known. */
+  contiguityKey?: string;
 };
 
 /** All the ids seen for one inventory page number within a form (length > 1 = dup). */
@@ -318,9 +322,34 @@ export function periodFlags(start: string | null, end: string | null): string[] 
 }
 
 /** The key identifying one FORM (its five pages share it): store · period-bucket ·
- *  version. Uses the coarse half-month bucket so date misreads don't over-split. */
-export function formKey(c: Pick<PageClassification, 'store_code' | 'period_start' | 'period_end' | 'version'>): string {
-  return [c.store_code ?? 'unknown-store', periodBucket(c.period_start, c.period_end), c.version].join('|');
+ *  version. Uses the coarse half-month bucket so date misreads don't over-split. When
+ *  the store is unreadable, a per-scan contiguity run key (assignBlankFormRuns) stands in
+ *  so blank pages don't all collapse into one bucket; without one they fall back to a
+ *  single 'unknown-store' group as before. */
+export function formKey(c: Pick<ClassifiedPage, 'store_code' | 'period_start' | 'period_end' | 'version' | 'contiguityKey'>): string {
+  const storeSlot = c.store_code ?? (c.contiguityKey ? `blank:${c.contiguityKey}` : 'unknown-store');
+  return [storeSlot, periodBucket(c.period_start, c.period_end), c.version].join('|');
+}
+
+/**
+ * Give each store-less inventory page a contiguity "run" key, so a scan's consecutive
+ * 1→5 run becomes ONE blank-store form instead of every unreadable page collapsing
+ * together (which would let a single "needs a store" card mix several real stores).
+ * Pages MUST be in scan order (oldest first). A new run starts when the page number does
+ * not advance (a reset to an earlier or equal page number) or the form version changes.
+ * Pages that already carry a store are returned untouched — they group by store.
+ */
+export function assignBlankFormRuns<T extends ClassifiedPage>(pagesInScanOrder: T[]): T[] {
+  let run = 0;
+  let lastPage = Infinity; // forces a new run on the first blank page
+  let lastVersion: string | null = null;
+  return pagesInScanOrder.map((p) => {
+    if (p.store_code || !isInventoryPage(p)) return p;
+    if (p.page <= lastPage || p.version !== lastVersion) run++;
+    lastPage = p.page;
+    lastVersion = p.version;
+    return {...p, contiguityKey: `r${run}`};
+  });
 }
 
 /** The key identifying one PAGE within a form: form key · page number. Two pages

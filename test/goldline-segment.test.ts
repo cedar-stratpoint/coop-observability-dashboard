@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   applyStoreRegistry,
+  assignBlankFormRuns,
   canonicalPeriod,
   clampPage,
   duplicatePages,
@@ -268,6 +269,26 @@ describe('applyStoreRegistry + grouping', () => {
     expect(forms.length).toBe(1);
     expect(forms[0].store_code).toBe('5300');
     expect(forms[0].present).toEqual([1, 2, 3]);
+  });
+});
+
+describe('assignBlankFormRuns', () => {
+  const blank = (id: string, p: number) => page({id, page: p, store_code: null, store_name: null, consultant: null});
+  it('cuts a scan into one run per physical blank form (page number resets)', () => {
+    const pages = assignBlankFormRuns([blank('a', 1), blank('b', 2), blank('c', 3), blank('d', 4), blank('e', 5), blank('f', 1), blank('g', 2)]);
+    const forms = groupIntoForms(pages);
+    expect(forms.length).toBe(2);
+    expect(forms.map((f) => f.present).sort()).toEqual([[1, 2], [1, 2, 3, 4, 5]]);
+    expect(forms.every((f) => f.store_code === null)).toBe(true);
+  });
+  it('starts a new run when the version changes mid-sequence', () => {
+    const pages = assignBlankFormRuns([blank('a', 1), {...blank('b', 2), version: 'v2' as const}]);
+    expect(groupIntoForms(pages).length).toBe(2);
+  });
+  it('leaves pages that already have a store untouched (no run key, group by store)', () => {
+    const pages = assignBlankFormRuns([page({id: 'a', store_code: '473', page: 1}), blank('b', 2)]);
+    expect(pages[0].contiguityKey).toBeUndefined();
+    expect(pages[1].contiguityKey).toBe('r1');
   });
 });
 
