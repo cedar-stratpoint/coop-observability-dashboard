@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — A "forms found in this scan" view, straight from the Uploads drop
+
+Phase 3 (b): the per-scan forms view. Opening a scan drop from Uploads ("See forms in this scan") now shows that scan's pages sorted into store forms, the same redesigned cards as the triage inbox but scoped to one drop, led by "N forms across M stores in this scan, sorted so the ones that need you come first." New route `/uploads/scan/[source]`; `triageBoard(companyId, {source})` filters the company's classified pages to the scan by its source name (reuses `uploadSource`, no extra query); the board grew an optional `scan` prop for the per-scan header. This is the shared forms surface we unified on, now reachable two ways, company-wide inbox and per-scan. Next: auto-split on upload-complete and the guided "which store?" step for the unreadable cards.
+
 ## 2026-11-05 — Scan triage, redesigned: lead with a summary, sort by what needs you
 
 First piece of the review-UX redesign (Phase 3). The triage board, the shared "forms to review" view, now opens with a plain sentence ("8 forms across 4 stores, sorted so the ones that need you come first") and a status breakdown (need a store · incomplete · ready), instead of a flat period-grouped grid. Each form is one calm card with a severity stripe and a single status: a store it couldn't read is **Needs a store** (red, sorted first), missing pages are **Incomplete** (amber), the rest are **Ready** (green), and committed sinks to the bottom. The store is now the card's primary line (BA secondary), and an unreadable store reads as "Store not readable" rather than a blank. Colour and order agree, so the cards that need a human float to the top. Same data and links as before, just a far calmer read; the per-scan "forms found" summary and the guided "which store?" step build on this next.
