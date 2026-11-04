@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Fix: large multi-page inventory scans were rejected before splitting
+
+The real September scan is ~114 MB (98 pages in one PDF) and was refused with "… is over 25 MB" before it could be split. The 25 MB limit was checked on the whole file, but it's meant as a per-page safeguard. Now a PDF is **split into single pages first, then the 25 MB limit is applied per page** (`components/analyst/upload-queue.tsx`) — a whole multi-page scan can be much larger, and only a genuinely huge single page is skipped (with a clear message), while the rest of the scan goes through. CSV / XLSX (not split) keep the whole-file check. Uploader help text updated to "25 MB per page". This unblocks uploading the bundle the Phase 0–2 pipeline was built for.
+
 ## 2026-11-04 — Nichido Phase 2 (part 2b/2c): store-change guard + Legacy values in review
 
 Finishing the Phase 2 review slices (see `../PLAN.md`, NICH-17). Both additive, no schema change.
