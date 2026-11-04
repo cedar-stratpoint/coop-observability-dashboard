@@ -54,6 +54,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
         extraction: p.extraction,
         productNames: names,
         scanUrl: p.upload.storage_path ? `/api/goldline/uploads/${p.upload.id}/file` : null,
+        detectedStore: p.detectedStore,
       };
     }),
   );

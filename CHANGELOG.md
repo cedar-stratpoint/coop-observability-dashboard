@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Staging promotion: Nichido scan pipeline (Phases 0–2) + large-PDF fix
+
+Isolated promotion of the Nichido handwritten-inventory-scan work to `staging` (cherry-picked onto the staging base, not a full develop→staging sweep). See `../PLAN.md` (NICH-17) and the develop CHANGELOG entries for the detail. The two additive Nichido Supabase migrations (`supabase/nichido/p0_page_classification.sql`, `p1_inventory_version.sql`) were already applied to Nichido Staging. What lands here:
+
+- **Phase 0** — pre-OCR page classifier (page number, kind, orientation, form version, handwritten header), auto-rotate upside-down pages, segment a shuffled bundle into store · period · version forms, store-code snapping to the registry, duplicate / re-upload detection.
+- **Phase 1** — version-aware extraction (V1 delivery-col-4, V2 delivery-first, Legacy 7-column deducted with an `extra` sidecar + self-check); `inventory.form_version` / `inventory.extra`.
+- **Phase 2** — scan triage board (`/uploads/triage`), duplicate value-diff on review, store-change guard on batch commit, Legacy deducted values shown in review rows.
+- **Fix** — large multi-page scans split into pages before the 25 MB limit (applied per page), so the ~114 MB September scan uploads.
+
+151 goldline tests green, tsc clean on the staging base.
+
 ## 2026-11-03 — Shopee Sync also loads a closed week's missing Ads and SKU files
 
 A week whose 7 sales days were all loaded but whose Ads file was never imported (staging: 19-25 Oct, after a worker bug failed the file once) was never retried: "missing" only looked at sales days and a week window only existed when all 7 days were missing. Pressing Sync or Retry now queues that week.

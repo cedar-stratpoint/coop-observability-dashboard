@@ -17,6 +17,21 @@ export const EXTRACT_MODEL = 'claude-sonnet-5-5';
 export const COLUMN_KEYS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 export type ColumnKey = (typeof COLUMN_KEYS)[number];
 
+// ── Phase 0: form layout versions and page kinds ───────────────────────────────
+// The Nichido form has evolved. Three layouts show up in real scans; two more
+// (v3, v4) are expected but not yet sampled, so anything off-template is 'unknown'
+// and gets flagged for a human rather than guessed. Detection reads the PRINTED
+// column headers (never the handwriting) — see buildPageClassifyPrompt. The
+// extractor is still V1/V2-shaped; version-aware extraction is Phase 1.
+export const FORM_VERSIONS = ['legacy', 'v1', 'v2', 'unknown'] as const;
+export type FormVersion = (typeof FORM_VERSIONS)[number];
+
+/** What a scanned page structurally is. Only 'inventory' carries item-count rows;
+ *  'sales' is the page-6 report (parked, out of scope); 'blank' is a bleed-through
+ *  back side to drop. */
+export const PAGE_KINDS = ['inventory', 'sales', 'blank', 'unknown'] as const;
+export type PageKind = (typeof PAGE_KINDS)[number];
+
 export type ManifestItem = {code: string; product: string};
 
 // Per-page item manifest, in printed order, generated from the blank templates
@@ -227,17 +242,26 @@ export function buildSystemPrompt(): string {
   ].join('\n');
 }
 
-/** The per-page manifest text (item codes + column meanings). Cached per page. */
-export function buildManifestPrompt(page: number): string {
+/** The per-page manifest text (item codes + column meanings) for the THREE-LOCATION
+ *  layouts (V1, V2). They share the same five fields and row-math (ending = stockroom
+ *  + drawer + selling); only the printed Delivery-column POSITION differs — col 4
+ *  (after the three counts) on V1, first (before them) on V2 — so the prompt states
+ *  the right order while the returned field names stay identical. Cached per page. */
+export function buildManifestPrompt(page: number, version: 'v1' | 'v2' = 'v1'): string {
   const items = MANIFESTS[page];
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
   }
   const list = items.map((i) => `${i.code} ${i.product}`).join(' · ');
+  const order = version === 'v2'
+    ? '  delivery (col1, FIRST) · stockroom (col2) · drawer (col3) · selling_area (col4) · ending_on_hand (col5)'
+    : '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)';
   return [
-    `PAGE ${page} of ${PAGE_COUNT}. Columns, left to right (handwritten int or null):`,
-    '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)',
-    '  total_value (col6) is DERIVED — leave null.',
+    `PAGE ${page} of ${PAGE_COUNT}. Form version ${version.toUpperCase()}. Columns, left to right (handwritten int or null):`,
+    order,
+    '  total_value (last col) is DERIVED — leave null.',
+    'ending_on_hand = stockroom + drawer + selling_area; delivery is separate (not part of it).',
+    'Map each cell by its PRINTED column meaning above, not by any handwritten sub-label.',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
     'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,
@@ -266,6 +290,67 @@ export const PAGE_DETECT_SCHEMA = {
   // (400 that failed every PDF). detectPage clamps the value to 0–6 instead.
   properties: {page: {type: 'integer'}},
   required: ['page'],
+} as const;
+
+/**
+ * Phase 0 classifier prompt. A superset of page-detect: for one shuffled scan it
+ * returns page number, kind, orientation, form version, and the per-page handwritten
+ * header (store / period / consultant) — WITHOUT transcribing item counts. This is
+ * what lets a 98-page multi-store, multi-version, rotated bundle be sorted into
+ * `{store · period · version · page}` form groups before any extraction runs.
+ */
+export function buildPageClassifyPrompt(): string {
+  return [
+    'This is ONE scanned page from a NICHIDO COSMETICS "Semi-Monthly Inventory" packet.',
+    'Scans arrive shuffled, rotated, and mixed across stores, periods, and form versions.',
+    'Classify this single page only. Do NOT transcribe item counts.',
+    '',
+    'Return JSON only (match the schema):',
+    '- page: the printed "PAGE # N" number (1–6), or 0 if none is visible.',
+    '- kind: "inventory" (pages 1–5, the ITEM# / PRODUCT count grid), "sales" (page 6,',
+    '  the 31-day Sales Report logbook, no item-count columns), "blank" (no form content,',
+    '  e.g. a bleed-through back side), or "unknown".',
+    '- orientation: 0 if upright, 180 if upside-down. Judge from the printed headings and',
+    '  the handwritten header line reading the right way up.',
+    '- version: which column layout the PRINTED template uses. Read the COLUMN HEADERS,',
+    '  never the handwriting:',
+    '    "legacy" — seven numbered columns including two "Deducted" columns (Beginning',
+    '      Inventory, Delivery, Beginning+Delivery, Total PCS Deducted, Total Amount',
+    '      Deducted, Ending Inventory, Total Amount of Ending Inventory).',
+    '    "v1" — three Tagalog "Bilang sa" location counts THEN Delivery: Stockroom,',
+    '      Drawer, Selling Area, Delivery, Ending Inventory, Total (Delivery is the 4th',
+    '      data column, after the three counts).',
+    '    "v2" — Delivery FIRST, then the three counts: Delivery, Stockroom, Drawer,',
+    '      Selling Area, Ending Inventory, Total (Delivery precedes the three counts).',
+    '    "unknown" — none of the above, or you cannot tell.',
+    '- store_code, store_name, period_start, period_end, consultant: from the handwritten',
+    '  header line at the TOP of the page. EVERY page has this header, not just page 1.',
+    '  Give period_start and period_end as YYYY-MM-DD using your best reading of the',
+    '  written dates (do not "fix" an impossible day — report it as written). Use null for',
+    '  any field that is absent or illegible.',
+    '- confidence: 0–1 for the overall classification.',
+  ].join('\n');
+}
+
+/** Schema for the classifier call. `page` and `orientation` are plain integers
+ *  (no enum/bounds — structured outputs reject numeric bounds; the caller clamps
+ *  page→0–6 and orientation→{0,180}). `kind` and `version` are string enums. */
+export const PAGE_CLASSIFY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    page: {type: 'integer'},
+    kind: {type: 'string', enum: ['inventory', 'sales', 'blank', 'unknown']},
+    orientation: {type: 'integer'},
+    version: {type: 'string', enum: ['legacy', 'v1', 'v2', 'unknown']},
+    store_code: {type: ['string', 'null']},
+    store_name: {type: ['string', 'null']},
+    period_start: {type: ['string', 'null']},
+    period_end: {type: ['string', 'null']},
+    consultant: {type: ['string', 'null']},
+    confidence: {type: 'number'},
+  },
+  required: ['page', 'kind', 'orientation', 'version', 'confidence'],
 } as const;
 
 /**

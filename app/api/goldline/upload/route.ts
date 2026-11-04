@@ -11,23 +11,31 @@ import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
   createUpload,
+  findDuplicatePageKey,
   getBatch,
   goldlineConfigured,
+  saveClassification,
   saveExtraction,
   setUploadStatus,
   upsertSales,
 } from '@/src/goldline-data';
-import {detectPage, extractInventoryPage, extractionConfigured, type ExtractedPage} from '@/src/goldline-extract-run';
+import {classifyPage, extractInventoryPage, extractionConfigured, type ExtractedPage} from '@/src/goldline-extract-run';
+import {applyOrientation} from '@/src/goldline-orient';
+import {knownStoreCodes} from '@/src/goldline-store-registry';
+import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from '@/src/goldline-segment';
 import {getWriterProfile} from '@/src/goldline-writer-data';
-import {humanizeExtractError, INVENTORY_PAGES, MANIFESTS} from '@/src/goldline-extract';
+import {humanizeExtractError, MANIFESTS} from '@/src/goldline-extract';
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
 //   • .csv  → parse → idempotent upsert into sales (needs period_start/_end)
 //   • .xlsx → Watsons POS Sales Data: one month, every store. The month comes from the
 //             file; stores and Watsons SKUs are added, then the month's sales replaced
-//   • .pdf  → store → Claude Vision detects the page → extracts that page's items →
-//             staged in extractions for review (page 6 / non-form → out of scope)
+//   • .pdf  → store → Claude Vision CLASSIFIES the page (number, kind, orientation,
+//             form version, handwritten header) → snaps the store code to the registry,
+//             records a page_key + duplicate flag → rotates if upside-down → extracts
+//             that page's items → staged in extractions for review (page 6 / blank /
+//             non-form → set aside, out of scope)
 // Tenant isolation is enforced here (getDataContext + canEditData); the data-blind
 // Coop Admin and read-only analysts are refused. File-type gating is the first check.
 
@@ -307,27 +315,74 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
 
   const pdfBase64 = Buffer.from(bytes).toString('base64');
   try {
-    // Auto-detect which page this scan is (from the footer), then extract with that
-    // page's manifest. Page 6 is the daily Sales Report (not inventory); 0 = not a
-    // recognizable form page. Both are a clean, out-of-scope stop, not a failure.
+    // Phase 0: classify the page (number, kind, orientation, form version, handwritten
+    // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
+    // read store code to the known registry (handwritten codes misread at high
+    // confidence, e.g. 473→472), persist the classification + a semantic page_key, and
+    // flag any duplicate / re-upload — all before extraction. Version-aware extraction
+    // is Phase 1; here the extractor still reads the V1/V2 three-location layout.
     emit({type: 'stage', stage: 'detecting'});
-    const page = await detectPage(pdfBase64);
-    if (page === 0) {
+    const cls = await classifyPage(pdfBase64);
+    const page = cls.page;
+
+    // Reconcile the store code against the registry (best-effort: no registry = raw).
+    let registry: string[] = [];
+    try {
+      registry = await knownStoreCodes(companyId);
+    } catch (e) {
+      console.error('goldline upload: store registry read failed', msg(e));
+    }
+    const snap = snapStoreCode(cls.store_code, registry);
+    const inv = isInventoryPage(cls);
+    const pk = inv
+      ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
+      : null;
+
+    // Duplicate / re-upload: same semantic page_key seen before. Flag, never drop.
+    let duplicateOf: Array<{id: string; status: string; created_at: string}> = [];
+    if (pk) {
+      try {
+        duplicateOf = await findDuplicatePageKey(companyId, pk, uploadId);
+      } catch (e) {
+        console.error('goldline upload: duplicate check failed', msg(e));
+      }
+    }
+
+    // Persist the classifier output on the upload row (metadata; best-effort).
+    await saveClassification({
+      uploadId,
+      pageNo: page,
+      pageKind: cls.kind,
+      orientation: cls.orientation,
+      formVersion: cls.version,
+      pageKey: pk,
+      classification: {...cls, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
+    }).catch((e) => console.error('goldline upload: saveClassification failed', msg(e)));
+
+    // Page-6 sales report and blanks/unrecognized pages are a clean, out-of-scope stop.
+    if (cls.kind === 'sales' || page === 6) {
+      const reason = 'This is the page 6 Sales Report, not an inventory page. It has been set aside (out of scope for now).';
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
+    }
+    if (!inv) {
       const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
       await setUploadStatus(uploadId, 'failed', {rejectReason: reason});
-      return json({uploadId, status: 'failed', error: reason}, 422);
+      return json({uploadId, status: 'failed', error: reason, pageKind: cls.kind}, 422);
     }
-    if (!INVENTORY_PAGES.includes(page)) {
-      const reason = 'This is page 6, the daily Sales Report, not an inventory page. Only inventory pages (1 to 5) are read here.';
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      return json({uploadId, status: 'rejected', error: reason}, 422);
-    }
+
+    // Upright copy for extraction: rotate 180° pages before reading (no-op if upright).
+    const extractB64 = cls.orientation === 180
+      ? Buffer.from(await applyOrientation(bytes, 180)).toString('base64')
+      : pdfBase64;
 
     emit({type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0});
     // The writer profile: an earlier reviewed copy of this page + notes from past
     // corrections, learned from this database's committed scans (empty on any error).
     const profile = await getWriterProfile(companyId, page, batchStore, ctx.storeScope);
-    const extracted = await extractInventoryPage(pdfBase64, page, profile);
+    // Phase 1: extract against the detected form version (legacy uses the 7-column
+    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1.
+    const extracted = await extractInventoryPage(extractB64, page, profile, cls.version);
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
     if (outPdf.length) {
@@ -345,13 +400,19 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       rows: extracted.rows.length,
       docConfidence: avgConfidence(extracted),
       flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
-      // The printed header (page 1 only carries it) — lets a batch prefill store/period.
+      // Phase 0 classification: the form version detected, whether the page was rotated
+      // upright, the store-code snap, and any duplicate / re-upload of this same page.
+      formVersion: cls.version,
+      rotated: cls.orientation === 180,
+      store: {code: snap.code, status: snap.status, from: snap.from ?? null, candidates: snap.candidates ?? null},
+      duplicateOf: duplicateOf.map((d) => ({uploadId: d.id, status: d.status, at: d.created_at})),
+      // The handwritten header (now read on every page) — lets a batch prefill store/period.
       header: {
-        storeCode: extracted.store_code || null,
+        storeCode: extracted.store_code || snap.code || null,
         storeName: extracted.store_name || null,
-        periodStart: extracted.period_start ?? null,
-        periodEnd: extracted.period_end ?? null,
-        consultant: extracted.consultant ?? null,
+        periodStart: extracted.period_start ?? cls.period_start ?? null,
+        periodEnd: extracted.period_end ?? cls.period_end ?? null,
+        consultant: extracted.consultant ?? cls.consultant ?? null,
       },
     });
   } catch (e) {

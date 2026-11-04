@@ -106,6 +106,61 @@ export async function setUploadStatus(
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
 }
 
+/**
+ * Phase 0 — persist a page's classifier output on its upload row (additive columns),
+ * plus the semantic `page_key` used for duplicate / re-upload detection. Best-effort:
+ * callers should not fail the upload if this write errors (classification is metadata,
+ * not the extracted counts).
+ */
+export async function saveClassification(input: {
+  uploadId: string;
+  pageNo: number;
+  pageKind: string;
+  orientation: 0 | 180;
+  formVersion: string;
+  pageKey: string | null;
+  classification: unknown;
+}): Promise<void> {
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .update({
+      page_no: input.pageNo,
+      page_kind: input.pageKind,
+      orientation: input.orientation,
+      form_version: input.formVersion,
+      page_key: input.pageKey,
+      classification: input.classification,
+      classified_at: new Date().toISOString(),
+    })
+    .eq('id', input.uploadId);
+  if (res.error) throw new Error(`uploads classification update failed: ${res.error.message}`);
+}
+
+/**
+ * Phase 0 — prior uploads for this company sharing the same semantic `page_key`
+ * (a duplicate within the bundle or a re-upload of a page seen before). Newest first,
+ * excluding the current upload. The caller FLAGS these; it never auto-drops.
+ */
+export async function findDuplicatePageKey(
+  companyId: string,
+  pageKey: string,
+  excludeUploadId: string,
+): Promise<Array<{id: string; status: string; created_at: string}>> {
+  if (!pageKey) return [];
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .select('id,status,created_at')
+    .eq('company_id', companyId)
+    .eq('page_key', pageKey)
+    .neq('id', excludeUploadId)
+    .order('created_at', {ascending: false})
+    .limit(10);
+  if (res.error) throw new Error(`uploads duplicate check failed: ${res.error.message}`);
+  return (res.data ?? []) as Array<{id: string; status: string; created_at: string}>;
+}
+
 /** What deleting an upload will take with it — shown in the confirmation before the
  *  user commits to it. `inventoryRows` are the inventory counts this scan is still
  *  the source of (a later scan that overwrote a count owns it instead). */
@@ -326,6 +381,9 @@ export type ReviewedInventoryRow = {
   selling_area: number | null;
   delivery: number | null;
   ending_on_hand: number | null;
+  // Phase 1 · Legacy-only sidecar (beginning / begin_plus_delivery / deducted_pcs),
+  // carried verbatim into inventory.extra. Absent/null for v1/v2 rows.
+  extra?: Record<string, number | null> | null;
 };
 
 /**
@@ -650,6 +708,8 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
 export type BatchPage = {
   upload: UploadRow;
   extraction: ExtractionRecord | null;
+  /** Phase 0 detected/snapped store for this page, for the store-change guard. */
+  detectedStore: string | null;
 };
 
 /** The batch's uploads with their staged readings, oldest first. Company-scoped. */
@@ -658,14 +718,24 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
   const supa = db();
   const ups = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,classification')
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})
     .limit(50); // pagination-ok: a batch is capped at 20 files (UI) — 50 is a hard ceiling
   if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
-  const uploads = (ups.data ?? []) as UploadRow[];
-  if (!uploads.length) return [];
+  const rawUploads = (ups.data ?? []) as Array<UploadRow & {classification?: Record<string, unknown> | null}>;
+  if (!rawUploads.length) return [];
+  // Phase 0 store the page's detected/snapped store in classification; carry it so the
+  // review can flag a batch whose pages read different stores (store-change guard).
+  const detectedStore = new Map<string, string | null>();
+  for (const u of rawUploads) {
+    const c = u.classification ?? {};
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const code = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    detectedStore.set(u.id, code);
+  }
+  const uploads = rawUploads.map(({classification: _c, ...u}) => u) as UploadRow[];
   const ext = await supa
     .from('extractions')
     .select('upload_id,page,status,doc_confidence,rows')
@@ -678,7 +748,7 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
       {page: e.page, status: e.status, docConfidence: e.doc_confidence, data: e.rows} as ExtractionRecord,
     ]),
   );
-  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null}));
+  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null, detectedStore: detectedStore.get(upload.id) ?? null}));
 }
 
 /**
@@ -721,6 +791,8 @@ export async function commitBatch(input: {
         selling_area: r.selling_area,
         delivery: r.delivery,
         ending_on_hand: r.ending_on_hand,
+        // Legacy sidecar (null for v1/v2); commit_batch writes it to inventory.extra.
+        extra: r.extra ?? null,
       })),
     })),
   });
