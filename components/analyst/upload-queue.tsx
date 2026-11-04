@@ -301,17 +301,29 @@ export function UploadQueueProvider({company, children}: {company: string | null
             problems.push(`“${f.name}” is empty.`);
             continue;
           }
-          if (f.size > MAX_FILE_BYTES) {
-            problems.push(`“${f.name}” is over 25 MB.`);
-            continue;
-          }
           if (k === 'pdf') {
+            // A multi-store scan can be a big PDF (the September scan is ~114 MB). Split
+            // it into single pages FIRST, then apply the 25 MB limit per page — a whole
+            // handwritten scan is large, but each page is ~1 MB. Only a genuinely huge
+            // single page is refused, and the rest of the scan still goes through.
             try {
-              accepted.push(...(await splitPdfPages(f, (i, n) => splitName(f.name, i, n))));
+              const pages = await splitPdfPages(f, (i, n) => splitName(f.name, i, n));
+              const big = pages.filter((p) => p.size > MAX_FILE_BYTES);
+              if (big.length) {
+                problems.push(`${big.length} ${big.length === 1 ? 'page is' : 'pages are'} over 25 MB and ${big.length === 1 ? 'was' : 'were'} skipped. Re-scan at a lower resolution.`);
+              }
+              accepted.push(...pages.filter((p) => p.size <= MAX_FILE_BYTES));
             } catch (e) {
               problems.push(e instanceof Error ? e.message : `“${f.name}” couldn’t be opened.`);
             }
-          } else accepted.push(f);
+          } else {
+            // CSV / XLSX are not split, so the 25 MB limit applies to the whole file.
+            if (f.size > MAX_FILE_BYTES) {
+              problems.push(`“${f.name}” is over 25 MB.`);
+              continue;
+            }
+            accepted.push(f);
+          }
         }
       } finally {
         setPreparing(false);
