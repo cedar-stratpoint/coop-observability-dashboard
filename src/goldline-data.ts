@@ -3,7 +3,8 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
-import {groupForms, scanOrder} from './upload-batch';
+import {reconcileYears, segmentBundle} from './goldline-segment';
+import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
 // project (src/nichido-client.ts): service-role key, never exposed to the browser.
@@ -652,56 +653,55 @@ export type SplitForm = {
 
 /**
  * Many stores in one scan (Q25): after every page of a drop is read, split the batch
- * into one batch per form. Pages are put in scan order and a new form starts whenever
- * the page number drops (…5, 1…). The first form keeps this batch; each other form
- * gets a new open batch. Store and period come from each form's page 1 header at
- * review, as for any batch. Returns every form; one form means nothing moved.
+ * into one batch per FORM. Grouping uses the Phase 0 classification (store · period ·
+ * version, with the store code snapped to the registry and the year reconciled) via
+ * the same `segmentBundle` the triage board uses — so a shuffled multi-store scan is
+ * separated correctly, where the old page-number heuristic lumped it into one pile.
+ * The first form keeps this batch; each other form gets a new open batch. Each form's
+ * batch is pre-filled with its detected store and period so review opens ready. Pages
+ * with no form (sales / blank / unplaceable) stay in the original batch. Returns every
+ * form; one (or none) means nothing moved.
  */
 export async function splitBatchIntoForms(companyId: string, batchId: string, createdBy: string | null): Promise<SplitForm[]> {
   const batch = await getBatch(companyId, batchId);
   if (!batch || batch.status !== 'open') return [];
   const supa = db();
   const uploads = (await fetchAllRows('uploads', (from, to) =>
-    supa.from('uploads').select('id,filename,created_at').eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
-  )) as unknown as Array<{id: string; filename: string; created_at: string}>;
+    supa.from('uploads').select(UPLOAD_CLS_COLS).eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
+  )) as unknown as UploadClsRow[];
   if (!uploads.length) return [];
-  const heads = new Map<string, {page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>();
-  for (let i = 0; i < uploads.length; i += 100) {
-    const res = await supa
-      .from('extractions')
-      .select('upload_id,page,store:rows->>store_code,ps:rows->>period_start,pe:rows->>period_end,ba:rows->>consultant')
-      .eq('company_id', companyId)
-      .in('upload_id', uploads.slice(i, i + 100).map((u) => u.id)); // pagination-ok: ≤100 ids, one row each
-    if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
-    for (const e of (res.data ?? []) as Array<{upload_id: string; page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>) {
-      heads.set(e.upload_id, {page: e.page ?? null, store: e.store?.trim() || null, ps: e.ps || null, pe: e.pe || null, ba: e.ba?.trim() || null});
-    }
-  }
-  const ordered = scanOrder(uploads).map((u) => ({...u, ...(heads.get(u.id) ?? {page: null, store: null, ps: null, pe: null, ba: null})}));
-  const forms = groupForms(ordered);
+
+  const byId = new Map(uploads.map((u) => [u.id, u]));
+  const {forms} = segmentBundle(reconcileYears(uploads.map(toClassifiedPage)));
+  if (forms.length === 0) return []; // no inventory pages to group (all parked)
+  const split = forms.length > 1; // a genuine multi-store / multi-period scan
+
   const out: SplitForm[] = [];
   for (let f = 0; f < forms.length; f++) {
-    const group = forms[f];
+    const g = forms[f];
+    const ids = g.slots.flatMap((s) => s.ids);
     let id = batchId;
     if (f > 0) {
       id = await createBatch(companyId, createdBy);
-      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', group.map((g) => g.id));
+      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', ids);
       if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
     }
-    const head = group.find((g) => g.page === 1);
+    // When a scan really held several forms, pre-fill each one's batch with its grouped
+    // store + period (the reviewer can still edit; an unmatched store stays blank for
+    // them to pick). A single-form batch is left as the uploader set it.
+    if (split) {
+      await updateBatchInfo(companyId, id, {storeCode: g.store_code ?? null, periodStart: g.period_start ?? null, periodEnd: g.period_end ?? null});
+    }
     out.push({
       batchId: id,
-      pages: group.map((g) => g.page).filter((n): n is number => n != null),
-      files: group.length,
-      storeCode: head?.store ?? null,
-      periodStart: head?.ps ?? null,
-      periodEnd: head?.pe ?? null,
-      consultant: head?.ba ?? null,
+      pages: g.present,
+      files: ids.length,
+      storeCode: g.store_code,
+      periodStart: g.period_start,
+      periodEnd: g.period_end,
+      consultant: consultantOf(byId.get(ids[0]) ?? uploads[0]),
     });
   }
-  // The first form keeps this batch; whatever store or period was typed for the whole
-  // drop belongs to it only when the scan held one form.
-  if (forms.length > 1) await updateBatchInfo(companyId, batchId, {storeCode: null, periodStart: null, periodEnd: null});
   return out;
 }
 
