@@ -105,7 +105,7 @@ function FormCard({form}: {form: TriageForm}) {
   );
 }
 
-export function TriageBoard({data}: {data: TriageResult; company: string}) {
+export function TriageBoard({data, scan}: {data: TriageResult; company: string; scan?: string}) {
   const {forms, counts, stores} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
     withStatus.sort(
@@ -133,14 +133,18 @@ export function TriageBoard({data}: {data: TriageResult; company: string}) {
       <header className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-heading text-xl font-semibold tracking-tight">Scan triage</h1>
+            {scan && <div className="truncate font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--primary)]" title={scan}>{scan}</div>}
+            <h1 className="font-heading text-xl font-semibold tracking-tight">{scan ? 'Forms in this scan' : 'Scan triage'}</h1>
             {n > 0 ? (
               <p className="mt-1 text-[15px] text-muted-foreground">
                 <span className="font-semibold text-foreground">{n}</span> {n === 1 ? 'form' : 'forms'} across{' '}
-                <span className="font-semibold text-foreground">{stores}</span> {stores === 1 ? 'store' : 'stores'}, sorted so the ones that need you come first.
+                <span className="font-semibold text-foreground">{stores}</span> {stores === 1 ? 'store' : 'stores'}
+                {scan ? ' in this scan, sorted so the ones that need you come first.' : ', sorted so the ones that need you come first.'}
               </p>
             ) : (
-              <p className="mt-0.5 text-sm text-muted-foreground">Uploaded pages, sorted into store forms. Open a card to review and commit its counts.</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {scan ? 'No store forms in this scan yet. Its pages may still be reading, or they were sales sheets and blanks.' : 'Uploaded pages, sorted into store forms. Open a card to review and commit its counts.'}
+              </p>
             )}
           </div>
           <Link
