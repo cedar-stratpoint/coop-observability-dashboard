@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Uploads: stop duplicate rows when a page is retried (idempotent ingest)
+
+A real 98-page scan produced 109 upload rows: 11 pages were ingested twice. Cause: when a page's upload request timed out at the edge, the client marked it "failed" but the server kept running and still saved the row; the user's retry then re-sent the identical split-page file and `createUpload` inserted a *second* row (the old duplicate check only flagged copies after the fact, it never prevented them). Now `createUpload` is idempotent within a batch, before storing anything it reuses any existing non-failed row with the same (company, batch, filename), and the upload route short-circuits a reused page (returns its current state, no second row, no re-run of OCR). A genuinely failed first attempt is excluded, so a real retry-after-failure still creates the row. This prevents new duplicates; cleaning up already-duplicated rows and a unique-index backstop are a separate follow-up.
+
 ## 2026-11-04 — Batch review: a loading skeleton that matches the real page
 
 The batch-review route already streamed a placeholder while the server read the batch, but it used the generic page skeleton (a chart block the page doesn't have, no page-tabs), so the content jumped when it arrived. Replaced it with a `BatchReviewSkeleton` that mirrors the actual layout, the header, the store / period / BA card, the grouped page-tab rows, and the review table, so the page paints instantly and settles without a jump. Static markup, no client JS; the real latency win was the caching above.
