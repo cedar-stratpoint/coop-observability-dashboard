@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Review UX: grouped page tabs, calmer review rows, and a "show in scan" locator
+
+Three Hick's-Law / eyestrain fixes to the batch review screen.
+
+- **Page tabs grouped by page number** (`batch-review.tsx`): a big pile (many stores, unknown pages) was a wall of ~50 near-identical "Page N" pills. Now it reads as a few labelled rows — Page 1 to 5, each with compact copy chips that show only their status (the row header carries the number) — and the noisy "Unknown" pages collapse behind a disclosure.
+- **Calmer review row** (`review-rows.tsx`): the ITEM cell stacked code, name, product line, "Maybe…", marks and the Legacy deducted line all at once. Now it's a clear hierarchy with real whitespace: code + name primary, a single combined reason line (marks + alt), then the Legacy context as a quiet tertiary line.
+- **"Show in scan" locator** (new): a crosshair button per row opens the enlarged scan with an **approximate highlight band** over the item's row, animated in. The band is computed from the fixed template + the item's printed order (`rowBandFor` in `goldline-extract.ts`) — no pixel coordinates are captured, so it points at the right row-area, not a pixel-exact box (the lightbox labels it "approximate"). Pure `rowBandFor` is unit-tested.
+- tsc + design detector clean; grouped tabs + modernized rows screenshot-verified (50-page pile → 5 rows + collapsed Unknown).
+
 ## 2026-11-04 — Uploads: paginate the grouped tiles and let rows size (12/24/36, 10/20/50)
 
 The grouped Uploads view showed every tile at once; with 41 uploads that is a long scroll. Added pagination to both views: **tiles paginate 12 / 24 / 36 per page**, **rows (All files, and a group's files) paginate 10 / 20 / 50**, with a per-page selector that switches label and options by view. Changing the page size or leaving a group's drill-in resets to page 1.

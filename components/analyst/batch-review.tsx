@@ -3,10 +3,11 @@
 import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
+import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, FORM_PAGES} from '@/src/upload-batch';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
@@ -114,7 +115,12 @@ export function BatchReview({
   const [ba, setBa] = useState(defaults.consultant ?? '');
   const storeBa = bas?.byStore[storeCode] ?? null;
   const [tabId, setTabId] = useState<string | null>((pages.find((p) => p.upload.id === initialPageId) ?? pages[0])?.upload.id ?? null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  // The enlarged scan. `highlight` (set by the per-row "Show in scan" locate button)
+  // is an approximate row band — top/height as fractions of the page — computed from
+  // the item's printed position in the page's fixed template.
+  const [lightbox, setLightbox] = useState<{url: string; highlight?: {top: number; height: number; label: string}} | null>(null);
+  // Which page-number groups have their copies expanded (tab strip, grouped view).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
   const [committing, startCommit] = useTransition();
@@ -426,9 +432,19 @@ export function BatchReview({
         </Card>
       ) : (
         <>
-          {/* Page tabs */}
-          <div role="tablist" aria-label="Pages" className="flex flex-wrap gap-1.5">
-            {pages.map((p, k) => {
+          {/* Pages, grouped by page number so a big pile (many stores, unknown pages)
+              reads as a few labelled rows instead of a wall of identical pills (Hick's
+              Law). A copy chip shows only its status; the group header carries the
+              number. Unknown pages collapse behind a disclosure. */}
+          {(() => {
+            // index-keyed copies per page number (1-5), plus the 'unknown' bucket.
+            const byPage = new Map<string, number[]>();
+            pages.forEach((p, k) => {
+              const key = p.page ? String(p.page) : 'unknown';
+              (byPage.get(key) ?? byPage.set(key, []).get(key)!).push(k);
+            });
+            const chip = (k: number, n: number, idxInGroup: number, groupSize: number) => {
+              const p = pages[k];
               const info = pageInfo[k];
               const open = Math.max(0, info.flagged - info.resolved);
               const dup = p.page != null && coverage.duplicates.includes(p.page);
@@ -438,13 +454,14 @@ export function BatchReview({
                   role="tab"
                   type="button"
                   aria-selected={tab === k}
+                  aria-label={`Page ${p.page ?? '?'}${groupSize > 1 ? ` copy ${idxInGroup + 1}` : ''}`}
                   onClick={() => setTab(k)}
                   className={cn(
-                    'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
+                    'inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
                     tab === k ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/30',
                   )}
                 >
-                  {p.page ? `Page ${p.page}` : 'Unknown page'}
+                  {groupSize > 1 && <span className="text-xs text-muted-foreground tabular-nums">{idxInGroup + 1}</span>}
                   {p.upload.status === 'committed' ? (
                     <CheckCircle2 className="size-3.5" style={{color: 'var(--status-good)'}} aria-label="committed" />
                   ) : open ? (
@@ -457,13 +474,46 @@ export function BatchReview({
                   {dup && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="duplicate page" />}
                 </button>
               );
-            })}
-            {FORM_PAGES.filter((n) => coverage.missing.includes(n) && coverage.missing.length < 5).map((n) => (
-              <span key={`m${n}`} title="Not in this batch" className="inline-flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground/70">
-                Page {n}
-              </span>
-            ))}
-          </div>
+            };
+            const unknown = byPage.get('unknown') ?? [];
+            return (
+              <div role="tablist" aria-label="Pages" className="flex flex-col gap-1.5">
+                {FORM_PAGES.map((n) => {
+                  const copies = byPage.get(String(n)) ?? [];
+                  if (copies.length === 0) {
+                    return coverage.missing.includes(n) && coverage.missing.length < 5 ? (
+                      <div key={n} className="flex items-center gap-2">
+                        <span className="w-14 shrink-0 text-xs font-medium text-muted-foreground">Page {n}</span>
+                        <span className="text-xs text-muted-foreground/60">not in this batch</span>
+                      </div>
+                    ) : null;
+                  }
+                  return (
+                    <div key={n} className="flex items-center gap-2">
+                      <span className="w-14 shrink-0 text-xs font-medium">Page {n}</span>
+                      <div className="flex flex-wrap gap-1.5">{copies.map((k, i) => chip(k, n, i, copies.length))}</div>
+                    </div>
+                  );
+                })}
+                {unknown.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOpenGroups((g) => ({...g, unknown: !g.unknown}))}
+                      aria-expanded={Boolean(openGroups.unknown)}
+                      className="inline-flex h-6 shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <ChevronDown className={cn('size-3.5 transition-transform', openGroups.unknown && 'rotate-180')} />
+                      Unknown ({unknown.length})
+                    </button>
+                    {openGroups.unknown && (
+                      <div className="flex flex-wrap gap-1.5">{unknown.map((k, i) => chip(k, 0, i, unknown.length))}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {cur && curState && (
             <div role="tabpanel" className="flex flex-col gap-5 lg:flex-row lg:items-start">
@@ -495,7 +545,7 @@ export function BatchReview({
                 </a>
                 <button
                         type="button"
-                        onClick={() => setLightbox(cur.scanUrl)}
+                        onClick={() => setLightbox({url: cur.scanUrl!})}
                         aria-label="Enlarge scan"
                         className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
                       >
@@ -553,6 +603,12 @@ export function BatchReview({
                     const open = unresolvedFlags(curFlags, curState.resolved);
                     goToFlag(stepFlag(open.length ? open : curFlags, curState.active, dir));
                   }}
+                  onLocate={cur.scanUrl && cur.page ? (itemCode) => {
+                    const band = rowBandFor(itemCode, cur.page!);
+                    const names = cur.productNames;
+                    const label = `${itemCode}${names[itemCode] ? ` · ${names[itemCode]}` : ''} · page ${cur.page}`;
+                    setLightbox({url: cur.scanUrl!, highlight: band ? {...band, label} : undefined});
+                  } : undefined}
                 />
               </div>
             </div>
@@ -600,15 +656,41 @@ export function BatchReview({
 
       {lightbox && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8" role="dialog" aria-modal="true" aria-label="Scanned page" onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}>
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <a href={lightbox} target="_blank" rel="noopener noreferrer" className={buttonVariants({variant: 'secondary', size: 'sm'})}>
-              <ExternalLink className="size-3.5" /> Open in new tab
-            </a>
-            <Button variant="secondary" size="sm" autoFocus onClick={() => setLightbox(null)}>
-              <X className="size-4" /> Close
-            </Button>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {lightbox.highlight ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-background/90 px-2.5 py-1 text-xs font-medium">
+                <Crosshair className="size-3.5" style={{color: 'var(--primary)'}} /> {lightbox.highlight.label}
+                <span className="text-muted-foreground">· approximate</span>
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <a href={lightbox.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({variant: 'secondary', size: 'sm'})}>
+                <ExternalLink className="size-3.5" /> Open in new tab
+              </a>
+              <Button variant="secondary" size="sm" autoFocus onClick={() => setLightbox(null)}>
+                <X className="size-4" /> Close
+              </Button>
+            </div>
           </div>
-          <iframe src={lightbox} title="Scanned page (enlarged)" className="min-h-0 w-full flex-1 rounded-md bg-white" />
+          {/* The page, with the approximate row band drawn over it when locating a SKU.
+              The band animates in; the PDF fills the frame, so top/height fractions map
+              to the page's printed layout (approximate — see the "Show in scan" button). */}
+          <div className="relative min-h-0 w-full flex-1">
+            <iframe src={lightbox.url} title="Scanned page (enlarged)" className="h-full w-full rounded-md bg-white" />
+            {lightbox.highlight && (
+              <div
+                className="pointer-events-none absolute right-0 left-0 rounded-sm motion-safe:animate-[pulse_1.6s_ease-in-out_2]"
+                style={{
+                  top: `${lightbox.highlight.top * 100}%`,
+                  height: `${lightbox.highlight.height * 100}%`,
+                  background: 'color-mix(in oklab, var(--primary) 18%, transparent)',
+                  boxShadow: '0 0 0 2px var(--primary), 0 0 0 9999px color-mix(in oklab, black 18%, transparent)',
+                }}
+              />
+            )}
+          </div>
         </div>
       )}
     </div>
