@@ -234,6 +234,12 @@ function mockTriage(): TriageResult {
       periodStart: '2026-09-09', periodEnd: '2026-09-15', flags: ['period-mismatch', 'period-partial'], needsReview: 5}),
     f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
       periodStart: '2026-10-01', periodEnd: '2026-10-15', flags: ['store-corrected'], needsReview: 2, committed: 3}),
+    // A year the reader misread (real data had 2016/2020/2024 fragments) — sinks below 2026.
+    f({storeCode: '2166', storeName: 'Gaisano Mall Digos', consultant: 'Rhea Mae Bermil', version: 'v1',
+      periodStart: '2020-09-01', periodEnd: '2020-09-15', present: [5], missing: [1, 2, 3, 4], flags: ['incomplete'], needsReview: 1}),
+    // A page whose period couldn't be read at all — always last.
+    f({storeCode: null, storeName: null, consultant: 'Unknown', version: 'unknown',
+      periodStart: null, periodEnd: null, present: [3], missing: [1, 2, 4, 5], flags: ['period-missing', 'unknown-store', 'unknown-version'], needsReview: 1}),
   ];
   return {
     configured: false,

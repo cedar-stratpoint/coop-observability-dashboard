@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido scan UX: queue grouping, triage sort, lighter store-conflict notice
+
+Real-data UX fixes after uploading the 98-page September scan. Nothing data-affecting; all additive / presentational.
+
+- **Upload queue groups split pages** (`components/analyst/batch-uploader.tsx`, `upload-queue-format.ts`): a multi-page PDF no longer floods the list with one row per page. Pages split from one scan collapse into a **single summarized row** (source name, "N of M read", aggregate progress) that expands to the per-page rows. `groupQueueItems()` / `groupLabel()` do the grouping (by the `(page N of M)` split name).
+- **Triage board sorts latest-first** (`components/analyst/triage-board.tsx`): most recent period at the top; a form whose period couldn't be read sinks to a "No period" section at the bottom instead of floating up. Forms within a period sort by store then version.
+- **Store-change notice applies Hick's Law** (`components/analyst/batch-review.tsx`): instead of listing every page→store pair (a wall on a big mixed batch), it leads with the **store count + the distinct store chips**, and hides the full per-page breakdown behind a "Which page read which store" disclosure.
+- Note (data quality, not a bug): on the real scan the handwritten **year** is the noisiest OCR field, only ~26 of 61 inventory pages read 2026; the rest scattered across 2016/2020/2024/etc. That fragments the triage board into many single-page fake-year forms. Sorting surfaces the real 2026 forms and sinks the fragments; nothing auto-commits, the reviewer sets the real period before commit. A tighter year-reconciliation is a follow-up. 16 goldline tests green, tsc + design detector clean.
+
 ## 2026-11-04 — Fix: large multi-page inventory scans were rejected before splitting
 
 The real September scan is ~114 MB (98 pages in one PDF) and was refused with "… is over 25 MB" before it could be split. The 25 MB limit was checked on the whole file, but it's meant as a per-page safeguard. Now a PDF is **split into single pages first, then the 25 MB limit is applied per page** (`components/analyst/upload-queue.tsx`) — a whole multi-page scan can be much larger, and only a genuinely huge single page is skipped (with a clear message), while the rest of the scan goes through. CSV / XLSX (not split) keep the whole-file check. Uploader help text updated to "25 MB per page". This unblocks uploading the bundle the Phase 0–2 pipeline was built for.
