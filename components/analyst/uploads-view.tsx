@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, Clock, Loader2, Search, Trash2, X, XCircle} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, Trash2, X, XCircle} from 'lucide-react';
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
@@ -14,6 +14,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
 import {cn} from '@/lib/utils';
 import {GL_PAGE} from '@/src/goldline-ui';
+import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upload-groups';
 
 // The Uploads inbox for one company: add a POS .csv, a Watsons POS Sales Data .xlsx
 // (one month, every store) or a scanned inventory .pdf
@@ -55,6 +56,55 @@ function fmtWhen(iso: string): string {
   return d.toLocaleString(undefined, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
 }
 
+/** "Nov 4, 2026" from a YYYY-MM-DD day. */
+function fmtDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return day;
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+/** One drop as a tile: source scan, day, file count, and a status breakdown. Click
+ *  opens its files (the list scoped to this group). */
+function GroupTile({g, onOpen}: {g: UploadGroup; onOpen: () => void}) {
+  const review = g.byStatus.needs_review ?? 0;
+  const committed = g.byStatus.committed ?? 0;
+  const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
+  const processing = g.byStatus.processing ?? 0;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+          <FileStack className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium" title={g.source}>{g.source}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+            {fmtDay(g.day)} · {g.files} {g.files === 1 ? 'file' : 'files'}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {review > 0 && <Tag cls="text-amber-700 bg-amber-500/15 dark:text-amber-400" n={review} label="to review" />}
+        {committed > 0 && <Tag cls="text-emerald-700 bg-emerald-500/15 dark:text-emerald-400" n={committed} label="committed" />}
+        {bad > 0 && <Tag cls="text-destructive bg-destructive/10" n={bad} label={bad === 1 ? 'issue' : 'issues'} />}
+        {processing > 0 && <Tag cls="text-muted-foreground bg-muted" n={processing} label="reading" />}
+      </div>
+    </button>
+  );
+}
+
+function Tag({cls, n, label}: {cls: string; n: number; label: string}) {
+  return (
+    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums', cls)}>
+      <span className="font-semibold">{n}</span> {label}
+    </span>
+  );
+}
+
 type Toast = {id: number; kind: 'ok' | 'err'; text: string};
 
 export function UploadsView({
@@ -77,7 +127,13 @@ export function UploadsView({
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [from, setFrom] = useState(''); // YYYY-MM-DD, uploaded on or after
+  const [to, setTo] = useState(''); // YYYY-MM-DD, uploaded on or before
   const [page, setPage] = useState(1);
+  // 'list' = the flat file table; 'groups' = one tile per drop. Selecting a tile sets
+  // `groupKey`, which scopes the list to that drop's files.
+  const [view, setView] = useState<'list' | 'groups'>('groups');
+  const [groupKey, setGroupKey] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
 
@@ -101,9 +157,31 @@ export function UploadsView({
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
       if (q && !u.filename.toLowerCase().includes(q)) return false;
+      const day = (u.created_at ?? '').slice(0, 10);
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      if (groupKey && uploadGroupKey(u) !== groupKey) return false;
       return true;
     });
-  }, [uploads, query, statusFilter, kindFilter]);
+  }, [uploads, query, statusFilter, kindFilter, from, to, groupKey]);
+
+  // Groups honour the status/type/search/date filters too, so the tile view narrows
+  // with the same controls (but not the group drill-in, which IS the group).
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const forGroups = uploads.filter((u) => {
+      if (statusFilter !== 'all' && u.status !== statusFilter) return false;
+      if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
+      if (q && !u.filename.toLowerCase().includes(q)) return false;
+      const day = (u.created_at ?? '').slice(0, 10);
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      return true;
+    });
+    return groupUploads(forGroups);
+  }, [uploads, query, statusFilter, kindFilter, from, to]);
+
+  const selectedGroup = groupKey ? groups.find((g) => g.key === groupKey) ?? null : null;
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -133,10 +211,48 @@ export function UploadsView({
       <Card>
         <CardHeader className="gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Files</CardTitle>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {filtered.length} of {uploads.length}
-            </span>
+            {selectedGroup ? (
+              <button
+                type="button"
+                onClick={() => setGroupKey(null)}
+                className="group flex min-w-0 items-center gap-2 text-left"
+              >
+                <ChevronLeft className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+                <span className="min-w-0">
+                  <CardTitle className="truncate">{selectedGroup.source}</CardTitle>
+                  <span className="block text-xs text-muted-foreground">{fmtDay(selectedGroup.day)} · back to groups</span>
+                </span>
+              </button>
+            ) : (
+              <CardTitle>Files</CardTitle>
+            )}
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {view === 'groups' && !selectedGroup ? `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}` : `${filtered.length} of ${uploads.length}`}
+              </span>
+              {!selectedGroup && (
+                <div className="inline-flex rounded-md border border-border p-0.5" role="tablist" aria-label="View">
+                  {([['groups', LayoutGrid, 'Grouped'], ['list', List, 'All files']] as const).map(([v, Icon, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      role="tab"
+                      aria-selected={view === v}
+                      onClick={() => {
+                        setView(v);
+                        setPage(1);
+                      }}
+                      className={cn(
+                        'inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors',
+                        view === v ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <Icon className="size-3.5" /> {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
@@ -152,6 +268,46 @@ export function UploadsView({
                 className="h-8 w-56 rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
               />
             </div>
+            {/* Upload date range — applies to both views. */}
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Uploaded on or after"
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              To
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Uploaded on or before"
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+              />
+            </label>
+            {(from || to) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFrom('');
+                  setTo('');
+                  setPage(1);
+                }}
+                className="h-8 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Clear dates
+              </button>
+            )}
             <NativeSelect
               aria-label="Filter by status"
               value={statusFilter}
@@ -183,7 +339,22 @@ export function UploadsView({
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {pageRows.length === 0 ? (
+          {view === 'groups' && !selectedGroup ? (
+            groups.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {uploads.length === 0 ? 'No files yet. Add one above.' : 'No uploads match.'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {groups.map((g) => (
+                  <GroupTile key={g.key} g={g} onOpen={() => {
+                    setGroupKey(g.key);
+                    setPage(1);
+                  }} />
+                ))}
+              </div>
+            )
+          ) : pageRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {uploads.length === 0 ? 'No files yet. Add one above.' : 'No files match.'}
             </p>
@@ -287,7 +458,7 @@ export function UploadsView({
             </div>
             </>
           )}
-          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} className="pt-1" />
+          {(view === 'list' || selectedGroup) && <Pagination page={safePage} pageCount={pageCount} onPage={setPage} className="pt-1" />}
         </CardContent>
       </Card>
 
