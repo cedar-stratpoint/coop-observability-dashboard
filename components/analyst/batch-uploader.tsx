@@ -97,7 +97,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 ? busy
                   ? `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
                   : `${s.done} of ${s.total} read${s.failed ? ` · ${s.failed} failed` : ''}.`
-                : `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per file.`}
+                : `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per page (a whole multi-page scan can be much larger).`}
             </p>
           </div>
           {hasItems && !busy && (
