@@ -1,10 +1,12 @@
 import 'server-only';
+import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
 import {reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
+import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
 // project (src/nichido-client.ts): service-role key, never exposed to the browser.
@@ -437,37 +439,40 @@ export async function commitInventory(input: {
   return payload.length;
 }
 
-/** List a company's uploads, newest first (paginated — never silently capped). */
-export async function listUploads(companyId: string): Promise<UploadRow[]> {
-  if (!goldlineConfigured()) return [];
+/** List a company's uploads, newest first (paginated — never silently capped). Cached
+ *  across requests (the /uploads home re-reads the whole table on every load); the
+ *  upload / commit / reject writes expire gl-uploads so a change shows on the next load. */
+export function listUploads(companyId: string): Promise<UploadRow[]> {
+  if (!goldlineConfigured()) return Promise.resolve([]);
   const supa = db();
-  const rows = await fetchAllRows('uploads', (from, to) =>
-    supa
-      .from('uploads')
-      .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
-      .eq('company_id', companyId)
-      .order('created_at', {ascending: false})
-      .order('id', {ascending: true})
-      .range(from, to),
-  );
-  return rows as unknown as UploadRow[];
+  return unstable_cache(
+    async () =>
+      (await fetchAllRows('uploads', (from, to) =>
+        supa
+          .from('uploads')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
+          .eq('company_id', companyId)
+          .order('created_at', {ascending: false})
+          .order('id', {ascending: true})
+          .range(from, to),
+      )) as unknown as UploadRow[],
+    ['gl-uploads', companyId],
+    {tags: [glTags.uploads(companyId)], revalidate: 30},
+  )();
 }
 
 /** Catalog line + printed price for the given item codes (the review page's family
- *  grouping and totals check). Company-scoped. */
+ *  grouping and totals check). Served from the cached full catalog (gl-catalog) so the
+ *  review page no longer queries products on every load. Company-scoped. */
 export async function catalogForCodes(
   companyId: string,
   codes: string[],
 ): Promise<Record<string, {productLine: string | null; unitPrice: number | null}>> {
   if (!goldlineConfigured() || !codes.length) return {};
-  const res = await db()
-    .from('products')
-    .select('item_code,product_line,unit_price')
-    .eq('company_id', companyId)
-    .in('item_code', codes.slice(0, 500)); // pagination-ok: one form page's codes (≤ ~70)
-  if (res.error) throw new Error(`products read failed: ${res.error.message}`);
+  const want = new Set(codes);
   const out: Record<string, {productLine: string | null; unitPrice: number | null}> = {};
-  for (const p of (res.data ?? []) as Array<{item_code: string; product_line: string | null; unit_price: string | number | null}>) {
+  for (const p of await getGlCatalog(companyId)) {
+    if (!want.has(p.item_code)) continue;
     out[p.item_code] = {productLine: p.product_line, unitPrice: p.unit_price == null ? null : Number(p.unit_price)};
   }
   return out;
@@ -822,13 +827,12 @@ export class BatchConflictError extends Error {
 
 export type StoreOption = {code: string; name: string};
 
-/** The company's stores (for the store-code pickers), by code. Company-scoped. */
+/** The company's stores (for the store-code pickers), by code. Served from the cached
+ *  store list (gl-stores) so the pickers don't re-read the stores table every load.
+ *  Company-scoped. */
 export async function listStores(companyId: string): Promise<StoreOption[]> {
   if (!goldlineConfigured()) return [];
-  const supa = db();
-  const rows = (await fetchAllRows('stores', (from, to) =>
-    supa.from('stores').select('store_code,name,status').eq('company_id', companyId).order('store_code').range(from, to),
-  )) as unknown as Array<{store_code: string; name: string; status: string}>;
+  const rows = await getGlStores(companyId);
   return rows
     .filter((r) => r.status !== 'closed')
     .map((r) => ({code: r.store_code, name: r.name}))
