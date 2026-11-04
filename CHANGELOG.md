@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido flow perf: route the hot pages through the existing cache
+
+The uploads and batch-review pages felt slow because they re-read the same big / rarely-changing tables on every load, bypassing the `goldline-ref-data.ts` cache the rest of Goldline already uses. Three fixes, all reusing that cache (tag-invalidated, so edits still show on the next load):
+
+- **`/uploads` home no longer rescans the whole `uploads` table every load.** `listUploads` is now cached under a new `gl-uploads` tag (30s), and the upload / commit / reject / split writes expire it. With multi-page scans the uploads table grows fast, so this was the biggest cost on that page.
+- **The batch-review page stops re-reading stores and the catalog on every load.** `listStores` now serves from the cached `getGlStores`, and `catalogForCodes` filters the already-cached `getGlCatalog` in memory instead of querying `products` each time. Both were uncached while a cached twin already existed.
+- **Left as-is on purpose:** `splitBatchIntoForms` still runs its (bounded, ≤20-row) re-segmentation check per open-batch load. It carries the no-loop redirect invariant, so it wasn't worth the risk to refactor here.
+
+Net: the batch page drops ~2 Supabase round-trips per load and `/uploads` drops a full-table scan. tsc clean; Nichido env guard + goldline suites green (the orient-test timeout is the known pdf-lib flake, passes isolated).
+
 ## 2026-11-04 — Review UX: grouped page tabs, calmer review rows, and a "show in scan" locator
 
 Three Hick's-Law / eyestrain fixes to the batch review screen.
