@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Scan triage, redesigned: lead with a summary, sort by what needs you
+
+First piece of the review-UX redesign (Phase 3). The triage board, the shared "forms to review" view, now opens with a plain sentence ("8 forms across 4 stores, sorted so the ones that need you come first") and a status breakdown (need a store · incomplete · ready), instead of a flat period-grouped grid. Each form is one calm card with a severity stripe and a single status: a store it couldn't read is **Needs a store** (red, sorted first), missing pages are **Incomplete** (amber), the rest are **Ready** (green), and committed sinks to the bottom. The store is now the card's primary line (BA secondary), and an unreadable store reads as "Store not readable" rather than a blank. Colour and order agree, so the cards that need a human float to the top. Same data and links as before, just a far calmer read; the per-scan "forms found" summary and the guided "which store?" step build on this next.
+
 ## 2026-11-05 — Split: re-snap store codes so a scan separates into the right forms
 
 When a 98-page scan held ~20 stores, the auto-split left most of them piled in one batch (the UI warns "6 different stores read across these pages"). One cause: store codes the classifier left raw never got reconciled before grouping, so "DS 5300", a one-digit misread "5360", and the real "5300" each spun off their own form. Two fixes: `normalizeStoreCode` now strips a leading "DS" store-type prefix ("DS 5300" keys as "5300"), and both grouping paths (the batch split and the triage board) now re-snap every page's code against the current store registry before grouping. The snapper still trusts a code that is itself a registered store, so genuinely different stores (473 vs 472) stay apart. This tightens the split for readable-but-drifted codes; pages whose store was unreadable (null) are left for a guided "which store?" step in the review UI (next), since guessing their store from noise would risk merging different stores' counts.
