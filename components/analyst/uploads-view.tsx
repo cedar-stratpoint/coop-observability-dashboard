@@ -24,7 +24,8 @@ import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upl
 // ?status=), and pagination run client-side. Deleting goes through a confirmation
 // that spells out any committed data it takes with it, then a toast confirms it.
 
-const PAGE_SIZE = 8;
+const ROW_SIZES = [10, 20, 50] as const;
+const TILE_SIZES = [12, 24, 36] as const;
 
 const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
 
@@ -130,6 +131,8 @@ export function UploadsView({
   const [from, setFrom] = useState(''); // YYYY-MM-DD, uploaded on or after
   const [to, setTo] = useState(''); // YYYY-MM-DD, uploaded on or before
   const [page, setPage] = useState(1);
+  const [rowSize, setRowSize] = useState<number>(ROW_SIZES[0]); // rows per page (10/20/50)
+  const [tileSize, setTileSize] = useState<number>(TILE_SIZES[0]); // tiles per page (12/24/36)
   // 'list' = the flat file table; 'groups' = one tile per drop. Selecting a tile sets
   // `groupKey`, which scopes the list to that drop's files.
   const [view, setView] = useState<'list' | 'groups'>('groups');
@@ -183,9 +186,15 @@ export function UploadsView({
 
   const selectedGroup = groupKey ? groups.find((g) => g.key === groupKey) ?? null : null;
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // The tile grid (grouped view, no drill-in) paginates by tiles; everything else (the
+  // flat list, and a group's files) paginates by rows.
+  const tileMode = view === 'groups' && !selectedGroup;
+  const pageSize = tileMode ? tileSize : rowSize;
+  const items = tileMode ? groups : filtered;
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageRows = tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
 
   return (
     <div className={GL_PAGE}>
@@ -214,7 +223,10 @@ export function UploadsView({
             {selectedGroup ? (
               <button
                 type="button"
-                onClick={() => setGroupKey(null)}
+                onClick={() => {
+                  setGroupKey(null);
+                  setPage(1);
+                }}
                 className="group flex min-w-0 items-center gap-2 text-left"
               >
                 <ChevronLeft className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
@@ -346,7 +358,7 @@ export function UploadsView({
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {groups.map((g) => (
+                {pageTiles.map((g) => (
                   <GroupTile key={g.key} g={g} onOpen={() => {
                     setGroupKey(g.key);
                     setPage(1);
@@ -458,7 +470,29 @@ export function UploadsView({
             </div>
             </>
           )}
-          {(view === 'list' || selectedGroup) && <Pagination page={safePage} pageCount={pageCount} onPage={setPage} className="pt-1" />}
+          {items.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {tileMode ? 'Tiles' : 'Rows'} per page
+                <NativeSelect
+                  aria-label={tileMode ? 'Tiles per page' : 'Rows per page'}
+                  value={pageSize}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (tileMode) setTileSize(n);
+                    else setRowSize(n);
+                    setPage(1);
+                  }}
+                  className="h-8 w-auto"
+                >
+                  {(tileMode ? TILE_SIZES : ROW_SIZES).map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+              {pageCount > 1 && <Pagination page={safePage} pageCount={pageCount} onPage={setPage} />}
+            </div>
+          )}
         </CardContent>
       </Card>
 
