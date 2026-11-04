@@ -1,4 +1,6 @@
 import {getDataContext} from '@/src/active-context';
+import {canEditData} from '@/src/company';
+import {listStores} from '@/src/goldline-data';
 import {triageBoard} from '@/src/goldline-triage-data';
 import {TriageBoard} from '@/components/analyst/triage-board';
 
@@ -19,6 +21,6 @@ export default async function Page() {
       </div>
     );
   }
-  const data = await triageBoard(ctx.companyId);
-  return <TriageBoard data={data} company={ctx.companyId} />;
+  const [data, stores] = await Promise.all([triageBoard(ctx.companyId), listStores(ctx.companyId)]);
+  return <TriageBoard data={data} company={ctx.companyId} stores={stores} canEdit={canEditData(ctx.role)} />;
 }

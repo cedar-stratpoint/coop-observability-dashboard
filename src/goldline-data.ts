@@ -142,6 +142,33 @@ export async function setUploadStatus(
  * callers should not fail the upload if this write errors (classification is metadata,
  * not the extracted counts).
  */
+/**
+ * Stamp a confirmed store onto a form's pages — the guided "which store?" step for a
+ * form the OCR couldn't read. Merges the store into each page's classification JSONB
+ * (store_code + store_snap {code, status:'confirmed'}, keeping everything else) so the
+ * forms view regroups it under the real store and it leaves "needs a store". Does not
+ * touch committed inventory. Returns the distinct batch ids the pages belong to, so the
+ * caller can make those batches commit-ready under the store.
+ */
+export async function setUploadsStore(companyId: string, uploadIds: string[], storeCode: string, storeName: string | null): Promise<string[]> {
+  const ids = uploadIds.filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return [];
+  const supa = db();
+  const {data, error} = await supa.from('uploads').select('id,batch_id,classification').eq('company_id', companyId).in('id', ids);
+  if (error) throw new Error(`uploads read failed: ${error.message}`);
+  const batches = new Set<string>();
+  for (const row of (data ?? []) as Array<{id: string; batch_id: string | null; classification: Record<string, unknown> | null}>) {
+    if (row.batch_id) batches.add(row.batch_id);
+    const c = {...(row.classification ?? {})};
+    c.store_code = storeCode;
+    if (storeName) c.store_name = storeName;
+    c.store_snap = {code: storeCode, status: 'confirmed'};
+    const up = await supa.from('uploads').update({classification: c}).eq('company_id', companyId).eq('id', row.id);
+    if (up.error) throw new Error(`uploads store update failed: ${up.error.message}`);
+  }
+  return [...batches];
+}
+
 export async function saveClassification(input: {
   uploadId: string;
   pageNo: number;

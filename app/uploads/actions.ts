@@ -18,6 +18,8 @@ import {
   getBatch,
   getBatchPages,
   getUpload,
+  listStores,
+  setUploadsStore,
   splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
@@ -371,5 +373,44 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
   } catch (e) {
     console.error('splitFormsAction', e);
     return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
+  }
+}
+
+/**
+ * Guided "which store?" — assign a store to a form whose store the scan couldn't read.
+ * Stamps the store onto the form's pages (so it leaves "needs a store"), then makes each
+ * affected batch commit-ready under that store: re-splitting a multi-store batch, or
+ * setting the store on a single-form batch. Only ever touches classification + the open
+ * batch, never committed inventory.
+ */
+export async function assignFormStoreAction(input: {company: string | null; uploadIds: string[]; storeCode: string}): Promise<{ok: true} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  const store = (input.storeCode ?? '').trim();
+  if (!store) return {ok: false, error: 'Pick a store first.'};
+  if (outOfScopeStores(ctx.storeScope, [store]).length) return {ok: false, error: `Store ${store} is outside your access.`};
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return {ok: false, error: 'No pages to assign.'};
+  try {
+    const name = (await listStores(ctx.companyId)).find((s) => s.code === store)?.name ?? null;
+    const batches = await setUploadsStore(ctx.companyId, ids, store, name);
+    // Make the form commit-ready under the store: a multi-form batch re-splits and each
+    // form's batch is pre-filled; a single-form batch gets the store set directly.
+    const by = (await auth())?.user?.email ?? null;
+    for (const batchId of batches) {
+      const forms = await splitBatchIntoForms(ctx.companyId, batchId, by);
+      if (forms.length === 1) {
+        const f = forms[0];
+        await updateBatchInfo(ctx.companyId, batchId, {storeCode: f.storeCode, periodStart: f.periodStart, periodEnd: f.periodEnd});
+      }
+    }
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads/triage');
+    revalidatePath('/uploads');
+    return {ok: true};
+  } catch (e) {
+    console.error('assignFormStoreAction', e);
+    return {ok: false, error: 'Couldn’t assign the store. The pages are saved; try again or set it from the form.'};
   }
 }
