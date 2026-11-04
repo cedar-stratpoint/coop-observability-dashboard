@@ -1,7 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import type {FormVersion} from './goldline-extract';
 
@@ -117,7 +117,10 @@ export async function triageBoard(companyId: string): Promise<TriageResult> {
   )) as unknown as UploadClsRow[];
 
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const {forms, sales, blanks, unplaceable} = segmentBundle(rows.map(toClassifiedPage));
+  // Reconcile OCR year noise (the handwritten year is the noisiest field) to the
+  // bundle's dominant year before grouping, so a misread year doesn't spin a page off
+  // into its own fake-year form. Snapped pages are flagged on their form.
+  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(rows.map(toClassifiedPage)));
 
   const parked: ParkedPage[] = [
     ...sales.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'sales' as const})),
@@ -234,9 +237,10 @@ function mockTriage(): TriageResult {
       periodStart: '2026-09-09', periodEnd: '2026-09-15', flags: ['period-mismatch', 'period-partial'], needsReview: 5}),
     f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
       periodStart: '2026-10-01', periodEnd: '2026-10-15', flags: ['store-corrected'], needsReview: 2, committed: 3}),
-    // A year the reader misread (real data had 2016/2020/2024 fragments) — sinks below 2026.
+    // A page whose misread year (2020) was reconciled to 2026, so it groups with its
+    // real cut-off and carries the year-auto-corrected flag.
     f({storeCode: '2166', storeName: 'Gaisano Mall Digos', consultant: 'Rhea Mae Bermil', version: 'v1',
-      periodStart: '2020-09-01', periodEnd: '2020-09-15', present: [5], missing: [1, 2, 3, 4], flags: ['incomplete'], needsReview: 1}),
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', present: [5], missing: [1, 2, 3, 4], flags: ['incomplete', 'year-reconciled'], needsReview: 1}),
     // A page whose period couldn't be read at all — always last.
     f({storeCode: null, storeName: null, consultant: 'Unknown', version: 'unknown',
       periodStart: null, periodEnd: null, present: [3], missing: [1, 2, 4, 5], flags: ['period-missing', 'unknown-store', 'unknown-version'], needsReview: 1}),

@@ -33,6 +33,7 @@ export const FLAG_LABEL: Record<string, string> = {
   'period-invalid-day': 'Invalid date',
   'period-partial': 'Partial cut-off',
   'period-mismatch': 'Dates disagree',
+  'year-reconciled': 'Year auto-corrected',
 };
 
 /** The tone (status token) a flag should read as: warn for things a reviewer should
@@ -41,7 +42,7 @@ export function flagTone(flag: string): 'warn' | 'crit' | 'info' {
   if (flag === 'duplicate-pages' || flag === 'unknown-version' || flag === 'store-unmatched' || flag === 'period-invalid-day') {
     return 'crit';
   }
-  if (flag === 'store-corrected') return 'info';
+  if (flag === 'store-corrected' || flag === 'year-reconciled') return 'info';
   return 'warn';
 }
 
