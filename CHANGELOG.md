@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Guided "which store?": file an unreadable form in one tap
+
+The last big piece of the review redesign. A "needs a store" card (a form whose store the scan couldn't read) now carries a **Confirm store** button instead of just linking away. It opens an inline picker, search the store registry, tap one, and the whole form is filed: the chosen store is stamped onto its pages (`setUploadsStore`, merged into each page's classification, committed inventory untouched) so the card leaves "needs a store", and the form's batch is made commit-ready under that store (`assignFormStoreAction` re-splits a multi-store batch or sets the store on a single-form batch). Safe because the earlier scan-run grouping means each "needs a store" card is one physical form, so a tap can't mislabel several stores at once. The forms view (inbox and per-scan) now passes the store list and edit permission; readable forms still just open to review. This completes mockup sections 02 to 05.
+
 ## 2026-11-05 — Split unreadable-store pages into one form per scan run
 
 Groundwork for the guided "which store?" step. When a scan has pages whose store the OCR couldn't read, they used to collapse into a single "needs a store" group keyed only by period and version, so one card could mix several different stores that all read blank, which would make a one-tap store assignment mislabel them. Now store-less pages are cut into forms by **scan contiguity**: a physical form is five consecutive pages scanned together, so a new run starts whenever the page number resets or the version changes (`assignBlankFormRuns`, pure + unit-tested). Both grouping paths, the batch split and the triage/forms view, read pages in scan order (`created_at`) and apply it after the store re-snap. Each "needs a store" card is now one real form, which is what the upcoming store picker will assign to. Readable stores are untouched; they still group by store.
