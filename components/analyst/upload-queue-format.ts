@@ -2,6 +2,7 @@
 // global progress indicator so they always say the same thing.
 
 import {progressFor} from '@/src/upload-progress';
+import {scanPosition} from '@/src/upload-batch';
 import type {QueueItem} from '@/components/analyst/upload-queue';
 
 export function itemPercent(i: QueueItem, now: number): number {
@@ -79,6 +80,74 @@ export function summarize(items: QueueItem[], now: number): QueueSummary {
     readyForReview: live.filter((i) => i.state === 'done' && i.serverStatus === 'needs_review').length,
     percent: Math.min(100, percent),
   };
+}
+
+/** One collapsed row in the queue list: either a single file, or all the pages that
+ *  were split out of one multi-page PDF, so a 98-page scan is one line, not 98. */
+export type QueueGroup = {
+  key: string;
+  /** The source PDF name ("Scan….pdf") for a split group, else the single file name. */
+  source: string;
+  items: QueueItem[];
+  isSplit: boolean; // true when this is a multi-page PDF split into pages
+  size: number; // sum of live page sizes
+  done: number;
+  failed: number;
+  running: number;
+  waiting: number;
+  total: number; // live (non-cancelled)
+  percent: number;
+};
+
+/**
+ * Group queue items by the PDF they were split from (filename "… (page N of M).pdf"),
+ * so the list shows one summarized row per source scan instead of one row per page.
+ * A single file (CSV, XLSX, or a one-page PDF) is its own group of one. Order follows
+ * first appearance so the list stays stable.
+ */
+export function groupQueueItems(items: QueueItem[], now: number): QueueGroup[] {
+  const order: string[] = [];
+  const buckets = new Map<string, QueueItem[]>();
+  for (const it of items) {
+    const src = scanPosition(it.name)?.source;
+    const key = src ? `pdf:${src}` : `one:${it.id}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      order.push(key);
+    }
+    buckets.get(key)!.push(it);
+  }
+  return order.map((key) => {
+    const group = buckets.get(key)!;
+    const live = group.filter((i) => i.state !== 'cancelled');
+    const isSplit = key.startsWith('pdf:') && group.length > 1;
+    const source = isSplit ? `${key.slice(4)}.pdf` : group[0].name;
+    const percent = live.length ? live.reduce((a, i) => a + itemPercent(i, now), 0) / live.length : 0;
+    return {
+      key,
+      source,
+      items: group,
+      isSplit,
+      size: live.reduce((a, i) => a + i.size, 0),
+      done: live.filter((i) => i.state === 'done').length,
+      failed: live.filter((i) => i.state === 'failed').length,
+      running: live.filter((i) => i.state === 'running').length,
+      waiting: live.filter((i) => i.state === 'queued' || i.state === 'waiting_period').length,
+      total: live.length,
+      percent: Math.min(100, percent),
+    };
+  });
+}
+
+/** A short status line for a collapsed split group: "12 of 98 read · 2 flagged". */
+export function groupLabel(g: QueueGroup): string {
+  if (!g.isSplit) return '';
+  const parts: string[] = [];
+  if (g.done < g.total) parts.push(`${g.done} of ${g.total} read`);
+  else parts.push(`${g.total} ${g.total === 1 ? 'page' : 'pages'} read`);
+  if (g.failed) parts.push(`${g.failed} failed`);
+  if (g.waiting && g.done < g.total) parts.push(`${g.waiting} waiting`);
+  return parts.join(' · ');
 }
 
 /** "~1 min left" from elapsed and progress; null until there's enough signal. */
