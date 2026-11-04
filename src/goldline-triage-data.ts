@@ -1,8 +1,9 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {applyStoreRegistry, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
+import {knownStoreCodes} from './goldline-store-registry';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -127,10 +128,12 @@ export async function triageBoard(companyId: string): Promise<TriageResult> {
   )) as unknown as UploadClsRow[];
 
   const byId = new Map(rows.map((r) => [r.id, r]));
-  // Reconcile OCR year noise (the handwritten year is the noisiest field) to the
-  // bundle's dominant year before grouping, so a misread year doesn't spin a page off
-  // into its own fake-year form. Snapped pages are flagged on their form.
-  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(rows.map(toClassifiedPage)));
+  // Re-snap store codes against the current registry, then reconcile OCR year noise
+  // (the handwritten year is the noisiest field) to the bundle's dominant year before
+  // grouping — so neither a drifted store code ("DS 5300") nor a misread year spins a
+  // page off into its own fake form. Snapped pages are flagged on their form.
+  const known = await knownStoreCodes(companyId);
+  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(applyStoreRegistry(rows.map(toClassifiedPage), known)));
 
   const parked: ParkedPage[] = [
     ...sales.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'sales' as const})),

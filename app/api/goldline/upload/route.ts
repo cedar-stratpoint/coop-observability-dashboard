@@ -13,6 +13,7 @@ import {
   createUpload,
   findDuplicatePageKey,
   getBatch,
+  getUpload,
   goldlineConfigured,
   saveClassification,
   saveExtraction,
@@ -203,8 +204,9 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
   }
 
   let uploadId: string;
+  let reused = false;
   try {
-    uploadId = await createUpload({
+    const created = await createUpload({
       companyId,
       kind: cls.kind,
       filename: file.name,
@@ -213,11 +215,20 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       uploadedBy,
       batchId: cls.kind === 'inventory_pdf' ? batchId : null,
     });
+    uploadId = created.id;
+    reused = created.reused;
   } catch (e) {
     console.error('goldline upload: store failed', e);
     return json({error: 'Could not store the file. Please try again.'}, 500);
   }
   track.uploadId = uploadId;
+  // This page is already in the batch — a retry of one the server had already saved.
+  // Don't insert a second row or re-run OCR; return the existing page's current state so
+  // the uploader marks it done instead of adding a duplicate.
+  if (reused) {
+    const existing = await getUpload(companyId, uploadId);
+    return json({uploadId, status: existing?.status ?? 'processing', reused: true});
+  }
   revalidateTag(glTags.uploads(companyId), {expire: 0}); // a new upload: refresh the cached /uploads list
   // The batch may have been committed while this page was uploading; a page added
   // after that could never be committed, so stop here with a clear reason.

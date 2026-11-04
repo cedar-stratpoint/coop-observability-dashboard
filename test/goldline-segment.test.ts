@@ -64,6 +64,13 @@ describe('normalizers', () => {
     expect(normalizeStoreCode('')).toBeNull();
     expect(normalizeStoreCode(null)).toBeNull();
   });
+  it('strips a DS store-type prefix so "DS 5300" keys as "5300"', () => {
+    expect(normalizeStoreCode('DS 5300')).toBe('5300');
+    expect(normalizeStoreCode('DS-5300')).toBe('5300');
+    expect(normalizeStoreCode('ds5300')).toBe('5300');
+    // Not a DS-prefixed numeric code: left alone.
+    expect(normalizeStoreCode('SM STA MESA')).toBe('SM STA MESA');
+  });
 });
 
 describe('period', () => {
@@ -246,6 +253,21 @@ describe('applyStoreRegistry + grouping', () => {
     const forms = groupIntoForms(pages);
     expect(forms[0].store_code).toBe('9999');
     expect(forms[0].flags).toContain(FORM_FLAGS.storeUnmatched);
+  });
+  it('collapses a "DS 5300" / "5360" drift into the real "5300" form', () => {
+    const known = ['5300'];
+    const pages = applyStoreRegistry(
+      [
+        page({id: 'a', store_code: '5300', page: 1}),
+        page({id: 'b', store_code: 'DS 5300', page: 2}), // store-type prefix
+        page({id: 'c', store_code: '5360', page: 3}), // one-digit misread
+      ],
+      known,
+    );
+    const forms = groupIntoForms(pages);
+    expect(forms.length).toBe(1);
+    expect(forms[0].store_code).toBe('5300');
+    expect(forms[0].present).toEqual([1, 2, 3]);
   });
 });
 
