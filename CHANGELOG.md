@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido Phase 4: the reconciliation audit matrix (per SKU per store)
+
+The NICH-17 deliverable Justin acts on: a scannable yes/no (check / x) matrix. For one store and month, every SKU gets a check/x on the two legs we have — **counted in the inventory form** and **sold in Watsons** — with the action that follows. The purchase-order leg (the real source of truth) is not built yet, so this is the **inventory × Watsons subset** of the matrix (decided with Lance); PO drops in later as a third column.
+
+- **`/stock/audit`** (`app/stock/audit/page.tsx` + `components/analyst/audit-matrix.tsx`): store + month pickers, summary pills (Not counted / No sales / Matched), a "show only mismatches" toggle (on by default), and a per-SKU table — In form ✓/✗, On hand, In Watsons ✓/✗, Units sold, a status pill, and a plain-language "what to do". Mismatches sort first. New **Audit** tab in the Goldline nav. It flags, it never retires a SKU.
+- **Reader** `src/goldline-audit-data.ts` (`auditData`): cross-references committed `inventory` (form presence + ending on hand) with Watsons sales units (via the product SKU links) for the picked store/month; builds the pickable store/month universe from committed counts. Mock fallback renders a believable store with no DB.
+- **Pure logic** `src/goldline-audit.ts` (`auditState` / `auditMatrix` / `auditSummary`): matched = in both; no_sales = counted but no Watsons sale (Watsons to audit); not_counted = sold in Watsons but not counted (flag for accounting). Tests in `test/goldline-audit.test.ts`. 153 goldline tests green, tsc + design detector clean, screenshot-verified.
+
+With this, the NICH-17 phases 0 to 4 are complete end to end: upload → classify → version-aware extract → triage → review → version-tagged commit → reconciliation → the audit matrix.
+
 ## 2026-11-04 — Nichido Phase 3: version-aware reconciliation (Legacy row-math on committed counts)
 
 The reconciliation engine (`runChecks` → `rowFindings` + `monthlyChecks`) already reads the committed `inventory`, so the scan's ending + delivery feed it directly, and the monthly form-vs-POS gap check works for every version (it uses ending + delivery, both populated). The one gap was the per-row math check: it only validated the V1/V2 three-location sum, so a committed **Legacy** form (whose counts live in `extra`) got no row-math validation.
