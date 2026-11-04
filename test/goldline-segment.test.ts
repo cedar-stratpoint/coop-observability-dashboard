@@ -15,6 +15,8 @@ import {
   normalizeVersion,
   periodBucket,
   periodFlags,
+  dominantYear,
+  reconcileYears,
   sanitizeClassification,
   snapStoreCode,
   type ClassifiedPage,
@@ -122,6 +124,42 @@ describe('segmentBundle', () => {
     const sofia = forms.find((g) => g.store_code === '5300')!;
     expect(sofia.present).toEqual([3]);
     expect(sofia.flags).toContain(FORM_FLAGS.periodPartial);
+  });
+});
+
+describe('year reconciliation', () => {
+  const cp = (p: Partial<ClassifiedPage> & {id: string}): ClassifiedPage => page(p);
+  it('dominantYear picks the clear plurality, null on a tie', () => {
+    expect(dominantYear([{period_start: '2026-09-01', period_end: '2026-09-15'}, {period_start: '2020-09-01', period_end: '2020-09-15'}, {period_start: '2026-09-16', period_end: '2026-09-30'}])).toBe(2026);
+    expect(dominantYear([{period_start: '2026-09-01', period_end: null}, {period_start: '2025-09-01', period_end: null}])).toBeNull(); // 1 vs 1 tie
+    expect(dominantYear([])).toBeNull();
+  });
+  it('snaps an outlier year to the dominant one, keeping month/day, and marks it', () => {
+    const out = reconcileYears([
+      cp({id: 'a', period_start: '2026-09-01', period_end: '2026-09-15'}),
+      cp({id: 'b', period_start: '2026-09-16', period_end: '2026-09-30'}),
+      cp({id: 'c', period_start: '2020-09-01', period_end: '2020-09-15'}),
+    ]);
+    const snapped = out.find((p) => p.id === 'c')!;
+    expect(snapped.period_start).toBe('2026-09-01');
+    expect(snapped.period_end).toBe('2026-09-15');
+    expect(snapped.year_snapped).toEqual({from: 2020, to: 2026});
+    expect(out.find((p) => p.id === 'a')!.year_snapped).toBeUndefined();
+  });
+  it('is a no-op when there is no clear dominant year', () => {
+    const inp = [cp({id: 'a', period_start: '2026-09-01', period_end: '2026-09-15'}), cp({id: 'b', period_start: '2025-09-01', period_end: '2025-09-15'})];
+    expect(reconcileYears(inp).some((p) => p.year_snapped)).toBe(false);
+  });
+  it('a reconciled page groups into the real year form and flags it', () => {
+    const forms = groupIntoForms(reconcileYears([
+      page({id: 'a', store_code: '473', version: 'v1', page: 1, period_start: '2026-09-01', period_end: '2026-09-15'}),
+      page({id: 'b', store_code: '473', version: 'v1', page: 2, period_start: '2026-09-16', period_end: '2026-09-30'}),
+      page({id: 'c', store_code: '473', version: 'v1', page: 3, period_start: '2020-09-01', period_end: '2020-09-15'}),
+    ]));
+    // 473 · 2026-09-H1 now holds pages 1 and 3 (the 2020 misread snapped in), flagged.
+    const h1 = forms.find((g) => g.present.includes(1) && g.present.includes(3))!;
+    expect(h1).toBeDefined();
+    expect(h1.flags).toContain(FORM_FLAGS.yearReconciled);
   });
 });
 

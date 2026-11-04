@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido: reconcile OCR year misreads so the triage board stops fragmenting
+
+Root-cause fix for the fake-year forms (Sep 2016 / Aug 2018 / Jul 2019…) on the triage board. The handwritten **year** is the noisiest OCR field — on the real September scan only ~26 of 61 inventory pages read 2026; the rest scattered across 2016 / 2020 / 2024 / etc. Each wrong year spun its page off into its own one-page form.
+
+- **`reconcileYears()` / `dominantYear()`** (`src/goldline-segment.ts`, pure): a scan uploaded together is one time period, so the year should agree. We take the single most common year (only when it's a clear plurality) and **snap each outlier page's year to it, keeping month/day**, recording `year_snapped` for the flag. No clear winner → no change.
+- Applied in the triage reader (`goldline-triage-data.ts`) before grouping, so a misread year no longer fragments a form. The form carries a **"Year auto-corrected"** flag (info tone) so the reviewer sees and can undo it. Snap + flag only; nothing commits without review, the reviewer sets the real period on commit.
+- Tests: `dominantYear`, `reconcileYears`, and a grouping case (`goldline-segment.test.ts`). 155 goldline tests green, tsc + design detector clean; triage screenshot-verified (a formerly "Sep 2020" fragment now sits under Sep 2026 with the flag). Store-code noise is already handled by the registry snap; this closes the year half.
+
 ## 2026-11-04 — Nichido scan UX: queue grouping, triage sort, lighter store-conflict notice
 
 Real-data UX fixes after uploading the 98-page September scan. Nothing data-affecting; all additive / presentational.

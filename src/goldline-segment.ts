@@ -26,7 +26,13 @@ export type PageClassification = {
 
 /** A classified page tagged with its upload id, so groups can name exact pages.
  *  `store_snap` is attached by applyStoreRegistry once the known-store list is known. */
-export type ClassifiedPage = PageClassification & {id: string; store_snap?: StoreSnap};
+export type ClassifiedPage = PageClassification & {
+  id: string;
+  store_snap?: StoreSnap;
+  /** Set by reconcileYears when this page's (OCR-misread) year was snapped to the
+   *  bundle's dominant year; keeps the original for the flag / undo. */
+  year_snapped?: {from: number; to: number};
+};
 
 /** All the ids seen for one inventory page number within a form (length > 1 = dup). */
 export type PageSlot = {page: number; ids: string[]};
@@ -76,6 +82,7 @@ export const FORM_FLAGS = {
   periodInvalidDay: 'period-invalid-day',
   periodPartial: 'period-partial',
   periodMismatch: 'period-mismatch', // pages in one form reported different exact dates
+  yearReconciled: 'year-reconciled', // an OCR-misread year was snapped to the bundle's dominant year
 } as const;
 
 const KIND_SET = new Set<string>(PAGE_KINDS);
@@ -244,6 +251,53 @@ function daysInMonth(y: number, m: number): number {
   return new Date(y, m, 0).getDate();
 }
 
+/** Replace the YYYY of an ISO-ish date string, keeping month/day. Null stays null. */
+function setYear(s: string | null, year: number): string | null {
+  if (!s) return s;
+  return s.replace(/^\s*\d{4}/, String(year));
+}
+
+/**
+ * The bundle's dominant year: the single most common year across the pages that read
+ * a parseable period, but ONLY when it's a clear plurality (strictly more than the
+ * next). A scan uploaded together is one time period, so the year should agree; the
+ * handwritten year digit is the noisiest OCR field, so the majority is the truth.
+ * Returns null when there's no parseable year or no clear winner (then nothing snaps).
+ */
+export function dominantYear(pages: Array<Pick<PageClassification, 'period_start' | 'period_end'>>): number | null {
+  const counts = new Map<number, number>();
+  for (const p of pages) {
+    const y = (parseYmd(p.period_start) ?? parseYmd(p.period_end))?.y;
+    if (y) counts.set(y, (counts.get(y) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 1 && sorted[0][1] <= sorted[1][1]) return null; // tie → don't guess
+  return sorted[0][0];
+}
+
+/**
+ * Snap each page whose year disagrees with the bundle's dominant year to that year
+ * (keeping month/day), and record it on `year_snapped` so the form flags it and the
+ * reviewer can see/undo. No-op when there's no clear dominant year. This reconciles
+ * the OCR year noise that otherwise fragments the triage board into fake-year forms;
+ * it is grouping-time only, nothing is committed.
+ */
+export function reconcileYears<T extends ClassifiedPage>(pages: T[]): T[] {
+  const dom = dominantYear(pages);
+  if (dom == null) return pages;
+  return pages.map((p) => {
+    const ys = (parseYmd(p.period_start) ?? parseYmd(p.period_end))?.y;
+    if (ys == null || ys === dom) return p;
+    return {
+      ...p,
+      period_start: setYear(p.period_start, dom),
+      period_end: setYear(p.period_end, dom),
+      year_snapped: {from: ys, to: dom},
+    };
+  });
+}
+
 /** Anomaly flags for a period, best-effort. Empty for a clean standard cut-off
  *  (1st–15th or 16th–end). Does not mutate the dates; Phase 3 decides what to do. */
 export function periodFlags(start: string | null, end: string | null): string[] {
@@ -327,6 +381,8 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
   const periodReads = new Map<string, Set<string>>();
   // Snap statuses seen across a form's pages, to flag corrected / unmatched stores.
   const snapStatuses = new Map<string, Set<StoreSnap['status']>>();
+  // Forms that contain at least one page whose year was reconciled.
+  const yearSnapped = new Set<string>();
 
   for (const c of pages) {
     if (!isInventoryPage(c)) continue; // defensive: only item pages form groups
@@ -344,6 +400,7 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
       set.add(c.store_snap.status);
       snapStatuses.set(g.key, set);
     }
+    if (c.year_snapped) yearSnapped.add(g.key);
   }
 
   for (const g of groups.values()) {
@@ -354,13 +411,17 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
     g.flags = formFlagsFor(g, {
       periodMismatch: (periodReads.get(g.key)?.size ?? 0) > 1,
       snaps: snapStatuses.get(g.key) ?? new Set(),
+      yearReconciled: yearSnapped.has(g.key),
     });
   }
 
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
-function formFlagsFor(g: FormGroup, extra: {periodMismatch: boolean; snaps: Set<StoreSnap['status']>}): string[] {
+function formFlagsFor(
+  g: FormGroup,
+  extra: {periodMismatch: boolean; snaps: Set<StoreSnap['status']>; yearReconciled: boolean},
+): string[] {
   const flags: string[] = [];
   if (g.duplicates.length > 0) flags.push(FORM_FLAGS.duplicatePages);
   if (g.missing.length > 0) flags.push(FORM_FLAGS.incomplete);
@@ -368,6 +429,7 @@ function formFlagsFor(g: FormGroup, extra: {periodMismatch: boolean; snaps: Set<
   if (!g.store_code) flags.push(FORM_FLAGS.unknownStore);
   if (extra.snaps.has('corrected')) flags.push(FORM_FLAGS.storeCorrected);
   if (extra.snaps.has('unknown') || extra.snaps.has('ambiguous')) flags.push(FORM_FLAGS.storeUnmatched);
+  if (extra.yearReconciled) flags.push(FORM_FLAGS.yearReconciled);
   if (extra.periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
   for (const f of periodFlags(g.period_start, g.period_end)) flags.push(f);
   return flags;
