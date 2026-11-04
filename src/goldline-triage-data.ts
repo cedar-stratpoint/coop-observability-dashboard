@@ -4,6 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {applyStoreRegistry, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import {knownStoreCodes} from './goldline-store-registry';
+import {uploadSource} from './goldline-upload-groups';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -112,11 +113,15 @@ function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>): TriageForm
   };
 }
 
-/** Build the triage board for a company from its classified inventory-PDF uploads. */
-export async function triageBoard(companyId: string): Promise<TriageResult> {
+/**
+ * Build the triage board for a company from its classified inventory-PDF uploads.
+ * With `source` given, scopes to one scan drop (every page whose filename shares that
+ * source name) — the per-scan "forms found" view. The company-wide inbox omits it.
+ */
+export async function triageBoard(companyId: string, opts?: {source?: string}): Promise<TriageResult> {
   if (!nichidoConfigured()) return mockTriage();
   const supa = nichidoDb();
-  const rows = (await fetchAllRows('uploads', (from, to) =>
+  const all = (await fetchAllRows('uploads', (from, to) =>
     supa
       .from('uploads')
       .select(UPLOAD_CLS_COLS)
@@ -126,6 +131,7 @@ export async function triageBoard(companyId: string): Promise<TriageResult> {
       .order('created_at', {ascending: false})
       .range(from, to),
   )) as unknown as UploadClsRow[];
+  const rows = opts?.source ? all.filter((r) => uploadSource(r.filename) === opts.source) : all;
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Re-snap store codes against the current registry, then reconcile OCR year noise

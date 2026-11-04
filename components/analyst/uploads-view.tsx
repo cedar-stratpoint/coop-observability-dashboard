@@ -239,6 +239,14 @@ export function UploadsView({
               <CardTitle>Files</CardTitle>
             )}
             <div className="flex items-center gap-3">
+              {selectedGroup && (
+                <Link
+                  href={`/uploads/scan/${encodeURIComponent(selectedGroup.source)}`}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:border-foreground/25"
+                >
+                  <LayoutGrid className="size-3.5 text-muted-foreground" /> See forms in this scan
+                </Link>
+              )}
               <span className="text-xs text-muted-foreground tabular-nums">
                 {view === 'groups' && !selectedGroup ? `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}` : `${filtered.length} of ${uploads.length}`}
               </span>
