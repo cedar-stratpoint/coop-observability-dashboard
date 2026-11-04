@@ -29,6 +29,17 @@ describe('rowMathOff', () => {
     expect(rowMathOff(r({ending_on_hand: 6}))).toBeNull();
     expect(rowMathOff(r({delivery: 6, ending_on_hand: 6}))).toBeNull();
   });
+  it('validates a Legacy row by its deducted identity (ending = begin+delivery − deducted)', () => {
+    const leg = (extra: Record<string, number | null>, p: Partial<CountRow>) => r({form_version: 'legacy', extra, ...p});
+    // consistent: begin+delivery 25, deducted 8 → ending 17
+    expect(rowMathOff(leg({begin_plus_delivery: 25, deducted_pcs: 8}, {ending_on_hand: 17}))).toBeNull();
+    // broken: 25 − 8 = 17, but 16 written
+    expect(rowMathOff(leg({begin_plus_delivery: 25, deducted_pcs: 8}, {ending_on_hand: 16}))).toEqual({written: 16, counted: 17});
+    // falls back to beginning + delivery − deducted when col3 absent
+    expect(rowMathOff(leg({beginning: 20, deducted_pcs: 8}, {delivery: 5, ending_on_hand: 18}))).toEqual({written: 18, counted: 17});
+    // not enough deducted inputs → skip (don't use the three-location sum on a Legacy row)
+    expect(rowMathOff(leg({beginning: 20}, {ending_on_hand: 20}))).toBeNull();
+  });
 });
 
 describe('rowFindings', () => {

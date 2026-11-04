@@ -62,7 +62,7 @@ async function loadInputs(companyId: string, stores?: string[]) {
   const counts = (await fetchAllRows('inventory', (from, to) => {
     let q = supa
       .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
-      .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand,consultant,source_upload_id')
+      .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand,consultant,source_upload_id,form_version,extra')
       .eq('company_id', companyId);
     if (stores) q = q.in('store_code', stores);
     return q.order('id').range(from, to);
