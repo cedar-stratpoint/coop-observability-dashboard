@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Uploads: a grouped view + date filter, so a 98-page drop is one tile not 98 rows
+
+Uploading a multi-page scan filled the Files inbox with one row per page (a 98-page drop = 98 rows, 22 pages of pagination) and files from different drops mixed together. Added a **Grouped / All files** toggle to `/uploads`:
+
+- **Grouped view (new default)**: one tile per drop — the source scan name + upload day + file count + a status breakdown (to review / committed / issues / reading). Clicking a tile drills into that drop's files (the flat list scoped to the group) with a "back to groups" breadcrumb. A group is keyed by **source + upload day**, so the same scan uploaded on two days are separate tiles; a lone CSV/XLSX is its own tile.
+- **All files view**: the existing flat table, unchanged.
+- **Date range filter** (From / To, on both views) alongside the existing search / status / type filters.
+- Pure grouping in `src/goldline-upload-groups.ts` (`groupUploads` / `uploadGroupKey`, by the `(page N of M)` source), tests in `test/goldline-upload-groups.test.ts`. tsc + design detector clean, both views screenshot-verified.
+
 ## 2026-11-04 — Nichido Phase 4: the reconciliation audit matrix (per SKU per store)
 
 The NICH-17 deliverable Justin acts on: a scannable yes/no (check / x) matrix. For one store and month, every SKU gets a check/x on the two legs we have — **counted in the inventory form** and **sold in Watsons** — with the action that follows. The purchase-order leg (the real source of truth) is not built yet, so this is the **inventory × Watsons subset** of the matrix (decided with Lance); PO drops in later as a third column.
