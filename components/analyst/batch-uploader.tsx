@@ -2,9 +2,9 @@
 
 import {useEffect, useRef, useState} from 'react';
 import Link from 'next/link';
-import {AlertTriangle, ArrowRight, Check, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
+import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
-import {eta, itemLabel, itemPercent, summarize} from '@/components/analyst/upload-queue-format';
+import {eta, groupLabel, groupQueueItems, itemLabel, itemPercent, summarize, type QueueGroup} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {UploadIllustration} from '@/components/analyst/upload-illustration';
@@ -259,9 +259,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             )}
 
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Files in this batch">
-              {q.items.map((i) => (
-                <FileRow key={i.id} i={i} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} onRetry={() => q.retry(i.id)} onCancel={() => q.cancel(i.id)} onRemove={() => q.remove(i.id)} />
-              ))}
+              {groupQueueItems(q.items, now).map((g) =>
+                g.isSplit ? (
+                  <GroupRow key={g.key} g={g} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} api={q} />
+                ) : (
+                  <FileRow key={g.items[0].id} i={g.items[0]} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} onRetry={() => q.retry(g.items[0].id)} onCancel={() => q.cancel(g.items[0].id)} onRemove={() => q.remove(g.items[0].id)} />
+                ),
+              )}
             </ul>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -283,6 +287,53 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
+// line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
+// upload from flooding the list (plan §06 UX). Collapsed by default.
+function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
+  const [open, setOpen] = useState(false);
+  const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
+  const working = g.running > 0 || g.waiting > 0;
+  const allDone = g.done === g.total && g.total > 0;
+  return (
+    <li className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-3 px-3.5 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+      >
+        <FileTypeBadge filename="scan.pdf" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="truncate text-sm font-medium" title={g.source}>{g.source}</span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{g.total} pages · {fmtSize(g.size)}</span>
+          </div>
+          <span className="truncate text-xs" style={g.failed ? {color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))'} : undefined}>
+            {groupLabel(g)}
+          </span>
+          {working && (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+              <div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none" style={{width: `${pct}%`}} />
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {allDone && <Check className="size-4" style={{color: 'var(--status-good)'}} aria-label="All pages read" />}
+          <ChevronDown aria-hidden className={cn('size-4 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
+        </div>
+      </button>
+      {open && (
+        <ul className="flex flex-col divide-y divide-border border-t border-border bg-muted/20 pl-3" aria-label={`Pages of ${g.source}`}>
+          {g.items.map((i) => (
+            <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

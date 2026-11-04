@@ -394,18 +394,27 @@ export function BatchReview({
               style={{color: toneText('var(--status-crit)'), background: 'color-mix(in oklab, var(--status-crit) 10%, transparent)'}}
             >
               <span className="inline-flex items-center gap-1.5 font-medium">
-                <AlertTriangle className="size-3.5" aria-hidden /> These pages read different stores: {storeGuard.stores.join(', ')}.
+                <AlertTriangle className="size-3.5" aria-hidden /> {storeGuard.stores.length} different stores read across these pages.
               </span>
               <span className="text-muted-foreground">
-                A batch is one store&apos;s form. Split it into one form per store, or remove the page that doesn&apos;t belong, before you commit.
+                A batch is one store&apos;s form. Split it into one form per store from Uploads, or remove the pages that don&apos;t belong, before you commit.
               </span>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                {pages.filter((p) => p.detectedStore).map((p) => (
-                  <span key={p.upload.id} className="text-muted-foreground tabular-nums">
-                    Page {p.page ?? '?'}: <span className="text-foreground">{p.detectedStore}</span>
-                  </span>
+              {/* Hick's Law: show the store SET first (short), hide the long per-page list behind a disclosure. */}
+              <div className="mt-0.5 flex flex-wrap gap-1.5">
+                {storeGuard.stores.map((s) => (
+                  <span key={s} className="rounded-full px-2 py-0.5 font-mono tabular-nums" style={{background: 'color-mix(in oklab, var(--status-crit) 14%, transparent)'}}>{s}</span>
                 ))}
               </div>
+              <details className="mt-0.5">
+                <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">Which page read which store</summary>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {pages.filter((p) => p.detectedStore).map((p) => (
+                    <span key={p.upload.id} className="text-muted-foreground tabular-nums">
+                      Page {p.page ?? '?'}: <span className="text-foreground">{p.detectedStore}</span>
+                    </span>
+                  ))}
+                </div>
+              </details>
             </div>
           )}
         </CardContent>
