@@ -4,8 +4,9 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
-import {reconcileYears, segmentBundle} from './goldline-segment';
+import {applyStoreRegistry, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
+import {knownStoreCodes} from './goldline-store-registry';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -58,7 +59,19 @@ export type UploadRow = {
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
 };
 
-/** Store the raw file, then open a uploads row. Returns the new upload id. */
+/**
+ * Store the raw file, then open an uploads row. Returns the row id and whether an
+ * existing row was reused.
+ *
+ * Idempotent within a batch: the uploader splits a scan into per-page files named
+ * "(page N of M)", and a retry re-POSTs the identical file. When a page's first request
+ * times out at the edge the server often still finishes and inserts the row, so the
+ * naive insert produced a *second* row on retry (the 98-page scan that became 109 rows).
+ * So when this upload belongs to a batch, reuse any existing non-failed row with the same
+ * (company, batch, filename) instead of inserting again — and short-circuit before the
+ * storage write so a reused page leaves no orphan object. A *failed* first attempt is
+ * excluded, so a genuine retry-after-failure still creates the authoritative row.
+ */
 export async function createUpload(input: {
   companyId: string;
   kind: UploadKind;
@@ -67,8 +80,22 @@ export async function createUpload(input: {
   contentType: string;
   uploadedBy: string | null;
   batchId?: string | null;
-}): Promise<string> {
+}): Promise<{id: string; reused: boolean}> {
   const supa = db();
+  if (input.batchId) {
+    const existing = await supa
+      .from('uploads')
+      .select('id')
+      .eq('company_id', input.companyId)
+      .eq('batch_id', input.batchId)
+      .eq('filename', input.filename)
+      .neq('status', 'failed')
+      .order('created_at', {ascending: true})
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) throw new Error(`uploads dedup check failed: ${existing.error.message}`);
+    if (existing.data) return {id: (existing.data as {id: string}).id, reused: true};
+  }
   // Original name kept for display in the row; the storage KEY uses the sanitized
   // basename so a crafted filename can't escape the company prefix.
   const path = `${input.companyId}/${Date.now()}-${safeObjectName(input.filename)}`;
@@ -91,7 +118,7 @@ export async function createUpload(input: {
     .select('id')
     .single();
   if (ins.error) throw new Error(`uploads insert failed: ${ins.error.message}`);
-  return (ins.data as {id: string}).id;
+  return {id: (ins.data as {id: string}).id, reused: false};
 }
 
 export async function setUploadStatus(
@@ -677,7 +704,12 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
   if (!uploads.length) return [];
 
   const byId = new Map(uploads.map((u) => [u.id, u]));
-  const {forms} = segmentBundle(reconcileYears(uploads.map(toClassifiedPage)));
+  // Re-snap store codes against the current registry before grouping, so drift the
+  // classifier left raw ("DS 5300", "5360", a misread "472") collapses into the real
+  // store's form instead of each variant spinning off its own. snapStoreCode trusts a
+  // code that is itself a registered store, so genuinely different stores stay apart.
+  const known = await knownStoreCodes(companyId);
+  const {forms} = segmentBundle(reconcileYears(applyStoreRegistry(uploads.map(toClassifiedPage), known)));
   if (forms.length === 0) return []; // no inventory pages to group (all parked)
   const split = forms.length > 1; // a genuine multi-store / multi-period scan
 

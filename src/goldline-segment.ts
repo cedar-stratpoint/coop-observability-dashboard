@@ -132,10 +132,14 @@ export function sanitizeClassification(raw: unknown): PageClassification {
 }
 
 /** Normalize a store code for keying: trim, collapse inner spaces, drop a leading
- *  '#'. Kept as a string ('473', '5300'); null stays null. */
+ *  '#'. Also strips a leading "DS" store-type prefix before a numeric code, so
+ *  "DS 5300" keys as the same store as "5300" instead of spinning off its own form.
+ *  Kept as a string ('473', '5300'); null stays null. */
 export function normalizeStoreCode(raw: string | null): string | null {
   if (!raw) return null;
-  const s = raw.replace(/^#/, '').replace(/\s+/g, ' ').trim();
+  let s = raw.replace(/^#/, '').replace(/\s+/g, ' ').trim();
+  const ds = /^DS[\s-]*(\d{2,6})$/i.exec(s);
+  if (ds) s = ds[1];
   return s === '' ? null : s;
 }
 
