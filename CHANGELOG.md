@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido: split a scan into forms by classification, so review opens one store at a time
+
+Structural fix for the "Review this store's form" screen opening a 50-page multi-store batch. A shuffled, multi-store scan was split by a page-number-restart heuristic (`groupForms`) that couldn't separate it, so everything landed in one batch. Review now groups the same way the triage board does.
+
+- **`splitBatchIntoForms` groups by the Phase 0 classification** (`src/goldline-data.ts`): it builds the pages from `uploads.classification` and runs `reconcileYears` + `segmentBundle` (store · period · version, store-snapped + year-reconciled) instead of `groupForms`. Each form becomes its own batch; the original keeps the first. When a scan really held several forms, each form's batch is **pre-filled with its detected store + period**, so review opens ready (the reviewer can still edit; an unmatched store stays blank to pick). A single-form drop is left as the uploader set it.
+- **The split now always runs once** after a scan finishes reading (`upload-queue.tsx`) and on an open batch's review page (`app/uploads/batch/[id]/page.tsx`), letting the classification grouping decide — the old flows only split when page numbers happened to restart, which a shuffled scan defeats. Backward-compatible: a batch whose pages have no classification is a no-op.
+- Shared the `uploads` classification select + mapper (`UPLOAD_CLS_COLS`, `toClassifiedPage`, `consultantOf`) from `goldline-triage-data.ts` so the triage board and the split read the exact same shape. 155 goldline tests green, tsc + design detector clean.
+
 ## 2026-11-04 — Nichido: reconcile OCR year misreads so the triage board stops fragmenting
 
 Root-cause fix for the fake-year forms (Sep 2016 / Aug 2018 / Jul 2019…) on the triage board. The handwritten **year** is the noisiest OCR field — on the real September scan only ~26 of 61 inventory pages read 2026; the rest scattered across 2016 / 2020 / 2024 / etc. Each wrong year spun its page off into its own one-page form.
