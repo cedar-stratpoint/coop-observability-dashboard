@@ -25,7 +25,6 @@ Structural fix for the "Review this store's form" screen opening a 50-page multi
 - **`splitBatchIntoForms` groups by the Phase 0 classification** (`src/goldline-data.ts`): it builds the pages from `uploads.classification` and runs `reconcileYears` + `segmentBundle` (store · period · version, store-snapped + year-reconciled) instead of `groupForms`. Each form becomes its own batch; the original keeps the first. When a scan really held several forms, each form's batch is **pre-filled with its detected store + period**, so review opens ready (the reviewer can still edit; an unmatched store stays blank to pick). A single-form drop is left as the uploader set it.
 - **The split now always runs once** after a scan finishes reading (`upload-queue.tsx`) and on an open batch's review page (`app/uploads/batch/[id]/page.tsx`), letting the classification grouping decide — the old flows only split when page numbers happened to restart, which a shuffled scan defeats. Backward-compatible: a batch whose pages have no classification is a no-op.
 - Shared the `uploads` classification select + mapper (`UPLOAD_CLS_COLS`, `toClassifiedPage`, `consultantOf`) from `goldline-triage-data.ts` so the triage board and the split read the exact same shape. 155 goldline tests green, tsc + design detector clean.
->>>>>>> origin/develop
 
 ## 2026-11-04 — Nichido: reconcile OCR year misreads so the triage board stops fragmenting
 
