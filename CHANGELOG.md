@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Nichido Phase 3: version-aware reconciliation (Legacy row-math on committed counts)
+
+The reconciliation engine (`runChecks` → `rowFindings` + `monthlyChecks`) already reads the committed `inventory`, so the scan's ending + delivery feed it directly, and the monthly form-vs-POS gap check works for every version (it uses ending + delivery, both populated). The one gap was the per-row math check: it only validated the V1/V2 three-location sum, so a committed **Legacy** form (whose counts live in `extra`) got no row-math validation.
+
+- **`rowMathOff` is now version-aware** (`src/goldline-checks.ts`): a `legacy` row is checked against its deducted identity (`ending = begin_plus_delivery − deducted`, falling back to `beginning + delivery − deducted`); V1/V2 keep the three-location sum. Not enough deducted inputs → skipped (never mis-applies the three-location sum to a Legacy row). `CountRow` gains optional `form_version` / `extra`.
+- **`loadInputs` reads `form_version` + `extra`** (`goldline-checks-data.ts`) so the check sees them. Backward-compatible: older rows with no `form_version` are treated as three-location.
+- Tests for the Legacy row-math path (`goldline-checks.test.ts`). 156 goldline tests green, tsc clean. (The broader F-series reconciliation — flags, BA scorecards, monthly gap — predates this; Phase 3's scan-work contribution is making it version-aware and confirming the committed scan data flows in.)
+
 ## 2026-11-04 — Nichido: split a scan into forms by classification, so review opens one store at a time
 
 Structural fix for the "Review this store's form" screen opening a 50-page multi-store batch. A shuffled, multi-store scan was split by a page-number-restart heuristic (`groupForms`) that couldn't separate it, so everything landed in one batch. Review now groups the same way the triage board does.
