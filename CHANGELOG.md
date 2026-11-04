@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-04 — Batch review: a loading skeleton that matches the real page
+
+The batch-review route already streamed a placeholder while the server read the batch, but it used the generic page skeleton (a chart block the page doesn't have, no page-tabs), so the content jumped when it arrived. Replaced it with a `BatchReviewSkeleton` that mirrors the actual layout, the header, the store / period / BA card, the grouped page-tab rows, and the review table, so the page paints instantly and settles without a jump. Static markup, no client JS; the real latency win was the caching above.
+
 ## 2026-11-04 — Nichido flow perf: route the hot pages through the existing cache
 
 The uploads and batch-review pages felt slow because they re-read the same big / rarely-changing tables on every load, bypassing the `goldline-ref-data.ts` cache the rest of Goldline already uses. Three fixes, all reusing that cache (tag-invalidated, so edits still show on the next load):
