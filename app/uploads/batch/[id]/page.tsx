@@ -4,7 +4,7 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {catalogForCodes, getBatch, getBatchPages, listStores, splitBatchIntoForms} from '@/src/goldline-data';
 import {MANIFESTS} from '@/src/goldline-extract';
-import {groupForms, orderPages, scanOrder} from '@/src/upload-batch';
+import {orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 
@@ -31,14 +31,13 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   const raw = await getBatchPages(ctx.companyId, id);
   const pdfPages = raw.filter((p) => p.upload.kind === 'inventory_pdf');
   // A scan with several stores' forms whose split didn't run (the tab closed mid-upload):
-  // split it now, then show this batch's own form. The other forms are in Uploads.
+  // split it now by the Phase 0 classification (store · period · version), then show
+  // this batch's own form. The other forms are in Uploads. Only redirects when a split
+  // actually moved pages, so there's no loop once the batch holds a single form.
   if (batch.status === 'open' && canEditData(ctx.role) && !pdfPages.some((p) => p.upload.status === 'processing')) {
-    const ordered = scanOrder(pdfPages.map((p) => ({filename: p.upload.filename, created_at: p.upload.created_at, page: p.extraction?.page ?? null})));
-    if (groupForms(ordered).length > 1) {
-      const session = await auth();
-      await splitBatchIntoForms(ctx.companyId, id, session?.user?.email ?? null);
-      redirect(`/uploads/batch/${id}`);
-    }
+    const session = await auth();
+    const forms = await splitBatchIntoForms(ctx.companyId, id, session?.user?.email ?? null);
+    if (forms.length > 1) redirect(`/uploads/batch/${id}`);
   }
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
   const [catalog, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);

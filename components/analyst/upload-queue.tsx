@@ -5,7 +5,7 @@ import {useRouter} from 'next/navigation';
 import {createBatchAction, splitFormsAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import type {SplitForm} from '@/src/goldline-data';
 import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progress';
-import {groupForms, MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
+import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
 import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
@@ -253,12 +253,13 @@ export function UploadQueueProvider({company, children}: {company: string | null
 
   const active = items.filter((i) => i.state === 'queued' || i.state === 'running' || i.state === 'waiting_period').length;
 
-  // Many stores in one scan (Q25): once every page is read, if the page numbers restart
-  // (…5, 1…) the drop held several forms. Split them into one batch each, once.
+  // Many stores in one scan (Q25): once every page is read, split the drop into one
+  // batch per FORM. The server groups by the Phase 0 classification (store · period ·
+  // version), which separates a shuffled multi-store scan the old page-number heuristic
+  // couldn't. Runs once per batch; a single-form drop is a cheap no-op.
   useEffect(() => {
     if (active > 0 || !batch.id || splitting || splitFor.current === batch.id) return;
-    const pdfs = items.filter((i) => i.kind === 'pdf' && i.state === 'done');
-    if (groupForms(pdfs.map((i) => ({page: i.page ?? null}))).length < 2) return;
+    if (!items.some((i) => i.kind === 'pdf' && i.state === 'done')) return;
     splitFor.current = batch.id;
     setSplitting(true);
     void splitFormsAction({company: queueCompany.current, batchId: batch.id})
