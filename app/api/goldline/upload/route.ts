@@ -218,6 +218,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     return json({error: 'Could not store the file. Please try again.'}, 500);
   }
   track.uploadId = uploadId;
+  revalidateTag(glTags.uploads(companyId), {expire: 0}); // a new upload: refresh the cached /uploads list
   // The batch may have been committed while this page was uploading; a page added
   // after that could never be committed, so stop here with a clear reason.
   if (batchId && cls.kind === 'inventory_pdf') {
