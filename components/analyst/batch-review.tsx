@@ -6,6 +6,7 @@ import {useRouter} from 'next/navigation';
 import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
+import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
@@ -703,22 +704,12 @@ export function BatchReview({
               </Button>
             </div>
           </div>
-          {/* The page, with the approximate row band drawn over it when locating a SKU.
-              The band animates in; the PDF fills the frame, so top/height fractions map
-              to the page's printed layout (approximate — see the "Show in scan" button). */}
-          <div className="relative min-h-0 w-full flex-1">
-            <iframe src={lightbox.url} title="Scanned page (enlarged)" className="h-full w-full rounded-md bg-white" />
-            {lightbox.highlight && (
-              <div
-                className="pointer-events-none absolute right-0 left-0 rounded-sm motion-safe:animate-[pulse_1.6s_ease-in-out_2]"
-                style={{
-                  top: `${lightbox.highlight.top * 100}%`,
-                  height: `${lightbox.highlight.height * 100}%`,
-                  background: 'color-mix(in oklab, var(--primary) 18%, transparent)',
-                  boxShadow: '0 0 0 2px var(--primary), 0 0 0 9999px color-mix(in oklab, black 18%, transparent)',
-                }}
-              />
-            )}
+          {/* The page rendered to a canvas, with the approximate row band drawn in the
+              page's own coordinate space, so zooming/panning keeps it locked on (the old
+              iframe overlay drifted). Falls back to the browser PDF viewer if it can't
+              render. The band is approximate — see the "Show in scan" button. */}
+          <div className="min-h-0 w-full flex-1">
+            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} className="h-full" />
           </div>
         </div>
       )}
