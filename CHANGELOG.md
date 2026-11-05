@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Scan upload: page through the per-page rows
+
+Expanding a multi-page scan in the uploader unrolled every page at once (98 rows for a 98-page scan). The expanded per-page list now pages twelve rows at a time, with a "Showing 1 to 12 of 98" line, so a big scan stays navigable instead of a long scroll.
+
 ## 2026-11-05 — Scan header: colour-code read vs failed
 
 The "32 of 98 read · 66 failed" line under a scan's heading was one flat grey string. The two halves now carry meaning at a glance: what came through reads in green, what failed reads in red. Neutral when nothing read yet, so "0 of 98 read" doesn't look like success.
