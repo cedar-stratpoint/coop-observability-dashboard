@@ -86,7 +86,14 @@
    "id": "business-health",
    "title": "Business health",
    "tables": [
-    "business_health"
+    "business_health",
+    "plan_versions",
+    "plan_targets",
+    "plan_actuals",
+    "plan_actual_parts",
+    "plan_part_targets",
+    "plan_month_closes",
+    "plan_actuals_log"
    ]
   },
   {
@@ -458,6 +465,62 @@
    "domain": "business-health",
    "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
    "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_versions": {
+   "name": "plan_versions",
+   "domain": "business-health",
+   "about": "Append-only plan versions for the Business Health Report (one row per workbook version, for example vSept26).",
+   "columns": "id, label, reason, created_by, created_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_targets": {
+   "name": "plan_targets",
+   "domain": "business-health",
+   "about": "Plan targets for one version, one row per month and metric.",
+   "columns": "plan_version, month (first day of the month), metric (gmv_total, gmv_events, gmv_website, gmv_marketplace, cm1, cm1_pct, cm2, cm2_pct, cm3, cm3_pct, overhead, ebitda, ebitda_pct, cash, coverage, roas, cac, customers, the two scalar workbook inputs of the customer roll, repeat_rate (row 118) and aov (row 119, pesos), the same value in every month, and inv_purchases, the workbook's inventory purchases row 41, the stock orders needed to hold the coverage target, drawn as the Planned stock orders chart and not a grid row; and the plan targets of the typed cost lines, each the workbook formula row that plans what an admin later types as paid: cogs row 55, platform_fees 59, fulfilment 60, event_costs 61, ad_marketplace 66, ad_website 67, event_marketing 68, content_other rows 69 + 70, bridge_funding 87, liability_settlement 88, freight_onetime 89, shown as a Plan row with a variance under each typed line in the grid), value (pesos for money, a ratio for percentages, so 0.65 = 65%), note. Overhead is a positive cost (workbook row 74 is the same figure, negative). Coverage is one workbook constant (row 45) repeated for every month. Targets only, never actuals.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_actuals": {
+   "name": "plan_actuals",
+   "domain": "business-health",
+   "about": "Typed monthly lines entered by a Coop Admin or Zoomy company admin: only the workbook's INPUT rows. Thirteen lines (all in pesos, never negative, all gate Close month): overhead, cogs, platform_fees, fulfilment, event_costs, ad_marketplace, ad_website, event_marketing, content_other, and the four cash-flow inputs bridge_funding (workbook row 87), liability_settlement (row 88), freight_onetime (row 89) and inv_purchases_paid (the stock bought, rows 41 and 82); plus two optional measures: roas (a multiple, 3.2 = 3.2x; workbook row 9 is an input; stored exactly as typed in amount_php, the column name predates it; never required to close) opening_cash (the bank balance at the start of the FIRST plan month only, in pesos, the one value that may be negative; derived cash starts from it; never required to close), and the two prefillable opening balances opening_inventory (workbook row 44, pesos) and opening_customers (row 120, a count), first plan month only, never negative, never required to close (stock on hand and the customer roll start from them; without a row Coop uses the workbook constant). The source column tags a PREFILLED cell: workbook (a fact from the Cedar Tree workbook) or owner (also confirmed by the owner, the Sep'26 bridge funding); null = typed by an admin, and any admin save clears the tag. The one-time prefill (private loader scripts/seed-plan-from-workbook.mjs, through plan_seed_actual) holds only actual, known values: opening stock, opening customers and Sep'26 funding (values are not in the repo); opening cash, settlement, freight and Aug/Oct funding stay empty. A missing row = not entered; a stored 0 = a real 0. Cash at month end, CAC, active customers and inventory coverage are formulas in the workbook (rows 90, 96, 113, 84), so they are NOT stored: Coop derives them with the same formulas (derivedActuals, src/plan-compute.ts; proven cell by cell by test/plan-workbook-equality.test.ts) and plan_set_actual rejects them (invalid_line). Cash = last cash + EBITDA + COGS − stock bought + funding − settlement − freight, starting from the typed opening_cash (the workbook has no opening-cash cell and starts from 0; until it is typed, every month waits); a month waits until every input behind it, this month and every earlier one, is typed. Older rows of cash, cac, customers and coverage are removed by supabase/plan_actuals_drop_derived.sql (idempotent).",
+   "columns": "month, metric, amount_php (pesos), updated_by, updated_at, source (workbook | owner | null).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_actual_parts": {
+   "name": "plan_actual_parts",
+   "domain": "business-health",
+   "about": "The breakdown behind three consolidated typed lines, one row per part: overhead (salaries, rent, accounting, tech, growth_consultant, rnd, workbook rows 33 to 38), cogs (marketplace_cogs, website_cogs, events_cogs, rows 52 to 54) and content_other (content_socials, other_spend, rows 69 and 70). The grid cell still stores the SUM in plan_actuals, so every derived number, the close gate and the cash chain read the total unchanged.",
+   "columns": "month, metric (overhead | cogs | content_other), part, amount_php (pesos, never negative), updated_by, updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_part_targets": {
+   "name": "plan_part_targets",
+   "domain": "business-health",
+   "about": "The per-part TARGETS behind the three consolidated lines, shown as the grey value beside each part in the breakdown modal. Loaded privately from the workbook (rows 33 to 38, 52 to 54, 69 and 70); the repo holds no figure.",
+   "columns": "month (first day of the month), line (overhead | cogs | content_other), part, value (pesos).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_month_closes": {
+   "name": "plan_month_closes",
+   "domain": "business-health",
+   "about": "A closed month is a row. It records the plan version the month closed under and a snapshot of the GMV actuals taken at close.",
+   "columns": "month, plan_version, closed_by, closed_at, gmv_snapshot (jsonb).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_actuals_log": {
+   "name": "plan_actuals_log",
+   "domain": "business-health",
+   "about": "Change log for typed lines, closes and unlocks (written in the same transaction as the change by the BHR-03/04 RPCs).",
+   "columns": "id, at, actor, month, metric, action, old_value, new_value, reason.",
    "prefer": null,
    "testOrders": null
   },
@@ -1040,6 +1103,18 @@
    "domains": [
     "business-health",
     "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/health-report",
+   "title": "Business Health Report",
+   "shows": "Plan vs actual by month: the Cedar Tree workbook targets (versioned) beside Coop's actuals. GMV actuals are real (BHR-02): Events GMV = non-voided pos_orders with an event, Website GMV = CRM orders other than refunded and voided (pending, authorized, partially_paid, paid count; partially_refunded counts in full and is flagged \"may overstate\"), Marketplace GMV = Shopee + Lazada per-day sales; a month with no data, a failed or truncated CRM read is an empty \"waiting\" cell, never 0 or red; only the workbook's input rows are typed into the grid by a Coop Admin or Zoomy company admin (server action savePlanLineAction, src/plan-actions.ts): overhead, COGS, platform fees, fulfilment, event costs, four ad lines, and the cash-flow inputs (bridge funding row 87, liability settlement row 88, freight row 89, inventory purchases paid), plus optional ROAS and the one-time opening_cash (the bank balance at the start of the first month, typed once in the first month's column, may be negative); everything the workbook computes by formula is calculated here by the same formula and never typed (derivedActuals): CM1 to EBITDA, cash at month end (opening cash, then last cash + EBITDA + COGS − stock bought + funding − settlement − freight; the workbook has no opening-cash cell, so every month waits until the opening cash is typed; a \"Check against your bank\" tooltip sits on the cash row and card), inventory coverage (stock on hand ÷ next month's planned COGS), active customers and CAC (the workbook's customer roll; marked \"modelled from plan assumptions\": shown beside their target, never red or green); a calculated cell waits until every input behind it, this month and earlier, is typed; everyone else with access is read-only, no inputs; admins close a month (Close month, only after the month has ended in Manila time, only with Events, Website and Marketplace GMV all complete (no gap, no partial; the button says what blocks it), and only with all 13 typed lines filled; GMV snapshot frozen, cells locked) and unlock it with a required reason, and a \"close is waiting\" banner shows until it is closed (closeMonthAction, unlockMonthAction); admins also get one header button named for the waiting month (for example Close Oct'26: primary when ready, quiet with the reason in its info tooltip when blocked, hidden when nothing waits; it scrolls to that month's Close row and focuses its Close button); on the three consolidated lines (Fixed overhead, COGS, Content and other) the grid cell is a button that opens a breakdown modal (title \"Fixed overhead · Oct'26\", one input per workbook sub-row with its grey plan value, live total against the line's plan, \"Total only\" for an unknown split; every part needs a value, a blank is never saved as 0): the cell stores the sum, the parts are kept in plan_actual_parts (savePlanPartsAction, RPC plan_set_actual_parts), closed months and non-admins open it read-only; the Edit targets drawer was removed (BHR-05 UI, 2026-11-05) because every target is derived and locked: the server action editTargetsAction and the plan_edit_targets RPC stay for a future plan engine, and the current target version shows in the Target badge tooltip. All explanatory copy (where the numbers come from, grid how-to, card and chart notes, view-only note) lives in info (i) tooltips, copy in src/plan-help.ts; only state and safety text stays visible. Funding, one-time payments and stock bought are not a free-form ledger: they are the workbook's own monthly rows (Actuals · cash flow, as in the workbook, thousands of pesos, never negative). Calculated rows say \"calculated: ...\" under their label; coverage is shown beside its 1.8-month plan constant without red or green; Rough runway is information only: cash divided by the average net cash burn of the last 3 months, \"not burning\" when cash did not fall. ROAS is the one optional typed measure (\"type it in the open cell\"; readers: \"not typed yet\"). Open to a Zoomy data viewer and to a Coop Admin (requireHealthReportAccess); a Goldline view is bounced. Mock mode (no env) renders the page with empty targets and a banner (the repo holds no plan figure; targets are loaded privately by scripts/seed-plan-from-workbook.mjs)",
+   "data": "pos_orders, pos_events, digest_archive, marketplace_daily_sales, plan_actuals, plan_actual_parts, plan_month_closes, plan_versions, plan_targets, plan_part_targets, website CRM (API)",
+   "domains": [
+    "business-health"
    ],
    "fenced": false,
    "access": "full",
