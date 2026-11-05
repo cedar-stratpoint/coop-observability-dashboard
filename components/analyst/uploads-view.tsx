@@ -27,7 +27,7 @@ import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upl
 const ROW_SIZES = [10, 20, 50] as const;
 const TILE_SIZES = [12, 24, 36] as const;
 
-const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
+export const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
 
 type StatusFilter = 'all' | UploadStatus;
 type KindFilter = 'all' | UploadKind;
@@ -40,7 +40,7 @@ const STATUS_META: Record<UploadStatus, {label: string; cls: string; Icon: typeo
   rejected: {label: 'Rejected', cls: 'text-destructive bg-destructive/10', Icon: XCircle},
 };
 
-function StatusPill({status}: {status: UploadStatus}) {
+export function StatusPill({status}: {status: UploadStatus}) {
   const m = STATUS_META[status] ?? STATUS_META.processing;
   const {Icon} = m;
   return (
@@ -51,7 +51,7 @@ function StatusPill({status}: {status: UploadStatus}) {
   );
 }
 
-function fmtWhen(iso: string): string {
+export function fmtWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString(undefined, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
@@ -64,17 +64,16 @@ function fmtDay(day: string): string {
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
 }
 
-/** One drop as a tile: source scan, day, file count, and a status breakdown. Click
- *  opens its files (the list scoped to this group). */
-function GroupTile({g, onOpen}: {g: UploadGroup; onOpen: () => void}) {
+/** One drop as a tile: source scan, day, file count, and a status breakdown. Opens the
+ *  scan — its pages sorted into store forms (Per store / Per BA / Per file). */
+function GroupTile({g}: {g: UploadGroup}) {
   const review = g.byStatus.needs_review ?? 0;
   const committed = g.byStatus.committed ?? 0;
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Link
+      href={`/uploads/scan/${encodeURIComponent(g.source)}`}
       className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
     >
       <div className="flex items-start gap-2.5">
@@ -94,7 +93,7 @@ function GroupTile({g, onOpen}: {g: UploadGroup; onOpen: () => void}) {
         {bad > 0 && <Tag cls="text-destructive bg-destructive/10" n={bad} label={bad === 1 ? 'issue' : 'issues'} />}
         {processing > 0 && <Tag cls="text-muted-foreground bg-muted" n={processing} label="reading" />}
       </div>
-    </button>
+    </Link>
   );
 }
 
@@ -375,10 +374,7 @@ export function UploadsView({
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {pageTiles.map((g) => (
-                  <GroupTile key={g.key} g={g} onOpen={() => {
-                    setGroupKey(g.key);
-                    setPage(1);
-                  }} />
+                  <GroupTile key={g.key} g={g} />
                 ))}
               </div>
             )

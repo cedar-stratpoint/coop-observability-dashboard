@@ -91,6 +91,15 @@ export function scanPosition(filename: string): {source: string; index: number} 
   return m ? {source: m[1], index: Number(m[2])} : null;
 }
 
+/** A human label for a file: a page split from a scan reads "Page 10 of 98" (with the raw
+ *  filename kept as a sub-line); a whole form or sales export keeps its own already-human
+ *  name and has no sub-line. `index` is the page's position for sorting (0 when not a split
+ *  page, so whole-file uploads sort first). */
+export function scanPageLabel(filename: string): {title: string; sub: string | null; index: number} {
+  const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
+  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
+}
+
 /**
  * Scan order for a batch's pages: pages split from the same PDF by their position in
  * it, files in the order they were uploaded otherwise.
