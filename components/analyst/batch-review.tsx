@@ -120,7 +120,7 @@ export function BatchReview({
   // The enlarged scan. `highlight` (set by the per-row "Show in scan" locate button)
   // is an approximate row band — top/height as fractions of the page — computed from
   // the item's printed position in the page's fixed template.
-  const [lightbox, setLightbox] = useState<{url: string; highlight?: {top: number; height: number; label: string}} | null>(null);
+  const [lightbox, setLightbox] = useState<{url: string; highlight?: {top: number; height: number; label: string; approximate?: boolean}} | null>(null);
   // Which page-number groups have their copies expanded (tab strip, grouped view).
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -634,10 +634,16 @@ export function BatchReview({
                     goToFlag(stepFlag(open.length ? open : curFlags, curState.active, dir));
                   }}
                   onLocate={cur.scanUrl && cur.page ? (itemCode) => {
-                    const band = rowBandFor(itemCode, cur.page!);
                     const names = cur.productNames;
                     const label = `${itemCode}${names[itemCode] ? ` · ${names[itemCode]}` : ''} · page ${cur.page}`;
-                    setLightbox({url: cur.scanUrl!, highlight: band ? {...band, label} : undefined});
+                    // Exact box the reader captured for this scan, else the template band.
+                    const box = cur.extraction?.data?.rows?.find((r) => r.item_code === itemCode)?.box;
+                    if (box && typeof box.y_top === 'number' && typeof box.y_bottom === 'number' && box.y_bottom > box.y_top) {
+                      setLightbox({url: cur.scanUrl!, highlight: {top: box.y_top, height: box.y_bottom - box.y_top, label}});
+                    } else {
+                      const band = rowBandFor(itemCode, cur.page!);
+                      setLightbox({url: cur.scanUrl!, highlight: band ? {...band, label, approximate: true} : undefined});
+                    }
                   } : undefined}
                 />
               </div>

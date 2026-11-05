@@ -44,6 +44,10 @@ export type ExtractedRow = {
   // have no three-location column; kept here so they survive into the extraction jsonb
   // (and later the inventory sidecar). Null/absent for v1/v2.
   extra?: Record<string, number | null> | null;
+  // Pointer 6b · where this printed row sits on the scan, as page fractions (0 = top,
+  // 1 = bottom), so "show in scan" can draw an exact box instead of the template band.
+  // Null/absent for scans read before this (they fall back to the band). Cosmetic only.
+  box?: {y_top: number; y_bottom: number} | null;
 };
 
 export type CellMark = {
