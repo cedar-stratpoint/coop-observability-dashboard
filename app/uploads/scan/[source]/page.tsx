@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import {ChevronLeft, LayoutGrid, Users, List, X} from 'lucide-react';
+import {LayoutGrid, Users, List, X} from 'lucide-react';
+import {BackButton} from '@/components/analyst/back-button';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {listStores, listUploads} from '@/src/goldline-data';
 import {getCurrentBas} from '@/src/goldline-ba-data';
-import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
+import {withCanonicalBa} from '@/src/goldline-ba-reconcile';
 import {triageBoard} from '@/src/goldline-triage-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {GL_PAGE} from '@/src/goldline-ui';
@@ -43,8 +44,8 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const companyId = ctx.companyId;
   const canEdit = canEditData(ctx.role);
 
-  const needBas = view === 'ba' || (view === 'store' && Boolean(ba));
-  const [board, stores, uploads, baReg] = await Promise.all([
+  const needBas = view !== 'file';
+  const [rawBoard, stores, uploads, baReg] = await Promise.all([
     view === 'file' ? Promise.resolve(null) : triageBoard(companyId, {source}),
     view === 'file' ? Promise.resolve([]) : listStores(companyId),
     view === 'file' ? listUploads(companyId) : Promise.resolve([]),
@@ -52,21 +53,19 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   ]);
   const files = view === 'file' ? uploads.filter((u) => uploadSource(u.filename) === source) : [];
   // The same person is written many ways; reconcile to one canonical BA (a registry name
-  // when known) so a BA card groups all their forms and filtering by it still matches.
-  const baCanon = board ? reconcileBaNames(board.forms.map((f) => f.consultant), baReg.names) : new Map<string, string>();
-  const canonBa = (c: string | null) => (c?.trim() ? baCanon.get(c.trim()) ?? c.trim() : 'No BA on the form');
-  // Per-store, filtered to one BA when arriving from a BA card.
-  const data = board && ba ? {...board, forms: board.forms.filter((f) => canonBa(f.consultant) === ba)} : board;
+  // when known) so every card reads it the same way and a BA card groups all their forms.
+  const board = rawBoard ? withCanonicalBa(rawBoard, baReg.names) : rawBoard;
+  const baOf = (c: string | null) => (c?.trim() ? c.trim() : 'No BA on the form');
+  // Per-store, filtered to one BA when arriving from a BA card (labels already canonical).
+  const data = board && ba ? {...board, forms: board.forms.filter((f) => baOf(f.consultant) === ba)} : board;
 
   const href = (v: View) => `/uploads/scan/${encodeURIComponent(source)}?view=${v}`;
 
   return (
     <div className={GL_PAGE}>
-      {/* Breadcrumb */}
+      {/* Breadcrumb — the chevron steps back to where you came from, not a fixed page. */}
       <nav className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" aria-label="Breadcrumb">
-        <Link href="/uploads" className="inline-flex items-center gap-1 transition-colors hover:text-foreground">
-          <ChevronLeft className="size-4" /> Uploads
-        </Link>
+        <BackButton fallback="/uploads" label="Uploads" />
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate font-medium text-foreground" title={source}>{source}</span>
       </nav>
