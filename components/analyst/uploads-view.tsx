@@ -106,6 +106,14 @@ function Tag({cls, n, label}: {cls: string; n: number; label: string}) {
   );
 }
 
+/** A human label for a file row: a page split from a scan reads "Page 10 of 98", with
+ *  the raw filename kept as a quiet sub-line; a whole form or sales export keeps its own
+ *  (already human) name and has no sub-line. */
+function pageLabel(filename: string): {title: string; sub: string | null} {
+  const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
+  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename} : {title: filename, sub: null};
+}
+
 type Toast = {id: number; kind: 'ok' | 'err'; text: string};
 
 export function UploadsView({
@@ -391,7 +399,7 @@ export function UploadsView({
                       className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
-                      {u.filename}
+                      {pageLabel(u.filename).title}
                     </Link>
                     <span className="truncate text-xs text-muted-foreground">
                       {KIND_LABEL[u.kind] ?? 'Inventory scan'} · {fmtWhen(u.created_at)}
@@ -441,11 +449,14 @@ export function UploadsView({
                       }}
                       className="cursor-pointer border-b border-border/60 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50"
                     >
-                      <td className="max-w-[20rem] py-2.5 pr-3">
+                      <td className="max-w-[22rem] py-2.5 pr-3">
                         <span className="flex min-w-0 items-center gap-2.5">
                           <FileTypeBadge filename={u.filename} />
-                          <span className="truncate font-medium" title={u.filename}>
-                            {u.filename}
+                          <span className="flex min-w-0 flex-col" title={u.filename}>
+                            <span className="truncate font-medium">{pageLabel(u.filename).title}</span>
+                            {pageLabel(u.filename).sub && (
+                              <span className="truncate font-mono text-[11px] text-muted-foreground">{pageLabel(u.filename).sub}</span>
+                            )}
                           </span>
                         </span>
                       </td>
