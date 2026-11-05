@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, Loader2, MapPin, Search} from 'lucide-react';
+import {Check, Loader2, MapPin, Search, User} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
@@ -47,18 +47,23 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={cn('truncate font-heading text-sm font-semibold tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
+          <div className={cn('truncate font-heading text-[15px] font-semibold tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
             {form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'Store not readable')}
             {form.storeName && form.storeCode ? <span className="font-mono text-xs font-normal text-muted-foreground"> · {form.storeCode}</span> : null}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
+          <div className="mt-1 truncate font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
         </div>
-        <span className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" style={tint(s.tone)}>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={tint(s.tone)}>
+          <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE_VAR[s.tone]}} />
           {s.label}
         </span>
       </div>
 
-      {form.consultant ? <div className="truncate text-xs text-muted-foreground">BA · {form.consultant}</div> : null}
+      {form.consultant ? (
+        <div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+          <User className="size-3 shrink-0 opacity-70" /> {form.consultant}
+        </div>
+      ) : null}
 
       {/* Page coverage: 5 cells, filled = present, dashed = missing, ring = duplicate. */}
       <div className="flex items-center gap-1.5" aria-label="Page coverage">
@@ -125,8 +130,8 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-        style={{background: TONE_VAR.crit}}
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors hover:border-[color:var(--status-crit)]"
+        style={{...tint('crit'), borderColor: 'color-mix(in oklab, var(--status-crit) 28%, transparent)'}}
       >
         <MapPin className="size-3.5" /> Confirm store
       </button>
@@ -182,25 +187,19 @@ function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: S
   // whole form is filed with one tap instead of opening the batch to type a store.
   if (needsStore && canEdit && stores.length > 0) {
     return (
-      <div className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{background: TONE_VAR[s.tone]}} />
-        <div className="flex flex-col gap-3 p-4 pt-[18px]">
-          <CardBody form={form} s={s} />
-          <StorePicker company={company} form={form} stores={stores} />
-        </div>
+      <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm">
+        <CardBody form={form} s={s} />
+        <StorePicker company={company} form={form} stores={stores} />
       </div>
     );
   }
   return (
     <Link
       href={href}
-      className="group relative block overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+      className="group flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
     >
-      <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{background: TONE_VAR[s.tone]}} />
-      <div className="flex flex-col gap-3 p-4 pt-[18px]">
-        <CardBody form={form} s={s} />
-        <span className="self-end whitespace-nowrap text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">Review →</span>
-      </div>
+      <CardBody form={form} s={s} />
+      <span className="self-end whitespace-nowrap text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">Review →</span>
     </Link>
   );
 }
