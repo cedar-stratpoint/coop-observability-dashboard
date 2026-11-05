@@ -6,6 +6,7 @@ import {useRouter} from 'next/navigation';
 import {Trash2} from 'lucide-react';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel} from '@/src/upload-batch';
+import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageResult} from '@/src/goldline-triage-data';
 import {Button} from '@/components/ui/button';
@@ -85,12 +86,16 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
 type BaGroup = {name: string; forms: number; stores: number; needsStore: number; incomplete: number; ready: number; committed: number};
 
 /** One card per Beauty Assistant: how many forms and stores are theirs in this scan, and
- *  what still needs doing. Opens that BA's forms (the store view, filtered). */
-export function BaCards({data, source}: {data: TriageResult; source: string}) {
+ *  what still needs doing. Near-duplicate spellings of one name are reconciled into a
+ *  single BA (preferring a registry name). Opens that BA's forms (the store view, filtered). */
+export function BaCards({data, source, knownBas = []}: {data: TriageResult; source: string; knownBas?: string[]}) {
   const groups = useMemo(() => {
+    const canon = reconcileBaNames(data.forms.map((f) => f.consultant), knownBas);
+    const nameOf = (c: string | null) => (c?.trim() ? canon.get(c.trim()) ?? c.trim() : 'No BA on the form');
     const by = new Map<string, BaGroup>();
+    const storesByName = new Map<string, Set<string>>();
     for (const f of data.forms) {
-      const name = f.consultant?.trim() || 'No BA on the form';
+      const name = nameOf(f.consultant);
       const g = by.get(name) ?? {name, forms: 0, stores: 0, needsStore: 0, incomplete: 0, ready: 0, committed: 0};
       g.forms++;
       const done = f.committed > 0 && f.needsReview === 0;
@@ -99,13 +104,14 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
       else if (f.missing.length > 0) g.incomplete++;
       else g.ready++;
       by.set(name, g);
+      const set = storesByName.get(name) ?? new Set<string>();
+      if (f.storeCode) set.add(f.storeCode);
+      storesByName.set(name, set);
     }
-    for (const g of by.values()) {
-      g.stores = new Set(data.forms.filter((f) => (f.consultant?.trim() || 'No BA on the form') === g.name).map((f) => f.storeCode).filter(Boolean)).size;
-    }
+    for (const g of by.values()) g.stores = storesByName.get(g.name)?.size ?? 0;
     // BAs who still need you first, then by form count.
     return [...by.values()].sort((a, b) => b.needsStore + b.incomplete - (a.needsStore + a.incomplete) || b.forms - a.forms);
-  }, [data.forms]);
+  }, [data.forms, knownBas]);
 
   if (groups.length === 0) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No forms with a BA in this scan yet.</p>;
@@ -115,33 +121,40 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
     <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {groups.map((g) => {
         const attention = g.needsStore + g.incomplete;
-        const stripe = g.needsStore > 0 ? TONE.crit : g.incomplete > 0 ? TONE.warn : TONE.good;
+        const initials = g.name
+          .split(/\s+/)
+          .filter((w) => /[a-z]/i.test(w))
+          .slice(0, 2)
+          .map((w) => w[0]?.toUpperCase())
+          .join('');
         return (
           <Link
             key={g.name}
             href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}`}
-            className="group relative block overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+            className="group flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
           >
-            <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{background: stripe}} />
-            <div className="flex flex-col gap-3 p-4 pt-[18px]">
+            <div className="flex items-center gap-2.5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold text-muted-foreground">
+                {initials || '?'}
+              </span>
               <div className="min-w-0">
-                <div className="truncate font-heading text-sm font-semibold tracking-tight">{g.name}</div>
-                <div className="mt-0.5 font-mono text-[11.5px] text-muted-foreground tabular-nums">
+                <div className="truncate font-heading text-[15px] font-semibold tracking-tight">{g.name}</div>
+                <div className="font-mono text-[11.5px] text-muted-foreground tabular-nums">
                   {g.forms} {g.forms === 1 ? 'form' : 'forms'} · {g.stores} {g.stores === 1 ? 'store' : 'stores'}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {g.needsStore > 0 && <Pill tone="crit" n={g.needsStore} label="need a store" />}
-                {g.incomplete > 0 && <Pill tone="warn" n={g.incomplete} label="incomplete" />}
-                {g.ready > 0 && <Pill tone="good" n={g.ready} label="ready" />}
-                {g.committed > 0 && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">{g.committed} done</span>
-                )}
-              </div>
-              <span className="self-end text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                {attention > 0 ? 'Open forms →' : 'View forms →'}
-              </span>
             </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {g.needsStore > 0 && <Pill tone="crit" n={g.needsStore} label="need a store" />}
+              {g.incomplete > 0 && <Pill tone="warn" n={g.incomplete} label="incomplete" />}
+              {g.ready > 0 && <Pill tone="good" n={g.ready} label="ready" />}
+              {g.committed > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">{g.committed} done</span>
+              )}
+            </div>
+            <span className="self-end text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">
+              {attention > 0 ? 'Open forms →' : 'View forms →'}
+            </span>
           </Link>
         );
       })}
@@ -151,7 +164,8 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
 
 function Pill({tone, n, label}: {tone: keyof typeof TONE; n: number; label: string}) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums" style={tint(tone)}>
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium tabular-nums" style={tint(tone)}>
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE[tone]}} />
       <span className="font-semibold">{n}</span> {label}
     </span>
   );
