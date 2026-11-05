@@ -48,6 +48,9 @@ export type ExtractedRow = {
   // 1 = bottom), so "show in scan" can draw an exact box instead of the template band.
   // Null/absent for scans read before this (they fall back to the band). Cosmetic only.
   box?: {y_top: number; y_bottom: number} | null;
+  // NICH-36 · the row is printed on the page but its code/name isn't in the reference
+  // manifest. Kept and flagged for review (never dropped). Null/absent on known rows.
+  off_manifest?: boolean | null;
 };
 
 export type CellMark = {
