@@ -219,14 +219,8 @@ export function TriageBoard({
   canEdit?: boolean;
   embedded?: boolean;
 }) {
-  const {forms, counts, storeCount} = useMemo(() => {
+  const {needsStore, groups, singles, counts, storeCount, n} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
-    withStatus.sort(
-      (a, b) =>
-        a.s.rank - b.s.rank ||
-        (b.f.periodStart ?? '').localeCompare(a.f.periodStart ?? '') ||
-        (a.f.storeCode ?? 'zzz').localeCompare(b.f.storeCode ?? 'zzz', undefined, {numeric: true}),
-    );
     const counts = {ready: 0, needsStore: 0, incomplete: 0, committed: 0};
     for (const {s} of withStatus) {
       if (s.rank === 0) counts.needsStore++;
@@ -234,12 +228,45 @@ export function TriageBoard({
       else if (s.rank === 2) counts.ready++;
       else counts.committed++;
     }
-    const storeCount = new Set(data.forms.map((f) => f.storeCode).filter(Boolean)).size;
-    return {forms: withStatus.map((w) => w.f), counts, storeCount};
+
+    // A form with no readable store can't be grouped (it isn't a store yet) and is the most
+    // urgent thing, so those stay as individual cards up top. Everything else groups by
+    // store code — same code is the same store, so a store's periods sit together instead
+    // of scattering as look-alike tiles. Different codes stay apart (different branches).
+    const byPeriodDesc = (a: {f: TriageForm}, b: {f: TriageForm}) => (b.f.periodStart ?? '').localeCompare(a.f.periodStart ?? '');
+    const needsStore = withStatus.filter((w) => w.s.rank === 0).sort(byPeriodDesc).map((w) => w.f);
+
+    const byStore = new Map<string, Array<{f: TriageForm; s: FormStatus}>>();
+    for (const w of withStatus) {
+      if (w.s.rank === 0 || !w.f.storeCode) continue;
+      const list = byStore.get(w.f.storeCode) ?? [];
+      list.push(w);
+      byStore.set(w.f.storeCode, list);
+    }
+    const all = [...byStore.entries()].map(([code, items]) => {
+      items.sort(byPeriodDesc);
+      return {
+        code,
+        name: items.find((i) => i.f.storeName)?.f.storeName ?? null,
+        forms: items.map((i) => i.f),
+        minRank: Math.min(...items.map((i) => i.s.rank)),
+        latest: items[0].f.periodStart ?? '',
+      };
+    });
+    // Stores that need you (lowest rank) first, then most-recent activity, then code.
+    const order = (a: (typeof all)[number], b: (typeof all)[number]) =>
+      a.minRank - b.minRank || b.latest.localeCompare(a.latest) || a.code.localeCompare(b.code, undefined, {numeric: true});
+    const groups = all.filter((g) => g.forms.length > 1).sort(order);
+    const singles = all
+      .filter((g) => g.forms.length === 1)
+      .sort(order)
+      .map((g) => g.forms[0]);
+
+    const storeCount = byStore.size;
+    return {needsStore, groups, singles, counts, storeCount, n: withStatus.length};
   }, [data.forms]);
 
   const t = data.totals;
-  const n = forms.length;
 
   const summaryLine =
     n > 0 ? (
@@ -305,10 +332,44 @@ export function TriageBoard({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {forms.map((f) => (
-            <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+        <div className="flex flex-col gap-7">
+          {needsStore.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <GroupHeading title="Needs a store" count={needsStore.length} tone="crit" />
+              <FormGrid>
+                {needsStore.map((f) => (
+                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                ))}
+              </FormGrid>
+            </section>
+          )}
+
+          {groups.map((g) => (
+            <section key={g.code} className="flex flex-col gap-3">
+              <GroupHeading
+                title={g.name ?? `Store ${g.code}`}
+                code={g.name ? g.code : undefined}
+                count={g.forms.length}
+                countLabel="forms"
+              />
+              <FormGrid>
+                {g.forms.map((f) => (
+                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                ))}
+              </FormGrid>
+            </section>
           ))}
+
+          {singles.length > 0 && (
+            <section className="flex flex-col gap-3">
+              {(needsStore.length > 0 || groups.length > 0) && <GroupHeading title="One-off stores" count={singles.length} />}
+              <FormGrid>
+                {singles.map((f) => (
+                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                ))}
+              </FormGrid>
+            </section>
+          )}
         </div>
       )}
 
@@ -332,6 +393,30 @@ export function TriageBoard({
           </Card>
         </section>
       )}
+    </div>
+  );
+}
+
+function FormGrid({children}: {children: React.ReactNode}) {
+  return <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{children}</div>;
+}
+
+/** A store (or triage bucket) heading above its cards: the store name once, its code, and
+ *  how many forms sit under it — so repeated periods of one store read as one store. */
+function GroupHeading({title, code, count, countLabel = 'form', tone}: {title: string; code?: string; count: number; countLabel?: string; tone?: Tone}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-border pb-1.5">
+      <h3 className="flex min-w-0 items-baseline gap-2">
+        <span
+          className={cn('truncate font-heading text-sm font-semibold tracking-tight', tone === 'crit' && 'text-[color:var(--status-crit)]')}
+        >
+          {title}
+        </span>
+        {code && <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">· {code}</span>}
+      </h3>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+        {count} {count === 1 ? countLabel.replace(/s$/, '') : countLabel.endsWith('s') ? countLabel : `${countLabel}s`}
+      </span>
     </div>
   );
 }

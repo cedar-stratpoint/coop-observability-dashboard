@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Forms: group a store's periods, canonical BA on every card, real Back, delete from a tile
+
+Four follow-ups on the review flow:
+
+- **Same-store forms group under one store.** A store scanned every period showed up as a row of look-alike tiles ("Watsons SM San Pablo" three times) that read like duplicates. The forms board now groups cards by store (same store code = same store; different codes stay apart as the different branches they are): a store heading shows the name once and how many forms sit under it, with each period still its own card. Forms that have no readable store yet stay pinned on top as individual cards (they're the urgent ones), and single-form stores collect under "One-off stores".
+- **Canonical BA on every card, not just Per-BA.** The Per-BA reconciliation now also rewrites the BA label on the store cards, so the same person reads identically everywhere ("Rhea Mae Bermil" on every card, never "RHEA MAE BERMIL" on one and "Rhea Mae P. Bermil" on the next). `withCanonicalBa`, pure and unit-tested.
+- **Back goes back.** The "‹ Uploads" breadcrumbs stepped to the Uploads landing and threw away where you were (a Per-BA view, a filter). They now step back through history to the actual previous page, falling back to a fixed destination only on a fresh deep link.
+- **Delete a scan from its tile.** The grouped Uploads tiles gained a trash button, like the file list has. It opens the same confirmation (what goes: pages, stores, BAs, committed counts) and the same "removing" progress pass, then stays on Uploads with a toast instead of redirecting.
+
 ## 2026-11-05 — Per BA: reconcile the same person written many ways into one
 
 A scan reads one beauty advisor's name several ways, "Rhea Mae Bernil", "Rhea Mae P. Bermil", "RHEA MAE BERMIL", which scattered one person's forms across three tiles that each had to be reviewed. The Per-BA view now **reconciles near-identical names into a single BA** (case, punctuation, middle initials and a leading "Ma."/"Mrs." ignored; a one-character slip like Bernil/Bermil still matches). When a matching name already exists in the BA registry, that spelling wins as the source of truth; otherwise the fullest written form stands in. Opening a reconciled BA still gathers all their forms (the store-view filter reconciles the same way). Pure and unit-tested; genuinely different people stay apart.

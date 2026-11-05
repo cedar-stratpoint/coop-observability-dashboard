@@ -1,5 +1,6 @@
 'use client';
 
+import type {ReactElement} from 'react';
 import {useEffect, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
@@ -16,7 +17,20 @@ import {Button} from '@/components/ui/button';
 
 const STEPS = ['Checking the scan', 'Removing the pages', 'Clearing their readings', 'Finishing up'];
 
-export function DeleteScanDialog({company, source}: {company: string; source: string}) {
+export function DeleteScanDialog({
+  company,
+  source,
+  trigger,
+  onDeleted,
+}: {
+  company: string;
+  source: string;
+  /** Custom trigger element (e.g. an icon button on a tile). Defaults to a "Delete scan" button. */
+  trigger?: ReactElement;
+  /** Called once the scan is gone. When set, the dialog stays on the page (toast + refresh is
+   *  the caller's job) instead of redirecting to the Uploads landing. */
+  onDeleted?: (info: {files: number; source: string}) => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<ScanGroupSummary | null | 'loading' | 'error'>('loading');
@@ -72,8 +86,12 @@ export function DeleteScanDialog({company, source}: {company: string; source: st
     setPhase('done');
     await new Promise((r) => setTimeout(r, remain + 400));
     setOpen(false);
-    router.push('/uploads');
-    router.refresh();
+    if (onDeleted) {
+      onDeleted({files: s?.files ?? 0, source});
+    } else {
+      router.push('/uploads');
+      router.refresh();
+    }
   }
 
   const s = typeof summary === 'object' && summary ? summary : null;
@@ -82,11 +100,13 @@ export function DeleteScanDialog({company, source}: {company: string; source: st
     <AlertDialog.Root open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
       <AlertDialog.Trigger
         render={
-          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive" />
+          trigger ?? (
+            <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive">
+              <Trash2 className="size-3.5" /> Delete scan
+            </Button>
+          )
         }
-      >
-        <Trash2 className="size-3.5" /> Delete scan
-      </AlertDialog.Trigger>
+      />
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
