@@ -4,7 +4,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
-import {eta, groupLabel, groupQueueItems, itemLabel, itemPercent, summarize, type QueueGroup} from '@/components/analyst/upload-queue-format';
+import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, CATEGORY_LABEL, FILTER_ORDER, type ItemCategory, type QueueGroup} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
@@ -99,8 +99,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 busy ? (
                   `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
                 ) : (
-                  // Read vs failed, colour-coded so the split reads on first glance:
-                  // green for what came through, red for what didn't.
+                  // Colour-coded so the split reads on first glance: green for what came
+                  // through, neutral for pages set aside (sales/blank), red only for real
+                  // failures.
                   <>
                     <span
                       className="font-medium tabular-nums"
@@ -108,6 +109,12 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                     >
                       {s.done} of {s.total} read
                     </span>
+                    {s.setAside > 0 && (
+                      <>
+                        <span aria-hidden> · </span>
+                        <span className="font-medium tabular-nums">{s.setAside} set aside</span>
+                      </>
+                    )}
                     {s.failed > 0 && (
                       <>
                         <span aria-hidden> · </span>
@@ -325,9 +332,25 @@ const PAGES_PER_VIEW = 12;
 function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const pageCount = Math.max(1, Math.ceil(g.items.length / PAGES_PER_VIEW));
+  const [filter, setFilter] = useState<'all' | ItemCategory>('all');
+  // How many pages fall in each plain-language bucket, for the filter chips + counts.
+  const counts = useMemo(() => {
+    const c = {} as Record<ItemCategory, number>;
+    for (const i of g.items) {
+      const k = itemCategory(i);
+      c[k] = (c[k] ?? 0) + 1;
+    }
+    return c;
+  }, [g.items]);
+  const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
+  const filtered = filter === 'all' ? g.items : g.items.filter((i) => itemCategory(i) === filter);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
-  const shown = g.items.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
+  const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
+  const choose = (f: 'all' | ItemCategory) => {
+    setFilter(f);
+    setPage(1);
+  };
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const working = g.running > 0 || g.waiting > 0;
   const allDone = g.done === g.total && g.total > 0;
@@ -361,6 +384,19 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
       </button>
       {open && (
         <div className="flex flex-col border-t border-border bg-muted/20">
+          {/* Filter chips — only when there's more than one bucket to sort between. */}
+          {present.length >= 2 && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-2.5" role="group" aria-label="Filter pages">
+              <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
+                All <span className="tabular-nums opacity-70">{g.items.length}</span>
+              </FilterChip>
+              {present.map((c) => (
+                <FilterChip key={c} active={filter === c} onClick={() => choose(c)}>
+                  {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+                </FilterChip>
+              ))}
+            </div>
+          )}
           <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
             {shown.map((i) => (
               <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
@@ -369,7 +405,7 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
           {pageCount > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2">
               <span className="text-[11px] text-muted-foreground tabular-nums">
-                Showing {(safePage - 1) * PAGES_PER_VIEW + 1} to {Math.min(safePage * PAGES_PER_VIEW, g.items.length)} of {g.items.length}
+                Showing {(safePage - 1) * PAGES_PER_VIEW + 1} to {Math.min(safePage * PAGES_PER_VIEW, filtered.length)} of {filtered.length}
               </span>
               <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label={`Pages of ${g.source}`} />
             </div>
@@ -380,10 +416,24 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
   );
 }
 
+/** A calm status pill: muted for the "set aside" kinds, red only for a genuine error. */
+function CategoryPill({cat}: {cat: ItemCategory}) {
+  const crit = cat === 'failed';
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={crit ? {color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))', background: 'color-mix(in oklab, var(--status-crit) 14%, transparent)'} : {background: 'var(--muted)', color: 'var(--foreground)'}}
+    >
+      {CATEGORY_LABEL[cat]}
+    </span>
+  );
+}
+
 function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void}) {
   const pct = itemPercent(i, now);
   const failed = i.state === 'failed';
   const done = i.state === 'done';
+  const cat = itemCategory(i);
   // A read page opens the batch review on that page's tab (the same view as "Review &
   // commit"), so there is one place to review. The whole row is the target (stretched
   // link), so there's no small "Open" to aim for.
@@ -412,13 +462,22 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
           </span>
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(i.size)}</span>
         </div>
-        <span
-          className={cn('truncate text-xs', failed ? 'text-destructive' : 'text-muted-foreground')}
-          style={done && i.flagged ? {color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'} : undefined}
-          title={failed ? i.error : undefined}
-        >
-          {itemLabel(i)}
-        </span>
+        {cat === 'sales' || cat === 'blank' || cat === 'other' ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <CategoryPill cat={cat} /> <span className="truncate">set aside, not counted</span>
+          </span>
+        ) : cat === 'failed' ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <CategoryPill cat={cat} /> <span className="truncate">{i.error ?? 'Please try again.'}</span>
+          </span>
+        ) : (
+          <span
+            className="truncate text-xs text-muted-foreground"
+            style={done && i.flagged ? {color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'} : undefined}
+          >
+            {itemLabel(i)}
+          </span>
+        )}
         {i.state === 'running' && (
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
             <div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none" style={{width: `${pct}%`}} />
@@ -446,6 +505,23 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
         )}
       </div>
     </li>
+  );
+}
+
+/** A small toggle chip for the per-scan page filter (All / Read / Couldn't read / …). */
+function FilterChip({active, onClick, children}: {active: boolean; onClick: () => void; children: React.ReactNode}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+        active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
