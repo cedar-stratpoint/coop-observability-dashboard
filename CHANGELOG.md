@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Classifier: read duplex blank back-sides as "Blank page"
+
+These forms are scanned duplex (auto-flip), so roughly half of every scan is a blank back side. A faint blank sometimes classified as "unknown" and read as "Not an inventory page" rather than a clean "Blank page". The classifier prompt now tells the reader that blanks are common and expected, that faint scanner noise / a smudge / a crease / light bleed-through still counts as blank, and to prefer "blank" over "unknown" on a near-empty page (and never use "unknown" for an empty page). Both outcomes were already set aside calmly; this just gives the right label. Needs a Staging re-run to confirm against real scans.
+
 ## 2026-11-06 — Scan upload: stop pages failing with a blank "(200)"
 
 QA saw legit inventory pages fail with "Upload failed (200)" on a 98-page scan. Root cause: reading a page takes 60 to 85 seconds and the server went silent the whole time, so a proxy's idle-read timeout cut the streaming connection before the final result line. The browser got a bare 200 with no answer and showed the raw code, and nothing retried it. The densest pages (page 4, the accessories list) are the slowest, so they got cut most.

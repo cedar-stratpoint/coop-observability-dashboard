@@ -3,6 +3,7 @@ import {
   buildSystemPrompt,
   buildManifestPrompt,
   buildPageDetectPrompt,
+  buildPageClassifyPrompt,
   EXTRACTION_SCHEMA,
   PAGE_DETECT_SCHEMA,
   MANIFESTS,
@@ -10,6 +11,17 @@ import {
   COLUMN_KEYS,
   humanizeExtractError,
 } from './goldline-extract';
+
+describe('buildPageClassifyPrompt', () => {
+  const p = buildPageClassifyPrompt();
+  // Duplex auto-flip means ~half of every scan is blank back-sides; a near-empty page
+  // must read as "blank" (calm, set aside), not "unknown" ("Not an inventory page").
+  it('steers faint/empty pages to blank, not unknown', () => {
+    expect(p).toContain('blank');
+    expect(p).toMatch(/auto-flip|back side|bleed-through/);
+    expect(p).toContain('not "unknown"');
+  });
+});
 
 describe('buildSystemPrompt', () => {
   const p = buildSystemPrompt();
