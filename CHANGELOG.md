@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — A scan drop is now a real page: Per store · Per BA · Per file
+
+The redesign's structural move (critique P1s: the authored store-form view was hidden behind a jargon button, and the drill-in was React state so Back lost your place). Clicking a scan in Uploads now opens `/uploads/scan/[source]` — a real route with a breadcrumb (Uploads · scan name) and a `Per store · Per BA · Per file` toggle:
+
+- **Per store** (default) — the store-form cards, scoped to this scan.
+- **Per BA** — one card per Beauty Assistant (how many forms and stores are theirs, what still needs doing), opening that BA's forms.
+- **Per file** — the scan's pages as a plain list, each reading "Page 10 of 98" (raw filename a quiet sub-line), in page order, opening its review.
+
+Because it's a route, Back returns to the scan (and the view is shareable). The standalone Scan triage page and the landing clean-up come next. `TriageBoard` gained an `embedded` mode so the scan page can put the breadcrumb and toggle above it.
+
 ## 2026-11-05 — Uploads: files read as "Page 10 of 98", not a raw scan filename
 
 First step of a design-led Uploads rework (after a dual-agent critique that scored the surface 21/40, the headline problem being that it speaks in files and filenames while the user thinks in stores and pages). A page split from a multi-page scan now shows as **"Page 10 of 98"** in the file list, with the raw `Scan2026-10-30_171554 (page 10 of 98).pdf` kept only as a quiet mono sub-line and tooltip. A whole form or a sales export keeps its own already-human name. Small change, directly addresses the "technical filenames, I don't know which is my store's page" complaint; the larger restructure (scan drill-in as a real route with Per store / Per BA / Per file, review always one clean store-form, accurate pointer) follows.
