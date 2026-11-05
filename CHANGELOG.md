@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Scan header: colour-code read vs failed
+
+The "32 of 98 read · 66 failed" line under a scan's heading was one flat grey string. The two halves now carry meaning at a glance: what came through reads in green, what failed reads in red. Neutral when nothing read yet, so "0 of 98 read" doesn't look like success.
+
 ## 2026-11-05 — After a big scan: group the split forms by store and page through them
 
 A 98-page scan splits into dozens of forms, and the post-upload "N forms in this scan" list showed them as one long flat wall, the same store's periods repeating as near-identical rows ("SM CITY-SAN PABLO 1" five times over). Now that list **groups by store** (the name once, its periods under it), **reconciles the BA spelling** so one person reads the same on every row (no more "LEONISA RAMOS" next to "Leonisa Ramo"), and **pages six stores at a time**. Forms with no store read on page 1 sit first, so the ones that need a store picked are the first thing you see. Fewer things to choose between at a glance (Hick's Law), and a long scan is navigable store by store.
