@@ -129,6 +129,38 @@ Finishing the Phase 2 review slices (see `../PLAN.md`, NICH-17). Both additive, 
 - **Legacy values in review** (`review-rows.tsx`): a Legacy form's `extra` sidecar (beginning / begin+delivery / deducted-pcs, Phase 1) now shows as a read-only context line under the item code in both the table and phone card — "Beginning 20 · +Delivery 25 · Deducted 8" — only for Legacy rows. Purely additive display.
 - Note on the rest: **partial commit / resume needs no new work** — drafts already persist and restore per batch (`src/review-draft.ts`), and an incomplete form already commits ("add the rest later"); cherry-picking a subset of uploaded pages is intentionally excluded by the per-form-atomic commit. 151 tests green, tsc + design detector clean.
 
+## 2026-11-03 — Goldline purchase orders (F12): approved restock lines become a PO and ship, received stock counts as delivered
+- **What it does:** the Restock run gets a "Make purchase orders" button that puts the owner's approved and edited lines on **one PO per store per restock run** and ships them (`record_shipment`: the warehouse goes down, the line is on the way). New Orders tab, `/stock/orders`. Each PO is laid out like Nichido's paper PURCHASE ORDER FORM (`PO FILE PAGE 1-2.xlsx`):
+  - The header has No. (`PO-0042`), TO, and FROM (Beauty Consultant, Store, Code, Date, Module).
+  - Lines are QTY | DESCRIPTION, grouped by product line with the shades under each.
+  - The mockup's admin columns sit to the right on screen: item code, price, amount, Line, Remarks, received qty and date.
+  - Printing gives the paper layout in two columns, with a received column and a signature row, without prices or rejected lines.
+- **Orders page by date (Nov 4):** `/stock/orders` opens on one tile per date POs were made (newest first; each shows its stores, approved total, lines received and the restock run). Picking a tile (`?date=YYYY-MM-DD`) lists that day's POs, one per store, with a status filter (All, Shipped, Partly received, Received) and a store or PO number search. A PO's breadcrumb links back to its date. **One PO per store per day** (`purchase_orders.po_date`, Manila; was one per store per run): making POs on a new day starts a new PO for each store, and making them again the same day adds to that day's PO. On Staging, the 6 lines added Nov 4 to PO-0001 (Nov 3) were moved to a new PO-0002 dated Nov 4; their shipments are unchanged.
+- **Dates and stores on separate pages (Nov 5):** `/stock/orders` is now a plain list of order dates for the month (date, stores, approved total, received, restock run), not tiles. A date opens its own page, `/stock/orders/date/YYYY-MM-DD`, with that day's POs per store and the status filter and store search. The PO's breadcrumb goes back to its date page; old `?date=` links redirect there; a day with no POs the role can see is a 404.
+- **Orders page scales with time (Nov 4):** the date tiles are added up in the database (`po_dates()`, one row per order date) and the page reads only the picked day's POs, so a page load costs the same with five dates or five hundred (before, it read every PO and line ever made). Tiles show one month at a time (`?month=YYYY-MM`, a month picker with older / newer), opening on the newest month with POs; a date link opens its month.
+- **Decided Nov 3: the owner decides once, on the Restock run (F11).** The plan's flow puts approve, edit and reject in F11 ("Either one approves or rejects from anywhere") and F12 has no decision step ("Approved lines become a purchase order. When stock arrives, they fill the received section"). The PO's Line and Remarks columns show the F11 decision and remark (Approved, Edited with the original number struck through). Lines rejected on the run show struck through with their remark, as in the mockup's CPFCD row, and are not ordered. A first build had approve and reject again on each PO line; that was dropped the same day as not what the plan says.
+- **Shipping happens when the PO is made.** A short warehouse stops the whole call and nothing ships. Making POs again only adds lines approved since.
+- **Changing a decision after the PO:** undo or edit on the Restock run takes a shipped line back off its PO and cancels its shipment (the units go back to the warehouse); the next "Make purchase orders" ships the new number. Refused once the stock is received (`already_received`) or due to have arrived (`already_arrived`).
+- **Delivered: the receipt wins, the form is the fallback.**
+  - In the form vs. sales check (F6), a store and item's PO receipts for a month replace the form's Delivery column.
+  - On the Inventory board (F9), receipts inside a count's period replace that count's Delivery.
+  - Both numbers are kept on the check row (`formDelivered`, `received`). Flag details carry `form_delivered` and `received` only when a receipt exists, so flags raised before F12 don't churn.
+  - Saving a receipt re-runs the checks for those stores.
+  - No new flag in v1 for a receipt that differs from the form.
+- **Received shipments:** `shipments.status` gains `received` (with `received_qty`, `received_on`). A received shipment stays "on the way" only until the store's next count covers the received date, with the qty that actually arrived. A short receipt is kept as entered and the missing units are **not** put back in the warehouse (v1).
+- **Fixed on the way:** re-making a restock run reserved the warehouse for every approved line, including lines already shipped, whose units `record_shipment` had already taken out. Lines on a PO are no longer reserved (`reservedByItem`).
+- **Open questions:**
+  - What the paper form's "Module" means. It's free text on the PO until Justin answers.
+  - Whether short units go back to the warehouse.
+  - Whether to print the whole catalog like the paper does. v1 prints ordered lines only.
+- **SQL:** `supabase/nichido/p3d_purchase_orders.sql` (cutover step 18). **Applied on Nichido Staging Nov 3.** The whole flow was run there in rolled-back transactions:
+  - Approve one line and reject one, then make POs: 1 PO; the rejected line isn't on it, and a second run adds none.
+  - The shipped line is in transit, and the warehouse went 1000 to 954.
+  - A short warehouse refuses with `not_enough_stock:0` and ships nothing.
+  - Undo on the run cancels the shipment, and the warehouse is back to 1000.
+  - Receiving more than was sent is refused (`over_qty`). A receipt of 45 of 46 is kept. Undo after that receipt is refused (`already_received`).
+  - The PO page was also rendered against a temporary PO, which was then removed.
+  - Staging has no POs or shipments left from testing. Not on prod.
 ## 2026-11-03 — Nichido Phase 2 (part 2a): duplicate / re-upload value diff
 
 When a scanned page shares the Phase 0 `page_key` with an earlier upload (a re-upload, or a page scanned twice), the review page now shows WHAT differs so the reviewer can decide which copy to keep. Flag-only, never blocks. See `../PLAN.md`, NICH-17. Additive, no schema change.

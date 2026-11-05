@@ -308,3 +308,12 @@ html.coop-splash-seen .coop-splash { display: none; }
    app's theme, so they stay visible in dark mode. */
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
+
+/* Goldline purchase orders (F12): printing a PO prints only its paper form, without the
+   dashboard around it. */
+@media print {
+  body:has(.po-print) * { visibility: hidden; }
+  body:has(.po-print) .po-print,
+  body:has(.po-print) .po-print * { visibility: visible; }
+  body:has(.po-print) .po-print { position: absolute; inset: 0 0 auto 0; }
+}
