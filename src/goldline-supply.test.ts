@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ItemMovement} from './goldline-movement';
-import {boardSummary, buildBoard, inFocus, inTransitFor, lastsLabel, manilaDate, productionDaysFor, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
+import {boardSummary, buildBoard, inFocus, inTransitFor, lastsLabel, manilaDate, productionDaysFor, shipmentOf, transitDaysFor, type StoreBlock, type SupplyConfig} from './goldline-supply';
 
 const TODAY = '2026-10-20';
 const cfg: SupplyConfig = {
@@ -197,5 +197,21 @@ describe('boardSummary · values (F9)', () => {
     });
     // TWC: 15 on hand × ₱185 + LIP: 2 × ₱299; delivered: TWC 5 × ₱185
     expect(boardSummary(rows, TODAY)).toMatchObject({stockValue: 15 * 185 + 2 * 299, deliveredValue: 5 * 185, deliveredUnits: 5, unpriced: 0});
+  });
+});
+
+describe('shipmentOf (F12 received shipments)', () => {
+  const row = {id: 's1', store_code: '1', item_code: 'BPDB01', qty: 12, shipped_on: '2026-10-18', arrives_on: '2026-10-21'};
+  it('keeps an in-transit shipment as sent', () => {
+    expect(shipmentOf({...row, status: 'in_transit'})).toMatchObject({qty: 12, arrivesOn: '2026-10-21'});
+  });
+  it('counts what arrived, on the day it arrived, once received', () => {
+    expect(shipmentOf({...row, status: 'received', received_qty: 10, received_on: '2026-10-22'})).toMatchObject({qty: 10, arrivesOn: '2026-10-22'});
+  });
+  it('drops a receipt of 0, and stays on the way until a count covers the received date', () => {
+    expect(shipmentOf({...row, status: 'received', received_qty: 0, received_on: '2026-10-22'})).toBeNull();
+    const s = shipmentOf({...row, status: 'received', received_qty: 10, received_on: '2026-10-22'})!;
+    expect(inTransitFor([s], '1', 'BPDB01', '2026-10-15')).toEqual({qty: 10, arrivesOn: '2026-10-22'});
+    expect(inTransitFor([s], '1', 'BPDB01', '2026-10-31')).toBeNull();
   });
 });

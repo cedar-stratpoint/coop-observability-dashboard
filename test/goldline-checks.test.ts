@@ -92,6 +92,21 @@ describe('monthlyChecks', () => {
     const {months} = monthlyChecks({...base, counts: c, posSold: () => 105});
     expect(months.find((m) => m.month === '2026-10')).toMatchObject({start: 120, formSold: 105, state: 'match'});
   });
+  it('a PO receipt counts as delivered over the form’s Delivery column (F12)', () => {
+    const c = [counts[0], {...counts[1], delivery: 20}, counts[2]];
+    const receipts = new Map([['1|LIPT01|2026-10', 18]]);
+    const {months, findings} = monthlyChecks({...base, counts: c, receipts, posSold: () => 103});
+    expect(months.find((m) => m.month === '2026-10')).toMatchObject({delivered: 18, formDelivered: 20, received: 18, start: 118, formSold: 103, state: 'match'});
+    expect(findings).toEqual([]);
+    const off = monthlyChecks({...base, counts: c, receipts, posSold: () => 80}).findings[0];
+    expect(off.details).toMatchObject({delivered: 18, form_delivered: 20, received: 18});
+  });
+  it('without a receipt the form’s Delivery column is used, and details keep their old shape', () => {
+    const c = [counts[0], {...counts[1], delivery: 20}, counts[2]];
+    const {months, findings} = monthlyChecks({...base, counts: c, receipts: new Map([['1|LIPT01|2026-09', 5]]), posSold: () => 80});
+    expect(months.find((m) => m.month === '2026-10')).toMatchObject({delivered: 20, formDelivered: 20, received: null});
+    expect(findings[0].details).not.toHaveProperty('received');
+  });
   it('the first count is the baseline, a month without POS data waits, unlinked items are held out', () => {
     expect(monthlyChecks({...base, posSold: () => 85}).months.find((m) => m.month === '2026-09')?.state).toBe('baseline');
     expect(monthlyChecks({...base, salesMonths: new Set(), posSold: () => 85}).months.find((m) => m.month === '2026-10')?.state).toBe('waiting_sales');

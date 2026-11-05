@@ -4,7 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {getForecastSettings, getGlCatalog, getGlStores, getGlSupplyRef, getStoreScope} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
 import {onHandOf, type InventoryRowIn} from './goldline-inventory';
-import type {Shipment} from './goldline-supply';
+import {SHIPMENT_COLS, SHIPMENT_OPEN, shipmentOf, type Shipment, type ShipmentRow} from './goldline-supply';
 import {forecastWindow, HOLD_REASONS, salesYear, type ForecastWindow, type MonthStatus} from './goldline-forecast';
 import {runCycle, type Decision, type StoreCount} from './goldline-restock';
 import {itemProjection, itemStoreLines, itemTotals, itemYear, sendOf, type ItemStoreLine, type ItemTotals, type ProjectionMonth, type SavedLine, type YearMonth} from './goldline-restock-item';
@@ -76,13 +76,13 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
     fetchAllRows('shipments', (from, to) =>
       supa
         .from('shipments') // pagination-ok: paged by fetchAllRows (.range below)
-        .select('id,store_code,item_code,qty,shipped_on,arrives_on')
+        .select(SHIPMENT_COLS)
         .eq('company_id', companyId)
         .eq('item_code', itemCode)
-        .eq('status', 'in_transit')
+        .in('status', SHIPMENT_OPEN)
         .order('id')
         .range(from, to),
-    ) as unknown as Promise<Array<{id: string; store_code: string; item_code: string; qty: number; shipped_on: string; arrives_on: string}>>,
+    ) as unknown as Promise<ShipmentRow[]>,
     // pagination-ok: one row by (company_id, cycle), unique.
     supa.from('restock_runs').select('id').eq('company_id', companyId).eq('cycle', cycle).maybeSingle(),
   ]);
@@ -144,7 +144,7 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
     retired: Boolean(p?.retired_at),
     openFlagStores: new Set(flags.map((f) => f.store_code)),
     counts: countMap,
-    shipments: shipments.map((s): Shipment => ({id: s.id, storeCode: s.store_code, itemCode: s.item_code, qty: s.qty, shippedOn: s.shipped_on, arrivesOn: s.arrives_on})),
+    shipments: shipments.map(shipmentOf).filter((s): s is Shipment => s != null),
     warehouse: supply.warehouse.find((w) => w.item_code === itemCode)?.on_hand ?? null,
     saved,
   });

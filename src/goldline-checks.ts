@@ -21,7 +21,10 @@
 //   gap       = form_sold − POS sold;  flag when |gap| > max(min units, pct × POS sold)
 // On hand is the written ending, else stockroom + drawer + selling area (onHandOf).
 // A store's first count is the baseline only (Q11); a month with no POS file waits.
+// Delivered is what the store received on purchase orders that month (F12), else the
+// form's Delivery column.
 import {onHandOf} from './goldline-inventory';
+import {deliveredFrom} from './goldline-po';
 
 export type FlagKind = 'sales_gap' | 'zero_or_below' | 'row_math' | 'unreadable';
 export type FlagCause = 'messy_handwriting' | 'incorrect_total' | 'padding';
@@ -77,7 +80,9 @@ export type MonthCheck = {
   month: string; // YYYY-MM
   state: MonthState;
   start: number | null;
-  delivered: number;
+  delivered: number; // the PO receipt when there is one, else the form's Delivery column (F12)
+  formDelivered: number; // the form's Delivery column
+  received: number | null; // units received on POs this month (null = no receipt)
   adjusted: number;
   ending: number | null;
   formSold: number | null;
@@ -186,6 +191,7 @@ export function monthlyChecks(input: {
   salesMonths: ReadonlySet<string>;
   linked: ReadonlySet<string>;
   settings?: CheckSettings;
+  receipts?: ReadonlyMap<string, number>; // store|item|YYYY-MM → units received on POs (receiptsByMonth)
 }): {months: MonthCheck[]; findings: Finding[]} {
   const s = input.settings ?? DEFAULT_SETTINGS;
   const series = new Map<string, CountRow[]>(); // store|item → counts by date
@@ -211,10 +217,12 @@ export function monthlyChecks(input: {
       // Final on hand before this month: the latest earlier count that has one.
       const before = rows.filter((r) => r.period_end < `${month}-01` && onHandOf(r).onHand != null).at(-1);
       const last = [...inMonth].reverse().find((r) => onHandOf(r).onHand != null);
-      const delivered = inMonth.reduce((a, r) => a + (r.delivery ?? 0), 0);
+      const formDelivered = inMonth.reduce((a, r) => a + (r.delivery ?? 0), 0);
+      const received = input.receipts?.get(`${store}|${item}|${month}`);
+      const delivered = deliveredFrom(formDelivered, received);
       const adjusted = adjBy.get(`${store}|${item}|${month}`) ?? 0;
       const ending = last ? (onHandOf(last).onHand as number) : null;
-      const row: MonthCheck = {store_code: store, item_code: item, month, state: 'baseline', start: null, delivered, adjusted, ending, formSold: null, posSold: null, gap: null, allowed: null};
+      const row: MonthCheck = {store_code: store, item_code: item, month, state: 'baseline', start: null, delivered, formDelivered, received: received ?? null, adjusted, ending, formSold: null, posSold: null, gap: null, allowed: null};
       if (ending == null) {
         months.push({...row, state: 'not_counted'}); // left blank on the form this month
         continue;
@@ -256,6 +264,8 @@ export function monthlyChecks(input: {
             opening: onHandOf(before).onHand,
             opening_period_end: before.period_end,
             delivered,
+            // Only with a PO receipt, so flags raised before F12 keep their stored details.
+            ...(received !== undefined ? {form_delivered: formDelivered, received} : {}),
             adjusted,
             ending,
             form_sold: row.formSold,
