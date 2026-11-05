@@ -85,7 +85,9 @@ export function sendUpload(input: {
       try {
         resolve({httpStatus: xhr.status, ...(JSON.parse(xhr.responseText) as Omit<UploadResult, 'httpStatus'>)});
       } catch {
-        reject(new Error(`Upload failed (${xhr.status}). Please try again.`));
+        // The stream closed before the final result line (a proxy idle-timeout cut it, or
+        // the connection dropped). No raw status code in front of the user.
+        reject(new Error('We couldn’t finish reading this page. Please try again.'));
       }
     };
     xhr.onerror = () => reject(new Error('Network error. Check your connection and try again.'));

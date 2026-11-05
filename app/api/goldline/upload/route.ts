@@ -67,6 +67,20 @@ export type UploadStage =
 type Emit = (e: UploadStage) => void;
 type Outcome = {body: Record<string, unknown>; status: number};
 
+// The classify (~20s) and read (~60-85s) calls run silently. On a streamed upload a
+// proxy's idle-read timeout can cut the NDJSON connection during that silence, before
+// the final result line — the client then sees a bare 200 and "couldn't finish reading".
+// Re-emit the current stage on a 12s heartbeat so bytes keep flowing and the stream
+// stays open until the real result (success or a clean failure) is written.
+async function withHeartbeat<T>(emit: Emit, beat: UploadStage, work: () => Promise<T>): Promise<T> {
+  const iv = setInterval(() => emit(beat), 12_000);
+  try {
+    return await work();
+  } finally {
+    clearInterval(iv);
+  }
+}
+
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Page-level confidence = mean of the per-row confidences (0 when empty). */
@@ -334,7 +348,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     // flag any duplicate / re-upload — all before extraction. Version-aware extraction
     // is Phase 1; here the extractor still reads the V1/V2 three-location layout.
     emit({type: 'stage', stage: 'detecting'});
-    const cls = await classifyPage(pdfBase64);
+    const cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
     const page = cls.page;
 
     // Reconcile the store code against the registry (best-effort: no registry = raw).
@@ -395,13 +409,15 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       ? Buffer.from(await applyOrientation(bytes, 180)).toString('base64')
       : pdfBase64;
 
-    emit({type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0});
+    const reading: UploadStage = {type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0};
+    emit(reading);
     // The writer profile: an earlier reviewed copy of this page + notes from past
     // corrections, learned from this database's committed scans (empty on any error).
     const profile = await getWriterProfile(companyId, page, batchStore, ctx.storeScope);
     // Phase 1: extract against the detected form version (legacy uses the 7-column
-    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1.
-    const extracted = await extractInventoryPage(extractB64, page, profile, cls.version);
+    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
+    // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
+    const extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
     if (outPdf.length) {
