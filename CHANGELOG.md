@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Forms cards: drop the top stripe, modernize
+
+The coloured 3px stripe across the top of every store/BA card read as a template costume (and the craft floor flags a coloured top border as a default to avoid). Removed it; status now lives entirely in a refined **dot pill** (a tinted dot + label), which already carried the state. Also: the store name is a touch larger, the BA line gets a person glyph, BA cards get an **initials avatar** (a contact-card feel), cards lift slightly on hover, and the "Confirm store" button is a **tinted outline** instead of a solid-red fill, so a scan with 30 "needs a store" forms no longer reads as a wall of red. Same information, calmer and more inviting.
+
 ## 2026-11-05 — Scan pointer, phase 6b: exact row boxes from the reader
 
 Makes the "show in scan" highlight pixel-accurate instead of a template estimate. The extraction now asks the reader for each row's `box` ({y_top, y_bottom} as page fractions on THIS scan's actual layout), additively, and the prompt is explicit that the box "must not change any count" (it carries into the extraction JSONB with no schema migration, since rows are JSON). When a row has a box, "show in scan" draws that exact band (no "approximate" tag); rows without one, every scan read before this, fall back to the computed template band as before. Cosmetic only: the counts are untouched.
