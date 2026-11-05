@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Per BA: reconcile the same person written many ways into one
+
+A scan reads one beauty advisor's name several ways, "Rhea Mae Bernil", "Rhea Mae P. Bermil", "RHEA MAE BERMIL", which scattered one person's forms across three tiles that each had to be reviewed. The Per-BA view now **reconciles near-identical names into a single BA** (case, punctuation, middle initials and a leading "Ma."/"Mrs." ignored; a one-character slip like Bernil/Bermil still matches). When a matching name already exists in the BA registry, that spelling wins as the source of truth; otherwise the fullest written form stands in. Opening a reconciled BA still gathers all their forms (the store-view filter reconciles the same way). Pure and unit-tested; genuinely different people stay apart.
+
 ## 2026-11-05 — Uploads: delete a whole scan drop, with a confirmation that shows what goes
 
 A scan drop (one PDF, often 100+ pages) could only be cleared file by file. A **Delete scan** button on the scan page now removes the whole drop and everything it produced (the pages, their readings, and any committed counts) in one go. It confirms first, in a modal that spells out exactly what will go: how many pages, across how many stores, which BAs, and a warning when committed pages (and their Inventory counts) are among them. On confirm it shows a short, honest "removing the pages" progress pass before returning to Uploads, so a 109-page drop vanishing doesn't read as a glitch. Editors only; irreversible by design, which is why it asks first.
