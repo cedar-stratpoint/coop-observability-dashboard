@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Goldline pages: sales totals kept per period, forecast reads cached
+
+Goldline pages (Restock, Stores, Overview, SKU linking/activity) spent seconds in the database on each load. Measured on Nichido Staging, neither Supabase in general nor the network was the problem (~45 ms a round trip, small tables in 50 to 300 ms). The time went to five sales functions that added up all 472k sales rows on every call: `sales_rollup` 2.9 s, `forecast_history` 5 s, `forecast_months` 2.2 s, `store_scope` 1.7 s, `sku_months` 2.6 s. The forecast ones weren't cached at all. Decrypting is not the main cost (all rows decrypt in ~0.7 s). The rest is aggregation spilling to disk on a small instance: Staging is Supabase's smallest compute size (256 MB shared buffers) and Prod is one size up. Rewriting the functions was tried and bought nothing, so the fix reads fewer rows instead.
+
+- **`s5_sales_period_totals.sql`** (Nichido): three small tables hold the sales already added up (per SKU per period ~3.5k, per store per period ~3.7k, per store per SKU ~65k), with figures still encrypted in the s1/s3 format. Statement triggers on `sales` add each change, so `upsert_sales`, the delete of a sales file, scripts and the SQL editor all keep them current. `sales_rollup`, `store_scope`, `forecast_months`, `sku_months` and `sales_by_sku` read them, with the same signatures and output (checked equal against the old functions, including split non-month periods): 2.9 s → 52 ms, 1.7 s → 6 ms, 2.2 s → 20 ms, 2.6 s → 26 ms. `private.sales_totals_drift(company)` checks the totals against a fresh pass (all zeros = in step), and `private.rebuild_sales_totals(company)` repairs them.
+- **Forecast reads cached:** `forecast_months` / `forecast_history` / `forecast_item_history` now go through `cachedSalesView` (keyed to the committed sales files, expired by sales writes and SKU linking). `forecast_history` is ~2.7 MB, over the data cache's 2 MB an entry, so it's stored gzipped (~270 KB). `forecast_history` stays on the raw rows (it needs store × item × month), so the Restock forecast tab's first load after an upload is still ~4 s.
+
+Staging, dev server, app time cold → warm: Stores 1.3 s → 0.15 s, Overview 1.1 s → 0.14 s, SKU linking 0.8 s → 0.3 s, Restock forecast tab 4.2 s → 0.9 s (was 6+ s every load), Restock item 0.8 s → 0.3 s.
+
+Applied to Nichido Staging only. Prod: apply `s5` (it backfills), run the drift check, then deploy. After that, the `sales_rollup` workarounds in `src/goldline-ref-data.ts` (in-flight sharing, in-memory copy) and the 30 s `service_role` timeout from `f2g` can go.
+
 ## 2026-11-05 — Uploads: paginate the "confirm store" read
 
 `setUploadsStore` (the guided "which store?" step) read the `uploads` table with a plain `.select()`, which PostgREST silently caps at 1000 rows. It was bounded in practice (the id list was small), but it tripped the pagination guard and left the read one refactor away from quiet truncation. It now uses the shared `fetchAllRows` paginator with a stable order, matching the other `uploads` reads in this module. No behaviour change; the pagination-guard test is green again.
