@@ -15,15 +15,18 @@ import {
   createBatch,
   deleteImpact,
   deleteUpload,
+  deleteScanGroup,
   getBatch,
   getBatchPages,
   getUpload,
   listStores,
+  scanGroupSummary,
   setUploadsStore,
   splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
   type DeleteImpact,
+  type ScanGroupSummary,
   type SplitForm,
   type ReviewedInventoryRow,
 } from '@/src/goldline-data';
@@ -373,6 +376,37 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
   } catch (e) {
     console.error('splitFormsAction', e);
     return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
+  }
+}
+
+/** What deleting a whole scan drop would remove — for the confirmation before the user commits. */
+export async function scanGroupSummaryAction(input: {company: string | null; source: string}): Promise<{ok: true; summary: ScanGroupSummary} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  try {
+    return {ok: true, summary: await scanGroupSummary(ctx.companyId, (input.source ?? '').trim())};
+  } catch (e) {
+    console.error('scanGroupSummaryAction', e);
+    return {ok: false, error: 'Couldn’t read this scan.'};
+  }
+}
+
+/** Delete a whole scan drop and everything it produced. Irreversible — the UI confirms first. */
+export async function deleteScanGroupAction(input: {company: string | null; source: string}): Promise<{ok: true; deleted: number} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot delete uploads.'};
+  const source = (input.source ?? '').trim();
+  if (!source) return {ok: false, error: 'No scan to delete.'};
+  try {
+    const deleted = await deleteScanGroup(ctx.companyId, source);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads');
+    revalidatePath('/uploads/forms');
+    return {ok: true, deleted};
+  } catch (e) {
+    console.error('deleteScanGroupAction', e);
+    return {ok: false, error: 'Delete didn’t finish. Some files may remain, try again.'};
   }
 }
 

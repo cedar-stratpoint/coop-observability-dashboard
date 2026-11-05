@@ -7,6 +7,7 @@ import type {ExtractedPage} from './goldline-extract-run';
 import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
+import {uploadSource} from './goldline-upload-groups';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -314,6 +315,66 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
   const res = await supa.from('uploads').delete().eq('company_id', companyId).eq('id', id);
   if (res.error) throw new Error(`uploads delete failed: ${res.error.message}`);
   return true;
+}
+
+export type ScanGroupSummary = {files: number; committed: number; needsReview: number; issues: number; stores: string[]; bas: string[]};
+
+/** What deleting a whole scan drop will take with it — shown in the confirmation before
+ *  the user commits to it. A scan = every upload whose filename shares this source. */
+export async function scanGroupSummary(companyId: string, source: string): Promise<ScanGroupSummary> {
+  if (!goldlineConfigured()) return {files: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
+  const scoped = rows.filter((r) => uploadSource(r.filename) === source);
+  const stores = new Set<string>();
+  const bas = new Set<string>();
+  let committed = 0;
+  let needsReview = 0;
+  let issues = 0;
+  for (const r of scoped) {
+    if (r.status === 'committed') committed++;
+    else if (r.status === 'needs_review') needsReview++;
+    else if (r.status === 'failed' || r.status === 'rejected') issues++;
+    const c = (r.classification ?? {}) as Record<string, unknown>;
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const store = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    if (store) stores.add(store);
+    if (typeof c.consultant === 'string' && c.consultant.trim()) bas.add(c.consultant.trim());
+  }
+  return {files: scoped.length, committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
+}
+
+/** Delete a whole scan drop: every upload whose filename shares this source, with its
+ *  committed counts, sales, extractions and stored files. Chunked so a 100-page drop
+ *  deletes in a few bulk statements. Returns how many uploads were removed. */
+export async function deleteScanGroup(companyId: string, source: string): Promise<number> {
+  if (!goldlineConfigured()) return 0;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,filename,storage_path').eq('company_id', companyId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; storage_path: string | null}>;
+  const scoped = rows.filter((r) => uploadSource(r.filename) === source);
+  if (!scoped.length) return 0;
+  const pathById = new Map(scoped.map((r) => [r.id, r.storage_path]));
+  for (let i = 0; i < scoped.length; i += 100) {
+    const ids = scoped.slice(i, i + 100).map((r) => r.id);
+    // Committed data first (fail loud), then extractions, then stored files, then rows.
+    const inv = await supa.from('inventory').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (inv.error) throw new Error(`inventory delete failed: ${inv.error.message}`);
+    const sales = await supa.from('sales').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (sales.error) throw new Error(`sales delete failed: ${sales.error.message}`);
+    const ext = await supa.from('extractions').delete().eq('company_id', companyId).in('upload_id', ids);
+    if (ext.error) throw new Error(`extractions delete failed: ${ext.error.message}`);
+    const paths = ids.map((id) => pathById.get(id)).filter((p): p is string => typeof p === 'string');
+    if (paths.length) {
+      const rm = await supa.storage.from(GOLDLINE_BUCKET).remove(paths);
+      if (rm.error) console.error('deleteScanGroup: storage remove failed', rm.error.message);
+    }
+    const del = await supa.from('uploads').delete().eq('company_id', companyId).in('id', ids);
+    if (del.error) throw new Error(`uploads delete failed: ${del.error.message}`);
+  }
+  return scoped.length;
 }
 
 /** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
