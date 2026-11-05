@@ -115,33 +115,40 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
     <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {groups.map((g) => {
         const attention = g.needsStore + g.incomplete;
-        const stripe = g.needsStore > 0 ? TONE.crit : g.incomplete > 0 ? TONE.warn : TONE.good;
+        const initials = g.name
+          .split(/\s+/)
+          .filter((w) => /[a-z]/i.test(w))
+          .slice(0, 2)
+          .map((w) => w[0]?.toUpperCase())
+          .join('');
         return (
           <Link
             key={g.name}
             href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}`}
-            className="group relative block overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+            className="group flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
           >
-            <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{background: stripe}} />
-            <div className="flex flex-col gap-3 p-4 pt-[18px]">
+            <div className="flex items-center gap-2.5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold text-muted-foreground">
+                {initials || '?'}
+              </span>
               <div className="min-w-0">
-                <div className="truncate font-heading text-sm font-semibold tracking-tight">{g.name}</div>
-                <div className="mt-0.5 font-mono text-[11.5px] text-muted-foreground tabular-nums">
+                <div className="truncate font-heading text-[15px] font-semibold tracking-tight">{g.name}</div>
+                <div className="font-mono text-[11.5px] text-muted-foreground tabular-nums">
                   {g.forms} {g.forms === 1 ? 'form' : 'forms'} · {g.stores} {g.stores === 1 ? 'store' : 'stores'}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {g.needsStore > 0 && <Pill tone="crit" n={g.needsStore} label="need a store" />}
-                {g.incomplete > 0 && <Pill tone="warn" n={g.incomplete} label="incomplete" />}
-                {g.ready > 0 && <Pill tone="good" n={g.ready} label="ready" />}
-                {g.committed > 0 && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">{g.committed} done</span>
-                )}
-              </div>
-              <span className="self-end text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                {attention > 0 ? 'Open forms →' : 'View forms →'}
-              </span>
             </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {g.needsStore > 0 && <Pill tone="crit" n={g.needsStore} label="need a store" />}
+              {g.incomplete > 0 && <Pill tone="warn" n={g.incomplete} label="incomplete" />}
+              {g.ready > 0 && <Pill tone="good" n={g.ready} label="ready" />}
+              {g.committed > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">{g.committed} done</span>
+              )}
+            </div>
+            <span className="self-end text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">
+              {attention > 0 ? 'Open forms →' : 'View forms →'}
+            </span>
           </Link>
         );
       })}
@@ -151,7 +158,8 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
 
 function Pill({tone, n, label}: {tone: keyof typeof TONE; n: number; label: string}) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums" style={tint(tone)}>
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium tabular-nums" style={tint(tone)}>
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE[tone]}} />
       <span className="font-semibold">{n}</span> {label}
     </span>
   );
