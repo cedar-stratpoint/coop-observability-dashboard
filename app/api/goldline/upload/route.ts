@@ -378,9 +378,16 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
     }
     if (!inv) {
+      // A blank back-side is a normal, expected part of a scan — set it aside quietly,
+      // like the sales report, rather than showing it as a failure.
+      if (cls.kind === 'blank') {
+        const reason = 'This looks like a blank page (a back side with no form). It has been set aside.';
+        await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+        return json({uploadId, status: 'rejected', error: reason, pageKind: 'blank'}, 422);
+      }
       const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
-      await setUploadStatus(uploadId, 'failed', {rejectReason: reason});
-      return json({uploadId, status: 'failed', error: reason, pageKind: cls.kind}, 422);
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
     }
 
     // Upright copy for extraction: rotate 180° pages before reading (no-op if upright).

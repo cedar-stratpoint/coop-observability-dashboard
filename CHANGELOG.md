@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Scan upload: friendly pills, no error codes, and a page filter
+
+Making the per-page list of a big scan readable for non-technical users:
+
+- **Calm pills for the pages that aren't read.** A sales report, a blank back-side, or a page that isn't an inventory form are normal parts of a mixed scan, not failures. Each now shows a muted pill ("Sales report", "Blank page", "Not an inventory page") with "set aside, not counted", instead of a red error line. Blank pages are detected and set aside like the sales report, rather than lumped in with "doesn't look like a form".
+- **No raw error codes.** "Upload failed (200). Please try again." becomes "Couldn't read" + "We couldn't read this page. Please try again." No HTTP status in front of the user.
+- **A filter on the expanded scan.** The per-page list gained filter chips (All, Read, Couldn't read, Sales report, Blank page, Not an inventory page) with counts, defaulting to All, so a 98-page scan is easy to sort. Chips show only the buckets that are present, and only when there's more than one.
+- **Honest counts.** The "N read · … failed" header (and the corner indicator) now separates "set aside" from genuine "failed", so benign pages no longer inflate the failure count.
+
 ## 2026-11-05 — Uploads: paginate the "confirm store" read
 
 `setUploadsStore` (the guided "which store?" step) read the `uploads` table with a plain `.select()`, which PostgREST silently caps at 1000 rows. It was bounded in practice (the id list was small), but it tripped the pagination guard and left the read one refactor away from quiet truncation. It now uses the shared `fetchAllRows` paginator with a stable order, matching the other `uploads` reads in this module. No behaviour change; the pagination-guard test is green again.
