@@ -95,11 +95,33 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
           <div className="flex flex-col gap-0.5">
             <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
-              {hasItems
-                ? busy
-                  ? `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
-                  : `${s.done} of ${s.total} read${s.failed ? ` · ${s.failed} failed` : ''}.`
-                : `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per page (a whole multi-page scan can be much larger).`}
+              {hasItems ? (
+                busy ? (
+                  `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
+                ) : (
+                  // Read vs failed, colour-coded so the split reads on first glance:
+                  // green for what came through, red for what didn't.
+                  <>
+                    <span
+                      className="font-medium tabular-nums"
+                      style={{color: s.done > 0 ? 'color-mix(in oklab, var(--status-good) 72%, var(--foreground))' : undefined}}
+                    >
+                      {s.done} of {s.total} read
+                    </span>
+                    {s.failed > 0 && (
+                      <>
+                        <span aria-hidden> · </span>
+                        <span className="font-medium tabular-nums" style={{color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))'}}>
+                          {s.failed} failed
+                        </span>
+                      </>
+                    )}
+                    .
+                  </>
+                )
+              ) : (
+                `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per page (a whole multi-page scan can be much larger).`
+              )}
             </p>
           </div>
           {hasItems && !busy && (
