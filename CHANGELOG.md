@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Uploads: paginate the "confirm store" read
+
+`setUploadsStore` (the guided "which store?" step) read the `uploads` table with a plain `.select()`, which PostgREST silently caps at 1000 rows. It was bounded in practice (the id list was small), but it tripped the pagination guard and left the read one refactor away from quiet truncation. It now uses the shared `fetchAllRows` paginator with a stable order, matching the other `uploads` reads in this module. No behaviour change; the pagination-guard test is green again.
+
 ## 2026-11-05 — OCR (NICH-36): read the page, not the catalog
 
 Carlos's Nov 5 QA found the reader both dropping real rows and inventing rows that aren't on the scan. Root cause: the extraction prompt told the model to "emit one object for every item code in the provided manifest", so the manifest (a per-page catalog) became the list of rows. When a store's page printed an item the manifest didn't list, it had no slot and was dropped (MUSE, NGFEP, Sugar Rush, Georgia, Individual Flare — all confirmed missing from the manifest). When the manifest listed items the page didn't print, the model emitted them anyway, in catalog order, which also re-sorted items under the wrong group (the Watsons "9 invented rows" and Raisin Wine landing under True Color Eye Shadow).
