@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Uploads: files read as "Page 10 of 98", not a raw scan filename
+
+First step of a design-led Uploads rework (after a dual-agent critique that scored the surface 21/40, the headline problem being that it speaks in files and filenames while the user thinks in stores and pages). A page split from a multi-page scan now shows as **"Page 10 of 98"** in the file list, with the raw `Scan2026-10-30_171554 (page 10 of 98).pdf` kept only as a quiet mono sub-line and tooltip. A whole form or a sales export keeps its own already-human name. Small change, directly addresses the "technical filenames, I don't know which is my store's page" complaint; the larger restructure (scan drill-in as a real route with Per store / Per BA / Per file, review always one clean store-form, accurate pointer) follows.
+
 ## 2026-11-05 — Guided "which store?": file an unreadable form in one tap
 
 The last big piece of the review redesign. A "needs a store" card (a form whose store the scan couldn't read) now carries a **Confirm store** button instead of just linking away. It opens an inline picker, search the store registry, tap one, and the whole form is filed: the chosen store is stamped onto its pages (`setUploadsStore`, merged into each page's classification, committed inventory untouched) so the card leaves "needs a store", and the form's batch is made commit-ready under that store (`assignFormStoreAction` re-splits a multi-store batch or sets the store on a single-form batch). Safe because the earlier scan-run grouping means each "needs a store" card is one physical form, so a tap can't mislabel several stores at once. The forms view (inbox and per-scan) now passes the store list and edit permission; readable forms still just open to review. This completes mockup sections 02 to 05.
