@@ -155,10 +155,13 @@ export async function setUploadsStore(companyId: string, uploadIds: string[], st
   const ids = uploadIds.filter((x) => typeof x === 'string').slice(0, 50);
   if (!ids.length) return [];
   const supa = db();
-  const {data, error} = await supa.from('uploads').select('id,batch_id,classification').eq('company_id', companyId).in('id', ids);
-  if (error) throw new Error(`uploads read failed: ${error.message}`);
+  // Paginated so the read is never silently capped at PostgREST's db.max_rows (1000);
+  // stable .order('id') keeps pages from overlapping or skipping.
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,batch_id,classification').eq('company_id', companyId).in('id', ids).order('id').range(from, to),
+  )) as Array<{id: string; batch_id: string | null; classification: Record<string, unknown> | null}>;
   const batches = new Set<string>();
-  for (const row of (data ?? []) as Array<{id: string; batch_id: string | null; classification: Record<string, unknown> | null}>) {
+  for (const row of rows) {
     if (row.batch_id) batches.add(row.batch_id);
     const c = {...(row.classification ?? {})};
     c.store_code = storeCode;
