@@ -28,6 +28,9 @@ export type UploadResult = {
   docConfidence?: number;
   header?: UploadHeader;
   watsons?: WatsonsResult; // a Watsons POS Sales Data month
+  // What kind of page this was when it isn't an inventory page to read: 'sales'
+  // (page 6 report), 'blank' (a back side), or 'unknown' — drives a friendly pill.
+  pageKind?: string;
 };
 
 export type WatsonsResult = {

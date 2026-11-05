@@ -11,6 +11,36 @@ export function itemPercent(i: QueueItem, now: number): number {
   return progressFor(i.kind, i.phase, i.uploadFrac, Math.max(0, now - i.phaseAt));
 }
 
+/**
+ * The plain-language bucket a page falls in, for the per-page pill and the filter. The
+ * three "set aside" kinds (sales report, blank back-side, not-an-inventory-page) are
+ * normal parts of a mixed scan, not errors, so they read calmly; only a genuine
+ * processing error is 'failed'.
+ */
+export type ItemCategory = 'working' | 'success' | 'sales' | 'blank' | 'other' | 'failed' | 'cancelled';
+
+export function itemCategory(i: QueueItem): ItemCategory {
+  if (i.state === 'done') return 'success';
+  if (i.state === 'cancelled') return 'cancelled';
+  if (i.state !== 'failed') return 'working'; // queued / waiting_period / running
+  if (i.pageKind === 'sales') return 'sales';
+  if (i.pageKind === 'blank') return 'blank';
+  if (i.pageKind === 'unknown') return 'other'; // read, but not an inventory page
+  return 'failed'; // a real processing error
+}
+
+/** Short pill labels + the filter order. 'working'/'cancelled' aren't offered as filters. */
+export const CATEGORY_LABEL: Record<ItemCategory, string> = {
+  working: 'In progress',
+  success: 'Read',
+  sales: 'Sales report',
+  blank: 'Blank page',
+  other: 'Not an inventory page',
+  failed: 'Couldn’t read',
+  cancelled: 'Cancelled',
+};
+export const FILTER_ORDER: ItemCategory[] = ['success', 'failed', 'sales', 'blank', 'other'];
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const n = (v: number) => v.toLocaleString('en-US');
 
@@ -61,12 +91,20 @@ export function itemLabel(i: QueueItem): string {
 export type QueueSummary = {
   total: number; // excluding cancelled
   done: number;
-  failed: number;
+  failed: number; // GENUINE processing errors only (not set-aside pages)
+  setAside: number; // sales report / blank / not-an-inventory-page — normal, not errors
   running: number;
   waiting: number; // queued + waiting for period
   readyForReview: number; // PDFs read and awaiting review
   percent: number;
 };
+
+/** Sales report, blank back-side, or a non-inventory page: expected in a mixed scan,
+ *  set aside rather than read — not a failure. */
+export function isSetAside(i: QueueItem): boolean {
+  const c = itemCategory(i);
+  return c === 'sales' || c === 'blank' || c === 'other';
+}
 
 export function summarize(items: QueueItem[], now: number): QueueSummary {
   const live = items.filter((i) => i.state !== 'cancelled');
@@ -74,7 +112,8 @@ export function summarize(items: QueueItem[], now: number): QueueSummary {
   return {
     total: live.length,
     done: live.filter((i) => i.state === 'done').length,
-    failed: live.filter((i) => i.state === 'failed').length,
+    failed: live.filter((i) => itemCategory(i) === 'failed').length,
+    setAside: live.filter(isSetAside).length,
     running: live.filter((i) => i.state === 'running').length,
     waiting: live.filter((i) => i.state === 'queued' || i.state === 'waiting_period').length,
     readyForReview: live.filter((i) => i.state === 'done' && i.serverStatus === 'needs_review').length,
@@ -92,7 +131,8 @@ export type QueueGroup = {
   isSplit: boolean; // true when this is a multi-page PDF split into pages
   size: number; // sum of live page sizes
   done: number;
-  failed: number;
+  failed: number; // GENUINE processing errors only
+  setAside: number; // sales / blank / not-an-inventory-page
   running: number;
   waiting: number;
   total: number; // live (non-cancelled)
@@ -130,7 +170,8 @@ export function groupQueueItems(items: QueueItem[], now: number): QueueGroup[] {
       isSplit,
       size: live.reduce((a, i) => a + i.size, 0),
       done: live.filter((i) => i.state === 'done').length,
-      failed: live.filter((i) => i.state === 'failed').length,
+      failed: live.filter((i) => itemCategory(i) === 'failed').length,
+      setAside: live.filter(isSetAside).length,
       running: live.filter((i) => i.state === 'running').length,
       waiting: live.filter((i) => i.state === 'queued' || i.state === 'waiting_period').length,
       total: live.length,
@@ -145,6 +186,7 @@ export function groupLabel(g: QueueGroup): string {
   const parts: string[] = [];
   if (g.done < g.total) parts.push(`${g.done} of ${g.total} read`);
   else parts.push(`${g.total} ${g.total === 1 ? 'page' : 'pages'} read`);
+  if (g.setAside) parts.push(`${g.setAside} set aside`);
   if (g.failed) parts.push(`${g.failed} failed`);
   if (g.waiting && g.done < g.total) parts.push(`${g.waiting} waiting`);
   return parts.join(' · ');

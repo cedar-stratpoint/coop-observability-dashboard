@@ -35,6 +35,9 @@ export type QueueItem = {
   // results
   uploadId?: string;
   serverStatus?: string; // needs_review | committed | rejected | failed
+  // When not a readable inventory page: 'sales' (page 6), 'blank', or 'unknown' —
+  // lets the row show a calm pill ("Sales report", "Blank page") instead of an error.
+  pageKind?: string;
   page?: number;
   rows?: number;
   flagged?: number;
@@ -225,7 +228,9 @@ export function UploadQueueProvider({company, children}: {company: string | null
           state: 'failed',
           uploadId: res.uploadId,
           serverStatus: res.status,
-          error: res.error ?? res.errors?.[0] ?? `Upload failed (${res.httpStatus}).`,
+          pageKind: res.pageKind,
+          // No raw HTTP status in front of the user — a plain, non-technical line.
+          error: res.error ?? res.errors?.[0] ?? 'We couldn’t read this page. Please try again.',
         });
       }
     },
