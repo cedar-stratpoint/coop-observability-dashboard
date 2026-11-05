@@ -1,14 +1,16 @@
 'use client';
 
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemLabel, itemPercent, summarize, type QueueGroup} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
+import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {UploadIllustration} from '@/components/analyst/upload-illustration';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
+import {Pagination} from '@/components/analyst/pagination';
 import type {SplitForm, StoreOption} from '@/src/goldline-data';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
@@ -415,8 +417,38 @@ const pageList = (pages: number[]) => {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDay = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}` : iso);
 
-/** Several stores in one scan: each form found, its own batch to review. */
+type FormRow = SplitForm & {baLabel: string | null};
+type StoreGroup = {key: string; code: string | null; name: string; forms: FormRow[]};
+
+// Hick's Law: a 98-page scan can split into dozens of forms, and the same store's
+// periods pile up as near-identical rows. Collapse that into one group per store
+// (name once, its periods under it) and page through a handful of stores at a time,
+// so the reviewer picks a store, not scans a wall. Forms with no store read sit first.
+const STORES_PER_PAGE = 6;
+
+/** Several stores in one scan: forms grouped by store, BA names reconciled, paged. */
 function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null; splitting: boolean; busy: boolean; stores: StoreOption[]}) {
+  const [page, setPage] = useState(1);
+  const nameOf = useMemo(() => new Map(stores.map((s) => [s.code, s.name])), [stores]);
+  const groups = useMemo<StoreGroup[]>(() => {
+    if (!forms) return [];
+    // One canonical BA spelling across the scan, so "LEONISA RAMOS" and "Leonisa Ramo"
+    // read as one person (no registry here — cluster the written names among themselves).
+    const baCanon = reconcileBaNames(forms.map((f) => f.consultant));
+    const canonBa = (c: string | null) => (c?.trim() ? baCanon.get(c.trim()) ?? c.trim() : null);
+    const by = new Map<string, StoreGroup>();
+    for (const f of forms) {
+      const key = f.storeCode ?? '__nostore__';
+      const g =
+        by.get(key) ??
+        {key, code: f.storeCode, name: f.storeCode ? nameOf.get(f.storeCode) ?? `Store ${f.storeCode}` : 'Store not on the form', forms: []};
+      g.forms.push({...f, baLabel: canonBa(f.consultant)});
+      by.set(key, g);
+    }
+    // Forms missing a store come first (they need one picked), then stores A→Z.
+    return [...by.values()].sort((a, b) => (a.code === null ? -1 : b.code === null ? 1 : a.name.localeCompare(b.name)));
+  }, [forms, nameOf]);
+
   if (!forms) {
     return (
       <p className="flex items-center gap-2 rounded-xl border border-border px-3.5 py-3 text-sm text-muted-foreground">
@@ -427,34 +459,59 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
       </p>
     );
   }
-  const nameOf = new Map(stores.map((s) => [s.code, s.name]));
+
   const blank = forms.filter((f) => !f.storeCode).length;
+  const pageCount = Math.max(1, Math.ceil(groups.length / STORES_PER_PAGE));
+  const safePage = Math.min(page, pageCount);
+  const shown = groups.slice((safePage - 1) * STORES_PER_PAGE, safePage * STORES_PER_PAGE);
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
       <p className="text-xs text-muted-foreground">
-        Each form is its own review. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
+        Each form is its own review, grouped by store. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
       </p>
-      <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Forms in this scan">
-        {forms.map((f, n) => (
-          <li key={f.batchId}>
-            <Link href={`/uploads/batch/${f.batchId}`} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/50">
-              <span className="flex min-w-0 flex-col">
-                <span className="font-medium">
-                  Form {n + 1} · {f.storeCode ? (nameOf.get(f.storeCode) ?? `Store ${f.storeCode}`) : 'store not on the form'}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {pageList(f.pages)}
-                  {f.periodStart && f.periodEnd ? ` · ${fmtDay(f.periodStart)} to ${fmtDay(f.periodEnd)}` : ''}
-                  {f.consultant ? ` · BA ${f.consultant}` : ''}
-                </span>
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
-                Review <ChevronRight className="size-3.5" aria-hidden />
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+
+      {shown.map((g) => (
+        <section key={g.key} className="flex flex-col gap-1.5" aria-label={g.name}>
+          <div className="flex items-baseline justify-between gap-3 px-0.5">
+            <h3 className="flex min-w-0 items-baseline gap-2">
+              <span className={cn('truncate text-sm font-semibold', g.code === null && 'text-[color:var(--status-crit)]')}>{g.name}</span>
+              {g.code && <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">· {g.code}</span>}
+            </h3>
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {g.forms.length} {g.forms.length === 1 ? 'form' : 'forms'}
+            </span>
+          </div>
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
+            {g.forms.map((f) => {
+              const period = f.periodStart && f.periodEnd ? `${fmtDay(f.periodStart)} to ${fmtDay(f.periodEnd)}` : null;
+              const sub = [period ? pageList(f.pages) : null, f.baLabel ? `BA ${f.baLabel}` : null].filter(Boolean).join(' · ');
+              return (
+                <li key={f.batchId}>
+                  <Link href={`/uploads/batch/${f.batchId}`} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/50">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-medium">{period ?? pageList(f.pages)}</span>
+                      {sub && <span className="truncate text-xs text-muted-foreground">{sub}</span>}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
+                      Review <ChevronRight className="size-3.5" aria-hidden />
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+
+      {pageCount > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {groups.length} stores · page {safePage} of {pageCount}
+          </span>
+          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Forms by store" />
+        </div>
+      )}
     </div>
   );
 }
