@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, Trash2, X, XCircle} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, SlidersHorizontal, Trash2, X, XCircle} from 'lucide-react';
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
@@ -27,7 +27,7 @@ import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upl
 const ROW_SIZES = [10, 20, 50] as const;
 const TILE_SIZES = [12, 24, 36] as const;
 
-const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
+export const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
 
 type StatusFilter = 'all' | UploadStatus;
 type KindFilter = 'all' | UploadKind;
@@ -40,7 +40,7 @@ const STATUS_META: Record<UploadStatus, {label: string; cls: string; Icon: typeo
   rejected: {label: 'Rejected', cls: 'text-destructive bg-destructive/10', Icon: XCircle},
 };
 
-function StatusPill({status}: {status: UploadStatus}) {
+export function StatusPill({status}: {status: UploadStatus}) {
   const m = STATUS_META[status] ?? STATUS_META.processing;
   const {Icon} = m;
   return (
@@ -51,7 +51,7 @@ function StatusPill({status}: {status: UploadStatus}) {
   );
 }
 
-function fmtWhen(iso: string): string {
+export function fmtWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString(undefined, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
@@ -64,17 +64,16 @@ function fmtDay(day: string): string {
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
 }
 
-/** One drop as a tile: source scan, day, file count, and a status breakdown. Click
- *  opens its files (the list scoped to this group). */
-function GroupTile({g, onOpen}: {g: UploadGroup; onOpen: () => void}) {
+/** One drop as a tile: source scan, day, file count, and a status breakdown. Opens the
+ *  scan — its pages sorted into store forms (Per store / Per BA / Per file). */
+function GroupTile({g}: {g: UploadGroup}) {
   const review = g.byStatus.needs_review ?? 0;
   const committed = g.byStatus.committed ?? 0;
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Link
+      href={`/uploads/scan/${encodeURIComponent(g.source)}`}
       className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
     >
       <div className="flex items-start gap-2.5">
@@ -94,7 +93,7 @@ function GroupTile({g, onOpen}: {g: UploadGroup; onOpen: () => void}) {
         {bad > 0 && <Tag cls="text-destructive bg-destructive/10" n={bad} label={bad === 1 ? 'issue' : 'issues'} />}
         {processing > 0 && <Tag cls="text-muted-foreground bg-muted" n={processing} label="reading" />}
       </div>
-    </button>
+    </Link>
   );
 }
 
@@ -104,6 +103,14 @@ function Tag({cls, n, label}: {cls: string; n: number; label: string}) {
       <span className="font-semibold">{n}</span> {label}
     </span>
   );
+}
+
+/** A human label for a file row: a page split from a scan reads "Page 10 of 98", with
+ *  the raw filename kept as a quiet sub-line; a whole form or sales export keeps its own
+ *  (already human) name and has no sub-line. */
+function pageLabel(filename: string): {title: string; sub: string | null} {
+  const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
+  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename} : {title: filename, sub: null};
 }
 
 type Toast = {id: number; kind: 'ok' | 'err'; text: string};
@@ -137,6 +144,7 @@ export function UploadsView({
   // `groupKey`, which scopes the list to that drop's files.
   const [view, setView] = useState<'list' | 'groups'>('groups');
   const [groupKey, setGroupKey] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
 
@@ -195,17 +203,19 @@ export function UploadsView({
   const safePage = Math.min(page, pageCount);
   const pageRows = tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
+  const hasActiveFilters = Boolean(query || from || to || statusFilter !== 'all' || kindFilter !== 'all');
+  const showFilters = filtersOpen || hasActiveFilters;
 
   return (
-    <div className={GL_PAGE}>
-      <header className="flex flex-col gap-1">
+    <div className={cn(GL_PAGE, 'gap-8')}>
+      <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
           <Link
-            href="/uploads/triage"
-            className="h-9 shrink-0 rounded-md border border-border bg-background px-3 text-sm leading-9 transition-colors hover:border-foreground/25"
+            href="/uploads/forms"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm transition-colors hover:border-foreground/25"
           >
-            Scan triage
+            <LayoutGrid className="size-3.5 text-muted-foreground" /> All forms
           </Link>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -218,7 +228,7 @@ export function UploadsView({
 
       {/* File list */}
       <Card>
-        <CardHeader className="gap-3">
+        <CardHeader className="gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {selectedGroup ? (
               <button
@@ -250,6 +260,15 @@ export function UploadsView({
               <span className="text-xs text-muted-foreground tabular-nums">
                 {view === 'groups' && !selectedGroup ? `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}` : `${filtered.length} of ${uploads.length}`}
               </span>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((o) => !o)}
+                aria-expanded={showFilters}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:border-foreground/25"
+              >
+                <SlidersHorizontal className="size-3.5 text-muted-foreground" /> Filters
+                {hasActiveFilters && <span aria-hidden className="size-1.5 rounded-full bg-primary" />}
+              </button>
               {!selectedGroup && (
                 <div className="inline-flex rounded-md border border-border p-0.5" role="tablist" aria-label="View">
                   {([['groups', LayoutGrid, 'Grouped'], ['list', List, 'All files']] as const).map(([v, Icon, label]) => (
@@ -274,8 +293,9 @@ export function UploadsView({
               )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+          {showFilters && (
+          <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-3">
+            <div className="relative w-full sm:w-auto">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={query}
@@ -285,7 +305,7 @@ export function UploadsView({
                 }}
                 placeholder="Search file name…"
                 aria-label="Search file name"
-                className="h-8 w-56 rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+                className="h-8 w-full rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 sm:w-56"
               />
             </div>
             {/* Upload date range — applies to both views. */}
@@ -357,20 +377,18 @@ export function UploadsView({
               <option value="inventory_pdf">Inventory PDF</option>
             </NativeSelect>
           </div>
+          )}
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-5">
           {view === 'groups' && !selectedGroup ? (
             groups.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 {uploads.length === 0 ? 'No files yet. Add one above.' : 'No uploads match.'}
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {pageTiles.map((g) => (
-                  <GroupTile key={g.key} g={g} onOpen={() => {
-                    setGroupKey(g.key);
-                    setPage(1);
-                  }} />
+                  <GroupTile key={g.key} g={g} />
                 ))}
               </div>
             )
@@ -391,7 +409,7 @@ export function UploadsView({
                       className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
-                      {u.filename}
+                      {pageLabel(u.filename).title}
                     </Link>
                     <span className="truncate text-xs text-muted-foreground">
                       {KIND_LABEL[u.kind] ?? 'Inventory scan'} · {fmtWhen(u.created_at)}
@@ -441,11 +459,14 @@ export function UploadsView({
                       }}
                       className="cursor-pointer border-b border-border/60 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50"
                     >
-                      <td className="max-w-[20rem] py-2.5 pr-3">
+                      <td className="max-w-[22rem] py-2.5 pr-3">
                         <span className="flex min-w-0 items-center gap-2.5">
                           <FileTypeBadge filename={u.filename} />
-                          <span className="truncate font-medium" title={u.filename}>
-                            {u.filename}
+                          <span className="flex min-w-0 flex-col" title={u.filename}>
+                            <span className="truncate font-medium">{pageLabel(u.filename).title}</span>
+                            {pageLabel(u.filename).sub && (
+                              <span className="truncate font-mono text-[11px] text-muted-foreground">{pageLabel(u.filename).sub}</span>
+                            )}
                           </span>
                         </span>
                       </td>

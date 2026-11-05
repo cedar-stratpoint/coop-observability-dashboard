@@ -205,7 +205,21 @@ function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: S
   );
 }
 
-export function TriageBoard({data, company, scan, stores = [], canEdit = false}: {data: TriageResult; company: string; scan?: string; stores?: StoreOption[]; canEdit?: boolean}) {
+export function TriageBoard({
+  data,
+  company,
+  scan,
+  stores = [],
+  canEdit = false,
+  embedded = false,
+}: {
+  data: TriageResult;
+  company: string;
+  scan?: string;
+  stores?: StoreOption[];
+  canEdit?: boolean;
+  embedded?: boolean;
+}) {
   const {forms, counts, storeCount} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
     withStatus.sort(
@@ -228,44 +242,53 @@ export function TriageBoard({data, company, scan, stores = [], canEdit = false}:
   const t = data.totals;
   const n = forms.length;
 
-  return (
-    <div className={GL_PAGE}>
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            {scan && <div className="truncate font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--primary)]" title={scan}>{scan}</div>}
-            <h1 className="font-heading text-xl font-semibold tracking-tight">{scan ? 'Forms in this scan' : 'Scan triage'}</h1>
-            {n > 0 ? (
-              <p className="mt-1 text-[15px] text-muted-foreground">
-                <span className="font-semibold text-foreground">{n}</span> {n === 1 ? 'form' : 'forms'} across{' '}
-                <span className="font-semibold text-foreground">{storeCount}</span> {storeCount === 1 ? 'store' : 'stores'}
-                {scan ? ' in this scan, sorted so the ones that need you come first.' : ', sorted so the ones that need you come first.'}
-              </p>
-            ) : (
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                {scan ? 'No store forms in this scan yet. Its pages may still be reading, or they were sales sheets and blanks.' : 'Uploaded pages, sorted into store forms. Open a card to review and commit its counts.'}
-              </p>
-            )}
-          </div>
-          <Link
-            href="/uploads"
-            className="h-9 shrink-0 rounded-md border border-border bg-background px-3 text-sm leading-9 transition-colors hover:border-foreground/25"
-          >
-            All uploads
-          </Link>
-        </div>
+  const summaryLine =
+    n > 0 ? (
+      <p className="text-[15px] text-muted-foreground">
+        <span className="font-semibold text-foreground">{n}</span> {n === 1 ? 'form' : 'forms'} across{' '}
+        <span className="font-semibold text-foreground">{storeCount}</span> {storeCount === 1 ? 'store' : 'stores'}
+        {scan ? ' in this scan, sorted so the ones that need you come first.' : ', sorted so the ones that need you come first.'}
+      </p>
+    ) : (
+      <p className="text-sm text-muted-foreground">
+        {scan ? 'No store forms in this scan yet. Its pages may still be reading, or they were sales sheets and blanks.' : 'Uploaded pages, sorted into store forms. Open a card to review and commit its counts.'}
+      </p>
+    );
+  const pills = n > 0 && (
+    <div className="flex flex-wrap items-center gap-2">
+      {counts.needsStore > 0 && <StatBadge tone="crit" n={counts.needsStore} label="need a store" />}
+      {counts.incomplete > 0 && <StatBadge tone="warn" n={counts.incomplete} label="incomplete" />}
+      {counts.ready > 0 && <StatBadge tone="good" n={counts.ready} label="ready" />}
+      {counts.committed > 0 && <StatBadge tone="good" muted n={counts.committed} label="committed" />}
+      {t.sales > 0 && <span className="text-xs text-muted-foreground">· {t.sales} sales {t.sales === 1 ? 'sheet' : 'sheets'} set aside</span>}
+      {t.unplaceable > 0 && <span className="text-xs text-[color:var(--status-warn)]">· {t.unplaceable} to place by hand</span>}
+    </div>
+  );
 
-        {n > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            {counts.needsStore > 0 && <StatBadge tone="crit" n={counts.needsStore} label="need a store" />}
-            {counts.incomplete > 0 && <StatBadge tone="warn" n={counts.incomplete} label="incomplete" />}
-            {counts.ready > 0 && <StatBadge tone="good" n={counts.ready} label="ready" />}
-            {counts.committed > 0 && <StatBadge tone="good" muted n={counts.committed} label="committed" />}
-            {t.sales > 0 && <span className="text-xs text-muted-foreground">· {t.sales} sales {t.sales === 1 ? 'sheet' : 'sheets'} set aside</span>}
-            {t.unplaceable > 0 && <span className="text-xs text-[color:var(--status-warn)]">· {t.unplaceable} to place by hand</span>}
+  return (
+    <div className={embedded ? 'flex flex-col gap-6' : GL_PAGE}>
+      {embedded ? (
+        <div className="flex flex-col gap-3">
+          {summaryLine}
+          {pills}
+        </div>
+      ) : (
+        <header className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="font-heading text-xl font-semibold tracking-tight">{scan ? 'Forms in this scan' : 'All forms'}</h1>
+              <div className="mt-1">{summaryLine}</div>
+            </div>
+            <Link
+              href="/uploads"
+              className="h-9 shrink-0 rounded-md border border-border bg-background px-3 text-sm leading-9 transition-colors hover:border-foreground/25"
+            >
+              All uploads
+            </Link>
           </div>
-        )}
-      </header>
+          {pills}
+        </header>
+      )}
 
       {data.mock && (
         <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">

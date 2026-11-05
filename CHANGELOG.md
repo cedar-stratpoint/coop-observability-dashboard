@@ -10,6 +10,33 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Review: confidence framing + a breadcrumb that remembers the scan
+
+Two changes to the store-form review, from the critique (a nervous reviewer read "50 pages · 46 flagged rows" as "I broke it") and the user's own notes:
+
+- **Lead with confidence, not accusation.** The header now reads "Read 142 of 146 rows confidently · 4 to glance at" instead of a bare flagged-row count. Same data, opposite feeling: what the machine got right is the headline; the few to check are the aside.
+- **A breadcrumb that shows where you are and takes you back there.** Above the title: the scan drop this form came from (a link), then the page you opened ("Page 10 of 98"). Back now returns to that scan's drill-in, not the default Uploads screen, so you keep your place (the user's lost-place complaint).
+
+The page-coverage grid is unchanged; with forms now split per store it reads as one chip per page, the confusing stacks of copies were a symptom of unsplit multi-store piles, which the earlier split fix resolves.
+
+## 2026-11-05 — Uploads: one "All forms" view, and a calmer landing
+
+Continues the design-led rework. The standalone Scan triage page is gone; the company-wide "forms to review" view it held now lives at `/uploads/forms` as **All forms** (breadcrumb, same cards), reached from a header link in its own words instead of the "Scan triage" button. And the landing is calmer: the eight-control filter bar (search, two dates, two selects) now hides behind a **Filters** disclosure, so arrival leads with the drops, not a wall of controls, which also fixes the filter bar clipping off the right edge on a phone (critique P2 + the browser-pass bug). Filters auto-open when any filter is active.
+
+## 2026-11-05 — A scan drop is now a real page: Per store · Per BA · Per file
+
+The redesign's structural move (critique P1s: the authored store-form view was hidden behind a jargon button, and the drill-in was React state so Back lost your place). Clicking a scan in Uploads now opens `/uploads/scan/[source]` — a real route with a breadcrumb (Uploads · scan name) and a `Per store · Per BA · Per file` toggle:
+
+- **Per store** (default) — the store-form cards, scoped to this scan.
+- **Per BA** — one card per Beauty Assistant (how many forms and stores are theirs, what still needs doing), opening that BA's forms.
+- **Per file** — the scan's pages as a plain list, each reading "Page 10 of 98" (raw filename a quiet sub-line), in page order, opening its review.
+
+Because it's a route, Back returns to the scan (and the view is shareable). The standalone Scan triage page and the landing clean-up come next. `TriageBoard` gained an `embedded` mode so the scan page can put the breadcrumb and toggle above it.
+
+## 2026-11-05 — Uploads: files read as "Page 10 of 98", not a raw scan filename
+
+First step of a design-led Uploads rework (after a dual-agent critique that scored the surface 21/40, the headline problem being that it speaks in files and filenames while the user thinks in stores and pages). A page split from a multi-page scan now shows as **"Page 10 of 98"** in the file list, with the raw `Scan2026-10-30_171554 (page 10 of 98).pdf` kept only as a quiet mono sub-line and tooltip. A whole form or a sales export keeps its own already-human name. Small change, directly addresses the "technical filenames, I don't know which is my store's page" complaint; the larger restructure (scan drill-in as a real route with Per store / Per BA / Per file, review always one clean store-form, accurate pointer) follows.
+
 ## 2026-11-05 — Guided "which store?": file an unreadable form in one tap
 
 The last big piece of the review redesign. A "needs a store" card (a form whose store the scan couldn't read) now carries a **Confirm store** button instead of just linking away. It opens an inline picker, search the store registry, tap one, and the whole form is filed: the chosen store is stamped onto its pages (`setUploadsStore`, merged into each page's classification, committed inventory untouched) so the card leaves "needs a store", and the form's batch is made commit-ready under that store (`assignFormStoreAction` re-splits a multi-store batch or sets the store on a single-form batch). Safe because the earlier scan-run grouping means each "needs a store" card is one physical form, so a tap can't mislabel several stores at once. The forms view (inbox and per-scan) now passes the store list and edit permission; readable forms still just open to review. This completes mockup sections 02 to 05.
