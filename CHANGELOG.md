@@ -83,6 +83,27 @@ When a 98-page scan held ~20 stores, the auto-split left most of them piled in o
 
 A real 98-page scan produced 109 upload rows: 11 pages were ingested twice. Cause: when a page's upload request timed out at the edge, the client marked it "failed" but the server kept running and still saved the row; the user's retry then re-sent the identical split-page file and `createUpload` inserted a *second* row (the old duplicate check only flagged copies after the fact, it never prevented them). Now `createUpload` is idempotent within a batch, before storing anything it reuses any existing non-failed row with the same (company, batch, filename), and the upload route short-circuits a reused page (returns its current state, no second row, no re-run of OCR). A genuinely failed first attempt is excluded, so a real retry-after-failure still creates the row. This prevents new duplicates; cleaning up already-duplicated rows and a unique-index backstop are a separate follow-up.
 
+## 2026-11-04 — Goldline restock "Hit or miss" board
+- **What it does:** a third Restock tab, **Hit or miss** (`/stock/restock?tab=hits`), shows how often the owner approves Coop's restock number as is.
+  - **Hit:** approved as is. An edit back to Coop's own number is already stored as approved, so it counts as a hit.
+  - **Miss:** edited or rejected.
+  - Lines waiting for a decision (undone ones too), held or covered don't count.
+  - The Run tab's "Approved as is" tile is now **Hit rate** and links to the board. It's the same number, for one run.
+- **The board:**
+  - Filters: last 6 runs, last 12 or all; store; product line; decided by (the plan has either Justin or the owner deciding).
+  - Tiles: hit rate with the change in points vs the previous run, hits, misses (edited · rejected), and units changed.
+  - A miss is **Coop too high** when rejected or edited down, **too low** when edited up. Units off = |final − Coop's number|.
+  - A hit-rate-by-run line and a separate decisions-per-run stacked bar. Never a dual axis. A table view of both is one click away.
+  - Product lines with a too-high / too-low diverging bar, stores lowest hit rate first (a click opens the store's run), the most missed items with their typical change and latest remark, and the owner's latest miss remarks.
+- **Colors:** chart colors were validated with the dataviz palette checker (lightness, chroma, colour-blind separation, contrast) in both themes. They are `--hit` (#008673 / #1AA58C dark) and `--miss` (#C9601C / #D2733A).
+  - The `--status-*` trio failed as a chart set (edited and rejected too close, the green reads gray), so it stays on the decision chips only.
+  - Rejected is the miss color with a 45° hatch, always labelled.
+- **Data:** `restock_decisions()` (`supabase/nichido/p3e_hit_rate.sql`, cutover step 19) returns the decided lines of the last N runs as one jsonb array, so the 1000-row cap doesn't apply. The math is pure and tested (`src/goldline-hit-rate.ts`). The board adds up in the browser, so store, line and person filters don't reload; changing the run range does.
+- **Staging:** p3e applied. With the 10 approved lines there today, the board reads 100% (10 of 10).
+  - Temporary decisions marked as a test were added to check the misses side, then reset: 2 approved, 2 edited and 1 rejected in 2026-10-b, plus 2 rejected in 2026-11-a.
+  - The board read 71% (12 of 17), latest run 83%, up 43 pts, Coop too high 237 units and too low 4, which matched a hand count.
+- **Open:** should a small edit (say within 10%) count as a near-hit? For now every edit is a miss, as asked; units off shows how far.
+
 ## 2026-11-04 — Batch review: a loading skeleton that matches the real page
 
 The batch-review route already streamed a placeholder while the server read the batch, but it used the generic page skeleton (a chart block the page doesn't have, no page-tabs), so the content jumped when it arrived. Replaced it with a `BatchReviewSkeleton` that mirrors the actual layout, the header, the store / period / BA card, the grouped page-tab rows, and the review table, so the page paints instantly and settles without a jump. Static markup, no client JS; the real latency win was the caching above.

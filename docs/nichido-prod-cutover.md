@@ -55,6 +55,7 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 16 | `p3b_recommendations.sql` | Rick | `restock_runs`, `recommendations`, `save_restock_run()`, `decide_recommendations()` (F11) |
 | 17 | `p3c_item_history.sql` | Rick | `forecast_item_history()` (Restock product page) |
 | 18 | `p3d_purchase_orders.sql` | Rick | `purchase_orders` (one per store per day, `po_date`), `po_lines`, `shipments` + `received` status / `received_qty` / `received_on`, `make_purchase_orders()` (puts approved lines on POs and ships them), `receive_po_lines()`, `po_dates()` (Orders date list), and `decide_recommendations()` redefined so changing a shipped line cancels its shipment (F12). Apply **after** p3b (it redefines p3b's function) and deploy with the build that reads it: an older build doesn't know the `received` status and would stop counting a received shipment as on the way. **Applied on Nichido Staging Nov 3** |
+| 19 | `p3e_hit_rate.sql` | Rick | `restock_decisions()` (Restock Hit or miss board: decided lines of the last N runs as one jsonb array). Needs p3b. **Applied on Nichido Staging Nov 4** |
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).
 

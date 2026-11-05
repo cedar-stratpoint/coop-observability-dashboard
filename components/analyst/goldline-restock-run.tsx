@@ -261,7 +261,18 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
           <section aria-label="Summary" className={cn('grid grid-cols-2 gap-4 lg:grid-cols-4', GL_TILES_MOBILE)}>
             <Metric label="To decide" value={num(data.toDecide)} sub="lines with something to send" valueClassName={data.toDecide ? 'text-[var(--status-warn)]' : undefined} />
             <Metric label="Units to send" value={num(sendUnits)} sub="suggested or decided, every store" />
-            <Metric label="Approved as is" value={pct(data.score)} sub="of decided lines, this run" />
+            <Metric
+              label="Hit rate"
+              value={pct(data.score)}
+              sub={
+                <>
+                  approved as is, this run ·{' '}
+                  <Link href="/stock/restock?tab=hits" className="underline underline-offset-4 hover:text-foreground">
+                    Hit or miss
+                  </Link>
+                </>
+              }
+            />
             <Metric label="Stores" value={num(data.stores.length)} sub="with a counted form, restock on" />
           </section>
 
