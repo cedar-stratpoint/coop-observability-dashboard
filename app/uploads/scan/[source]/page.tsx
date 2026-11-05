@@ -8,6 +8,7 @@ import {uploadSource} from '@/src/goldline-upload-groups';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {TriageBoard} from '@/components/analyst/triage-board';
 import {BaCards, ScanFileList} from '@/components/analyst/scan-views';
+import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,6 +91,11 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
               <X className="size-3" />
             </Link>
           </span>
+        )}
+        {canEdit && (
+          <div className="ml-auto">
+            <DeleteScanDialog company={companyId} source={source} />
+          </div>
         )}
       </div>
 
