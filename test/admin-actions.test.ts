@@ -12,8 +12,8 @@ const grantRoles = vi.hoisted(() =>
 vi.mock('server-only', () => ({}));
 vi.mock('next/cache', () => ({revalidatePath: vi.fn()}));
 vi.mock('@/auth', () => ({auth: async () => (session.email ? {user: {email: session.email}} : null)}));
-vi.mock('@/src/company', () => ({
-  COOP_VIEW_KEY: 'coop_admin',
+vi.mock('@/src/company', async () => ({
+  ...(await vi.importActual<typeof import('../src/company')>('../src/company')),
   fetchMemberships: async () => memberships.rows,
 }));
 vi.mock('@/src/admin-data', () => ({
