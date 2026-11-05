@@ -9,7 +9,7 @@ if (typeof window !== 'undefined') {
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 }
 
-export type ScanHighlight = {top: number; height: number; label: string};
+export type ScanHighlight = {top: number; height: number; label: string; approximate?: boolean};
 
 /**
  * The scan's first page rendered to a canvas, with the row highlight drawn in the page's
@@ -89,7 +89,8 @@ export function ScanPageViewer({url, highlight, className}: {url: string; highli
                 }}
               >
                 <span className="absolute left-1 -top-1 -translate-y-full rounded bg-[color:var(--primary)] px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-white">
-                  {highlight.label} · approximate
+                  {highlight.label}
+                  {highlight.approximate ? ' · approximate' : ''}
                 </span>
               </div>
             )}

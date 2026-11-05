@@ -289,6 +289,9 @@ export function buildManifestPrompt(page: number, version: 'v1' | 'v2' = 'v1'): 
     'ending_on_hand = stockroom + drawer + selling_area; delivery is separate (not part of it).',
     'Map each cell by its PRINTED column meaning above, not by any handwritten sub-label.',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
+    'For each row, also return box = {y_top, y_bottom}: the fraction (0 at the page top,',
+    "1 at the bottom) of where that printed item row begins and ends on THIS scan's",
+    'actual layout. This only points the reviewer at the row; it must not change any count.',
     'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,
   ].join('\n');
@@ -458,6 +461,18 @@ export const EXTRACTION_SCHEMA = {
               },
               required: ['field', 'mark'],
             },
+          },
+          // Where this printed item row sits on THIS scan, as fractions (0 = page top,
+          // 1 = page bottom). Used only to point the reviewer at the row in the enlarged
+          // scan; null/absent falls back to the template band. Never affects the counts.
+          box: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            properties: {
+              y_top: {type: 'number'},
+              y_bottom: {type: 'number'},
+            },
+            required: ['y_top', 'y_bottom'],
           },
         },
         required: ['item_code', 'ending_on_hand', 'confidence'],
