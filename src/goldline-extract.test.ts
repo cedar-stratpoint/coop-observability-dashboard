@@ -21,6 +21,18 @@ describe('buildSystemPrompt', () => {
     expect(p).toContain('confidence');
     expect(p).toContain('Return JSON only');
   });
+
+  // NICH-36: page is the source of truth, manifest is a dictionary — not a checklist.
+  it('makes the page the source of truth, not the reference list', () => {
+    expect(p).toContain('THE PAGE IS THE SOURCE OF TRUTH');
+    // Only emit rows physically printed; never add a reference-only item.
+    expect(p).toContain('physically printed');
+    expect(p).toContain('do NOT sort by item code');
+    // Keep out-of-stock / blank-count rows instead of dropping them.
+    expect(p).toContain('O/S');
+    // A printed item not in the reference list is kept and flagged, never dropped.
+    expect(p).toContain('off_manifest');
+  });
 });
 
 describe('buildManifestPrompt', () => {
@@ -54,6 +66,13 @@ describe('EXTRACTION_SCHEMA', () => {
     }
   });
 
+  // NICH-36: an optional per-row flag for a printed item not in the reference manifest.
+  it('allows an optional off_manifest flag per row', () => {
+    const row = EXTRACTION_SCHEMA.properties.rows.items;
+    expect(Object.keys(row.properties)).toContain('off_manifest');
+    expect(row.required).not.toContain('off_manifest');
+  });
+
   it('page-1 manifest covers all 43 coded rows (Final Powder has no item code)', () => {
     expect(MANIFESTS[1].length).toBe(43);
   });
@@ -79,6 +98,14 @@ describe('manifests pages 1–5', () => {
         expect(item.product.trim().length).toBeGreaterThan(0);
       }
     }
+  });
+
+  // NICH-36: rows the QA found printed on real scans but missing from the manifest,
+  // which caused them to be silently dropped. They must be present now.
+  it('includes the SKUs the Nov 5 QA found dropped', () => {
+    const page2 = new Set(MANIFESTS[2].map((i) => i.code));
+    for (const code of ['MUSE', 'NGFEP', 'MPMLSCB06', 'MPMLSCB07']) expect(page2).toContain(code);
+    expect(new Set(MANIFESTS[5].map((i) => i.code))).toContain('ELIF3125B');
   });
 });
 
