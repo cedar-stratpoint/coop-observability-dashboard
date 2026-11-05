@@ -9,7 +9,7 @@
 import {Fragment, useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
-import {AlertTriangle, CalendarClock, ChartColumn, Check, ChevronDown, ChevronRight, Info, Loader2, PackageCheck, Pencil, RotateCcw, X} from 'lucide-react';
+import {AlertTriangle, CalendarClock, ChartColumn, Check, ChevronDown, ChevronRight, ClipboardList, Info, Loader2, PackageCheck, Pencil, RotateCcw, X} from 'lucide-react';
 import type {RestockRunData, RunLine} from '@/src/goldline-restock-data';
 import type {Decision} from '@/src/goldline-restock';
 import {restockItemHref} from '@/src/goldline-restock-item';
@@ -22,7 +22,7 @@ import {Button} from '@/components/ui/button';
 import {fmtDay, ToneChip} from '@/components/analyst/goldline-ops-shared';
 import {Modal} from '@/components/analyst/goldline-supply-dialogs';
 import {HOLD_LABEL, monthLabel, num, span} from '@/components/analyst/goldline-restock-inputs';
-import {decideRecommendationsAction, makeRestockRunAction} from '@/app/stock/actions';
+import {decideRecommendationsAction, makePurchaseOrdersAction, makeRestockRunAction} from '@/app/stock/actions';
 import {cn} from '@/lib/utils';
 import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
 
@@ -118,6 +118,21 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
       router.refresh();
     });
   };
+  const makeOrders = () => {
+    if (!run) return;
+    setError(null);
+    setNotice(null);
+    start(async () => {
+      const res = await makePurchaseOrdersAction({company: data.company, runId: run.id});
+      if (!res.ok) return setError(res.error);
+      setNotice(
+        res.lines
+          ? `Shipped ${num(res.lines)} ${res.lines === 1 ? 'line' : 'lines'} on purchase orders${res.pos ? ` (${num(res.pos)} new ${res.pos === 1 ? 'PO' : 'POs'})` : ''}. Fill in the received section on Orders when stock arrives.`
+          : 'Every approved line is already on a purchase order.',
+      );
+      router.refresh();
+    });
+  };
   const toggle = (set: Set<string>, id: string) => {
     const next = new Set(set);
     if (next.has(id)) next.delete(id);
@@ -177,6 +192,13 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
               )}
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {run && data.canDecide && data.toOrder.lines > 0 && (
+            <Button size="sm" onClick={makeOrders} disabled={pending} title="Puts approved lines on each store's purchase order and ships them from the warehouse.">
+              <ClipboardList className="size-4" /> Make purchase orders ({num(data.toOrder.lines)} {data.toOrder.lines === 1 ? 'line' : 'lines'}, {num(data.toOrder.stores)}{' '}
+              {data.toOrder.stores === 1 ? 'store' : 'stores'})
+            </Button>
+          )}
           <Button
             variant={run ? 'outline' : 'default'}
             size="sm"
@@ -186,6 +208,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
           >
             {pending ? <Loader2 className="size-4 animate-spin" /> : <PackageCheck className="size-4" />} {run ? 'Make run again' : 'Make run'}
           </Button>
+          </div>
         </div>
         <div className="h-0.5 w-24 rounded-full bg-gradient-to-r from-primary to-transparent" aria-hidden />
       </header>
@@ -467,11 +490,23 @@ function DecisionCell({
   }
   if (l.decision !== 'pending') {
     const d = DECISION[l.decision];
+    // A line on a PO has shipped. Changing it takes it back off (its shipment is cancelled)
+    // until the stock is received or due to have arrived (F12).
+    const locked = l.po?.locked ?? false;
     return (
       <span className="flex flex-col gap-1">
         <span className="flex flex-wrap items-center gap-1.5">
           <ToneChip tone={d.tone}>{d.label}</ToneChip>
-          {canDecide && (
+          {l.po && (
+            <Link
+              href={`/stock/orders/${l.po.id}`}
+              title={l.po.locked ? 'Shipped on this PO and received or due' : 'Shipped on this PO. Undo takes it back off and returns the stock.'}
+              className="font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              {l.po.number}
+            </Link>
+          )}
+          {canDecide && !locked && (
             <button type="button" onClick={onUndo} disabled={pending} className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50">
               <RotateCcw className="size-3" aria-hidden /> Undo
             </button>

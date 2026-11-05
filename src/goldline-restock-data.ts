@@ -4,6 +4,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores, getGlSupplyRef} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
 import {HOLD_REASONS, type HoldReason} from './goldline-forecast';
+import {runPoLinks} from './goldline-po-data';
 import {lineState, overallScore, runCycle, storeScores, type Decision, type RunLineState, type RunSkipped, type StoreScore} from './goldline-restock';
 
 // Server-only reads behind the Restock page's Run tab (F11): the saved run for a half
@@ -50,6 +51,7 @@ export type RunLine = {
   remark: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
+  po: {id: string; number: string; locked: boolean} | null; // the purchase order it shipped on (F12); locked = received or due, can't change
 };
 
 export type RunStoreRow = StoreScore & {name: string | null; lines: number; send: number; covered: number; held: number; sendUnits: number};
@@ -64,6 +66,7 @@ export type RestockRunData = {
   store: string | null; // the store picked, if any
   lines: RunLine[]; // the picked store's lines, or every store's lines with something to send
   warehouseSample: boolean; // warehouse figures are still sample data
+  toOrder: {lines: number; stores: number}; // approved lines not on a purchase order (not shipped) yet (F12)
 };
 
 type LineRow = {
@@ -94,7 +97,7 @@ const EMPTY_SKIPPED: RunSkipped = {no_count: {stores: 0, lines: 0}, out_of_scope
 
 export async function getRestockRun(companyId: string, runDate: string, store: string | null, storeScope?: string[] | null): Promise<RestockRunData> {
   const cycle = runCycle(runDate);
-  const empty: RestockRunData = {configured: nichidoConfigured(), cycle, run: null, stores: [], score: null, toDecide: 0, store: null, lines: [], warehouseSample: false};
+  const empty: RestockRunData = {configured: nichidoConfigured(), cycle, run: null, stores: [], score: null, toDecide: 0, store: null, lines: [], warehouseSample: false, toOrder: {lines: 0, stores: 0}};
   if (!nichidoConfigured()) return empty;
 
   const supa = db();
@@ -112,7 +115,7 @@ export async function getRestockRun(companyId: string, runDate: string, store: s
   if (!runRow) return {...empty, warehouseSample};
 
   const picked = store && (!scope || scope.includes(store)) ? store : null;
-  const [rows, catalog, storeRows] = await Promise.all([
+  const [rows, catalog, storeRows, poLinks] = await Promise.all([
     fetchAllRows('recommendations', (from, to) => {
       let q = supa.from('recommendations').select(LINE_COLS).eq('company_id', companyId).eq('run_id', runRow.id); // pagination-ok: paged by fetchAllRows (.range below)
       if (scope) q = q.in('store_code', scope);
@@ -120,6 +123,7 @@ export async function getRestockRun(companyId: string, runDate: string, store: s
     }) as unknown as Promise<LineRow[]>,
     getGlCatalog(companyId),
     getGlStores(companyId),
+    runPoLinks(companyId, runRow.id),
   ]);
 
   const storeName = new Map(storeRows.map((s) => [s.store_code, s.name]));
@@ -148,8 +152,13 @@ export async function getRestockRun(companyId: string, runDate: string, store: s
       remark: r.remark,
       decidedBy: r.decided_by,
       decidedAt: r.decided_at,
+      po: (() => {
+        const p = poLinks.get(r.id);
+        return p ? {id: p.poId, number: p.number, locked: p.locked} : null;
+      })(),
     };
   });
+  const unordered = lines.filter((l) => (l.decision === 'approved' || l.decision === 'edited') && (l.finalQty ?? 0) > 0 && !l.po);
 
   const scores = storeScores(lines.map((l) => ({storeCode: l.storeCode, decision: l.decision, suggested: l.suggested, holds: l.holds})));
   const scoreBy = new Map(scores.map((s) => [s.storeCode, s]));
@@ -204,5 +213,6 @@ export async function getRestockRun(companyId: string, runDate: string, store: s
     store: picked,
     lines: picked ? lines.filter((l) => l.storeCode === picked) : lines.filter((l) => l.state === 'send'),
     warehouseSample,
+    toOrder: {lines: unordered.length, stores: new Set(unordered.map((l) => l.storeCode)).size},
   };
 }
