@@ -1,7 +1,8 @@
 import 'server-only';
+import {gunzipSync, gzipSync} from 'node:zlib';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {getForecastSettings, getGlCatalog, getGlStores, getStoreScope} from './goldline-ref-data';
+import {cachedSalesView, getForecastSettings, getGlCatalog, getGlStores, getStoreScope} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
 import type {InventoryRowIn} from './goldline-inventory';
 import {
@@ -23,10 +24,63 @@ import {
 // for the run's window (forecast_history, one jsonb value), which months are loaded
 // (forecast_months), and what holds a line: store scope, retired products, open flags.
 // Company-fenced on every query and narrowed to a store-scoped role's stores.
-// Sales are read fresh (they change with every Watsons upload); settings, catalog,
-// stores and scope come from the cached reference data.
+// Settings, catalog, stores and scope come from the cached reference data.
 
 const db = nichidoDb;
+
+// The sales reads (forecast_months, forecast_history, forecast_item_history) decrypt
+// every sales row they touch, 2 to 5 s a call on Staging, so they're cached like the
+// sales totals: under the committed sales files (cachedSalesView), expired by a sales
+// write and by SKU linking (the catalog tag: they split units by product).
+
+export type ForecastMonthRow = {month: string; loaded: boolean; units: number | string; unlinked_units: number | string};
+
+/** forecast_months for these months (first-of-month dates), cached. */
+export function forecastMonths(companyId: string, months: string[]): Promise<ForecastMonthRow[]> {
+  return cachedSalesView(
+    companyId,
+    ['forecast-months', months.join(',')],
+    async () => {
+      // pagination-ok: one row per requested month (12).
+      const {data, error} = await db().rpc('forecast_months', {p_company: companyId, p_months: months});
+      if (error) throw new Error(`forecast_months failed: ${error.message}`);
+      return (data ?? []) as ForecastMonthRow[];
+    },
+    ['sales', 'catalog'],
+  );
+}
+
+/** forecast_history ({store: {item: [units…]}}), cached. Every store's history is about
+ *  2.7 MB of JSON, over the data cache's 2 MB an entry, so it's kept gzipped. */
+export async function forecastHistory(companyId: string, months: string[], stores: string[] | null): Promise<Record<string, Record<string, number[]>>> {
+  const packed = await cachedSalesView(
+    companyId,
+    ['forecast-history', months.join(','), stores ? stores.join(',') : '*'],
+    async () => {
+      // pagination-ok: returns one jsonb value ({store: {item: [units…]}}), not rows.
+      const {data, error} = await db().rpc('forecast_history', {p_company: companyId, p_months: months, p_stores: stores});
+      if (error) throw new Error(`forecast_history failed: ${error.message}`);
+      return gzipSync(JSON.stringify(data ?? {})).toString('base64');
+    },
+    ['sales', 'catalog'],
+  );
+  return JSON.parse(gunzipSync(Buffer.from(packed, 'base64')).toString('utf8'));
+}
+
+/** forecast_item_history ({store: [units…]}) for one product, cached. */
+export function forecastItemHistory(companyId: string, itemCode: string, months: string[]): Promise<Record<string, number[]>> {
+  return cachedSalesView(
+    companyId,
+    ['forecast-item-history', itemCode, months.join(',')],
+    async () => {
+      // pagination-ok: returns one jsonb value ({store: [units…]}), not rows.
+      const {data, error} = await db().rpc('forecast_item_history', {p_company: companyId, p_item: itemCode, p_months: months, p_stores: null});
+      if (error) throw new Error(`forecast_item_history failed: ${error.message}`);
+      return (data ?? {}) as Record<string, number[]>;
+    },
+    ['sales', 'catalog'],
+  );
+}
 
 export type ForecastData = {
   configured: boolean;
@@ -61,11 +115,9 @@ export async function loadForecastBase(companyId: string, runDate: string, store
   const yearMonths = salesYear(runDate);
   const supa = db();
   const scope = storeScope ?? null;
-  const [months, history, scopeRows, catalog, storeRows, flags, counts] = await Promise.all([
-    // pagination-ok: one row per requested month (12).
-    supa.rpc('forecast_months', {p_company: companyId, p_months: yearMonths.map(firstOf)}),
-    // pagination-ok: returns one jsonb value ({store: {item: [units…]}}), not rows.
-    supa.rpc('forecast_history', {p_company: companyId, p_months: window.lastYear.map(firstOf), p_stores: scope}),
+  const [months, hist, scopeRows, catalog, storeRows, flags, counts] = await Promise.all([
+    forecastMonths(companyId, yearMonths.map(firstOf)),
+    forecastHistory(companyId, window.lastYear.map(firstOf), scope),
     getStoreScope(companyId),
     getGlCatalog(companyId),
     getGlStores(companyId),
@@ -83,17 +135,13 @@ export async function loadForecastBase(companyId: string, runDate: string, store
       return q.order('id').range(from, to);
     }),
   ]);
-  if (months.error) throw new Error(`forecast_months failed: ${months.error.message}`);
-  if (history.error) throw new Error(`forecast_history failed: ${history.error.message}`);
-
-  const year: MonthStatus[] = ((months.data ?? []) as Array<{month: string; loaded: boolean; units: number | string; unlinked_units: number | string}>).map((m) => ({
+  const year: MonthStatus[] = months.map((m) => ({
     month: m.month.slice(0, 7),
     loaded: m.loaded,
     units: Number(m.units) || 0,
     unlinkedUnits: Number(m.unlinked_units) || 0,
   }));
 
-  const hist = (history.data ?? {}) as Record<string, Record<string, number[]>>;
   const historyRows = Object.entries(hist).flatMap(([storeCode, items]) => Object.entries(items).map(([itemCode, units]) => ({storeCode, itemCode, units})));
 
   // Each store's latest count (F9): its rows give on hand, and its pairs show up even when
@@ -138,10 +186,7 @@ export async function getForecastData(companyId: string, runDate: string, store:
   let storeYear: number[] | null = null;
   if (picked) {
     const months = salesYear(runDate);
-    // pagination-ok: returns one jsonb value ({store: {item: [units…]}}), not rows.
-    const {data, error} = await db().rpc('forecast_history', {p_company: companyId, p_months: months.map(firstOf), p_stores: [picked]});
-    if (error) throw new Error(`forecast_history failed: ${error.message}`);
-    const items = Object.values(((data ?? {}) as Record<string, Record<string, number[]>>)[picked] ?? {});
+    const items = Object.values((await forecastHistory(companyId, months.map(firstOf), [picked]))[picked] ?? {});
     storeYear = months.map((_, i) => items.reduce((a, u) => a + (Number(u[i]) || 0), 0));
   }
 

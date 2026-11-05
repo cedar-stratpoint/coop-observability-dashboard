@@ -6,6 +6,7 @@ import {itemDisplayName} from './goldline-item-name';
 import {onHandOf, type InventoryRowIn} from './goldline-inventory';
 import {SHIPMENT_COLS, SHIPMENT_OPEN, shipmentOf, type Shipment, type ShipmentRow} from './goldline-supply';
 import {forecastWindow, HOLD_REASONS, salesYear, type ForecastWindow, type MonthStatus} from './goldline-forecast';
+import {forecastItemHistory, forecastMonths} from './goldline-forecast-data';
 import {runCycle, type Decision, type StoreCount} from './goldline-restock';
 import {itemProjection, itemStoreLines, itemTotals, itemYear, sendOf, type ItemStoreLine, type ItemTotals, type ProjectionMonth, type SavedLine, type YearMonth} from './goldline-restock-item';
 
@@ -41,11 +42,9 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
   const yearMonths = salesYear(runDate);
   const cycle = runCycle(runDate);
 
-  const [months, history, catalog, storeRows, scopeRows, supply, counts, snaps, flags, shipments, run] = await Promise.all([
-    // pagination-ok: one row per requested month (12).
-    supa.rpc('forecast_months', {p_company: companyId, p_months: yearMonths.map(firstOf)}),
-    // pagination-ok: returns one jsonb value ({store: [units…]}), not rows.
-    supa.rpc('forecast_item_history', {p_company: companyId, p_item: itemCode, p_months: yearMonths.map(firstOf), p_stores: null}),
+  const [months, hist, catalog, storeRows, scopeRows, supply, counts, snaps, flags, shipments, run] = await Promise.all([
+    forecastMonths(companyId, yearMonths.map(firstOf)),
+    forecastItemHistory(companyId, itemCode, yearMonths.map(firstOf)),
     getGlCatalog(companyId),
     getGlStores(companyId),
     getStoreScope(companyId),
@@ -86,12 +85,9 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
     // pagination-ok: one row by (company_id, cycle), unique.
     supa.from('restock_runs').select('id').eq('company_id', companyId).eq('cycle', cycle).maybeSingle(),
   ]);
-  if (months.error) throw new Error(`forecast_months failed: ${months.error.message}`);
-  if (history.error) throw new Error(`forecast_item_history failed: ${history.error.message}`);
   if (run.error) throw new Error(`restock_runs read failed: ${run.error.message}`);
 
   const p = catalog.find((x) => x.item_code === itemCode) ?? null;
-  const hist = (history.data ?? {}) as Record<string, number[]>;
   if (!p && !counts.length && !Object.keys(hist).length) return null; // not this company's item
 
   const saved = new Map<string, SavedLine>();
@@ -120,7 +116,7 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
     }
   }
 
-  const year: MonthStatus[] = ((months.data ?? []) as Array<{month: string; loaded: boolean; units: number | string; unlinked_units: number | string}>).map((m) => ({
+  const year: MonthStatus[] = months.map((m) => ({
     month: m.month.slice(0, 7),
     loaded: m.loaded,
     units: Number(m.units) || 0,
