@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-05 — Uploads: one "All forms" view, and a calmer landing
+
+Continues the design-led rework. The standalone Scan triage page is gone; the company-wide "forms to review" view it held now lives at `/uploads/forms` as **All forms** (breadcrumb, same cards), reached from a header link in its own words instead of the "Scan triage" button. And the landing is calmer: the eight-control filter bar (search, two dates, two selects) now hides behind a **Filters** disclosure, so arrival leads with the drops, not a wall of controls, which also fixes the filter bar clipping off the right edge on a phone (critique P2 + the browser-pass bug). Filters auto-open when any filter is active.
+
 ## 2026-11-05 — A scan drop is now a real page: Per store · Per BA · Per file
 
 The redesign's structural move (critique P1s: the authored store-form view was hidden behind a jargon button, and the drill-in was React state so Back lost your place). Clicking a scan in Uploads now opens `/uploads/scan/[source]` — a real route with a breadcrumb (Uploads · scan name) and a `Per store · Per BA · Per file` toggle:

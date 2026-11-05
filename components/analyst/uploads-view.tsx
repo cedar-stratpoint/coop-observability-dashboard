@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, Trash2, X, XCircle} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, SlidersHorizontal, Trash2, X, XCircle} from 'lucide-react';
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
@@ -144,6 +144,7 @@ export function UploadsView({
   // `groupKey`, which scopes the list to that drop's files.
   const [view, setView] = useState<'list' | 'groups'>('groups');
   const [groupKey, setGroupKey] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
 
@@ -202,6 +203,8 @@ export function UploadsView({
   const safePage = Math.min(page, pageCount);
   const pageRows = tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
+  const hasActiveFilters = Boolean(query || from || to || statusFilter !== 'all' || kindFilter !== 'all');
+  const showFilters = filtersOpen || hasActiveFilters;
 
   return (
     <div className={cn(GL_PAGE, 'gap-8')}>
@@ -209,10 +212,10 @@ export function UploadsView({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
           <Link
-            href="/uploads/triage"
-            className="h-9 shrink-0 rounded-md border border-border bg-background px-3 text-sm leading-9 transition-colors hover:border-foreground/25"
+            href="/uploads/forms"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm transition-colors hover:border-foreground/25"
           >
-            Scan triage
+            <LayoutGrid className="size-3.5 text-muted-foreground" /> All forms
           </Link>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -257,6 +260,15 @@ export function UploadsView({
               <span className="text-xs text-muted-foreground tabular-nums">
                 {view === 'groups' && !selectedGroup ? `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}` : `${filtered.length} of ${uploads.length}`}
               </span>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((o) => !o)}
+                aria-expanded={showFilters}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:border-foreground/25"
+              >
+                <SlidersHorizontal className="size-3.5 text-muted-foreground" /> Filters
+                {hasActiveFilters && <span aria-hidden className="size-1.5 rounded-full bg-primary" />}
+              </button>
               {!selectedGroup && (
                 <div className="inline-flex rounded-md border border-border p-0.5" role="tablist" aria-label="View">
                   {([['groups', LayoutGrid, 'Grouped'], ['list', List, 'All files']] as const).map(([v, Icon, label]) => (
@@ -281,8 +293,9 @@ export function UploadsView({
               )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+          {showFilters && (
+          <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-3">
+            <div className="relative w-full sm:w-auto">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={query}
@@ -292,7 +305,7 @@ export function UploadsView({
                 }}
                 placeholder="Search file name…"
                 aria-label="Search file name"
-                className="h-8 w-56 rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+                className="h-8 w-full rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 sm:w-56"
               />
             </div>
             {/* Upload date range — applies to both views. */}
@@ -364,6 +377,7 @@ export function UploadsView({
               <option value="inventory_pdf">Inventory PDF</option>
             </NativeSelect>
           </div>
+          )}
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
           {view === 'groups' && !selectedGroup ? (

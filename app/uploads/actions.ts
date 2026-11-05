@@ -406,7 +406,7 @@ export async function assignFormStoreAction(input: {company: string | null; uplo
       }
     }
     revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
-    revalidatePath('/uploads/triage');
+    revalidatePath('/uploads/forms');
     revalidatePath('/uploads');
     return {ok: true};
   } catch (e) {
