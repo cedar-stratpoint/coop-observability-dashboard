@@ -178,6 +178,11 @@
   --status-good: #3B7A5A;
   --status-warn: #B4780A;
   --status-crit: #B4462F;
+  /* Restock hit or miss charts (validated: lightness, chroma, colour-blind separation;
+     the status trio fails as a chart set). Rejected = miss with a hatch, always labelled. */
+  --hit: #008673;
+  --miss: #C9601C;
+  --miss-soft: #F6E3D6;
 }
 
 /* Dark = warm charcoal (class-driven; seeded before paint in app/layout.tsx). */
@@ -224,6 +229,9 @@
   --status-good: #4FAE7C;
   --status-warn: #D8A33E;
   --status-crit: #E0876B;
+  --hit: #1AA58C;
+  --miss: #D2733A;
+  --miss-soft: #3A2A1E;
 }
 
 /* Smooth the flip between themes without animating layout. */
