@@ -6,6 +6,7 @@ import {useRouter} from 'next/navigation';
 import {Trash2} from 'lucide-react';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel} from '@/src/upload-batch';
+import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageResult} from '@/src/goldline-triage-data';
 import {Button} from '@/components/ui/button';
@@ -85,12 +86,16 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
 type BaGroup = {name: string; forms: number; stores: number; needsStore: number; incomplete: number; ready: number; committed: number};
 
 /** One card per Beauty Assistant: how many forms and stores are theirs in this scan, and
- *  what still needs doing. Opens that BA's forms (the store view, filtered). */
-export function BaCards({data, source}: {data: TriageResult; source: string}) {
+ *  what still needs doing. Near-duplicate spellings of one name are reconciled into a
+ *  single BA (preferring a registry name). Opens that BA's forms (the store view, filtered). */
+export function BaCards({data, source, knownBas = []}: {data: TriageResult; source: string; knownBas?: string[]}) {
   const groups = useMemo(() => {
+    const canon = reconcileBaNames(data.forms.map((f) => f.consultant), knownBas);
+    const nameOf = (c: string | null) => (c?.trim() ? canon.get(c.trim()) ?? c.trim() : 'No BA on the form');
     const by = new Map<string, BaGroup>();
+    const storesByName = new Map<string, Set<string>>();
     for (const f of data.forms) {
-      const name = f.consultant?.trim() || 'No BA on the form';
+      const name = nameOf(f.consultant);
       const g = by.get(name) ?? {name, forms: 0, stores: 0, needsStore: 0, incomplete: 0, ready: 0, committed: 0};
       g.forms++;
       const done = f.committed > 0 && f.needsReview === 0;
@@ -99,13 +104,14 @@ export function BaCards({data, source}: {data: TriageResult; source: string}) {
       else if (f.missing.length > 0) g.incomplete++;
       else g.ready++;
       by.set(name, g);
+      const set = storesByName.get(name) ?? new Set<string>();
+      if (f.storeCode) set.add(f.storeCode);
+      storesByName.set(name, set);
     }
-    for (const g of by.values()) {
-      g.stores = new Set(data.forms.filter((f) => (f.consultant?.trim() || 'No BA on the form') === g.name).map((f) => f.storeCode).filter(Boolean)).size;
-    }
+    for (const g of by.values()) g.stores = storesByName.get(g.name)?.size ?? 0;
     // BAs who still need you first, then by form count.
     return [...by.values()].sort((a, b) => b.needsStore + b.incomplete - (a.needsStore + a.incomplete) || b.forms - a.forms);
-  }, [data.forms]);
+  }, [data.forms, knownBas]);
 
   if (groups.length === 0) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No forms with a BA in this scan yet.</p>;
