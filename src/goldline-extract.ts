@@ -1,12 +1,17 @@
 // Goldline inventory-form extraction (P2) — the template-aware prompt the Claude
 // API gets for each scanned page, plus the JSON schema it must return.
 //
-// Strategy: the six Nichido pages are a FIXED template, so extraction is
-// slot-filling against a known per-page manifest, not open reading. That removes
-// the row-skips and column-drift a free read produces. This module is PURE (no
-// network, no SDK) so it unit-tests; the live call that sends `buildSystemPrompt()`
-// + `buildManifestPrompt(page)` + the schema with the PDF lives in the server
-// route and is smoke-tested on Staging with GOLDLINE_ANTHROPIC_API_KEY in the env.
+// Strategy (NICH-36): the PAGE is the source of truth. The reader transcribes the
+// rows actually printed on the scanned page, in printed order, and the per-page
+// manifest is a DICTIONARY of known codes/names used only to recognise and correct
+// a printed code — never a checklist of rows to emit. (The earlier slot-filling
+// rule — "emit one object for every manifest code" — invented rows for items a
+// store didn't print and dropped printed items the manifest was missing; see the
+// Nov 5 QA.) A printed item not in the manifest is still emitted, flagged
+// off_manifest, so it is reviewed rather than lost. This module is PURE (no network,
+// no SDK) so it unit-tests; the live call that sends `buildSystemPrompt()` +
+// `buildManifestPrompt(page)` + the schema with the PDF lives in the server route
+// and is smoke-tested on Staging with GOLDLINE_ANTHROPIC_API_KEY in the env.
 
 // Matches the model the Coop chat uses (src/chat/config.ts), so one tier serves
 // both. Sonnet is the plan's default for extraction (accuracy on messy handwriting
@@ -86,10 +91,11 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'CDSBLB03', product: 'Liquid Blush Poppy Pink'}, {code: 'CDSBLB04', product: 'Liquid Blush Tease Me'},
     {code: 'CDSBLB05', product: 'Liquid Blush Hush Blush'}, {code: 'CDSBLB06', product: 'Liquid Blush Love Cake'},
     {code: 'MS09113', product: 'Bare Basic Palette'}, {code: 'MS099717', product: 'Naturally Beautiful Palette'},
-    {code: 'MUIS09', product: 'TCC In Style Make-up Palette'}, {code: 'MUMBS02', product: 'Bombshell Eyeshadow Palette'},
-    {code: 'MUO03', product: 'Obsession Eyeshadow Palette'}, {code: 'MUBBEP', product: 'Berry Blossom Eyeshadow Palette'},
-    {code: 'MUSEP', product: 'Sakura Eyeshadow Palette'}, {code: 'BESP', product: 'Bejeweled Eyeshadow Palette'},
-    {code: 'LSESP', product: 'Love Spells Eyeshadow Palette'}, {code: 'CPC001', product: 'Contour Palette'},
+    {code: 'MUIS09', product: 'TCC In Style Make-up Palette'}, {code: 'MUSE', product: 'Sweet Escape Eyeshadow Palette'},
+    {code: 'MUMBS02', product: 'Bombshell Eyeshadow Palette'}, {code: 'MUO03', product: 'Obsession Eyeshadow Palette'},
+    {code: 'MUBBEP', product: 'Berry Blossom Eyeshadow Palette'}, {code: 'MUSEP', product: 'Sakura Eyeshadow Palette'},
+    {code: 'BESP', product: 'Bejeweled Eyeshadow Palette'}, {code: 'LSESP', product: 'Love Spells Eyeshadow Palette'},
+    {code: 'CPC001', product: 'Contour Palette'}, {code: 'NGFEP', product: 'Nichido Glam Face & Eye Palette 317-A'},
     {code: 'USMLLC01', product: 'Matte Lip Color O So Spice'}, {code: 'USMLLC02', product: 'Matte Lip Color Fast Play'},
     {code: 'USMLLC03', product: 'Matte Lip Color Simply Nude'}, {code: 'USMLLC04', product: 'Matte Lip Color Bespoke'},
     {code: 'USMLLC05', product: 'Matte Lip Color Dirty Talk'}, {code: 'USMLLC06', product: 'Matte Lip Color Chic Cafe'},
@@ -97,7 +103,8 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'USMLLC09', product: 'Matte Lip Color Catwalk'}, {code: 'USMLLC10', product: 'Matte Lip Color Smitten'},
     {code: 'MPMLSCB01', product: 'Matte Lipstick Goddess'}, {code: 'MPMLSCB02', product: 'Matte Lipstick Kiss Of An Angel'},
     {code: 'MPMLSCB03', product: 'Matte Lipstick Heart to Heart'}, {code: 'MPMLSCB04', product: 'Matte Lipstick Adore You'},
-    {code: 'MPMLSCB05', product: 'Matte Lipstick Love On Fire'}, {code: 'MPMLSCB08', product: 'Matte Lipstick Euphoria'},
+    {code: 'MPMLSCB05', product: 'Matte Lipstick Love On Fire'}, {code: 'MPMLSCB06', product: 'Matte Lipstick Sugar Rush'},
+    {code: 'MPMLSCB07', product: 'Matte Lipstick Georgia'}, {code: 'MPMLSCB08', product: 'Matte Lipstick Euphoria'},
     {code: 'MPMLSCB09', product: 'Matte Lipstick Hot Red'}, {code: 'MPMLSCB10', product: 'Matte Lipstick High Spirits'},
     {code: 'MPMLSCB11', product: 'Matte Lipstick Sweet Marsala'}, {code: 'MPMLSCB12', product: 'Matte Lipstick Wine Soiree'},
     {code: 'MPMLSCB13', product: 'Matte Lipstick Malibu'},
@@ -191,6 +198,7 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'EDNH7464', product: 'Elise Diva Lashes DW7464'}, {code: 'EDNH7927', product: 'Elise Diva Lashes C7927'},
     {code: 'ELN4455', product: 'Elise Lashes N4455'}, {code: 'ELCX1313', product: 'Elise Lashes CX1313'},
     {code: 'ELI8089', product: 'Elise Lashes I8089'}, {code: 'ELF8058', product: 'Elise Lashes F8058'},
+    {code: 'ELIF3125B', product: 'Individual Flare 3125 Black'},
     {code: 'EFLLF11', product: 'Elise Feather Lite Lashes F11'}, {code: 'EFLLF12', product: 'Elise Feather Lite Lashes F12'},
     {code: 'EFLLF13', product: 'Elise Feather Lite Lashes F13'}, {code: 'EFLLF14', product: 'Elise Feather Lite Lashes F14'},
     {code: 'JLLS04', product: 'Juicy Lips Lipstick Pink Champagne'},
@@ -236,9 +244,25 @@ export function buildSystemPrompt(): string {
     'You receive ONE scanned page as image + text. Transcribe only what is written —',
     'never infer, estimate, average, or fill a blank.',
     '',
+    'THE PAGE IS THE SOURCE OF TRUTH, NOT THE REFERENCE LIST.',
+    'Output one row for each item ROW actually printed on this page, reading the page from',
+    'top to bottom in the order the rows are printed (keep the printed group/family order;',
+    'do NOT sort by item code). The reference list you are given is a dictionary of known',
+    'codes and names for this page — use it ONLY to recognise and correct a printed code,',
+    'never as the list of rows to output.',
+    '',
     'Rules:',
-    '- Emit one object for every item code in the provided manifest, in order. Never add',
-    '  a code that is not on the page; never skip one. Use null for an empty count cell.',
+    '- Emit a row only for an item that is physically printed on this page. Do NOT add an',
+    '  item just because it is in the reference list; if it is not printed here, it is not a',
+    '  row. Never skip a row that IS printed. Use null for an empty count cell.',
+    '- Never drop a printed row because it has no counts. A row whose only mark is "O/S"',
+    '  (out of stock), or whose count cells are all blank, is still a real printed row:',
+    '  keep it, read null for the empty cells, and note "O/S" in "alt" when that is the mark.',
+    '- If a row is printed on the page but its code or name is NOT in the reference list,',
+    '  still emit it: use the code and name exactly as printed, set "off_manifest": true,',
+    '  set confidence below 0.6, and say so in "alt". Never silently drop it.',
+    '- Match a printed code to the reference list when it clearly is the same item (a misread',
+    '  character); keep the reference code then. When unsure, keep what is printed.',
     '- Counts are whole numbers. An empty cell is null; only a written "0" is zero.',
     '- A mark belongs to the column it sits under; if it straddles two, pick the nearer,',
     '  lower the confidence, and add a "straddle" mark for that cell.',
@@ -261,7 +285,7 @@ export function buildSystemPrompt(): string {
     '  "unclear" mark for that cell.',
     '- "marks" lists only those cells (field = the column key); leave it empty when every',
     '  cell in the row reads cleanly. Never mark a cell just because it is blank.',
-    '- Confirm the footer page number matches the manifest page; if it does not, return',
+    '- Confirm the footer page number matches the reference page number; if it does not, return',
     '  { "error": "page_mismatch" } instead of mapping rows.',
     '- Skip the bottom TOTAL row. If the page is not a Nichido inventory page or is',
     '  unreadable, return { "error": "..." }. Return JSON only.',
@@ -292,7 +316,10 @@ export function buildManifestPrompt(page: number, version: 'v1' | 'v2' = 'v1'): 
     'For each row, also return box = {y_top, y_bottom}: the fraction (0 at the page top,',
     "1 at the bottom) of where that printed item row begins and ends on THIS scan's",
     'actual layout. This only points the reviewer at the row; it must not change any count.',
-    'Item rows on this page, in printed order — read a value or null for each:',
+    'REFERENCE — known codes and names for this page (a dictionary to recognise and correct',
+    'printed codes, NOT a checklist). Output a row only for an item printed on the page, in',
+    'the page\'s printed order; a printed item missing from this list is still a row',
+    '(off_manifest: true). Do not output a listed item that is not printed on the page:',
     `  ${list}`,
   ].join('\n');
 }
@@ -474,6 +501,9 @@ export const EXTRACTION_SCHEMA = {
             },
             required: ['y_top', 'y_bottom'],
           },
+          // True when this row is printed on the page but its code/name is not in the
+          // reference list — kept (never dropped) and surfaced for review, not silently lost.
+          off_manifest: {type: ['boolean', 'null']},
         },
         required: ['item_code', 'ending_on_hand', 'confidence'],
       },

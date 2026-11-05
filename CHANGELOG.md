@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — OCR (NICH-36): read the page, not the catalog
+
+Carlos's Nov 5 QA found the reader both dropping real rows and inventing rows that aren't on the scan. Root cause: the extraction prompt told the model to "emit one object for every item code in the provided manifest", so the manifest (a per-page catalog) became the list of rows. When a store's page printed an item the manifest didn't list, it had no slot and was dropped (MUSE, NGFEP, Sugar Rush, Georgia, Individual Flare — all confirmed missing from the manifest). When the manifest listed items the page didn't print, the model emitted them anyway, in catalog order, which also re-sorted items under the wrong group (the Watsons "9 invented rows" and Raisin Wine landing under True Color Eye Shadow).
+
+Fix: **the page is the source of truth, the manifest is a dictionary.** The reader now transcribes only the rows actually printed on the page, in the page's printed order (no sorting by code), and uses the manifest only to recognise and correct a printed code. A printed item not in the manifest is still emitted, flagged `off_manifest` and low-confidence, so it is reviewed rather than lost. Out-of-stock and blank-count rows are kept, not dropped. As an immediate stopgap the five SKUs the QA found missing were added to the manifest.
+
+Not in this change: the separate "many pages failed" ingestion issue (likely rate-limit/timeout on a 98-page scan), and surfacing the `off_manifest` flag as a review badge. Needs a Staging re-run of the QA scans to confirm against real data.
+
 ## 2026-11-05 — Scan upload: page through the per-page rows
 
 Expanding a multi-page scan in the uploader unrolled every page at once (98 rows for a 98-page scan). The expanded per-page list now pages twelve rows at a time, with a "Showing 1 to 12 of 98" line, so a big scan stays navigable instead of a long scroll.
