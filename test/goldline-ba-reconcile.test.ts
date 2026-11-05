@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {baSlug, reconcileBaNames} from '../src/goldline-ba-reconcile';
+import {baSlug, reconcileBaNames, withCanonicalBa} from '../src/goldline-ba-reconcile';
 
 describe('baSlug', () => {
   it('lowercases, drops punctuation and middle initials', () => {
@@ -33,5 +33,25 @@ describe('reconcileBaNames', () => {
     const map = reconcileBaNames(['', '  ', null, undefined, 'Mae Bernal']);
     expect(map.size).toBe(1);
     expect(map.get('Mae Bernal')).toBe('Mae Bernal');
+  });
+});
+
+describe('withCanonicalBa', () => {
+  it('rewrites every form consultant to one canonical spelling', () => {
+    const board = {
+      forms: [
+        {key: 'a', consultant: 'RHEA MAE BERMIL'},
+        {key: 'b', consultant: 'Rhea Mae P. Bermil'},
+        {key: 'c', consultant: null},
+      ],
+    };
+    const out = withCanonicalBa(board, ['Rhea Mae Bermil']);
+    expect(out.forms[0].consultant).toBe('Rhea Mae Bermil');
+    expect(out.forms[1].consultant).toBe('Rhea Mae Bermil');
+    // Blank names are left untouched, and other fields survive.
+    expect(out.forms[2].consultant).toBeNull();
+    expect(out.forms[0].key).toBe('a');
+    // A new board is returned; the input is not mutated.
+    expect(board.forms[0].consultant).toBe('RHEA MAE BERMIL');
   });
 });

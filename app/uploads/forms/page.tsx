@@ -1,8 +1,9 @@
-import Link from 'next/link';
-import {ChevronLeft} from 'lucide-react';
 import {getDataContext} from '@/src/active-context';
+import {BackButton} from '@/components/analyst/back-button';
 import {canEditData} from '@/src/company';
 import {listStores} from '@/src/goldline-data';
+import {getCurrentBas} from '@/src/goldline-ba-data';
+import {withCanonicalBa} from '@/src/goldline-ba-reconcile';
 import {triageBoard} from '@/src/goldline-triage-data';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {TriageBoard} from '@/components/analyst/triage-board';
@@ -23,13 +24,17 @@ export default async function Page() {
       </div>
     );
   }
-  const [data, stores] = await Promise.all([triageBoard(ctx.companyId), listStores(ctx.companyId)]);
+  const [board, stores, baReg] = await Promise.all([
+    triageBoard(ctx.companyId),
+    listStores(ctx.companyId),
+    getCurrentBas(ctx.companyId),
+  ]);
+  // One canonical spelling per BA across every card (see withCanonicalBa).
+  const data = withCanonicalBa(board, baReg.names);
   return (
     <div className={GL_PAGE}>
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground" aria-label="Breadcrumb">
-        <Link href="/uploads" className="inline-flex items-center gap-1 transition-colors hover:text-foreground">
-          <ChevronLeft className="size-4" /> Uploads
-        </Link>
+        <BackButton fallback="/uploads" label="Uploads" />
         <span aria-hidden>·</span>
         <span className="font-medium text-foreground">All forms</span>
       </nav>

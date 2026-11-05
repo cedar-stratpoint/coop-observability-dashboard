@@ -67,3 +67,23 @@ export function reconcileBaNames(names: Array<string | null | undefined>, known:
   }
   return out;
 }
+
+/**
+ * Rewrite each form's `consultant` to its canonical BA spelling, so the same person reads
+ * identically on every card (not "RHEA MAE BERMIL" on one and "Rhea Mae P. Bermil" on the
+ * next). Clusters across the whole board; blank names are left as-is. Pure — returns a new
+ * board, forms untouched apart from the label.
+ */
+export function withCanonicalBa<T extends {forms: ReadonlyArray<{consultant: string | null}>}>(board: T, known: string[] = []): T {
+  const map = reconcileBaNames(
+    board.forms.map((f) => f.consultant),
+    known,
+  );
+  return {
+    ...board,
+    forms: board.forms.map((f) => {
+      const t = f.consultant?.trim();
+      return t ? {...f, consultant: map.get(t) ?? t} : f;
+    }),
+  };
+}
