@@ -205,8 +205,8 @@ export function UploadsView({
   const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
 
   return (
-    <div className={GL_PAGE}>
-      <header className="flex flex-col gap-1">
+    <div className={cn(GL_PAGE, 'gap-8')}>
+      <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Uploads</h1>
           <Link
@@ -226,7 +226,7 @@ export function UploadsView({
 
       {/* File list */}
       <Card>
-        <CardHeader className="gap-3">
+        <CardHeader className="gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {selectedGroup ? (
               <button
@@ -366,14 +366,14 @@ export function UploadsView({
             </NativeSelect>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-5">
           {view === 'groups' && !selectedGroup ? (
             groups.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 {uploads.length === 0 ? 'No files yet. Add one above.' : 'No uploads match.'}
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {pageTiles.map((g) => (
                   <GroupTile key={g.key} g={g} onOpen={() => {
                     setGroupKey(g.key);
