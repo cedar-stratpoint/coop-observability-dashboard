@@ -22,3 +22,14 @@ export function homeFor(ctx: {isCoopAdmin: boolean; companyId?: string | null} |
   if (ctx?.companyId === 'zoomy') return '/';
   return '/overview';
 }
+
+/**
+ * Who may open the Business Health Report (`/health-report`): a Zoomy data viewer, or a Coop Admin (the view that is otherwise
+ * data-blind; the plan holds no customer data, and the Coop Admin is one of its two editors). A Goldline view is bounced.
+ * `signin` = no resolved context (signed out, or no membership): the server guard decides from the session.
+ */
+export function healthReportAccess(ctx: {companyId: string | null; isCoopAdmin: boolean; canSeeData: boolean} | null): 'allow' | 'bounce' | 'signin' {
+  if (ctx === null) return 'signin';
+  if (ctx.isCoopAdmin) return 'allow';
+  return ctx.companyId === 'zoomy' && ctx.canSeeData ? 'allow' : 'bounce';
+}
