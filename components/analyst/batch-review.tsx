@@ -301,9 +301,16 @@ export function BatchReview({
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 pt-6 pb-6">
       <div className="flex flex-col gap-1.5">
         <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
-          <Link href={`/uploads/scan/${encodeURIComponent(scanSource)}`} className="inline-flex shrink-0 items-center gap-1 transition-colors hover:text-foreground">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) router.back();
+              else router.push(`/uploads/scan/${encodeURIComponent(scanSource)}`);
+            }}
+            className="inline-flex shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+          >
             <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
-          </Link>
+          </button>
           {curPageLabel && (
             <>
               <span aria-hidden>·</span>

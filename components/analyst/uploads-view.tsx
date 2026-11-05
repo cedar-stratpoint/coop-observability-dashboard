@@ -8,6 +8,7 @@ import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldl
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
 import {DeleteUploadDialog} from '@/components/analyst/delete-upload-dialog';
+import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
@@ -64,28 +65,59 @@ function fmtDay(day: string): string {
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
 }
 
-/** One drop as a tile: source scan, day, file count, and a status breakdown. Opens the
- *  scan — its pages sorted into store forms (Per store / Per BA / Per file). */
-function GroupTile({g}: {g: UploadGroup}) {
+/** One drop as a tile: source scan, day, file count, and a status breakdown. The card opens
+ *  the scan (its pages sorted into store forms); the trash button deletes the whole drop
+ *  through the same confirmation + progress as the scan page, sitting above the open overlay. */
+function GroupTile({
+  g,
+  company,
+  canEdit,
+  onDeleted,
+}: {
+  g: UploadGroup;
+  company: string;
+  canEdit: boolean;
+  onDeleted: (info: {files: number; source: string}) => void;
+}) {
   const review = g.byStatus.needs_review ?? 0;
   const committed = g.byStatus.committed ?? 0;
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
   return (
-    <Link
-      href={`/uploads/scan/${encodeURIComponent(g.source)}`}
-      className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
-    >
+    <div className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-within:ring-3 focus-within:ring-ring/40">
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <FileStack className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium" title={g.source}>{g.source}</div>
+          <Link
+            href={`/uploads/scan/${encodeURIComponent(g.source)}`}
+            title={g.source}
+            className="block truncate text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
+          >
+            {g.source}
+          </Link>
           <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
             {fmtDay(g.day)} · {g.files} {g.files === 1 ? 'file' : 'files'}
           </div>
         </div>
+        {canEdit && (
+          <DeleteScanDialog
+            company={company}
+            source={g.source}
+            onDeleted={onDeleted}
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete scan ${g.source}`}
+                className="relative z-10 -mt-1 -mr-1 shrink-0 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            }
+          />
+        )}
       </div>
       <div className="flex flex-wrap gap-1.5">
         {review > 0 && <Tag cls="text-amber-700 bg-amber-500/15 dark:text-amber-400" n={review} label="to review" />}
@@ -93,7 +125,7 @@ function GroupTile({g}: {g: UploadGroup}) {
         {bad > 0 && <Tag cls="text-destructive bg-destructive/10" n={bad} label={bad === 1 ? 'issue' : 'issues'} />}
         {processing > 0 && <Tag cls="text-muted-foreground bg-muted" n={processing} label="reading" />}
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -388,7 +420,16 @@ export function UploadsView({
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {pageTiles.map((g) => (
-                  <GroupTile key={g.key} g={g} />
+                  <GroupTile
+                    key={g.key}
+                    g={g}
+                    company={company}
+                    canEdit={canEdit}
+                    onDeleted={({files}) => {
+                      toast('ok', `Scan deleted · ${files} ${files === 1 ? 'page' : 'pages'} removed`);
+                      router.refresh();
+                    }}
+                  />
                 ))}
               </div>
             )
