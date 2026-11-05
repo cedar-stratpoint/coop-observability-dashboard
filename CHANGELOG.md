@@ -8,7 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-Dates are local working dates (GMT+8). Newest first.
+## 2026-11-05 — Scan pointer, phase 6a: a canvas viewer whose highlight tracks zoom
+
+The "show in scan" highlight used to be an HTML band laid over an `<iframe>` PDF, so when you zoomed the enlarged view the browser's PDF viewer zoomed independently and the band drifted off the row. The enlarged view now renders the page to a **canvas** with `pdfjs-dist` and draws the band in the **page's own coordinate space**, so it stays locked on while you zoom (there's a zoom control) and pan. It falls back to the browser PDF viewer if the page can't render (a 10s timeout guards against ever spinning forever), so the worst case is exactly today's behaviour. The band is still the computed approximation; phase 6b (exact per-item boxes captured at OCR time) makes it pixel-accurate.
+
+Note: `pdfjs-dist`'s worker is vendored at `public/pdf.worker.min.mjs`; re-copy it from `node_modules/pdfjs-dist/build/` when bumping pdfjs.
+
+
 
 ## 2026-11-05 — Review: confidence framing + a breadcrumb that remembers the scan
 
