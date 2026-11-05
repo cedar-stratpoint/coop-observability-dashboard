@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-05 — Uploads: delete a whole scan drop, with a confirmation that shows what goes
+
+A scan drop (one PDF, often 100+ pages) could only be cleared file by file. A **Delete scan** button on the scan page now removes the whole drop and everything it produced (the pages, their readings, and any committed counts) in one go. It confirms first, in a modal that spells out exactly what will go: how many pages, across how many stores, which BAs, and a warning when committed pages (and their Inventory counts) are among them. On confirm it shows a short, honest "removing the pages" progress pass before returning to Uploads, so a 109-page drop vanishing doesn't read as a glitch. Editors only; irreversible by design, which is why it asks first.
+
 ## 2026-11-05 — Forms cards: drop the top stripe, modernize
 
 The coloured 3px stripe across the top of every store/BA card read as a template costume (and the craft floor flags a coloured top border as a default to avoid). Removed it; status now lives entirely in a refined **dot pill** (a tinted dot + label), which already carried the state. Also: the store name is a touch larger, the BA line gets a person glyph, BA cards get an **initials avatar** (a contact-card feel), cards lift slightly on hover, and the "Confirm store" button is a **tinted outline** instead of a solid-red fill, so a scan with 30 "needs a store" forms no longer reads as a wall of red. Same information, calmer and more inviting.
