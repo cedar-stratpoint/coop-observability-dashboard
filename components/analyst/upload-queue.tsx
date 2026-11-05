@@ -18,6 +18,12 @@ import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '
 
 export const CONCURRENCY = 2;
 
+// Auto-retry transient page failures (a cut stream, a timeout, an overload) a couple
+// of times with backoff before ever showing the page as failed — a big scan hits these
+// and nothing else recovers them. Permanent outcomes (set aside, out of scope) don't retry.
+const AUTO_RETRY_MAX = 2;
+const AUTO_BACKOFF_MS = [2500, 7000];
+
 export type ItemState = 'queued' | 'waiting_period' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export type QueueItem = {
@@ -98,6 +104,8 @@ export function UploadQueueProvider({company, children}: {company: string | null
   // Run attempt per item: cancelling (before the request goes out) or retrying bumps
   // it, so a superseded run stops at the gate and never overwrites a newer one.
   const attempt = useRef(new Map<string, number>());
+  // How many times each item has been auto-retried after a transient failure.
+  const autoTries = useRef(new Map<string, number>());
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchRef = useRef(batch);
   batchRef.current = batch;
@@ -156,6 +164,31 @@ export function UploadQueueProvider({company, children}: {company: string | null
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
   }, []);
 
+  // A transient failure gets AUTO_RETRY_MAX automatic re-tries (with backoff) before it's
+  // shown as failed; a permanent one is marked failed straight away. Re-queuing lets the
+  // scheduler pick it up again like a manual retry.
+  const failOrRetry = useCallback(
+    (id: string, info: {error: string; transient: boolean; serverStatus?: string; pageKind?: string}) => {
+      const tries = autoTries.current.get(id) ?? 0;
+      if (info.transient && tries < AUTO_RETRY_MAX) {
+        autoTries.current.set(id, tries + 1);
+        patch(id, {state: 'failed', serverStatus: info.serverStatus, pageKind: info.pageKind, error: 'Didn’t go through, retrying…'});
+        setTimeout(() => {
+          setItems((all) =>
+            all.map((i) =>
+              i.id === id && i.state === 'failed'
+                ? {...i, state: 'queued', error: undefined, phase: 'uploading', uploadFrac: 0, uploadId: undefined, serverStatus: undefined, pageKind: undefined}
+                : i,
+            ),
+          );
+        }, AUTO_BACKOFF_MS[Math.min(tries, AUTO_BACKOFF_MS.length - 1)]);
+        return;
+      }
+      patch(id, {state: 'failed', serverStatus: info.serverStatus, pageKind: info.pageKind, error: info.error});
+    },
+    [patch],
+  );
+
   const run = useCallback(
     async (item: QueueItem) => {
       const token = (attempt.current.get(item.id) ?? 0) + 1;
@@ -182,11 +215,13 @@ export function UploadQueueProvider({company, children}: {company: string | null
         periodEnd: item.kind === 'csv' ? b.periodEnd : undefined,
         onUploadProgress: (f) => patch(item.id, {uploadFrac: f}),
         onStage: (ev) =>
-          patch(item.id, {
+          // A heartbeat re-emits the current stage; don't reset phaseAt then, or the
+          // progress band restarts every 12s. Only reset when the phase truly changes.
+          patch(item.id, (i) => ({
             phase: ev.stage,
-            phaseAt: Date.now(),
+            phaseAt: i.phase === ev.stage ? i.phaseAt : Date.now(),
             ...(ev.stage === 'reading' ? {reading: {page: ev.page, items: ev.items}} : {}),
-          }),
+          })),
       });
       aborts.current.set(item.id, abort);
       let res: UploadResult;
@@ -195,10 +230,12 @@ export function UploadQueueProvider({company, children}: {company: string | null
       } catch (e) {
         aborts.current.delete(item.id);
         if (e instanceof DOMException && e.name === 'AbortError') return patch(item.id, {state: 'cancelled'});
-        return patch(item.id, {state: 'failed', error: e instanceof Error ? e.message : 'Upload failed.'});
+        // A cut stream / network blip / timeout — transient, so auto-retry before failing.
+        return failOrRetry(item.id, {transient: true, error: e instanceof Error ? e.message : 'Upload failed.'});
       }
       aborts.current.delete(item.id);
       if (res.status === 'needs_review' || res.status === 'committed') {
+        autoTries.current.delete(item.id); // read through — clear the retry counter
         patch(item.id, {
           state: 'done',
           phase: 'done',
@@ -224,9 +261,11 @@ export function UploadQueueProvider({company, children}: {company: string | null
         }
         refreshSoon(); // the Files list picks up the new rows
       } else {
-        patch(item.id, {
-          state: 'failed',
-          uploadId: res.uploadId,
+        if (res.uploadId) patch(item.id, {uploadId: res.uploadId});
+        // A genuine processing error ('failed') is transient and worth a retry; a page
+        // set aside ('rejected': sales / blank / not-an-inventory-page) is permanent.
+        failOrRetry(item.id, {
+          transient: res.status === 'failed',
           serverStatus: res.status,
           pageKind: res.pageKind,
           // No raw HTTP status in front of the user — a plain, non-technical line.
@@ -234,7 +273,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
         });
       }
     },
-    [ensureBatch, patch, refreshSoon],
+    [ensureBatch, patch, refreshSoon, failOrRetry],
   );
 
   // Scheduler: keep CONCURRENCY uploads going; CSVs wait for the batch period.
@@ -368,12 +407,14 @@ export function UploadQueueProvider({company, children}: {company: string | null
       splitting,
       active,
       addFiles,
-      retry: (id) =>
+      retry: (id) => {
+        autoTries.current.delete(id); // a manual retry earns a fresh set of auto-retries
         patch(id, (i) =>
           i.state === 'failed' || i.state === 'cancelled'
             ? {state: 'queued', error: undefined, phase: 'uploading', uploadFrac: 0, uploadId: undefined, serverStatus: undefined}
             : {},
-        ),
+        );
+      },
       cancel: (id) => {
         const abort = aborts.current.get(id);
         if (abort) return abort();

@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Scan upload: stop pages failing with a blank "(200)"
+
+QA saw legit inventory pages fail with "Upload failed (200)" on a 98-page scan. Root cause: reading a page takes 60 to 85 seconds and the server went silent the whole time, so a proxy's idle-read timeout cut the streaming connection before the final result line. The browser got a bare 200 with no answer and showed the raw code, and nothing retried it. The densest pages (page 4, the accessories list) are the slowest, so they got cut most.
+
+Three fixes:
+
+- **Heartbeat the long reads.** The server now re-emits its progress every 12 seconds while the two slow AI calls (classify, read) run, so the connection never goes idle long enough to be cut and the real result (success or a clean failure) actually comes back.
+- **Auto-retry transient failures.** A page that fails from a cut stream, a timeout, or an overload is retried automatically up to twice with backoff before it's ever shown as failed. Pages set aside (sales / blank / not an inventory page) and other permanent outcomes don't retry.
+- **No raw status codes.** The remaining "Upload failed (200)" wording (a transport fallback the earlier change missed) is now "We couldn't finish reading this page. Please try again."
+
+Not in this change: the separate page-number gate (a legit form whose printed "PAGE # N" footer is unreadable is still rejected as "not an inventory page") — a follow-up. Needs a Staging re-run of the 98-page scan to confirm against real data.
+
 ## 2026-11-05 — Goldline pages: sales totals kept per period, forecast reads cached
 
 Goldline pages (Restock, Stores, Overview, SKU linking/activity) spent seconds in the database on each load. Measured on Nichido Staging, neither Supabase in general nor the network was the problem (~45 ms a round trip, small tables in 50 to 300 ms). The time went to five sales functions that added up all 472k sales rows on every call: `sales_rollup` 2.9 s, `forecast_history` 5 s, `forecast_months` 2.2 s, `store_scope` 1.7 s, `sku_months` 2.6 s. The forecast ones weren't cached at all. Decrypting is not the main cost (all rows decrypt in ~0.7 s). The rest is aggregation spilling to disk on a small instance: Staging is Supabase's smallest compute size (256 MB shared buffers) and Prod is one size up. Rewriting the functions was tried and bought nothing, so the fix reads fewer rows instead.
