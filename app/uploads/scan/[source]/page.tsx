@@ -3,6 +3,8 @@ import {ChevronLeft, LayoutGrid, Users, List, X} from 'lucide-react';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {listStores, listUploads} from '@/src/goldline-data';
+import {getCurrentBas} from '@/src/goldline-ba-data';
+import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {triageBoard} from '@/src/goldline-triage-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {GL_PAGE} from '@/src/goldline-ui';
@@ -41,14 +43,20 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const companyId = ctx.companyId;
   const canEdit = canEditData(ctx.role);
 
-  const [board, stores, uploads] = await Promise.all([
+  const needBas = view === 'ba' || (view === 'store' && Boolean(ba));
+  const [board, stores, uploads, baReg] = await Promise.all([
     view === 'file' ? Promise.resolve(null) : triageBoard(companyId, {source}),
     view === 'file' ? Promise.resolve([]) : listStores(companyId),
     view === 'file' ? listUploads(companyId) : Promise.resolve([]),
+    needBas ? getCurrentBas(companyId) : Promise.resolve({byStore: {}, names: [] as string[]}),
   ]);
   const files = view === 'file' ? uploads.filter((u) => uploadSource(u.filename) === source) : [];
+  // The same person is written many ways; reconcile to one canonical BA (a registry name
+  // when known) so a BA card groups all their forms and filtering by it still matches.
+  const baCanon = board ? reconcileBaNames(board.forms.map((f) => f.consultant), baReg.names) : new Map<string, string>();
+  const canonBa = (c: string | null) => (c?.trim() ? baCanon.get(c.trim()) ?? c.trim() : 'No BA on the form');
   // Per-store, filtered to one BA when arriving from a BA card.
-  const data = board && ba ? {...board, forms: board.forms.filter((f) => (f.consultant?.trim() || 'No BA on the form') === ba)} : board;
+  const data = board && ba ? {...board, forms: board.forms.filter((f) => canonBa(f.consultant) === ba)} : board;
 
   const href = (v: View) => `/uploads/scan/${encodeURIComponent(source)}?view=${v}`;
 
@@ -102,7 +110,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       {view === 'file' ? (
         <ScanFileList files={files} canEdit={canEdit} company={companyId} />
       ) : view === 'ba' ? (
-        board && <BaCards data={board} source={source} />
+        board && <BaCards data={board} source={source} knownBas={baReg.names} />
       ) : (
         data && <TriageBoard data={data} company={companyId} scan={source} stores={stores} canEdit={canEdit} embedded />
       )}
