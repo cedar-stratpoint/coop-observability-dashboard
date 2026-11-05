@@ -4,7 +4,7 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useSearchParams} from 'next/navigation';
 import {signOut} from 'next-auth/react';
-import {Activity, BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, Contact, FileBarChart, Flag, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
+import {Activity, BarChart3, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Contact, FileBarChart, Flag, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
 import type {DigestArchiveRow} from '../../src/types';
 import {cn} from '@/lib/utils';
 import {fmtRange, hasNoSalesData, periodKind} from '../../src/week';
@@ -74,9 +74,16 @@ const leafActive = (href: string, pathname: string, channel: string | null) => {
   }
   if (href === '/offline-sales/orders') return pathname.startsWith('/offline-sales/orders');
   if (href === '/offline-sales/events') return pathname.startsWith('/offline-sales/events');
-  // Goldline: SKU linking (/stock/skus) and Audit (/stock/audit) own their subtrees;
-  // Inventory owns the rest of /stock.
-  if (href === '/stock') return pathname.startsWith('/stock') && !pathname.startsWith('/stock/skus') && !pathname.startsWith('/stock/audit');
+  // Goldline: SKU linking (/stock/skus), Restock (/stock/restock), Orders (/stock/orders)
+  // and Audit (/stock/audit) own their subtrees; Inventory owns the rest of /stock.
+  if (href === '/stock')
+    return (
+      pathname.startsWith('/stock') &&
+      !pathname.startsWith('/stock/skus') &&
+      !pathname.startsWith('/stock/restock') &&
+      !pathname.startsWith('/stock/orders') &&
+      !pathname.startsWith('/stock/audit')
+    );
   return pathname.startsWith(href.split('?')[0]);
 };
 
@@ -229,6 +236,8 @@ export function DashboardShell({
   const overviewTab: NavItem = {href: '/overview', label: 'Overview', icon: BarChart3};
   const storesTab: NavItem = {href: '/stores', label: 'Stores', icon: Store};
   const stockTab: NavItem = {href: '/stock', label: 'Inventory', icon: Package};
+  const restockTab: NavItem = {href: '/stock/restock', label: 'Restock', icon: CalendarRange};
+  const ordersTab: NavItem = {href: '/stock/orders', label: 'Orders', icon: ClipboardList};
   const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU linking', icon: Link2};
   const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
   const flagsTab: NavItem = {href: '/flags', label: 'Flags', icon: Flag};
@@ -245,7 +254,7 @@ export function DashboardShell({
     ? FLAT_TABS
     : isCoopAdminView
       ? [usersTab, ...(multiView ? [settingsTab] : [])]
-      : [overviewTab, storesTab, stockTab, skuLinksTab, flagsTab, auditTab, basTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
+      : [overviewTab, storesTab, stockTab, restockTab, ordersTab, skuLinksTab, flagsTab, auditTab, basTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
 
   // ── Mobile nav model (below md only) ──────────────────────────────────────
   // The left rail is hidden under md; these drive a bottom tab bar + a "More" sheet.
@@ -282,7 +291,7 @@ export function DashboardShell({
       ? multiView
         ? [settingsTab]
         : []
-      : [storesTab, skuLinksTab, flagsTab, basTab, healthTab, ...(multiView ? [settingsTab] : [])];
+      : [restockTab, ordersTab, storesTab, skuLinksTab, flagsTab, basTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 
   return (

@@ -7,6 +7,11 @@ import {canEditData, outOfScopeStores} from '@/src/company';
 import {manilaDate} from '@/src/goldline-supply';
 import {glTags} from '@/src/goldline-ref-data';
 import {MAX_WINDOW_MONTHS} from '@/src/goldline-forecast';
+import {decideRecommendations, makeRestockRun, RestockError} from '@/src/goldline-restock-writes';
+import type {Decision} from '@/src/goldline-restock';
+import {makePurchaseOrders, PoError, receivePoLines, setPoModule} from '@/src/goldline-po-writes';
+import {poLineStores, poStore} from '@/src/goldline-po-data';
+import {runChecks} from '@/src/goldline-checks-data';
 import {
   cancelShipment,
   existingItems,
@@ -213,5 +218,158 @@ export async function saveForecastSettingsAction(input: {company: string | null;
   } catch (err) {
     console.error('saveForecastSettingsAction', err);
     return {ok: false, error: 'Could not save the restock settings. Please try again.'};
+  }
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_REMARK = 500;
+const MAX_IDS = 2000;
+
+/** Make (or re-make) the restock run for a date's half month. Company-wide roles only. */
+export async function makeRestockRunAction(input: {company: string | null; runDate: string}): Promise<ActionResult<{saved: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (e.ctx.storeScope) return {ok: false, error: 'Only company-wide roles can make a restock run (the warehouse serves every store).'};
+  const runDate = ISO_DAY.test(input.runDate ?? '') && !Number.isNaN(Date.parse(input.runDate)) ? input.runDate : manilaDate();
+  try {
+    const {saved} = await makeRestockRun(e.companyId, runDate, e.by);
+    revalidatePath('/stock/restock');
+    return {ok: true, saved};
+  } catch (err) {
+    console.error('makeRestockRunAction', err);
+    return {ok: false, error: 'Could not make the run. Please try again.'};
+  }
+}
+
+const DECIDE_ERROR: Record<RestockError['code'], string> = {
+  remark_required: 'Add a remark that says why.',
+  bad_qty: 'Enter how many units to send (0 or more).',
+  over_warehouse: 'That is more than the warehouse holds.',
+  edit_one: 'Edit one line at a time.',
+  already_received: 'That line was already received at the store, so it can’t change. Clear its received qty on the purchase order first.',
+  already_arrived: 'That line shipped and is due to have arrived, so it can’t be taken back. Record what was received on its purchase order instead.',
+  nothing_changed: 'Those lines can’t be decided (held, covered, or not in your stores). Refresh and try again.',
+};
+
+/** Approve many lines as is, or edit, reject or undo one. */
+export async function decideRecommendationsAction(input: {
+  company: string | null;
+  ids: string[];
+  decision: Decision;
+  qty?: number | null;
+  remark?: string | null;
+}): Promise<ActionResult<{changed: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  const ids = Array.isArray(input.ids) ? [...new Set(input.ids.filter((id) => typeof id === 'string' && UUID.test(id)))] : [];
+  if (!ids.length || ids.length > MAX_IDS) return {ok: false, error: 'Pick the lines to decide.'};
+  if (!['approved', 'edited', 'rejected', 'pending'].includes(input.decision)) return {ok: false, error: 'Unknown decision.'};
+  const remark = typeof input.remark === 'string' ? input.remark.trim().slice(0, MAX_REMARK) : '';
+  if ((input.decision === 'edited' || input.decision === 'rejected') && !remark) return {ok: false, error: DECIDE_ERROR.remark_required};
+  const qty = input.decision === 'edited' ? intIn(input.qty, 0, MAX_QTY) : null;
+  if (input.decision === 'edited' && qty == null) return {ok: false, error: DECIDE_ERROR.bad_qty};
+  try {
+    const changed = await decideRecommendations(e.companyId, e.ctx.storeScope ?? null, {ids, decision: input.decision, qty, remark: remark || null, by: e.by});
+    // Changing a line already on a PO cancels its shipment, which moves warehouse stock (F12).
+    refresh(e.companyId, ['supply']);
+    return {ok: true, changed};
+  } catch (err) {
+    if (err instanceof RestockError) return {ok: false, error: DECIDE_ERROR[err.code]};
+    console.error('decideRecommendationsAction', err);
+    return {ok: false, error: 'Could not save the decision. Please try again.'};
+  }
+}
+
+// ── Purchase orders (F12) ────────────────────────────────────────────────────────────
+
+const PO_ERROR: Record<PoError['code'], string> = {
+  run_not_found: 'That restock run is gone. Refresh and try again.',
+  not_enough_stock: 'The warehouse doesn’t hold enough for one of these lines. Nothing was shipped.',
+  over_qty: 'Received can’t be more than was sent.',
+  bad_date: 'Pick a received date between the day it was sent and today.',
+  line_not_found: 'A line wasn’t found. Refresh and try again.',
+};
+
+function poError(err: unknown, where: string, fallback: string): {ok: false; error: string} {
+  if (err instanceof PoError) {
+    if (err.code === 'not_enough_stock' && err.detail != null) {
+      return {ok: false, error: `The warehouse holds only ${err.detail} of one item, so nothing was shipped. Update the warehouse stock, or edit that line on the run.`};
+    }
+    return {ok: false, error: PO_ERROR[err.code]};
+  }
+  console.error(where, err);
+  return {ok: false, error: fallback};
+}
+
+/** Put a run's approved lines on each store's purchase order (one per store per run) and ship them. */
+export async function makePurchaseOrdersAction(input: {company: string | null; runId: string}): Promise<ActionResult<{pos: number; lines: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (!UUID.test(input.runId ?? '')) return {ok: false, error: PO_ERROR.run_not_found};
+  try {
+    const out = await makePurchaseOrders(e.companyId, input.runId, e.ctx.storeScope ?? null, e.by, manilaDate());
+    refresh(e.companyId, ['supply']); // shipping takes stock out of the warehouse
+    return {ok: true, ...out};
+  } catch (err) {
+    return poError(err, 'makePurchaseOrdersAction', 'Could not make the purchase orders. Please try again.');
+  }
+}
+
+/** Save the received section: qty and date per line. A blank qty clears that line's receipt. */
+export async function receivePoLinesAction(input: {
+  company: string | null;
+  lines: Array<{id: string; qty: number | null; date: string | null}>;
+}): Promise<ActionResult<{changed: number}>> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  const raw = Array.isArray(input.lines) ? input.lines.slice(0, MAX_IDS) : [];
+  const lines: Array<{id: string; qty: number | null; date: string | null}> = [];
+  for (const l of raw) {
+    if (!l || !UUID.test(l.id ?? '')) return {ok: false, error: PO_ERROR.line_not_found};
+    if (l.qty == null) {
+      lines.push({id: l.id, qty: null, date: null});
+      continue;
+    }
+    const qty = intIn(l.qty, 0, MAX_QTY);
+    if (qty == null) return {ok: false, error: 'Received qty is a whole number, 0 or more.'};
+    if (!ISO_DAY.test(l.date ?? '') || Number.isNaN(Date.parse(l.date as string))) return {ok: false, error: PO_ERROR.bad_date};
+    lines.push({id: l.id, qty, date: l.date});
+  }
+  if (!lines.length) return {ok: false, error: 'Nothing to save.'};
+  try {
+    const ids = [...new Set(lines.map((l) => l.id))];
+    const stores = await poLineStores(e.companyId, ids);
+    if (stores.size !== ids.length) return {ok: false, error: PO_ERROR.line_not_found};
+    const out = outOfScopeStores(e.ctx.storeScope, [...new Set(stores.values())]);
+    if (out.length) return {ok: false, error: `Store ${out[0]} is outside your access.`};
+    const changed = await receivePoLines(e.companyId, e.ctx.storeScope ?? null, {lines, by: e.by, today: manilaDate()});
+    // Received counts as delivered in form vs. sales: re-run the checks for these stores so
+    // their flags reflect it now. The receipt is saved either way.
+    await runChecks(e.companyId, [...new Set(stores.values())]).catch((err) => console.error('receivePoLinesAction runChecks', err));
+    refresh(e.companyId, []);
+    revalidatePath('/flags');
+    return {ok: true, changed};
+  } catch (err) {
+    return poError(err, 'receivePoLinesAction', 'Could not save what was received. Please try again.');
+  }
+}
+
+/** The paper form's Module field (free text until its meaning is confirmed). */
+export async function setPoModuleAction(input: {company: string | null; id: string; module: string | null}): Promise<ActionResult> {
+  const e = await editorContext(input.company);
+  if ('error' in e) return {ok: false, error: e.error as string};
+  if (!UUID.test(input.id ?? '')) return {ok: false, error: 'Purchase order not found.'};
+  const module = typeof input.module === 'string' ? input.module.trim().slice(0, 80) || null : null;
+  try {
+    const store = await poStore(e.companyId, input.id);
+    if (!store) return {ok: false, error: 'Purchase order not found.'};
+    if (outOfScopeStores(e.ctx.storeScope, [store]).length) return {ok: false, error: `Store ${store} is outside your access.`};
+    await setPoModule(e.companyId, input.id, module, e.by);
+    revalidatePath('/stock', 'layout');
+    return {ok: true};
+  } catch (err) {
+    console.error('setPoModuleAction', err);
+    return {ok: false, error: 'Could not save the module. Please try again.'};
   }
 }
