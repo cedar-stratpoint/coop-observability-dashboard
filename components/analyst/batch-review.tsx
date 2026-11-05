@@ -9,7 +9,8 @@ import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
-import {batchCoverage, batchReadiness, storeConflict, FORM_PAGES} from '@/src/upload-batch';
+import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, FORM_PAGES} from '@/src/upload-batch';
+import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
@@ -287,22 +288,50 @@ export function BatchReview({
   const inventoryHref =
     storeCode && periodStart && periodEnd ? `/stock?store=${encodeURIComponent(storeCode)}&period=${periodStart}_${periodEnd}` : '/stock';
   const openFlags = pageInfo.reduce((n, p) => n + Math.max(0, p.flagged - p.resolved), 0);
+  // Confidence framing: lead with what was read cleanly, not with the flag count.
+  const totalRows = pages.reduce((n, p) => n + (state[p.upload.id]?.rows.length ?? 0), 0);
+  const confident = Math.max(0, totalRows - openFlags);
+  // Where this form came from: the scan drop and which of its pages is open now, so Back
+  // returns to the scan (not the default Uploads screen) and the context is visible.
+  const scanSource = uploadSource(pages[0]?.upload.filename ?? '');
+  const curPageLabel = cur ? scanPageLabel(cur.upload.filename).title : null;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 pt-6 pb-6">
-      <div className="flex flex-col gap-1">
-        <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-3.5" /> Back to uploads
-        </Link>
+      <div className="flex flex-col gap-1.5">
+        <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
+          <Link href={`/uploads/scan/${encodeURIComponent(scanSource)}`} className="inline-flex shrink-0 items-center gap-1 transition-colors hover:text-foreground">
+            <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
+          </Link>
+          {curPageLabel && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="truncate font-medium text-foreground">{curPageLabel}</span>
+            </>
+          )}
+        </nav>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Review this store&apos;s form</h1>
           {committed ? (
             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium" style={{color: toneText('var(--status-good)'), background: 'color-mix(in oklab, var(--status-good) 14%, transparent)'}}>
               <CheckCircle2 className="size-3.5" /> Committed
             </span>
+          ) : totalRows > 0 ? (
+            <span className="text-sm text-muted-foreground">
+              Read <span className="font-semibold text-foreground tabular-nums">{confident}</span> of{' '}
+              <span className="font-semibold text-foreground tabular-nums">{totalRows}</span> rows confidently
+              {openFlags > 0 ? (
+                <>
+                  {' · '}
+                  <span className="font-medium text-[color:var(--status-warn)]">{openFlags} to glance at</span>
+                </>
+              ) : (
+                ' · nothing left to check'
+              )}
+            </span>
           ) : (
             <span className="text-xs text-muted-foreground">
-              {pages.length} {pages.length === 1 ? 'page' : 'pages'} · {openFlags ? `${openFlags} flagged ${openFlags === 1 ? 'row' : 'rows'} to check` : 'nothing left to check'}
+              {pages.length} {pages.length === 1 ? 'page' : 'pages'}
             </span>
           )}
         </div>
