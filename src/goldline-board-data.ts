@@ -6,8 +6,9 @@ import {salesUnits} from './goldline-sales-units';
 import {getGlCatalog, getGlStores, getGlSupplyRef} from './goldline-ref-data';
 import type {InventoryRowIn} from './goldline-inventory';
 import {addDays, storeMovement, type Count} from './goldline-movement';
+import {deliveredFrom, receivedBetween, type Receipt} from './goldline-po';
 import {countedSoldByMonth, type ItemCount} from './goldline-product';
-import {manilaDate, type CatalogItem, type Shipment, type StoreBlock, type SupplyConfig} from './goldline-supply';
+import {manilaDate, SHIPMENT_COLS, SHIPMENT_OPEN, shipmentOf, type CatalogItem, type Shipment, type ShipmentRow, type StoreBlock, type SupplyConfig} from './goldline-supply';
 
 // Server-only reads behind the combined Goldline Inventory board: every store's recent
 // counts (enough for this month, last month, the month before, and the movement
@@ -78,7 +79,7 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
     const counted = [...new Set(rows.map((r) => r.store_code))];
     return counted.length ? linkedSales(supa, companyId, products, since, counted) : [];
   });
-  const [storesRows, products, supply, counts, shipments, sales] = await Promise.all([
+  const [storesRows, products, supply, counts, shipments, sales, received] = await Promise.all([
     getGlStores(companyId),
     productsP,
     getGlSupplyRef(companyId),
@@ -86,15 +87,31 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
     fetchAllRows('shipments', (from, to) => {
       let q = supa
         .from('shipments') // pagination-ok: paged by fetchAllRows (.range below)
-        .select('id,store_code,item_code,qty,shipped_on,arrives_on')
+        .select(SHIPMENT_COLS)
         .eq('company_id', companyId)
-        .eq('status', 'in_transit')
+        .in('status', SHIPMENT_OPEN)
         .gte('arrives_on', since);
       if (storeScope) q = q.in('store_code', storeScope);
       return q.order('arrives_on').order('id').range(from, to);
-    }) as unknown as Promise<Array<{id: string; store_code: string; item_code: string; qty: number; shipped_on: string; arrives_on: string}>>,
+    }) as unknown as Promise<ShipmentRow[]>,
     salesP,
+    // What arrived on purchase orders (F12): it replaces a count's Delivery column.
+    fetchAllRows('po_lines', (from, to) => {
+      let q = supa
+        .from('po_lines') // pagination-ok: paged by fetchAllRows (.range below)
+        .select('store_code,item_code,received_qty,received_on')
+        .eq('company_id', companyId)
+        .not('received_qty', 'is', null)
+        .gte('received_on', since);
+      if (storeScope) q = q.in('store_code', storeScope);
+      return q.order('id').range(from, to);
+    }) as unknown as Promise<Array<{store_code: string; item_code: string; received_qty: number; received_on: string}>>,
   ]);
+  const receiptsBy = new Map<string, Receipt[]>(); // store|item → receipts
+  for (const r of received) {
+    const k = `${r.store_code}|${r.item_code}`;
+    receiptsBy.set(k, [...(receiptsBy.get(k) ?? []), {storeCode: r.store_code, itemCode: r.item_code, qty: r.received_qty, receivedOn: r.received_on}]);
+  }
   const {settings, lines, transit, warehouse: wh} = supply;
 
   const itemBySku = new Map(products.filter((p) => p.sku_code?.trim()).map((p) => [p.sku_code!.trim(), p.item_code]));
@@ -113,8 +130,12 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
 
   // store → rows
   const byStore = new Map<string, Row[]>();
-  for (const r of counts) {
-    if (scope && !scope.has(r.store_code)) continue;
+  for (const c of counts) {
+    if (scope && !scope.has(c.store_code)) continue;
+    // Delivered = what the store received on POs during the count's period, else the form's column.
+    const mine = receiptsBy.get(`${c.store_code}|${c.item_code}`);
+    const got = mine ? receivedBetween(mine, c.store_code, c.item_code, c.period_start, c.period_end) : undefined;
+    const r = got === undefined ? c : {...c, delivery: deliveredFrom(c.delivery ?? 0, got)};
     const list = byStore.get(r.store_code);
     if (list) list.push(r);
     else byStore.set(r.store_code, [r]);
@@ -180,7 +201,7 @@ export async function getBoardData(companyId: string, storeScope?: string[] | nu
       storeTransitDays: Object.fromEntries(transit.map((t) => [t.store_code, t.transit_days])),
       isSample: sample,
     },
-    shipments: shipments.map((s) => ({id: s.id, storeCode: s.store_code, itemCode: s.item_code, qty: s.qty, shippedOn: s.shipped_on, arrivesOn: s.arrives_on})),
+    shipments: shipments.map(shipmentOf).filter((s): s is Shipment => s != null),
     currentMonth: (latest ?? today).slice(0, 7),
     today,
   };
