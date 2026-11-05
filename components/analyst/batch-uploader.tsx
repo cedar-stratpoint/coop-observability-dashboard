@@ -314,11 +314,20 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   );
 }
 
+// How many per-page rows to show at once when a scan group is expanded — a 98-page
+// scan paginates instead of unrolling the whole list.
+const PAGES_PER_VIEW = 12;
+
 // A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
 // line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
-// upload from flooding the list (plan §06 UX). Collapsed by default.
+// upload from flooding the list (plan §06 UX). Collapsed by default; the expanded
+// per-page rows are paged so even a 98-page scan stays navigable.
 function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
   const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(g.items.length / PAGES_PER_VIEW));
+  const safePage = Math.min(page, pageCount);
+  const shown = g.items.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const working = g.running > 0 || g.waiting > 0;
   const allDone = g.done === g.total && g.total > 0;
@@ -351,11 +360,21 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
         </div>
       </button>
       {open && (
-        <ul className="flex flex-col divide-y divide-border border-t border-border bg-muted/20 pl-3" aria-label={`Pages of ${g.source}`}>
-          {g.items.map((i) => (
-            <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
-          ))}
-        </ul>
+        <div className="flex flex-col border-t border-border bg-muted/20">
+          <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
+            {shown.map((i) => (
+              <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+            ))}
+          </ul>
+          {pageCount > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2">
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                Showing {(safePage - 1) * PAGES_PER_VIEW + 1} to {Math.min(safePage * PAGES_PER_VIEW, g.items.length)} of {g.items.length}
+              </span>
+              <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label={`Pages of ${g.source}`} />
+            </div>
+          )}
+        </div>
       )}
     </li>
   );
