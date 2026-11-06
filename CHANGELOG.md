@@ -8,25 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-06 — Health report: every actual line says where it comes from; empty typed cells highlighted; denser grid
+## 2026-11-06 — Forms board: confirm a store for a whole group at once
 
-The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It is the sum of rows 66-70, which are typed. **Decision: every actual line names its source, and a computed line that is waiting points at the rows to fill.**
+A store group is built from the store code the scan read, so its heading showed whatever name one form happened to read ("SM Sta Rosa DS") rather than the registry's real name, and there was no way to fix a code for several forms together. The group heading now shows the **registry's canonical name** for the code (e.g. "DS STA ROSA 2") when the code is a known store, with the code beside it. A new **Confirm store / Change store** control on the heading opens a dialog that **suggests the registry store for the code**; you keep it or pick another, then it points the forms in the group to that store in one go (reusing the per-form assign, applied in bulk).
 
-- **Source chip on each actual line** (`actualSource` in `src/plan-sheet.ts`, one explicit table): ✎ **Type** (rows in `TYPED_ROW` + opening cash; "once" / "optional" kept), ⚡ **Auto** (48 Shopee + Lazada, 49 Website (CRM), 50 POS events, 51 sum of rows 48-50: Coop's readers, never typed), ƒ **Calc** with the formula in the sheet's own row numbers (39 "= rows 33-38", 56 "= 51 − 55", 71 "= rows 66-70", and so on) plus the typed rows it needs. Lucide icons (the app's set), tooltip with the full text, icon only below md with the words kept for screen readers. A legend line sits above the grid.
-- **A waiting calc cell says what to fill** that month ("fill 66-70" in the cell; "fill rows 66-70" in the tooltip and screen-reader text), listing only the rows still empty.
-- **Every empty typed cell in an open month is highlighted** (past or current, not closed, not ahead), not only the required lines of the oldest unclosed month. The now-unused `Edit.fill` is removed; Fill in / Enter-to-next flow is unchanged.
-- **Denser grid** (owner: "ang laki and ang wide nung cells"): at 1440 the label column is capped at 260px (was 340), month columns ~81-89px (were 84-109; a long hint never widens a column now), rows ~26-27px on desktop (were 30-31), so 12 months show fully instead of 10. Phone keeps the 3-month window and 44px inputs. Trade-off: about half the long sheet labels now wrap to two lines.
-- Tests: `test/plan-sheet-source.test.ts` (one source per actual row, cited rows exist, type rows = `TYPED_ROW`), render tests in `test/plan-sheet-render.test.tsx`, and a `PLAN_WORKBOOK`-gated check that every row a Calc label cites is in the real sheet formula. Data catalog not affected (no data change). Story: BHR-07.
-
-- **Typed-once lines on a phone** (owner: "cant fill ?"): opening cash, opening inventory and opening customers take the first month only, so a 3-month window that starts later showed an empty row. The window's first visible cell now says "Type in <first month>" and jumps back to it.
-
-- **Decluttered on owner feedback** ("too cluttered and messy"): the worded chips, the legend and the "fill 33-38 +6" text in waiting cells are gone. Each ACTUAL label has ONE small icon (pencil = you type, bolt = from Coop, function = worked out) that opens the source or formula on hover, tap or focus; a waiting cell keeps that only as its hover title and screen-reader text. Lesson: `knowledge/lessons/grid-cells-hold-numbers-only.md`.
-
-- **Tips name the lines, never row numbers** (owner: a user cannot tell what "row 66" is): "Worked out: Marketplace ad spend + ... + Other spend costs. It fills in once the ad spend lines are typed." The CALC table keeps the sheet's row numbers (checked against the workbook); `rowName`, `namedFormula` and `feedNames` in `src/plan-sheet.ts` turn them into words.
-
-- **Chart y-axis fixed** (owner: "sure ka tama to?"): the cash chart read 0k, 0k, 1k, 1k, 2k because its gridlines sat on padded, un-round values and each label was rounded to the nearest thousand. Both hand-drawn charts (cash, target stock orders) now use round steps from `src/plan-axis.ts` and labels keep the decimals their step needs (0, 500, 1k, 1.5k, 2k).
-
-- **Equal is met, also against a rounded target** (owner check: Aug'26 filled with the workbook's own values): CM3 %, EBITDA % and break-even ROAS were red. The loader stores targets rounded to 6 decimals while the page works actuals out at full precision, so equal missed by under 0.000001. The judge now allows that stored rounding (`STORED` in `src/plan-sheet.ts`); a real miss is still a miss.
+Because a scan can misread a code and lump a different store into the group, the dialog lists every form with its read name and a tick, all on by default, and flags any whose name shares no word with the chosen store as "looks different", so an odd one (e.g. "SM Sta Maria" under 5300) can be unticked instead of mis-stamped. A code already matched to a registry store reads as linked (quiet "Change store"); an unknown code prompts in the accent colour.
 
 ## 2026-11-06 — Per file: one row per page, earlier attempts folded away
 
