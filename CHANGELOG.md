@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Reader: more time for dense pages; clearer scan filter pills
+
+Two things from the first clean run (read_logs made the first one obvious):
+
+- **Dense pages were timing out.** The read_logs timings showed the accessories page (page 4) taking ~85s to read, right at the old 85s cap, so pages 23 and 33 (both page-4 forms with real data) failed with "couldn't read". Raised the read budget to 150s and the route's maxDuration to 300s, so a dense page has room to finish instead of tripping the wall. Classify stays 20s; 20 + 150 is well under 300.
+- **The scan filter pills are easier to spot.** The per-scan filter row now leads with a "SHOW" label, the chips are a touch larger, the failures chip ("Couldn't read") is tinted red so it doesn't blend in with the calm set-aside buckets, and a separator line plus padding sits between the chips and the first page row.
+
 ## 2026-11-06 — Upload: an inline staging tray instead of a confirm modal
 
 The earlier confirm step was a modal that popped the instant a file was picked, which read like a one-shot "upload this one file". Replaced with an inline staging tray: picking or dropping files now lists them on screen (name, size, remove), the dropzone stays open above to add more, and a persistent "Upload N files" button at the bottom right confirms. Nothing reads until Upload is pressed; Clear discards. Files de-dupe by name+size, so dropping the same one twice doesn't double it.

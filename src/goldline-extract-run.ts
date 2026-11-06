@@ -251,11 +251,11 @@ export async function extractInventoryPage(
     messages: [{role: 'user', content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: readText(manifest, profile)}]}],
   };
 
-  // Cast through unknown: output_config/thinking are newer params and the exact SDK
-  // type surface varies by version; the wire shape above follows the current docs.
-  // 85s + the detect call's 20s = 105s, under the route's 160s maxDuration, so a hung
-  // call throws here and the route's catch marks the upload failed — never 'processing'.
-  const res = await createMessageWithFallback(params, {timeout: 85_000});
+  // 150s (was 85s): the densest pages — page 4, the accessories list — measured ~85s to
+  // read and were timing out at the old cap, so dense pages need more room. 20s (classify)
+  // + 150s (extract) = 170s, under the route's 300s maxDuration, so a hung call throws here
+  // and the route's catch marks the upload failed — never a hard platform kill.
+  const res = await createMessageWithFallback(params, {timeout: 150_000});
 
   const parsed = parseJsonContent(res);
   if (parsed && typeof parsed === 'object' && 'error' in parsed) {
