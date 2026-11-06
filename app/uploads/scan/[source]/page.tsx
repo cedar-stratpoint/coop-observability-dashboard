@@ -54,7 +54,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const files = view === 'file' ? uploads.filter((u) => uploadSource(u.filename) === source) : [];
   // The same person is written many ways; reconcile to one canonical BA (a registry name
   // when known) so every card reads it the same way and a BA card groups all their forms.
-  const board = rawBoard ? withCanonicalBa(rawBoard, baReg.names) : rawBoard;
+  const board = rawBoard ? withCanonicalBa(rawBoard, baReg.names, {foldFirstName: true}) : rawBoard;
   const baOf = (c: string | null) => (c?.trim() ? c.trim() : 'No BA on the form');
   // Per-store, filtered to one BA when arriving from a BA card (labels already canonical).
   const data = board && ba ? {...board, forms: board.forms.filter((f) => baOf(f.consultant) === ba)} : board;
