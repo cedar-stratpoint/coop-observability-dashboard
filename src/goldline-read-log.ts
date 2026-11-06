@@ -7,7 +7,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 // or mis-read page can be debugged after the fact and the reader hardened. Written
 // best-effort: a logging failure must NEVER break an upload, so every path swallows.
 
-export type ReadLogEvent = 'page_read' | 'assign_store';
+export type ReadLogEvent = 'page_read' | 'assign_store' | 'assign_ba';
 
 export type ReadLogInput = {
   companyId: string;
