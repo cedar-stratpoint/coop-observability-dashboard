@@ -26,6 +26,8 @@ import {knownStoreCodes} from '@/src/goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from '@/src/goldline-segment';
 import {getWriterProfile} from '@/src/goldline-writer-data';
 import {humanizeExtractError, MANIFESTS} from '@/src/goldline-extract';
+import {uploadSource} from '@/src/goldline-upload-groups';
+import {logReadEvent, type ReadLogInput} from '@/src/goldline-read-log';
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
@@ -340,6 +342,9 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
   }
 
   const pdfBase64 = Buffer.from(bytes).toString('base64');
+  // Accumulates what we learn about this page so the read_logs row is complete no matter
+  // which branch (set aside / read / failed) the page takes — including the catch below.
+  const rec: ReadLogInput = {companyId, uploadId, filename: file.name, fileSize: file.size, source: uploadSource(file.name)};
   try {
     // Phase 0: classify the page (number, kind, orientation, form version, handwritten
     // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
@@ -348,8 +353,15 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     // flag any duplicate / re-upload — all before extraction. Version-aware extraction
     // is Phase 1; here the extractor still reads the V1/V2 three-location layout.
     emit({type: 'stage', stage: 'detecting'});
+    const classifyStart = Date.now();
     const cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    rec.classifyMs = Date.now() - classifyStart;
     const page = cls.page;
+    rec.page = page;
+    rec.pageKind = cls.kind;
+    rec.formVersion = cls.version;
+    rec.orientation = cls.orientation;
+    rec.storeFrom = cls.store_code;
 
     // Reconcile the store code against the registry (best-effort: no registry = raw).
     let registry: string[] = [];
@@ -359,6 +371,8 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       console.error('goldline upload: store registry read failed', msg(e));
     }
     const snap = snapStoreCode(cls.store_code, registry);
+    rec.storeCode = snap.code;
+    rec.detail = {classify: cls, snap};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
@@ -389,6 +403,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     if (cls.kind === 'sales' || page === 6) {
       const reason = 'This is the page 6 Sales Report, not an inventory page. It has been set aside (out of scope for now).';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'sales'});
       return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
     }
     if (!inv) {
@@ -397,10 +412,12 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       if (cls.kind === 'blank') {
         const reason = 'This looks like a blank page (a back side with no form). It has been set aside.';
         await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+        await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'blank'});
         return json({uploadId, status: 'rejected', error: reason, pageKind: 'blank'}, 422);
       }
       const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified'});
       return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
     }
 
@@ -417,17 +434,29 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     // Phase 1: extract against the detected form version (legacy uses the 7-column
     // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
     // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
+    const readStart = Date.now();
     const extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+    rec.readMs = Date.now() - readStart;
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
     if (outPdf.length) {
       const reason = `Scanned form is for store ${extracted.store_code}, outside your access.`;
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
+      await logReadEvent({...rec, status: 'rejected', stage: 'read', storeCode: extracted.store_code, rowCount: extracted.rows.length});
       return json({uploadId, status: 'rejected', error: reason}, 403);
     }
     emit({type: 'stage', stage: 'saving'});
     await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
     await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
+    await logReadEvent({
+      ...rec,
+      status: 'needs_review',
+      stage: 'read',
+      rowCount: extracted.rows.length,
+      docConfidence: avgConfidence(extracted),
+      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
+      offManifest: extracted.rows.filter((r) => r.off_manifest).length,
+    });
     return json({
       uploadId,
       status: 'needs_review',
@@ -456,6 +485,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     console.error('goldline upload: extraction failed', msg(e));
     const friendly = humanizeExtractError(e);
     await setUploadStatus(uploadId, 'failed', {rejectReason: friendly, errorDetail: msg(e)});
+    await logReadEvent({...rec, status: 'failed', stage: rec.readMs != null ? 'read' : 'classified', error: msg(e), detail: {...(rec.detail as object | null), error: msg(e)}});
     return json({uploadId, status: 'failed', error: friendly}, 422);
   }
 }
