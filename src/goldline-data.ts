@@ -173,6 +173,27 @@ export async function setUploadsStore(companyId: string, uploadIds: string[], st
   return [...batches];
 }
 
+/** Stamp a BA (consultant) onto the given pages' classification, so a scan's forms regroup
+ *  under the chosen person. Mirrors setUploadsStore: paginated read, writes the name plus a
+ *  confirmed `ba_snap` marker. BA doesn't drive batch splitting, so no re-split is needed. */
+export async function setUploadsBa(companyId: string, uploadIds: string[], baName: string): Promise<void> {
+  const ids = uploadIds.filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return;
+  const name = baName.trim();
+  if (!name) return;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,classification').eq('company_id', companyId).in('id', ids).order('id').range(from, to),
+  )) as Array<{id: string; classification: Record<string, unknown> | null}>;
+  for (const row of rows) {
+    const c = {...(row.classification ?? {})};
+    c.consultant = name;
+    c.ba_snap = {name, status: 'confirmed'};
+    const up = await supa.from('uploads').update({classification: c}).eq('company_id', companyId).eq('id', row.id);
+    if (up.error) throw new Error(`uploads BA update failed: ${up.error.message}`);
+  }
+}
+
 export async function saveClassification(input: {
   uploadId: string;
   pageNo: number;

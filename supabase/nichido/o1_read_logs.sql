@@ -10,7 +10,7 @@
 create table if not exists public.read_logs (
   id             uuid primary key default gen_random_uuid(),
   company_id     text not null references public.companies(id) on delete cascade,
-  event          text not null default 'page_read',   -- page_read | assign_store
+  event          text not null default 'page_read',   -- page_read | assign_store | assign_ba
   -- keep the log after the upload itself is deleted, so a post-mortem survives cleanup
   upload_id      uuid references public.uploads(id) on delete set null,
   batch_id       uuid,
