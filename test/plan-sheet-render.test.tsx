@@ -9,7 +9,7 @@ vi.mock('@/lib/utils', () => ({cn: (...a: unknown[]) => a.filter((x) => typeof x
 vi.mock('@/src/plan-help', async () => await import('../src/plan-help'));
 vi.mock('@/src/plan-compute', async () => await import('../src/plan-compute'));
 vi.mock('@/src/plan-sheet', async () => await import('../src/plan-sheet'));
-import {SheetRows, SourceLegend, type Edit} from '../components/analyst/plan-sheet-rows';
+import {SheetRows, sourceTip, type Edit} from '../components/analyst/plan-sheet-rows';
 import {withTotals, type PlanData} from '../src/plan-compute';
 import {SHEET_ROWS, actualKind} from '../src/plan-sheet';
 
@@ -110,38 +110,34 @@ describe('L6: long sheet labels are clamped to three lines on a phone, the full 
   });
 });
 
-describe('BHR-07: every actual line says where it comes from', () => {
+describe('BHR-07: every actual line shows one small icon for where it comes from (owner: chips and "fill" text were too cluttered)', () => {
   const html = render(true);
-  const chip = (row: number | string) => /<span[^>]*data-source="(\w+)"[^>]*>(.*?)<\/span><\/th>/.exec(line(html, 'data-sheet-actual', row)!.inner);
+  const label = (row: number | string) => /<th[^>]*>(.*?)<\/th>/.exec(line(html, 'data-sheet-actual', row)!.inner)![1];
   const text = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
-  it.each([[33, 'type', 'Type'], [44, 'type', 'Type once'], [9, 'type', 'Type · optional'], ['opening_cash', 'type', 'Type once'],
-    [48, 'auto', 'Auto · Shopee + Lazada'], [51, 'auto', 'Auto · sum of rows 48-50'], [71, 'calc', 'Calc = rows 66-70'], [56, 'calc', 'Calc = 51 − 55']] as const)('row %s: a %s chip that says "%s"', (row, kind, words) => {
-    const m = chip(row);
-    expect(m, `row ${row}`).not.toBeNull();
-    expect(m![1]).toBe(kind);
-    expect(text(m![2])).toContain(words);
-    expect(m![0]).toContain('<svg'); // the icon (lucide), hidden from screen readers
-    expect(m![0]).toMatch(/title="[^"]+"/);
+  it.each([[33, 'type'], [44, 'type'], [9, 'type'], ['opening_cash', 'type'], [48, 'auto'], [51, 'auto'], [71, 'calc'], [56, 'calc']] as const)('row %s: one %s icon button, no words', (row, kind) => {
+    const th = label(row);
+    expect(th.match(/<button/g)?.length, `row ${row}`).toBe(1);
+    expect(th).toContain(`data-source="${kind}"`);
+    expect(th).toContain('<svg');
+    expect(text(th).trim().toLowerCase()).toMatch(/^(actual|opening cash)$/); // no chip words beside the label
   });
-  it('the chip words stay in the accessible text on a phone (icon only, words sr-only below md)', () => {
-    expect(chip(71)![0]).toContain('max-md:sr-only');
+  it('the icon says what it is to a screen reader', () => {
+    expect(label(71)).toMatch(/aria-label="Worked out by a formula: where this actual comes from"/);
+    expect(label(48)).toMatch(/aria-label="Filled in by Coop: where this actual comes from"/);
   });
-  it('the owner example: row 71 waits and says which rows to fill', () => {
+  it('the tip text: typed, auto and calc (with the rows that feed it)', () => {
+    expect(sourceTip({kind: 'type', from: 'every month'} as never)).toBe('You type this every month.');
+    expect(sourceTip({kind: 'type', from: 'once'} as never)).toBe('You type this once, in the first month.');
+    expect(sourceTip({kind: 'auto', from: 'Shopee + Lazada'} as never)).toBe('Filled in by Coop from Shopee + Lazada.');
+    expect(sourceTip({kind: 'calc', from: '= rows 66-70', feeds: [66, 67, 68, 69, 70]} as never)).toBe("Worked out by the sheet's formula: = rows 66-70. It fills in once rows 66-70 are typed.");
+  });
+  it('the owner example: row 71 waits with an empty-looking cell, the rows to fill only in the hover title and for screen readers', () => {
     const cells = [...line(html, 'data-sheet-actual', 71)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
     expect(cells).toHaveLength(3);
-    for (const c of cells) { expect(text(c[1])).toBe('waiting, fill rows 66-70'); expect(c[0]).toContain('title="Waiting: fill rows 66-70"'); expect(c[1]).toContain('sr-only">rows </span>66-70'); } // the cell shows "fill 66-70"
-  });
-  it('a calc line names only the rows still empty that month (row 39, Sep: rent blank)', () => {
-    const cells = [...line(html, 'data-sheet-actual', 39)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
-    expect(cells[0][1]).toBe('1.4');
-    expect(text(cells[1][1])).toContain('fill row 34');
-    expect(text(cells[2][1])).toContain('fill rows 33-38');
-  });
-  it('a long list shows its first run in the cell (+ how many more) and all of it in the title, and never widens the column', () => {
-    const c = /<td[^>]*>.*?<\/td>/.exec(line(html, 'data-sheet-actual', 90)!.inner)![0];
-    expect(text(c)).toContain('fill rows 41 +5'); // Aug has rows 33-38 typed: 41, 52-54, 59-61, 66-70, 87-89 and opening cash are left, in sheet order
-    expect(c).toMatch(/title="Waiting: fill rows [^"]*and opening cash"/);
-    expect(c).toContain('w-0 min-w-[calc(100%+0.5rem)]'); // sized to its cell, never to its text
+    for (const c of cells) {
+      expect(c[0]).toContain('title="Waiting: fill rows 66-70"');
+      expect(c[1]).toBe('<span class="sr-only">waiting, fill rows 66-70</span>');
+    }
   });
 });
 
@@ -168,14 +164,6 @@ describe('BHR-07: every empty typed cell in an open month is highlighted', () =>
   });
 });
 
-describe('BHR-07: the legend above the grid', () => {
-  it('names the three sources', () => {
-    const html = renderToStaticMarkup(<SourceLegend />);
-    expect(html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).toContain('you type');
-    expect(html).toContain('from Coop');
-    expect(html).toContain('worked out from the rows above');
-  });
-});
 
 // Owner, 2026-11-06 ("cant fill ?"): on a phone the grid shows 3 months; the typed-once lines (opening cash, opening inventory, opening customers)
 // take the FIRST month only, so a window that starts later showed an empty row. The first visible cell now offers to jump back to that month.

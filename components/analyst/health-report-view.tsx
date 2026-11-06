@@ -13,7 +13,7 @@ import {
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type PlanData, type Status,
 } from '@/src/plan-compute';
 import {SHEET_ROWS, blockOf, rowOfLine} from '@/src/plan-sheet';
-import {GROUP_ROW, LABEL_CELL, SheetRows, SourceLegend, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
+import {GROUP_ROW, LABEL_CELL, SheetRows, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
 
 // Business Health Report: the workbook plan month by month beside the actuals. GMV actuals (BHR-02) come from Coop's readers; a month with
 // no data is an empty cell that says waiting, never PHP 0 and never red. Green = met or beat, red = missed, grey = waiting, partial,
@@ -268,7 +268,6 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
   const closed = plan.months.filter((m) => edit.closes[m]);
   return (
     <div>
-      <SourceLegend />
       {closed.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground" data-testid="lock-note">
           <span className="inline-flex items-center gap-1.5"><Lock className="size-3.5" aria-hidden />{closed.map(shortMonth).join(', ')} closed and locked.</span>
