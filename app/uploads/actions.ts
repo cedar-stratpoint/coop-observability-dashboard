@@ -22,6 +22,7 @@ import {
   getUpload,
   listStores,
   scanGroupSummary,
+  setUploadsBa,
   setUploadsStore,
   splitBatchIntoForms,
   updateBatchInfo,
@@ -453,5 +454,31 @@ export async function assignFormStoreAction(input: {company: string | null; uplo
     // diagnosable instead of a dead end; the raw detail is short and operator-facing.
     const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
     return {ok: false, error: `Couldn’t assign the store${detail}. The pages are saved; try again or set it from the form.`};
+  }
+}
+
+/** Point a form's pages at one BA (beauty advisor), so a scan read many ways regroups under
+ *  the chosen person. Stamps the consultant on the pages; the forms board re-reads it. */
+export async function assignFormBaAction(input: {company: string | null; uploadIds: string[]; baName: string}): Promise<{ok: true} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  const ba = (input.baName ?? '').trim();
+  if (!ba) return {ok: false, error: 'Pick a BA first.'};
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return {ok: false, error: 'No pages to assign.'};
+  try {
+    await setUploadsBa(ctx.companyId, ids, ba);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads/forms');
+    revalidatePath('/uploads');
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_ba', status: 'ok', detail: {ba, uploadIds: ids}});
+    return {ok: true};
+  } catch (e) {
+    console.error('assignFormBaAction', e);
+    const reason = e instanceof Error && e.message ? e.message : String(e);
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_ba', status: 'failed', error: reason, detail: {ba, uploadIds: ids}});
+    const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
+    return {ok: false, error: `Couldn’t assign the BA${detail}. The pages are saved; try again or set it from the form.`};
   }
 }

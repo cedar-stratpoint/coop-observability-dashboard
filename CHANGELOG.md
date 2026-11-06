@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Per BA view: confirm a BA for a whole card at once
+
+The Per-BA view already folds near-identical spellings of one name into a single card (via name reconciliation), but a scan can read one person so many ways ("Vanessa Dimaampao", "Vanessa Dran", "Vanessa Olompo") that the look-alikes can't be auto-merged safely, so they sit as separate cards. Each named BA card now has a **Change BA** control (the same idea as the per-store "Confirm store"): it opens a dialog to point the card's forms at one person. Coop suggests the registry match for the card's name; the picker also lists every other BA already read in this scan, so a one-form look-alike can be folded into the person who already holds most of the forms. You can also type a name that is new to the registry. Each form is listed with a tick (all on) and a "looks different" flag when its read name shares no word with the chosen BA, so an odd one can be left out. Applying stamps the chosen name on those forms, so they regroup under one card. Needs the edit role; the "No BA on the form" card has no control.
+
 ## 2026-11-07 — Per file view: paginated, with a 5 / 10 / 20 / 50 page size
 
 A 98-page scan listed all its pages at once in the Per-file view, so the page scrolled a long way. It now paginates: a footer shows "1 to 20 of 98 pages", a **Per page** selector (5, 10, 20, 50; default 20, remembered per browser), and the shared numbered pager. Same one-row-per-page dedupe as before; the "earlier attempts" toggles and delete flow are unchanged.
