@@ -97,7 +97,7 @@ export async function getGmvActuals(months: readonly string[], nowKey: string): 
   const fromDay = `${months[0].slice(0, 7)}-01`;
   const [orders, events, digests, daily, crm] = await Promise.all([
     soft(getPosOrders, 'pos_orders'), soft(getPosEvents, 'pos_events'), soft(getDigests, 'digest_archive'), soft(getMarketplaceDaily, 'marketplace_daily_sales'),
-    soft(getCrmOrdersForPlan, 'crm orders'),
+    soft(() => getCrmOrdersForPlan(fromDay), 'crm orders'),
   ]);
   const pos = orders && events ? {orders, events} : null;
   // Same definition as the Sales page: stored digests' per-day figures plus the backend's per-day rows, merged by rollupChannels.

@@ -83,6 +83,31 @@ export function crmCoverage(returned: number, reportedTotal: number | null): {tr
   return {truncated: returned >= CRM_ORDERS_CAP || (reportedTotal !== null && reportedTotal > returned)};
 }
 
+/** Page ceiling for the filtered /api/orders read (500 rows a page), so a runaway cursor cannot loop for ever. */
+export const CRM_ORDER_MAX_PAGES = 40;
+
+export interface OrderPage<T> {orders: readonly T[]; nextCursor: string | null | undefined}
+
+/**
+ * Follows the Worker's keyset `next_cursor` until it is null. `nextCursor === undefined` means the Worker has no paging (old code: newest
+ * 1000 only), reported as `legacy`. Hitting the ceiling gives `complete: false`. A page that throws rejects the whole read: a gap, never a partial sum.
+ */
+export async function collectOrderPages<T>(
+  fetchPage: (cursor: string | null) => Promise<OrderPage<T>>,
+  maxPages: number = CRM_ORDER_MAX_PAGES,
+): Promise<{orders: T[]; complete: boolean; legacy: boolean}> {
+  const orders: T[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    const res = await fetchPage(cursor);
+    orders.push(...res.orders);
+    if (res.nextCursor === undefined) return {orders, complete: true, legacy: true};
+    if (res.nextCursor === null) return {orders, complete: true, legacy: false};
+    cursor = res.nextCursor;
+  }
+  return {orders, complete: false, legacy: false};
+}
+
 export interface WebsiteOrderLike {createdAt: string | null; totalPrice: string | null; financialStatus: string | null}
 
 /** `crm` is null when the CRM is not configured or the read failed. A truncated read only covers months after the oldest order we hold. */

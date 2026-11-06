@@ -31,6 +31,9 @@ Now a failed or mis-read page is a SQL query away instead of a re-upload: "which
 - **Confirm before a scan starts reading.** Choosing or dropping a file used to begin processing immediately. It now holds the files and asks first, in a small modal that lists what was picked (and notes a multi-page PDF is split into pages), so a 98-page scan only starts on a deliberate "Upload".
 - **"Confirm store" looks clickable.** The needs-a-store button now lifts with a shadow on hover, presses on click, and nudges its pin icon, with a focus ring and reduced-motion fallback, so it reads as the action it is.
 - **Surface the real reason a store assignment fails.** "Couldn't assign the store" was a dead end. It now appends the actual error detail (the pages are still saved), so a Staging failure is diagnosable instead of silent. (We couldn't reproduce the reported failure from the logs; this makes the next attempt tell us what's wrong.)
+## 2026-11-06 — Health report: Website GMV covers every plan month (paged CRM read)
+
+The Website row of the Business Health Report read the Worker's unfiltered `/api/orders`, which only returns the newest 1,000 orders, so months older than that window stayed a gap. Decision: page the Worker's filtered mode instead (`from`, `limit=500`, `fields`, `cursor`, which returns `{orders, next_cursor, total_matching}`). No CRM change is needed. The read is a pure `collectOrderPages` (`src/plan-gmv.ts`): it follows `next_cursor` until null, stops at 40 pages and then reports truncated, and a failed page makes the whole read a gap, never a partial (understated) sum. An old Worker that ignores the filter (no `next_cursor` field) behaves as before: newest 1,000 and the existing cap rule with the `/api/metrics` order count. The status rules and `websiteCells` are unchanged. Not verified: a live call to the staging Worker; the Checklist's live check is still open.
 
 ## 2026-11-06 — Classifier: read duplex blank back-sides as "Blank page"
 
