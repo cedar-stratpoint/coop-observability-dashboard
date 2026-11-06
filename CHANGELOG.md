@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Retry: show "Retrying…" in place instead of the row vanishing
+
+Hitting the retry icon on a failed page used to make the row pop out of the "Couldn't read" filter the instant it was clicked (it was no longer a failure, so the filter dropped it), with no sign anything happened. Now a just-retried page stays in view while it re-reads: the row shows a spinner and "Retrying… reading the page" with a soft tint and the live progress bar, so the click lands as clear feedback. It leaves only once it's genuinely read, and if it fails again it stays put as a failure. Spinner respects reduced motion.
+
 ## 2026-11-06 — Health report: the All months grid IS the Business Plan sheet (targets only, itemised rows typed in place)
 
 The grid used to show a subset of rows in Coop's own order, three workbook values (opening stock, opening customers, the Sep'26 bridge funding) had been loaded as actuals, and overhead, COGS and content and other were one typed cell each behind a breakdown modal. The owner and a business-accountant review (2026-11-06) corrected all three. Decisions:
