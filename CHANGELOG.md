@@ -28,6 +28,14 @@ The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It i
 
 - **Equal is met, also against a rounded target** (owner check: Aug'26 filled with the workbook's own values): CM3 %, EBITDA % and break-even ROAS were red. The loader stores targets rounded to 6 decimals while the page works actuals out at full precision, so equal missed by under 0.000001. The judge now allows that stored rounding (`STORED` in `src/plan-sheet.ts`); a real miss is still a miss.
 
+## 2026-11-06 — Per file: one row per page, earlier attempts folded away
+
+Each retry and each re-upload of a scan makes a fresh `uploads` row per page, and the failed ones aren't removed, so the Per-file view piled up the same page many times (one 98-page scan had grown to 244 rows across a day of testing). It now shows **one row per page** — the current, best attempt (a committed or read page beats one processing, which beats a set-aside, which beats a failure; newest breaks a tie) — with the older tries folded behind an "N earlier attempts" toggle. Expanding lists them with their status and a delete button, so stale attempts can be cleared with the normal delete flow. No data is removed automatically; "Delete scan" still clears the whole drop.
+
+## 2026-11-06 — Review: the "Page N of M" reads as a pill
+
+On the review page the "Page 21 of 98" sat as faint breadcrumb text next to the scan name and was easy to miss. It's now a small accent pill (tinted background, border, semibold tabular figures), so which page you're reviewing reads at a glance.
+
 ## 2026-11-06 — Health report SQL: one file, final schema only
 
 - **Decision: ship the final schema, not the local iterations.** No hosted database ever had the plan tables (staging checked: `to_regclass('public.plan_actuals')` is NULL; PROD is never touched), so there is nothing to migrate and nothing to drop. `supabase/plan_report.sql` is now the only plan SQL file: the five tables, the four RPCs, RLS on with no policies, anon and authenticated revoked. RPC behaviour is unchanged.

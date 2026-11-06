@@ -312,10 +312,12 @@ export function BatchReview({
             <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
           </button>
           {curPageLabel && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="truncate font-medium text-foreground">{curPageLabel}</span>
-            </>
+            <span
+              className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums"
+              style={{color: toneText('var(--primary)'), background: 'color-mix(in oklab, var(--primary) 14%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)'}}
+            >
+              {curPageLabel}
+            </span>
           )}
         </nav>
         <div className="flex flex-wrap items-center gap-3">

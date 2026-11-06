@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import {useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {Trash2} from 'lucide-react';
+import {ChevronDown, Trash2} from 'lucide-react';
+import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
@@ -19,52 +20,116 @@ function tint(t: keyof typeof TONE) {
   return {color: toneText(TONE[t]), background: `color-mix(in oklab, ${TONE[t]} 14%, transparent)`};
 }
 
+// The best outcome wins when a page was tried several times: a committed or read page
+// beats one still processing, which beats a set-aside, which beats a failure; newest
+// breaks a tie. Retries and re-uploads each make a fresh row, so a page can have many.
+const STATUS_RANK: Record<string, number> = {committed: 5, needs_review: 4, processing: 3, rejected: 2, failed: 1};
+
 /** The scan's pages as a plain list — "Page 10 of 98", in page order, each opening its
- *  review. The raw filename is a quiet sub-line, not the headline. */
+ *  review. One row per page: the current (best) attempt, with the older tries folded
+ *  behind an "N earlier attempts" toggle so repeated retries/re-uploads don't pile up. */
 export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; canEdit: boolean; company: string}) {
   const router = useRouter();
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
-  const rows = useMemo(
-    () => [...files].sort((a, b) => scanPageLabel(a.filename).index - scanPageLabel(b.filename).index || a.filename.localeCompare(b.filename)),
-    [files],
-  );
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const groups = useMemo(() => {
+    const byPage = new Map<number, UploadRow[]>();
+    for (const f of files) {
+      const idx = scanPageLabel(f.filename).index;
+      const arr = byPage.get(idx) ?? [];
+      arr.push(f);
+      byPage.set(idx, arr);
+    }
+    return [...byPage.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([idx, rows]) => {
+        const sorted = [...rows].sort(
+          (a, b) => (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0) || b.created_at.localeCompare(a.created_at),
+        );
+        return {idx, best: sorted[0], others: sorted.slice(1)};
+      });
+  }, [files]);
 
-  if (rows.length === 0) {
+  if (files.length === 0) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No files in this scan.</p>;
   }
+
+  const toggle = (idx: number) =>
+    setExpanded((s) => {
+      const n = new Set(s);
+      n.has(idx) ? n.delete(idx) : n.add(idx);
+      return n;
+    });
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <ul role="list" className="flex flex-col divide-y divide-border">
-        {rows.map((u) => {
+        {groups.map(({idx, best: u, others}) => {
           const label = scanPageLabel(u.filename);
+          const open = expanded.has(idx);
           return (
-            <li key={u.id} className="relative flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40">
-              <FileTypeBadge filename={u.filename} />
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <Link
-                  href={`/uploads/${u.id}`}
-                  className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-                  title={u.filename}
-                >
-                  {label.title}
-                </Link>
-                {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
-                <span className="truncate text-xs text-muted-foreground">
-                  {KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}
-                </span>
+            <li key={idx} className="flex flex-col">
+              <div className="relative flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40">
+                <FileTypeBadge filename={u.filename} />
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <Link
+                    href={`/uploads/${u.id}`}
+                    className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                    title={u.filename}
+                  >
+                    {label.title}
+                  </Link>
+                  {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
+                    {others.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => toggle(idx)}
+                        aria-expanded={open}
+                        className="relative z-10 inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-[11px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                      >
+                        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
+                        {others.length} earlier {others.length === 1 ? 'attempt' : 'attempts'}
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <StatusPill status={u.status} />
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Delete ${label.title}`}
+                    className="relative z-10 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => setDeleteTarget(u)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                )}
               </div>
-              <StatusPill status={u.status} />
-              {canEdit && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Delete ${label.title}`}
-                  className="relative z-10 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => setDeleteTarget(u)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
+              {open && others.length > 0 && (
+                <ul className="flex flex-col divide-y divide-border border-t border-border bg-muted/20 pl-[4.25rem]">
+                  {others.map((o) => (
+                    <li key={o.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <Link href={`/uploads/${o.id}`} className="min-w-0 flex-1 truncate text-xs text-muted-foreground hover:text-foreground" title={o.filename}>
+                        {KIND_LABEL[o.kind] ?? 'File'} · {fmtWhen(o.created_at)}
+                      </Link>
+                      <StatusPill status={o.status} />
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Delete this earlier attempt of ${label.title}`}
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteTarget(o)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
           );
