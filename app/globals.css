@@ -294,6 +294,35 @@ html.coop-splash-seen .coop-splash { display: none; }
   .coop-shine { animation: none; }
 }
 
+/* Upload progress — a sheen that keeps gliding across the filled portion so a long scan
+   read (one page can take ~80s) reads as "still working", not frozen. Purposeful labor
+   illusion for a minutes-long, occasional wait, not an attention pulse; transform-only, so
+   the global reduced-motion rule below collapses it to a flat gradient fill. The fill width
+   stays the real progress. */
+@keyframes gl-progress-sheen {
+  0%   { transform: translateX(-130%) skewX(-18deg); }
+  100% { transform: translateX(280%) skewX(-18deg); }
+}
+.gl-progress-fill {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--primary) 78%, black 6%),
+    var(--primary) 68%,
+    color-mix(in oklab, var(--primary) 72%, white 24%)
+  );
+}
+.gl-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 44%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, white 40%, transparent), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  animation: gl-progress-sheen 1.7s linear infinite;
+}
+
 /* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
    motion-reduce variant, so collapse every transition and animation here instead
    (the slide-in drawers, dialogs, hover tweens). Final states still apply, so

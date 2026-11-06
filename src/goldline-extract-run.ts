@@ -71,14 +71,72 @@ export type ExtractedPage = {
   reader?: {profile: boolean; reference_upload_id: string | null; notes: boolean};
 };
 
-/** True when extraction is configured; lets callers disable the PDF path cleanly. */
+/** True when extraction is configured (a primary OR fallback key is set). */
 export function extractionConfigured(): boolean {
-  return Boolean(process.env.GOLDLINE_ANTHROPIC_API_KEY);
+  return Boolean(process.env.GOLDLINE_ANTHROPIC_API_KEY || process.env.GOLDLINE_ANTHROPIC_API_KEY_FALLBACK);
 }
 
-/** Goldline's own Anthropic client (its key, not Ask Coop's). */
-function goldlineClient(): Anthropic {
-  return new Anthropic({apiKey: process.env.GOLDLINE_ANTHROPIC_API_KEY});
+type GoldlineCred = {label: string; apiKey: string; workspaceId?: string};
+
+/** The Anthropic credentials to try, primary first then fallback. The temporary/primary
+ *  key (e.g. one that expires) is `GOLDLINE_ANTHROPIC_API_KEY`; a standby is
+ *  `GOLDLINE_ANTHROPIC_API_KEY_FALLBACK`. Each may carry its own workspace id (an
+ *  org-scoped key must; a workspace-scoped key leaves it unset). */
+function goldlineCreds(): GoldlineCred[] {
+  const creds: GoldlineCred[] = [];
+  const primary = process.env.GOLDLINE_ANTHROPIC_API_KEY?.trim();
+  if (primary) creds.push({label: 'primary', apiKey: primary, workspaceId: process.env.GOLDLINE_ANTHROPIC_WORKSPACE_ID?.trim() || undefined});
+  const fallback = process.env.GOLDLINE_ANTHROPIC_API_KEY_FALLBACK?.trim();
+  if (fallback) creds.push({label: 'fallback', apiKey: fallback, workspaceId: process.env.GOLDLINE_ANTHROPIC_WORKSPACE_ID_FALLBACK?.trim() || undefined});
+  return creds;
+}
+
+/** One Anthropic client for a credential set. An org-scoped key names its workspace via
+ *  the anthropic-workspace-id header; a workspace-scoped key omits it. */
+function clientFor(c: GoldlineCred): Anthropic {
+  return new Anthropic({apiKey: c.apiKey, ...(c.workspaceId ? {defaultHeaders: {'anthropic-workspace-id': c.workspaceId}} : {})});
+}
+
+/** A KEY-level failure worth switching to the fallback key: an expired/revoked/invalid
+ *  key, an out-of-credits balance, or a workspace-scope problem. NOT a transient (429 /
+ *  529 / timeout) or a content error (our own page_mismatch) — those must stay on the
+ *  same key, so a real reading problem isn't masked by burning the fallback's budget. */
+export function isKeyLevelError(e: unknown): boolean {
+  const status = (e as {status?: number} | null)?.status;
+  if (status === 401 || status === 403) return true;
+  const s = (e instanceof Error ? e.message : String(e ?? '')).toLowerCase();
+  return /credit balance|billing|not scoped to a workspace|authentication|invalid x-api-key|x-api-key header|expired|unauthorized|permission_error/.test(s);
+}
+
+/** Send one message, trying each key in order and advancing to the next ONLY on a
+ *  key-level error (expired/out-of-credits/workspace). Transient and content errors
+ *  propagate from the key that hit them, unchanged, so the caller's retry/timeout logic
+ *  and the real reason are preserved. Throws when no key is configured. */
+async function createMessageWithFallback(
+  params: unknown,
+  opts: {timeout: number},
+): Promise<{content?: Array<{type: string; text?: string}>}> {
+  const creds = goldlineCreds();
+  if (creds.length === 0) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  let lastErr: unknown;
+  for (let i = 0; i < creds.length; i++) {
+    const client = clientFor(creds[i]);
+    try {
+      return (await client.messages.create(
+        params as Parameters<typeof client.messages.create>[0],
+        {timeout: opts.timeout},
+      )) as {content?: Array<{type: string; text?: string}>};
+    } catch (e) {
+      lastErr = e;
+      if (i < creds.length - 1 && isKeyLevelError(e)) {
+        const detail = (e instanceof Error ? e.message : String(e ?? '')).slice(0, 160);
+        console.error(`goldline: Anthropic ${creds[i].label} key failed (${detail}); trying the fallback key`);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
 }
 
 /** A document content block for a base64 PDF — shared by the detect + extract calls. */
@@ -104,7 +162,6 @@ function parseJsonContent(res: {content?: Array<{type: string; text?: string}>})
  */
 export async function detectPage(pdfBase64: string): Promise<number> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
-  const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
     max_tokens: 300,
@@ -116,10 +173,7 @@ export async function detectPage(pdfBase64: string): Promise<number> {
   };
   // Short timeout: detect runs BEFORE extract in the same request, so their timeouts
   // must sum under the route's maxDuration. 20s (detect) + 85s (extract) = 105s < 120s.
-  const res = (await client.messages.create(
-    params as unknown as Parameters<typeof client.messages.create>[0],
-    {timeout: 20_000},
-  )) as {content?: Array<{type: string; text?: string}>};
+  const res = await createMessageWithFallback(params, {timeout: 20_000});
   const parsed = parseJsonContent(res) as {page?: unknown};
   const n = typeof parsed.page === 'number' ? Math.trunc(parsed.page) : 0;
   return n >= 0 && n <= 6 ? n : 0;
@@ -135,7 +189,6 @@ export async function detectPage(pdfBase64: string): Promise<number> {
  */
 export async function classifyPage(pdfBase64: string): Promise<PageClassification> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
-  const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
     // 800 (not 500): a truncated response yields unterminated JSON, which we'd rather
@@ -148,10 +201,7 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
   };
   // Same 20s budget as detectPage — it replaces detect in the Phase 0 path, so the
   // request timeout math (classify + extract < route maxDuration) is unchanged.
-  const res = (await client.messages.create(
-    params as unknown as Parameters<typeof client.messages.create>[0],
-    {timeout: 20_000},
-  )) as {content?: Array<{type: string; text?: string}>};
+  const res = await createMessageWithFallback(params, {timeout: 20_000});
   // Degrade, don't throw: a malformed/truncated JSON response becomes an all-unknown
   // classification (page 0, kind/version unknown, confidence 0), so ONE unreadable
   // page is flagged for manual placement instead of sinking the whole bundle.
@@ -185,7 +235,6 @@ export async function extractInventoryPage(
     ? buildLegacyManifestPrompt(page)
     : buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1');
 
-  const client = goldlineClient();
   const params = {
     model: EXTRACT_MODEL,
     // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON. 16000 covers the
@@ -206,10 +255,7 @@ export async function extractInventoryPage(
   // type surface varies by version; the wire shape above follows the current docs.
   // 85s + the detect call's 20s = 105s, under the route's 160s maxDuration, so a hung
   // call throws here and the route's catch marks the upload failed — never 'processing'.
-  const res = (await client.messages.create(
-    params as unknown as Parameters<typeof client.messages.create>[0],
-    {timeout: 85_000},
-  )) as {content?: Array<{type: string; text?: string}>};
+  const res = await createMessageWithFallback(params, {timeout: 85_000});
 
   const parsed = parseJsonContent(res);
   if (parsed && typeof parsed === 'object' && 'error' in parsed) {

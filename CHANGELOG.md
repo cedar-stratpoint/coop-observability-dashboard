@@ -35,6 +35,29 @@ Apply on staging by hand in this order: `plan_report.sql`, `plan_actuals_remove_
 ## 2026-11-06 — Health report: Website GMV covers every plan month (paged CRM read)
 
 The Website row of the Business Health Report read the Worker's unfiltered `/api/orders`, which only returns the newest 1,000 orders, so months older than that window stayed a gap. Decision: page the Worker's filtered mode instead (`from`, `limit=500`, `fields`, `cursor`, which returns `{orders, next_cursor, total_matching}`). No CRM change is needed. The read is a pure `collectOrderPages` (`src/plan-gmv.ts`): it follows `next_cursor` until null, stops at 40 pages and then reports truncated, and a failed page makes the whole read a gap, never a partial (understated) sum. An old Worker that ignores the filter (no `next_cursor` field) behaves as before: newest 1,000 and the existing cap rule with the `/api/metrics` order count. The status rules and `websiteCells` are unchanged. Not verified: a live call to the staging Worker; the Checklist's live check is still open.
+## 2026-11-06 — Reader: fallback Anthropic key when the primary fails
+
+The primary Goldline key can be temporary (expires) or hit its credit limit mid-batch. A single call now tries the primary key first and, only on a KEY-level error (expired, revoked, out of credits, or a workspace-scope problem), retries the same call on `GOLDLINE_ANTHROPIC_API_KEY_FALLBACK` (with its own optional `GOLDLINE_ANTHROPIC_WORKSPACE_ID_FALLBACK`). Transient errors (429/529/timeout) and content errors (our own page_mismatch) stay on the same key, so a real reading problem isn't masked and the fallback's budget isn't burned. `extractionConfigured` is true if either key is set. Unit-tested; the fallback is off unless its env var is set.
+
+## 2026-11-06 — Reader: support an org-scoped Anthropic key (workspace-id header)
+
+An Anthropic API key created at the org level (not inside a workspace) must name the workspace to run and bill in, via an `anthropic-workspace-id` header, or every request 400s. The Goldline reader now sends that header when `GOLDLINE_ANTHROPIC_WORKSPACE_ID` is set, and omits it cleanly for a workspace-scoped key (no behaviour change there). Verified live against the key: with the workspace header, `/v1/models` and a `claude-sonnet-5-5` message both return 200. Set both `GOLDLINE_ANTHROPIC_API_KEY` and `GOLDLINE_ANTHROPIC_WORKSPACE_ID` in Vercel for an org-scoped key.
+
+## 2026-11-06 — Upload progress: a living bar so a long scan doesn't feel stuck
+
+Reading a big scan can sit for minutes on one page, and a flat fill bar made that look frozen. The upload progress bars now have a subtle glossy gradient fill and a sheen that keeps gliding across the filled portion, so an in-flight read reads as "still working" (a labor illusion) instead of stalled. The fill width is still the real progress; the sheen is transform-only and purposeful (a minutes-long, occasional wait, not a decorative pulse), matching the house "Ask coop" shine. The main bar is a touch taller for presence. Collapses to a static fill under reduced motion via the app-wide rule. Built with the motion skill (Jakub polish, Emil restraint, a touch of Jhey for the requested fun).
+
+## 2026-11-06 — Observability: a read_logs table for the scan-read pipeline
+
+To debug and harden the reader, every page the uploader reads (and every store-assign attempt) now writes one durable row to a new Nichido `read_logs` table: the identity (company, scan source, upload, filename, page, size), the classifier/extract summary (page kind, form version, orientation, snapped vs raw store, row count, doc confidence, flagged, off-manifest), **timings** (how long classify and the read each took, so the slow dense pages are visible), and the **final outcome** including the real error and the stage it died in. The full extraction rows stay in `extractions`; `read_logs` keeps a lean summary plus a `detail` jsonb with the raw classifier output.
+
+Now a failed or mis-read page is a SQL query away instead of a re-upload: "which form version fails most", "read-time p95 by page", "every failure in the last hour and why". Written best-effort by the server (service role) so it never blocks an upload; RLS-fenced like every other table; a `private.purge_read_logs(days)` function (auto-scheduled nightly when pg_cron is present) caps growth at 90 days. Applied to Nichido Staging (`o1_read_logs.sql`); promote to prod with the other reviewed SQL.
+
+## 2026-11-06 — Uploads: confirm before processing, Confirm-store hover, surface the assign error
+
+- **Confirm before a scan starts reading.** Choosing or dropping a file used to begin processing immediately. It now holds the files and asks first, in a small modal that lists what was picked (and notes a multi-page PDF is split into pages), so a 98-page scan only starts on a deliberate "Upload".
+- **"Confirm store" looks clickable.** The needs-a-store button now lifts with a shadow on hover, presses on click, and nudges its pin icon, with a focus ring and reduced-motion fallback, so it reads as the action it is.
+- **Surface the real reason a store assignment fails.** "Couldn't assign the store" was a dead end. It now appends the actual error detail (the pages are still saved), so a Staging failure is diagnosable instead of silent. (We couldn't reproduce the reported failure from the logs; this makes the next attempt tell us what's wrong.)
 
 ## 2026-11-06 — Classifier: read duplex blank back-sides as "Blank page"
 

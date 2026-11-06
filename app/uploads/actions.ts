@@ -6,6 +6,7 @@ import {runChecks} from '@/src/goldline-checks-data';
 import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
+import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
 import {
   BatchConflictError,
@@ -442,9 +443,15 @@ export async function assignFormStoreAction(input: {company: string | null; uplo
     revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads/forms');
     revalidatePath('/uploads');
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_store', status: 'ok', storeCode: store, detail: {uploadIds: ids, batches}});
     return {ok: true};
   } catch (e) {
     console.error('assignFormStoreAction', e);
-    return {ok: false, error: 'Couldn’t assign the store. The pages are saved; try again or set it from the form.'};
+    const reason = e instanceof Error && e.message ? e.message : String(e);
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_store', status: 'failed', storeCode: store, error: reason, detail: {uploadIds: ids}});
+    // Surface the real reason (the pages are still saved) so a staging failure is
+    // diagnosable instead of a dead end; the raw detail is short and operator-facing.
+    const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
+    return {ok: false, error: `Couldn’t assign the store${detail}. The pages are saved; try again or set it from the form.`};
   }
 }
