@@ -9,7 +9,7 @@ const URL_ = process.env.SB_LOCAL_URL;
 const SECRET = process.env.SB_LOCAL_JWT_SECRET;
 if (URL_) assertLocalSupabase(URL_);
 const local = !!URL_ && !!SECRET;
-const TABLES = ['plan_versions', 'plan_targets', 'plan_part_targets', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
+const TABLES = ['plan_versions', 'plan_targets', 'plan_actual_parts', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
 
 function jwt(role: string): string {
   const b = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -24,22 +24,21 @@ describe.skipIf(!local)('plan_* tables on the local stack', () => {
     const sb = as('service_role');
     const v = await sb.from('plan_versions').select('id,label').order('id', {ascending: true}).limit(1); // other tests insert short-lived probe versions after it
     expect(v.error).toBeNull();
-    const t = await sb.from('plan_targets').select('month,metric').eq('plan_version', v.data![0].id).limit(5000);
+    const t = await sb.from('plan_targets').select('month,metric').eq('plan_version', v.data![0].id).in('metric', ['gmv_total', 'cash', 'cogs', 'overhead']).limit(1000); // the full plan is ~2,000 rows: more than one REST page
     expect(t.error).toBeNull();
     const months = [...new Set((t.data ?? []).map((r) => r.month))].sort();
     expect(months).toHaveLength(17);
     expect(months[0]).toBe('2026-08-01');
     expect(months[16]).toBe('2027-12-01');
-    expect((t.data ?? []).length % 17).toBe(0);
+    // the core targets are in every month (a sheet row with a blank cell in a month has no row there, never a 0)
+    for (const id of ['gmv_total', 'cash', 'cogs', 'overhead']) expect((t.data ?? []).filter((r) => r.metric === id), id).toHaveLength(17);
   });
-  it('holds no actuals for real months except the known prefills (loaded privately), and closes nothing', async () => {
+  it('the loader writes no actual: no real plan month holds a workbook-tagged actual (BHR-06), and nothing is closed', async () => {
     const sb = as('service_role');
-    const a = await sb.from('plan_actuals').select('month,metric,source').lt('month', '2031-01-01').order('month').order('metric');
-    for (const r of a.data ?? []) expect(['opening_customers', 'opening_inventory', 'bridge_funding'], `${r.month} ${r.metric}`).toContain(r.metric);
-    for (const r of a.data ?? []) expect(['workbook', 'owner'], `${r.month} ${r.metric}`).toContain(r.source);
+    const a = await sb.from('plan_actuals').select('month,metric').in('source', ['workbook', 'owner']).lt('month', '2031-01-01');
+    expect(a.error).toBeNull();
+    expect(a.data ?? []).toEqual([]);
     expect((await sb.from('plan_month_closes').select('*', {count: 'exact', head: true}).lt('month', '2031-01-01')).count).toBe(0);
-    const log = await sb.from('plan_actuals_log').select('action').lt('month', '2031-01-01');
-    for (const r of log.data ?? []) expect(r.action).toBe('seed'); // the log holds only prefills, never a typed edit
   });
   it.each(TABLES)('anon cannot read %s (RLS on, no policies, no grant)', async (table) => {
     const r = await as('anon').from(table).select('*').limit(1);

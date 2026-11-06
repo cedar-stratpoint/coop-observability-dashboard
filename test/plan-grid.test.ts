@@ -1,19 +1,16 @@
 import {describe, expect, it} from 'vitest';
-import {assemblePlan, GRID_METRIC_GROUPS, LINE_GROUPS, LINES, METRICS, stockOrderSeries} from '../src/plan-compute';
+import {assemblePlan, LINES, METRICS, REQUIRED_LINE_ORDER, stockOrderSeries} from '../src/plan-compute';
+import {LINE_ROW, SHEET_ROWS, targetId} from '../src/plan-sheet';
 
-// The All months grid follows the approved prototype: typed lines first (grouped by what they feed), then the key-metrics block.
+// The All months grid IS the Business Plan sheet (src/plan-sheet.ts, BHR-06): typed lines are entered on their own sheet rows.
 describe('grid row structure', () => {
-  it('LINE_GROUPS lists every typed line exactly once, in the approved artifact order', () => {
-    const ids = LINE_GROUPS.flatMap((g) => g.ids);
-    expect(ids).toEqual(['overhead', 'cogs', 'platform_fees', 'fulfilment', 'event_costs', 'ad_marketplace', 'ad_website', 'event_marketing', 'content_other', 'inv_purchases_paid', 'bridge_funding', 'liability_settlement', 'freight_onetime']);
-    expect([...ids].sort()).toEqual(LINES.map((l) => l.id).sort());
-    expect(LINE_GROUPS.map((g) => g.label)).toEqual(['overhead', 'feeds CM1', 'feeds CM2', 'feeds CM3', 'cash flow items']);
+  it('the lines that close a month are walked in sheet row order, each once', () => {
+    expect([...REQUIRED_LINE_ORDER].sort()).toEqual(LINES.map((l) => l.id).sort());
+    expect(REQUIRED_LINE_ORDER.map((id) => LINE_ROW[id].row)).toEqual([33, 34, 35, 36, 37, 38, 41, 52, 53, 54, 59, 60, 61, 66, 67, 68, 69, 70, 87, 88, 89]);
   });
-  it('GRID_METRIC_GROUPS covers every metric once', () => {
-    const ids = GRID_METRIC_GROUPS.flatMap((g) => g.ids);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect([...ids].sort()).toEqual(METRICS.map((m) => m.id).sort());
-    expect(GRID_METRIC_GROUPS[0]).toMatchObject({label: 'Key metrics', ids: ['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace']});
+  it('every metric the cards read is a row of the sheet mirror (the old Key metrics block is gone, BHR-06)', () => {
+    const ids = SHEET_ROWS.filter((r) => r.unit).map(targetId);
+    for (const m of METRICS) if (m.id !== 'coverage') expect(ids, m.id).toContain(m.id);
   });
 });
 

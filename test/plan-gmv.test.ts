@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
-  CRM_ORDERS_CAP, crmCoverage, eventsCells, marketplaceCells, phMonthKey, totalCells, websiteCells, websiteOrderCounts, WEBSITE_STATUS_RULES, PARTIAL_REFUND_NOTE,
+  CRM_ORDERS_CAP, collectOrderPages, crmCoverage, eventsCells, marketplaceCells, phMonthKey, totalCells, websiteCells, websiteOrderCounts, WEBSITE_STATUS_RULES, PARTIAL_REFUND_NOTE,
 } from '../src/plan-gmv';
 import {dailyRowsToDigests} from '../src/daily-sales-digests';
 import {rollupChannels} from '../src/period-rollup';
@@ -218,5 +218,46 @@ describe('status of a GMV cell', () => {
   });
   it('a gap (null) is waiting, never red', () => {
     expect(metricStatus({...base, actual: null})).toBe('waiting');
+  });
+});
+
+describe('collectOrderPages (paged CRM read)', () => {
+  const pages = (list: {orders: number[]; nextCursor: string | null | undefined}[]) => {
+    const seen: (string | null)[] = [];
+    const fetchPage = async (cursor: string | null) => {
+      seen.push(cursor);
+      return list[seen.length - 1];
+    };
+    return {fetchPage, seen};
+  };
+
+  it('follows next_cursor until it is null and reports a complete read', async () => {
+    const {fetchPage, seen} = pages([{orders: [1, 2], nextCursor: 'a'}, {orders: [3], nextCursor: 'b'}, {orders: [4], nextCursor: null}]);
+    const r = await collectOrderPages(fetchPage, 40);
+    expect(r).toEqual({orders: [1, 2, 3, 4], complete: true, legacy: false});
+    expect(seen).toEqual([null, 'a', 'b']);
+  });
+
+  it('stops at the page ceiling and says the read is incomplete', async () => {
+    const {fetchPage, seen} = pages([{orders: [1], nextCursor: 'a'}, {orders: [2], nextCursor: 'b'}, {orders: [3], nextCursor: 'c'}]);
+    const r = await collectOrderPages(fetchPage, 2);
+    expect(r).toEqual({orders: [1, 2], complete: false, legacy: false});
+    expect(seen).toHaveLength(2);
+  });
+
+  it('a response with no next_cursor field is the old Worker (newest 1000), flagged legacy', async () => {
+    const {fetchPage, seen} = pages([{orders: [1, 2], nextCursor: undefined}]);
+    const r = await collectOrderPages(fetchPage, 40);
+    expect(r).toEqual({orders: [1, 2], complete: true, legacy: true});
+    expect(seen).toHaveLength(1);
+  });
+
+  it('a page that throws rejects the whole read, never a partial sum', async () => {
+    let n = 0;
+    const fetchPage = async () => {
+      if (++n === 2) throw new Error('CRM 500');
+      return {orders: [1], nextCursor: 'a' as string | null | undefined};
+    };
+    await expect(collectOrderPages(fetchPage, 40)).rejects.toThrow('CRM 500');
   });
 });

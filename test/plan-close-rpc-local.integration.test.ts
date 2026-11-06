@@ -35,11 +35,11 @@ describe.skipIf(!local)('plan_close_month and plan_unlock_month on the local sta
   beforeEach(cleanup);
   afterAll(async () => { await cleanup(); await sb().from('plan_versions').delete().like('label', 'close-probe-%'); });
 
-  it('closes only when all 13 typed lines hold a value; a typed 0 counts, a missing line does not', async () => {
-    await fill('content_other');
+  it('closes only when all 21 typed lines hold a value; a typed 0 counts, a missing line does not', async () => {
+    await fill('other_spend');
     expect((await close()).error?.message).toBe('month_incomplete');
     expect(await closeRow()).toBeNull();
-    expect((await set('content_other', 0, null)).error).toBeNull();
+    expect((await set('other_spend', 0, null)).error).toBeNull();
     expect((await close()).error).toBeNull();
   });
 
@@ -90,9 +90,9 @@ describe.skipIf(!local)('plan_close_month and plan_unlock_month on the local sta
   it('the optional ROAS never gates a close, are locked by it, and an unlock reopens them with a log row', async () => {
     await fill();
     expect((await set('roas', 3.2, null)).error).toBeNull();
-    expect((await close()).error).toBeNull(); // ROAS is optional; the 13 lines gate the close
+    expect((await close()).error).toBeNull(); // ROAS is optional; the 21 lines gate the close
     expect((await set('roas', 4, 3.2)).error?.message).toBe('month_closed');
-    expect((await set('overhead', 10, 0)).error?.message).toBe('month_closed');
+    expect((await set('salaries', 10, 0)).error?.message).toBe('month_closed');
     expect((await unlock('fix a typo')).error).toBeNull();
     expect((await set('roas', 4, 3.2)).error).toBeNull();
     expect((await logs()).filter((l) => l.metric === 'roas').map((l) => [l.action, Number(l.new_value)])).toEqual([['edit', 3.2], ['edit', 4]]);
@@ -115,10 +115,10 @@ describe.skipIf(!local)('plan_close_month and plan_unlock_month on the local sta
     await fill();
     expect((await close(undefined, 'nope')).error).not.toBeNull();
     await close();
-    expect((await set('cogs', 5, 0)).error?.message).toBe('month_closed');
+    expect((await set('marketplace_cogs', 5, 0)).error?.message).toBe('month_closed');
     expect((await close()).error?.message).toBe('already_closed');
-    const cogs = (await sb().from('plan_actuals').select('amount_php').eq('month', M).eq('metric', 'cogs').single()).data!;
-    expect(Number(cogs.amount_php)).toBe(0);
+    const mcogs = (await sb().from('plan_actuals').select('amount_php').eq('month', M).eq('metric', 'marketplace_cogs').single()).data!;
+    expect(Number(mcogs.amount_php)).toBe(0);
   });
 
   it('unlock needs a reason: blank or missing is rejected and the month stays closed; with a reason it is logged and the cells open', async () => {
@@ -131,7 +131,7 @@ describe.skipIf(!local)('plan_close_month and plan_unlock_month on the local sta
     const u = (await logs()).find((l) => l.action === 'unlock')!;
     expect(u).toMatchObject({actor: 'boss@x.com', reason: 'late refund found', month: M});
     expect(u.at).toBeTruthy();
-    expect((await set('cogs', 9, 0)).error).toBeNull(); // open again
+    expect((await set('marketplace_cogs', 9, 0)).error).toBeNull(); // open again
     expect((await unlock('again')).error?.message).toBe('not_closed');
   });
 
@@ -170,15 +170,15 @@ describe.skipIf(!local)('plan_close_month and plan_unlock_month on the local sta
 
   it('an edit racing a close never leaves a log row with a stale old value', async () => {
     await fill();
-    const res = await Promise.all([set('cogs', 50, 0, 'a@x.com'), close('b@x.com'), set('cogs', 60, 0, 'c@x.com')]);
+    const res = await Promise.all([set('marketplace_cogs', 50, 0, 'a@x.com'), close('b@x.com'), set('marketplace_cogs', 60, 0, 'c@x.com')]);
     expect(res.filter((r) => r.error && !['month_closed', 'stale_value'].includes(r.error.message))).toHaveLength(0);
-    const edits = (await logs()).filter((l) => l.metric === 'cogs');
+    const edits = (await logs()).filter((l) => l.metric === 'marketplace_cogs');
     let prev = 0; // the value every log chain started from
     for (const e of edits) {
       expect(Number(e.old_value)).toBe(prev);
       prev = Number(e.new_value);
     }
-    const stored = (await sb().from('plan_actuals').select('amount_php').eq('month', M).eq('metric', 'cogs').single()).data!;
+    const stored = (await sb().from('plan_actuals').select('amount_php').eq('month', M).eq('metric', 'marketplace_cogs').single()).data!;
     expect(Number(stored.amount_php)).toBe(prev);
   });
 

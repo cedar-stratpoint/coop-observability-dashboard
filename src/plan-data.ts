@@ -2,7 +2,7 @@ import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {createClient} from '@supabase/supabase-js';
-import {assemblePlan, PLAN_MONTHS, GAP, ALL_LINE_IDS, type ActualCell, type ClosedMonth, type ClosedTargetRow, type LineSeries, type LineSources, type PlanData, type PlanTargetRow} from './plan-compute';
+import {assemblePlan, PLAN_MONTHS, GAP, ALL_LINE_IDS, type ActualCell, type ClosedMonth, type ClosedTargetRow, type LineSeries, type PlanData, type PlanTargetRow} from './plan-compute';
 import {eventsCells, marketplaceCells, totalCells, websiteCells} from './plan-gmv';
 import {getDigests} from './data';
 import {getPosEvents, getPosOrders} from './pos-sales';
@@ -11,7 +11,6 @@ import {getMarketplaceDaily} from './marketplace-daily-data';
 import {dailyRowsToDigests} from './daily-sales-digests';
 import {rollupChannels} from './period-rollup';
 import {phDay} from './custom-range';
-import {PART_LINE_IDS} from './plan-parts';
 import {fetchAllRows} from './pos-fetch-paginate';
 
 // SERVER-ONLY read seam for the Business Health Report's PLAN (targets only; actuals arrive in BHR-02/03). Service-role, archive project,
@@ -30,22 +29,6 @@ export function emptyPlan(notice: string): PlanData {
   return {...assemblePlan('No targets loaded', [], null, PLAN_MONTHS), source: 'seed', notice};
 }
 
-/** The stored per-part targets as line -> part -> value per month index. Optional extras: a missing table or a failed read gives none. */
-async function readPartTargets(sb: NonNullable<ReturnType<typeof planClient>>, months: readonly string[]): Promise<NonNullable<PlanData['partTargets']>> {
-  const out: NonNullable<PlanData['partTargets']> = {};
-  try {
-    const rows = await fetchAllRows('plan_part_targets', (from, to) => sb.from('plan_part_targets').select('month,line,part,value').order('month').order('line').order('part').range(from, to));
-    for (const r of rows as unknown as Array<{month: string; line: string; part: string; value: number | string}>) {
-      const i = months.indexOf(r.month);
-      if (i < 0) continue;
-      ((out[r.line] ??= {})[r.part] ??= months.map(() => null))[i] = Number(r.value);
-    }
-  } catch (error) {
-    console.warn(`plan part targets read failed (is supabase/plan_part_targets.sql applied?): ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return out;
-}
-
 const readPlan = unstable_cache(
   async (): Promise<PlanData> => {
     const sb = createClient(url as string, serviceKey as string, {auth: {persistSession: false}});
@@ -60,7 +43,7 @@ const readPlan = unstable_cache(
     const rows = await fetchAllRows('plan_targets', (from, to) =>
       sb.from('plan_targets').select('month,metric,value').eq('plan_version', version.id).order('month', {ascending: true}).order('metric', {ascending: true}).range(from, to));
     const plan = assemblePlan(version.label as string, rows as unknown as PlanTargetRow[], Number(version.id));
-    return {...plan, partTargets: await readPartTargets(sb, plan.months)};
+    return plan;
   },
   ['plan-report'],
   {revalidate: 60, tags: [PLAN_TAG]},
@@ -97,7 +80,7 @@ export async function getGmvActuals(months: readonly string[], nowKey: string): 
   const fromDay = `${months[0].slice(0, 7)}-01`;
   const [orders, events, digests, daily, crm] = await Promise.all([
     soft(getPosOrders, 'pos_orders'), soft(getPosEvents, 'pos_events'), soft(getDigests, 'digest_archive'), soft(getMarketplaceDaily, 'marketplace_daily_sales'),
-    soft(getCrmOrdersForPlan, 'crm orders'),
+    soft(() => getCrmOrdersForPlan(fromDay), 'crm orders'),
   ]);
   const pos = orders && events ? {orders, events} : null;
   // Same definition as the Sales page: stored digests' per-day figures plus the backend's per-day rows, merged by rollupChannels.
@@ -125,44 +108,23 @@ export function planClient() {
  * The typed lines (the workbook's input rows: costs, stock bought, funding, one-time payments, and ROAS) by plan month (pesos, null = empty). Never cached: a person just typed it. Null when the read failed or the table is
  * not applied: the page then shows no typed numbers and no inputs (it never lets someone type blind over values it could not read).
  */
-export async function getTypedLines(months: readonly string[]): Promise<{lines: LineSeries; sources: LineSources} | null> {
+export async function getTypedLines(months: readonly string[]): Promise<{lines: LineSeries} | null> {
   const lines: Record<string, (number | null)[]> = Object.fromEntries(ALL_LINE_IDS.map((id) => [id, months.map(() => null)]));
-  const sources: Record<string, (string | null)[]> = Object.fromEntries(ALL_LINE_IDS.map((id) => [id, months.map(() => null)]));
   const sb = planClient();
-  if (!sb) return {lines, sources}; // mock mode: nothing typed, nothing saved
+  if (!sb) return {lines}; // mock mode: nothing typed, nothing saved
   try {
-    const rows = await fetchAllRows('plan_actuals', (from, to) => sb.from('plan_actuals').select('month,metric,amount_php,source').order('month', {ascending: true}).order('metric', {ascending: true}).range(from, to));
-    for (const r of rows as unknown as Array<{month: string; metric: string; amount_php: number | string; source: string | null}>) {
+    const rows = await fetchAllRows('plan_actuals', (from, to) => sb.from('plan_actuals').select('month,metric,amount_php').order('month', {ascending: true}).order('metric', {ascending: true}).range(from, to));
+    for (const r of rows as unknown as Array<{month: string; metric: string; amount_php: number | string}>) {
       const i = months.indexOf(r.month);
-      if (i >= 0 && lines[r.metric]) { lines[r.metric][i] = Number(r.amount_php); sources[r.metric][i] = r.source; }
+      if (i >= 0 && lines[r.metric]) lines[r.metric][i] = Number(r.amount_php);
     }
-    return {lines, sources};
+    return {lines};
   } catch (error) {
     console.warn(`plan actuals: typed lines read failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
 
-/**
- * The saved breakdown of the consolidated lines (plan_actual_parts), by line then plan-month index: {part: pesos} or null. Never cached. Parts are optional extras beside the totals:
- * when the read fails or the table is not applied yet it returns nothing (the grid still shows every total) and says so in the log.
- */
-export async function getTypedParts(months: readonly string[]): Promise<Record<string, (Record<string, number> | null)[]>> {
-  const out: Record<string, (Record<string, number> | null)[]> = Object.fromEntries(PART_LINE_IDS.map((id) => [id, months.map(() => null)]));
-  const sb = planClient();
-  if (!sb) return out;
-  try {
-    const rows = await fetchAllRows('plan_actual_parts', (from, to) => sb.from('plan_actual_parts').select('month,metric,part,amount_php').order('month', {ascending: true}).order('metric', {ascending: true}).order('part', {ascending: true}).range(from, to));
-    for (const r of rows as unknown as Array<{month: string; metric: string; part: string; amount_php: number | string}>) {
-      const i = months.indexOf(r.month);
-      if (i >= 0 && out[r.metric]) (out[r.metric][i] ??= {})[r.part] = Number(r.amount_php);
-    }
-  } catch (error) {
-    console.warn(`plan actuals: breakdown read failed (is supabase/plan_actual_parts.sql applied?): ${error instanceof Error ? error.message : String(error)}`);
-    return Object.fromEntries(PART_LINE_IDS.map((id) => [id, months.map(() => null)]));
-  }
-  return out;
-}
 
 // ---- BHR-04: closed months --------------------------------------------------------------------------------------------------------
 /** Closed months by 'YYYY-MM-01', never cached. Null when the read failed: the page then shows no close controls (and no inputs). */

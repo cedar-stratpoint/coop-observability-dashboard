@@ -31,17 +31,22 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
   beforeEach(wipe);
   afterAll(wipe);
 
-  it('saves each of the 13 typed lines, and a typed 0 is stored as a real 0', async () => {
+  it('saves each of the 21 typed lines, and a typed 0 is stored as a real 0', async () => {
     for (const l of LINES) expect((await set(l.id, 0, null)).error, l.id).toBeNull();
     const rows = (await sb().from('plan_actuals').select('metric,amount_php').eq('month', M)).data ?? [];
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(21);
     expect(rows.every((r) => Number(r.amount_php) === 0)).toBe(true);
   });
 
+  it('BHR-06: a total (overhead, COGS, content and other) is never typed: the RPC rejects it; its sheet rows are typed instead', async () => {
+    for (const parent of ['overhead', 'cogs', 'content_other']) expect((await set(parent, 1, null)).error?.message, parent).toBe('invalid_line');
+    expect(((await sb().from('plan_actuals').select('metric').eq('month', M)).data ?? []).length).toBe(0);
+  });
+
   it('writes who and when, and one log row with the old and new value in the same call', async () => {
-    await set('cogs', 1500, null, 'a@x.com');
-    await set('cogs', 2500, 1500, 'b@x.com');
-    const row = (await sb().from('plan_actuals').select('updated_by,updated_at').eq('month', M).eq('metric', 'cogs').single()).data;
+    await set('marketplace_cogs', 1500, null, 'a@x.com');
+    await set('marketplace_cogs', 2500, 1500, 'b@x.com');
+    const row = (await sb().from('plan_actuals').select('updated_by,updated_at').eq('month', M).eq('metric', 'marketplace_cogs').single()).data;
     expect(row?.updated_by).toBe('b@x.com');
     expect(row?.updated_at).toBeTruthy();
     const l = await logs();
@@ -49,10 +54,10 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
   });
 
   it('compare-and-set: a stale expected value is rejected, nothing is written and nothing is logged', async () => {
-    await set('cogs', 100, null);
-    const stale = await set('cogs', 999, 50); // the caller last saw 50, someone saved 100
+    await set('marketplace_cogs', 100, null);
+    const stale = await set('marketplace_cogs', 999, 50); // the caller last saw 50, someone saved 100
     expect(stale.error?.message).toBe('stale_value');
-    expect(await cell('cogs')).toBe(100);
+    expect(await cell('marketplace_cogs')).toBe(100);
     expect(await logs()).toHaveLength(1);
     const empty = await set('fulfilment', 5, 7); // expected a value where the cell is empty
     expect(empty.error?.message).toBe('stale_value');
@@ -60,46 +65,46 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
   });
 
   it('two admins saving the same cell at once: exactly one wins, the other is stale, and every log old value is the true previous one', async () => {
-    await set('cogs', 100, null);
-    const res = await Promise.all([set('cogs', 111, 100, 'a@x.com'), set('cogs', 222, 100, 'b@x.com')]);
+    await set('marketplace_cogs', 100, null);
+    const res = await Promise.all([set('marketplace_cogs', 111, 100, 'a@x.com'), set('marketplace_cogs', 222, 100, 'b@x.com')]);
     expect(res.filter((r) => !r.error)).toHaveLength(1);
     expect(res.filter((r) => r.error?.message === 'stale_value')).toHaveLength(1);
     const l = await logs();
     expect(l).toHaveLength(2);
     expect(Number(l[1].old_value)).toBe(100);
-    expect(Number(l[1].new_value)).toBe(await cell('cogs'));
+    expect(Number(l[1].new_value)).toBe(await cell('marketplace_cogs'));
   });
 
   it('many concurrent first writes to an empty cell: one wins, none corrupts the log', async () => {
-    const res = await Promise.all([1, 2, 3, 4, 5].map((n) => set('overhead', n * 10, null, `u${n}@x.com`)));
+    const res = await Promise.all([1, 2, 3, 4, 5].map((n) => set('salaries', n * 10, null, `u${n}@x.com`)));
     expect(res.filter((r) => !r.error)).toHaveLength(1);
     expect(await logs()).toHaveLength(1);
   });
 
   it('negative amounts are rejected, the derived rows (cash, cac, customers, coverage) are refused, an unknown line and a bad month are rejected', async () => {
-    expect((await set('cogs', -1, null)).error?.message).toBe('negative_cost');
+    expect((await set('marketplace_cogs', -1, null)).error?.message).toBe('negative_cost');
     for (const derived of ['cash', 'cac', 'customers', 'coverage']) {
       expect((await set(derived, 1, null)).error?.message, derived).toBe('invalid_line');
       expect(await cell(derived), derived).toBeNaN();
     }
     expect((await set('revenue', 1, null)).error?.message).toBe('invalid_line');
-    expect((await set('cogs', 1, null, 'a@x.com', '2031-03-15')).error?.message).toBe('invalid_month');
-    expect(await cell('cogs')).toBeNaN();
+    expect((await set('marketplace_cogs', 1, null, 'a@x.com', '2031-03-15')).error?.message).toBe('invalid_month');
+    expect(await cell('marketplace_cogs')).toBeNaN();
   });
 
   it('clearing a cell makes it missing again and is logged; clearing an empty cell is a no-op', async () => {
-    await set('cogs', 5, null);
-    expect((await set('cogs', null, 5)).error).toBeNull();
-    expect(await cell('cogs')).toBeNaN();
+    await set('marketplace_cogs', 5, null);
+    expect((await set('marketplace_cogs', null, 5)).error).toBeNull();
+    expect(await cell('marketplace_cogs')).toBeNaN();
     expect((await logs()).map((r) => r.action)).toEqual(['edit', 'clear']);
-    expect((await set('cogs', null, null)).error).toBeNull();
+    expect((await set('marketplace_cogs', null, null)).error).toBeNull();
     expect(await logs()).toHaveLength(2);
   });
 
   it('a failed log write fails the change: no actor, no value saved', async () => {
-    const r = await set('cogs', 42, null, null);
+    const r = await set('marketplace_cogs', 42, null, null);
     expect(r.error).not.toBeNull();
-    expect(await cell('cogs')).toBeNaN();
+    expect(await cell('marketplace_cogs')).toBeNaN();
     expect(await logs()).toHaveLength(0);
   });
 
@@ -107,7 +112,7 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
     const v = (await sb().from('plan_versions').select('id').limit(1)).data![0].id;
     await sb().from('plan_month_closes').insert({month: M, plan_version: v, closed_by: 'x@x.com'});
     try {
-      expect((await set('cogs', 1, null)).error?.message).toBe('month_closed');
+      expect((await set('marketplace_cogs', 1, null)).error?.message).toBe('month_closed');
     } finally {
       await sb().from('plan_month_closes').delete().eq('month', M);
     }
@@ -142,7 +147,7 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
       expect((await set(m, 9, 1)).error?.message, m).toBe('stale_value');
     }
     expect((await logs()).filter((r) => r.action === 'edit')).toHaveLength(4);
-    // Close needs all 13 typed lines (these four included); the close RPC itself is covered by plan-close-rpc-local. A closed month locks them.
+    // Close needs all 21 typed lines (these four included); the close RPC itself is covered by plan-close-rpc-local. A closed month locks them.
     for (const l of LINES) if (!ids.includes(l.id as (typeof ids)[number])) await set(l.id, 0, null);
 
     const v = (await sb().from('plan_versions').select('id').limit(1)).data![0].id;
@@ -159,9 +164,9 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
   });
 
   it.each(['anon', 'authenticated'])('%s cannot call the RPC', async (role) => {
-    const r = await as(role).rpc('plan_set_actual', {p_month: M, p_metric: 'cogs', p_amount: 1, p_expected: null, p_by: 'evil@x.com'});
+    const r = await as(role).rpc('plan_set_actual', {p_month: M, p_metric: 'marketplace_cogs', p_amount: 1, p_expected: null, p_by: 'evil@x.com'});
     expect(r.error).not.toBeNull();
-    expect(await cell('cogs')).toBeNaN();
+    expect(await cell('marketplace_cogs')).toBeNaN();
     expect((await as(role).rpc('plan_set_actual', {p_month: M, p_metric: 'roas', p_amount: 1, p_expected: null, p_by: 'evil@x.com'})).error).not.toBeNull();
     expect(await cell('roas')).toBeNaN();
   });
@@ -181,8 +186,8 @@ describe.skipIf(!local)('plan_set_actual on the local stack', () => {
     });
     it('is rejected for any other month, and every other line still cannot be negative', async () => {
       expect((await set('opening_cash', 5, null)).error?.message).toBe('invalid_line');
-      expect((await set('cogs', -1, null)).error?.message).toBe('negative_cost');
-      expect((await set('overhead', -1, null, 'a@x.com', first)).error?.message).toBe('negative_cost');
+      expect((await set('marketplace_cogs', -1, null)).error?.message).toBe('negative_cost');
+      expect((await set('salaries', -1, null, 'a@x.com', first)).error?.message).toBe('negative_cost');
     });
   });
 });
