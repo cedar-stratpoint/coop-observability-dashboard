@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {ChevronDown, Trash2} from 'lucide-react';
 import {cn} from '@/lib/utils';
@@ -11,9 +11,14 @@ import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageResult} from '@/src/goldline-triage-data';
 import {Button} from '@/components/ui/button';
+import {Pagination} from '@/components/analyst/pagination';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {DeleteUploadDialog} from '@/components/analyst/delete-upload-dialog';
 import {KIND_LABEL, StatusPill, fmtWhen} from '@/components/analyst/uploads-view';
+
+const PAGE_SIZES = [5, 10, 20, 50] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
+const SIZE_KEY = 'coop.scanfiles.perPage';
 
 const TONE = {good: 'var(--status-good)', warn: 'var(--status-warn)', crit: 'var(--status-crit)'} as const;
 function tint(t: keyof typeof TONE) {
@@ -32,6 +37,22 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const router = useRouter();
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState<PageSize>(20);
+  // Pages per view is a per-viewer convenience: remembered in this browser only.
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem(SIZE_KEY));
+      if ((PAGE_SIZES as readonly number[]).includes(v)) setSize(v as PageSize);
+    } catch {}
+  }, []);
+  const changeSize = (v: PageSize) => {
+    setSize(v);
+    setPage(1);
+    try {
+      localStorage.setItem(SIZE_KEY, String(v));
+    } catch {}
+  };
   const groups = useMemo(() => {
     const byPage = new Map<number, UploadRow[]>();
     for (const f of files) {
@@ -50,6 +71,12 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
       });
   }, [files]);
 
+  const total = groups.length;
+  const pageCount = Math.max(1, Math.ceil(total / size));
+  const safePage = Math.min(page, pageCount);
+  const from = (safePage - 1) * size;
+  const pageGroups = groups.slice(from, from + size);
+
   if (files.length === 0) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No files in this scan.</p>;
   }
@@ -62,9 +89,10 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
     });
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div className="flex flex-col gap-4">
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
       <ul role="list" className="flex flex-col divide-y divide-border">
-        {groups.map(({idx, best: u, others}) => {
+        {pageGroups.map(({idx, best: u, others}) => {
           const label = scanPageLabel(u.filename);
           const open = expanded.has(idx);
           return (
@@ -135,6 +163,20 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           );
         })}
       </ul>
+      </div>
+
+      {total > PAGE_SIZES[0] && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {from + 1} to {Math.min(total, from + size)} of {total} {total === 1 ? 'page' : 'pages'}
+            </p>
+            <RowsPerPage value={size} onChange={changeSize} />
+          </div>
+          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Scan pages" />
+        </div>
+      )}
+
       <DeleteUploadDialog
         company={company}
         upload={deleteTarget}
@@ -144,6 +186,30 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           router.refresh();
         }}
       />
+    </div>
+  );
+}
+
+function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize) => void}) {
+  return (
+    <div role="group" aria-label="Pages per view" className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span>Per page</span>
+      <div className="flex rounded-md bg-muted/60 p-0.5">
+        {PAGE_SIZES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={value === s}
+            onClick={() => onChange(s)}
+            className={cn(
+              'h-6 min-w-8 rounded px-2 tabular-nums transition-colors duration-150',
+              value === s ? 'bg-background font-medium text-foreground shadow-sm' : 'hover:text-foreground',
+            )}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
