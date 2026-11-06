@@ -5,6 +5,7 @@ import {useRouter} from 'next/navigation';
 import {Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Rows3, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {HelpTip as InfoTip} from './help-tip';
+import {axisTicks, fmtAxisTick} from '@/src/plan-axis';
 import {PLAN_HELP} from '@/src/plan-help';
 import type {PlanVersionInfo} from '@/src/plan-data';
 import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '@/src/plan-actions';
@@ -183,16 +184,14 @@ function CashChart({plan, nowKey, actuals}: {plan: PlanData; nowKey: string; act
   const vals = [...tgt, ...act].filter((v): v is number => v !== null);
   if (n < 2 || vals.length === 0) return null;
   const W = 720, H = 240, L = 52, R = 14, T = 14, B = 30;
-  let lo = Math.min(...vals), hi = Math.max(...vals);
-  if (hi === lo) { hi += 1; lo -= 1; }
-  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+  const {lo, hi, ticks} = axisTicks(Math.min(...vals), Math.max(...vals));
+  const step = ticks[1] - ticks[0];
   const x = (i: number) => L + (i * (W - L - R)) / (n - 1);
   const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
   const path = (ids: number[], f: (i: number) => number | null) => ids.map((i, k) => `${k ? 'L' : 'M'}${x(i).toFixed(1)} ${y(f(i) as number).toFixed(1)}`).join(' ');
   const planIds = plan.months.map((_, i) => i).filter((i) => tgt[i] !== null && tgt[i] !== undefined);
   const actIds = plan.months.map((_, i) => i).filter((i) => act[i] !== null);
   const cur = currentIndex(plan.months, nowKey);
-  const fmtAxis = (v: number) => { const a = Math.abs(v); return `${v < 0 ? '−' : ''}${a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : `${Math.round(a / 1000)}k`}`; };
   const def = DEF_BY_ID.cash, last = Math.max(0, cur - 1);
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4" data-testid="cash-chart">
@@ -202,7 +201,7 @@ function CashChart({plan, nowKey, actuals}: {plan: PlanData; nowKey: string; act
         <span className="inline-flex items-center gap-1.5"><svg aria-hidden viewBox="0 0 22 8" className="h-2 w-[22px]"><line x1="0" x2="22" y1="4" y2="4" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="5 4" /></svg>Target from workbook</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Cash at month end, target against actual, by month" className="block h-auto w-full" fontSize="11" fill="var(--muted-foreground)">
-        {[0, 1, 2, 3, 4].map((k) => { const v = lo + ((hi - lo) * k) / 4; return <g key={k}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border)" /><text x={L - 6} y={y(v) + 4} textAnchor="end">{fmtAxis(v)}</text></g>; })}
+        {ticks.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border)" /><text x={L - 6} y={y(v) + 4} textAnchor="end">{fmtAxisTick(v, step)}</text></g>)}
         {plan.months.map((mo, i) => <text key={mo} x={x(i)} y={H - 10} textAnchor="middle" fontSize={n > 12 ? 9.5 : 11} fontWeight={i === last ? 600 : 400} fill={i === last ? 'var(--foreground)' : undefined}>{axisLabel(mo, i)}</text>)}
         <rect x={x(last) - 9} y={T} width={18} height={H - T - B} fill="var(--accent)" />
         {planIds.length > 1 && <path d={path(planIds, (i) => tgt[i])} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="6 5" />}
@@ -225,13 +224,12 @@ function StockChart({plan, nowKey}: {plan: PlanData; nowKey: string}) {
   const cov = plan.targets.coverage?.find((v) => v !== null) ?? null;
   const n = plan.months.length, lastClosed = Math.max(0, currentIndex(plan.months, nowKey) - 1);
   const W = 720, H = 220, L = 52, R = 10, T = 14, B = 30;
-  const mx = Math.max(...vals, 1), bw = (W - L - R) / n;
-  const fmtAxis = (v: number) => Math.round(v / 1000).toLocaleString('en-US');
+  const {hi: mx, ticks: yTicks} = axisTicks(0, Math.max(...vals, 1), 2), bw = (W - L - R) / n;
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4" data-testid="stock-chart">
       <h3 className="mb-1.5 font-serif text-base leading-tight">Target stock orders<InfoTip text={PLAN_HELP.stockChart(cov)} label="About target stock orders" className="ml-1" /></h3>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Planned inventory purchases by month" className="block h-auto w-full" fontSize="11" fill="var(--muted-foreground)">
-        {[0, 0.5, 1].map((f) => { const yy = T + (1 - f) * (H - T - B); return <g key={f}><line x1={L} x2={W - R} y1={yy} y2={yy} stroke="var(--border)" /><text x={L - 6} y={yy + 4} textAnchor="end">{fmtAxis(mx * f)}</text></g>; })}
+        {yTicks.map((v) => { const yy = T + (1 - v / mx) * (H - T - B); return <g key={v}><line x1={L} x2={W - R} y1={yy} y2={yy} stroke="var(--border)" /><text x={L - 6} y={yy + 4} textAnchor="end">{fmtAxisTick(v, yTicks[1] - yTicks[0])}</text></g>; })}
         {plan.months.map((mo, k) => {
           const v = series[k];
           const h = v === null || v === undefined ? 0 : (v / mx) * (H - T - B), bx = L + k * bw + 3;
