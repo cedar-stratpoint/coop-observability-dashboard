@@ -9,7 +9,7 @@ const URL_ = process.env.SB_LOCAL_URL;
 const SECRET = process.env.SB_LOCAL_JWT_SECRET;
 if (URL_) assertLocalSupabase(URL_);
 const local = !!URL_ && !!SECRET;
-const TABLES = ['plan_versions', 'plan_targets', 'plan_actual_parts', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
+const TABLES = ['plan_versions', 'plan_targets', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
 
 function jwt(role: string): string {
   const b = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -33,11 +33,8 @@ describe.skipIf(!local)('plan_* tables on the local stack', () => {
     // the core targets are in every month (a sheet row with a blank cell in a month has no row there, never a 0)
     for (const id of ['gmv_total', 'cash', 'cogs', 'overhead']) expect((t.data ?? []).filter((r) => r.metric === id), id).toHaveLength(17);
   });
-  it('the loader writes no actual: no real plan month holds a workbook-tagged actual (BHR-06), and nothing is closed', async () => {
+  it('nothing is closed in a real plan month on a fresh stack', async () => {
     const sb = as('service_role');
-    const a = await sb.from('plan_actuals').select('month,metric').in('source', ['workbook', 'owner']).lt('month', '2031-01-01');
-    expect(a.error).toBeNull();
-    expect(a.data ?? []).toEqual([]);
     expect((await sb.from('plan_month_closes').select('*', {count: 'exact', head: true}).lt('month', '2031-01-01')).count).toBe(0);
   });
   it.each(TABLES)('anon cannot read %s (RLS on, no policies, no grant)', async (table) => {

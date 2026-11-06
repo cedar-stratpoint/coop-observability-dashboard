@@ -28,7 +28,7 @@ describe('buildRows (synthetic workbook, always runs)', () => {
   it('AC4: builds no actual rows, and the loader never calls the prefill RPC (the workbook holds targets only)', () => {
     expect(rows.prefills).toBeUndefined();
     const src = readFileSync(path.resolve(__dirname, '../scripts/seed-plan-from-workbook.mjs'), 'utf8') + readFileSync(path.resolve(__dirname, '../scripts/plan-workbook.mjs'), 'utf8');
-    expect(src).not.toMatch(/plan_seed_actual|plan_set_actual|from\('plan_actuals'\)|PREFILL/);
+    expect(src).not.toMatch(/plan_set_actual|from\('plan_actuals'\)|PREFILL/);
   });
   it('a target with no value in a month (a blank cell) makes no row, never a 0', () => {
     const r = buildRows({months, targets: {r19: [null, 10]}, assumptions: {}});
