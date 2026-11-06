@@ -34,6 +34,33 @@ describe('reconcileBaNames', () => {
     expect(map.size).toBe(1);
     expect(map.get('Mae Bernal')).toBe('Mae Bernal');
   });
+
+  it('does not fold different surnames by default', () => {
+    const map = reconcileBaNames(['Vanessa Dimaampao', 'Vanessa Dran']);
+    expect(new Set(map.values()).size).toBe(2);
+  });
+
+  it('folds small same-first-name look-alikes into the dominant card when asked', () => {
+    // Dimaampao has many forms; the one-off "Vanessa …" reads fold into her.
+    const names = [...Array(5).fill('Vanessa Dimaampao'), 'Vanessa Dran', 'Vanessa Olompo'];
+    const map = reconcileBaNames(names, [], {foldFirstName: true});
+    expect(map.get('Vanessa Dran')).toBe('Vanessa Dimaampao');
+    expect(map.get('Vanessa Olompo')).toBe('Vanessa Dimaampao');
+    expect(new Set(map.values()).size).toBe(1);
+  });
+
+  it('keeps two substantial same-first-name cards apart when folding', () => {
+    // Both have more than FOLD_SMALL_FORMS forms, so neither is absorbed.
+    const names = [...Array(4).fill('Vanessa Dimaampao'), ...Array(4).fill('Vanessa Reyes')];
+    const map = reconcileBaNames(names, [], {foldFirstName: true});
+    expect(new Set(map.values()).size).toBe(2);
+  });
+
+  it('does not merge different first names when folding', () => {
+    const names = ['Vanessa Dran', 'Sofia Lucero'];
+    const map = reconcileBaNames(names, [], {foldFirstName: true});
+    expect(new Set(map.values()).size).toBe(2);
+  });
 });
 
 describe('withCanonicalBa', () => {

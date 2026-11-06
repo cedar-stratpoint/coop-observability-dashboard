@@ -239,7 +239,7 @@ export function BaCards({
 }) {
   const [editCard, setEditCard] = useState<{name: string; items: TriageForm[]} | null>(null);
   const groups = useMemo(() => {
-    const canon = reconcileBaNames(data.forms.map((f) => f.consultant), knownBas);
+    const canon = reconcileBaNames(data.forms.map((f) => f.consultant), knownBas, {foldFirstName: true});
     const nameOf = (c: string | null) => (c?.trim() ? canon.get(c.trim()) ?? c.trim() : 'No BA on the form');
     const by = new Map<string, BaGroup>();
     const storesByName = new Map<string, Set<string>>();
