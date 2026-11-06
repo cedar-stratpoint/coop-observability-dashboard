@@ -10,6 +10,22 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.21.0 (2026-11-06): Business Health Report (prod release)
+Ships the Business Health Report (`/health-report`) to prod, taken from `staging` as a health-report-only change on top of `main` (staging and main have diverged, so a full promotion would drop the prod-only releases; same pattern as v1.20.0). Staging PRs: #476 (BHR-01 to BHR-05), #487 (paged CRM read, BHR-06 sheet mirror), #497 (plan SQL as one file), #501 (BHR-07). The feature files are byte-identical to staging; shared files carry only the health-report hunks.
+
+- **What it is.** Plan vs actual by calendar month. The All months grid mirrors the Business Plan sheet row for row (target line, then actual line), with GMV actuals read live (Events from POS orders, Website from the CRM, Marketplace from the Shopee and Lazada per-day sales), the workbook's input rows typed in place, and every formula row derived by the workbook's own formula. Admins close a month (gated on complete GMV and every typed line) and unlock it with a reason; every change is logged.
+- **Who sees it.** A Zoomy data viewer and a Coop Admin (`requireHealthReportAccess`); a Goldline view is bounced. Only a Coop Admin or a Zoomy company admin can type, close or unlock; everyone else reads.
+- **No plan figure in this public repo.** Targets are loaded privately from the workbook by `scripts/seed-plan-from-workbook.mjs`. Until they are loaded the page renders with empty targets and a banner.
+- **Shared-file hunks, no other behaviour change:** nav item (Overview group, mobile More, and the Coop Admin view), `leafActive` moved to `src/nav-active.ts` with a `pathUnder` fix so `/health` and `/health-report` never light up together (prod's own `/stock` rule kept), the digest-week picker hidden on `/health-report`, `/health-report` added to Ask Coop's in-app link list and data catalog (plan tables + page), `isActiveCoopAdmin` / `canEditPlan` in `src/company.ts` (the admin actions now use `isActiveCoopAdmin`; same result, `fetchMemberships` already drops suspended rows), `getCrmOrdersForPlan` in `src/crm-data.ts` (a new reader; `getCrmOrders` is unchanged), the `--bhr-warn` token and the fill-in cell styles in `app/globals.css`, and the local stack applying `supabase/plan_report.sql`.
+
+Apply on staging by hand: `supabase/plan_report.sql` only, and the same one file on PROD (step 1 below).
+
+PROD steps (owner / co-worker; Claude never touches the PROD project):
+1. Run `supabase/plan_report.sql` once in the PROD SQL editor. It is create-only (tables, RLS on with no policies, SECURITY DEFINER RPCs for service_role), no drops.
+2. Load the targets. The loader refuses any URL that is not local or staging, by design; how targets reach PROD is an open owner decision.
+3. Confirm `CRM_API_URL` and `CRM_API_READ_TOKEN` are set on the PROD Vercel project (the Website GMV row is a gap without them).
+4. Redeploy PROD, then open `/health-report` as a Zoomy viewer and as a Coop Admin.
+
 ## v1.20.0 (2026-11-03): Shopee Sync button and card (prod release)
 Ships the Shopee Sync to prod, taken from `staging` as a Shopee-only change on top of `main` (a full staging promotion would have dropped the prod releases v1.19.2 to v1.19.4, since the two branches diverged on 2026-10-05). The Sales page opens on All time and shows the Sync card; Sync works out the closed days that are missing, queues one job, and the cloud worker (separate repo `shopee-worker`) exports the Shopee files and sends each one to the server's import routes. The card shows progress and ends Done only when no closed day or week report is missing. Windows follow the owner's rule: a full missing Monday to Sunday week runs By Week (all five files), a shorter gap runs By Day (`sales_overview`). A closed week whose Ads or SKU file is missing is requested on its own. The daily limit counts only jobs a worker claimed. Needs `supabase/shopee_sync.sql` applied by hand on PROD first, and the worker and wake tokens in the prod env (`SHOPEE_SYNC_WORKER_TOKEN`, `SHOPEE_SYNC_WAKE_TOKEN`). Detail of each change is in the staging entries (SYN-09 to SYN-13). No other behaviour changes.
 

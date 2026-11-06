@@ -2,7 +2,7 @@
 
 import {revalidatePath} from 'next/cache';
 import {auth} from '@/auth';
-import {COOP_VIEW_KEY, fetchMemberships, type CompanyRole} from '@/src/company';
+import {COOP_VIEW_KEY, fetchMemberships, isActiveCoopAdmin, type CompanyRole} from '@/src/company';
 import {countCoopAdmins, grantRoles, revoke, setStatus} from '@/src/admin-data';
 import {guardEnv} from '@/src/coop-env-server';
 import {PROD_CONFIRM_WORD, prodConfirmOk} from '@/src/coop-env';
@@ -25,8 +25,7 @@ async function requireCoopAdmin(): Promise<{actor: string} | {error: string}> {
   // session token — so a just-revoked/suspended admin can't keep managing roles.
   // fetchMemberships drops suspended rows.
   const memberships = await fetchMemberships(actor);
-  const stillCoopAdmin = memberships.some((m) => m.companyId === null && m.role === 'coop_admin');
-  if (!stillCoopAdmin) return {error: 'Not authorized. You need an active Coop Admin role.'};
+  if (!isActiveCoopAdmin(memberships)) return {error: 'Not authorized. You need an active Coop Admin role.'};
   return {actor};
 }
 
