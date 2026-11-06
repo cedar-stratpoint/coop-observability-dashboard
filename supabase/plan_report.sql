@@ -1,5 +1,5 @@
 -- Business Health Report (plan vs actual): tables (BHR-01) and the write RPCs (typed lines BHR-03; close and unlock BHR-04; target edit as a new plan version BHR-05).
--- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_drop_derived.sql (one-off), supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off; run its PREFLIGHT query first). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
+-- Run by hand per environment in the Supabase SQL editor. This is the only plan SQL file. The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
 -- Design: knowledge/best-practices/plan-versions-and-locked-actuals.md. Money is stored in pesos.
 -- RLS is ON with NO policies on every table: only the service role (Coop server-side) gets through. Never add an anon policy.
 
@@ -34,9 +34,6 @@ create table if not exists public.plan_actuals (
   check (month = date_trunc('month', month)::date)
 );
 
--- Provenance of a cell. Was set only by the removed workbook prefill ('workbook' / 'owner', BHR-06 deletes those rows); an admin save always clears it, so it is null for every typed value. Kept, additive-only.
-alter table public.plan_actuals add column if not exists source text check (source in ('workbook', 'owner'));
-
 -- A closed month is a row, not a flag (BHR-04). It remembers the plan version it closed under and a snapshot of the GMV actuals,
 -- because GMV is computed at read time. The version cannot be deleted while a closed month points at it.
 create table if not exists public.plan_month_closes (
@@ -61,21 +58,6 @@ create table if not exists public.plan_actuals_log (
   reason     text
 );
 create index if not exists plan_actuals_log_month_idx on public.plan_actuals_log (month, at desc);
-
--- BHR-05 first shipped a free-form dated-entries ledger (plan_dated_entries). The workbook has one monthly number per row instead (rows 87, 88, 89 and the
--- stock bought), so those are now typed lines in plan_actuals (see plan_set_actual below). The ledger is dropped only when it is EMPTY: if it holds rows
--- it is kept and named in a NOTICE (export them, then drop it by hand). Nothing reads it any more. Idempotent.
-do $$
-declare n bigint;
-begin
-  if to_regclass('public.plan_dated_entries') is null then return; end if;
-  execute 'select count(*) from public.plan_dated_entries' into n;
-  if n = 0 then
-    drop table public.plan_dated_entries;
-  else
-    raise notice 'kept plan_dated_entries: it holds % row(s). Export them, then run: drop table public.plan_dated_entries;', n;
-  end if;
-end $$;
 
 alter table public.plan_versions      enable row level security;
 alter table public.plan_targets       enable row level security;
@@ -134,8 +116,8 @@ begin
   if p_amount is null then
     delete from plan_actuals where month = p_month and metric = p_metric;
   else
-    insert into plan_actuals (month, metric, amount_php, updated_by, updated_at, source) values (p_month, p_metric, p_amount, p_by, ts, null)
-    on conflict (month, metric) do update set amount_php = excluded.amount_php, updated_by = excluded.updated_by, updated_at = excluded.updated_at, source = null;
+    insert into plan_actuals (month, metric, amount_php, updated_by, updated_at) values (p_month, p_metric, p_amount, p_by, ts)
+    on conflict (month, metric) do update set amount_php = excluded.amount_php, updated_by = excluded.updated_by, updated_at = excluded.updated_at;
   end if;
   insert into plan_actuals_log (at, actor, month, metric, action, old_value, new_value) values (ts, p_by, p_month, p_metric, case when p_amount is null then 'clear' else 'edit' end, cur, p_amount);
   return jsonb_build_object('changed', true, 'amount', p_amount, 'updated_at', ts);
@@ -143,11 +125,6 @@ end;
 $$;
 revoke all on function public.plan_set_actual(date, text, numeric, numeric, text) from public, anon, authenticated;
 grant execute on function public.plan_set_actual(date, text, numeric, numeric, text) to service_role;
-
--- ---------------------------------------------------------------------------------------------------------------------------------
--- BHR-06: the plan workbook holds TARGETS only, so nothing may write a workbook value as an actual. The one-time prefill RPC (plan_seed_actual) is gone;
--- the rows it wrote are removed by supabase/plan_actuals_remove_workbook_prefill.sql. Idempotent.
-drop function if exists public.plan_seed_actual(date, text, numeric, text, text);
 
 -- ---------------------------------------------------------------------------------------------------------------------------------
 -- BHR-04: close a month, and unlock it with a reason. Same rules as plan_set_actual: one function = one transaction, the same per-month

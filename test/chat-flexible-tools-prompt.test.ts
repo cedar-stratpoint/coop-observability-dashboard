@@ -39,6 +39,6 @@ describe('no variant says a single product cannot be compared across channels', 
 
 describe('the cached Explore prompt did not grow for these tools (budget 14,400, was 14,396 before this change)', () => {
   it('stays at or below its size before shopify_query and compare_sku', () => {
-    expect(estimateTokens(buildStaticSystem({tools: true, explore: true}))).toBeLessThanOrEqual(14_440); // 14,396 before those tools; 14,435 after the 2026-11-05 catalog (plan tables incl. plan_part_targets, /health-report)
+    expect(estimateTokens(buildStaticSystem({tools: true, explore: true}))).toBeLessThanOrEqual(14_440); // 14,396 before those tools; 14,435 after the 2026-11-05 catalog (plan tables, /health-report)
   });
 });

@@ -116,10 +116,3 @@ describe.skipIf(!local)('plan_edit_targets on the local stack', () => {
     }
   });
 });
-
-describe.skipIf(!local)('plan_dated_entries is gone (BHR-05 follows the workbook: one monthly cash-flow row each, no free-form ledger)', () => {
-  it('the table no longer exists on the local stack', async () => {
-    const r = await sb().from('plan_dated_entries').select('*').limit(1);
-    expect(r.error).not.toBeNull();
-  });
-});
