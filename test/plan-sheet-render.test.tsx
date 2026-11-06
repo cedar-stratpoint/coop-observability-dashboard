@@ -91,20 +91,20 @@ describe('L4: rows 47 and 80 repeat the month headings, like the sheet', () => {
   });
 });
 
-describe('L6: long sheet labels are clamped to two lines on a phone, the full text kept', () => {
+describe('L6: long sheet labels are clamped to three lines on a phone, the full text kept', () => {
   const html = render(true);
-  it.each([38, 100, 102, 110])('row %i: the label text is the sheet label, with a title and a two-line clamp', (row) => {
+  it.each([38, 100, 102, 110])('row %i: the label text is the sheet label, with a title and a three-line clamp', (row) => {
     const r = SHEET_ROWS.find((x) => x.row === row)!;
     const th = /<th[^>]*>(.*?)<\/th>/.exec(line(html, 'data-sheet-row', row)!.inner)!;
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     expect(th[0]).toContain(`title="${esc(r.label.trim())}"`);
     expect(th[1]).toContain(esc(r.label.trim()));
-    expect(th[1]).toContain('max-md:line-clamp-2');
+    expect(th[1]).toContain('max-md:line-clamp-3');
   });
   it.each([93, 117])('section row %i: clamped with a title too', (row) => {
     const r = SHEET_ROWS.find((x) => x.row === row)!;
     const tr = line(html, 'data-sheet-row', row)!;
-    expect(tr.inner).toContain('max-md:line-clamp-2');
+    expect(tr.inner).toContain('max-md:line-clamp-3');
     expect(tr.inner).toContain('title="');
     expect(tr.inner.replace(/&amp;/g, '&').replace(/&#x27;/g, "'")).toContain(r.label);
   });

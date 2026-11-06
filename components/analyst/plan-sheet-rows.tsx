@@ -44,15 +44,15 @@ export const cellActual = (s: Status) => (s === 'ok' ? 'bg-[var(--status-good)]/
 export const GROUP_ROW = 'sticky left-0 z-10 whitespace-normal border-b border-border bg-muted px-2 py-[5px] text-left text-[11px] font-medium uppercase tracking-[0.07em] text-muted-foreground';
 export const LABEL_CELL = 'sticky left-0 z-10 max-w-[108px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left leading-snug md:min-w-[150px] md:max-w-none md:whitespace-nowrap';
 export const SUB_CELL = 'sticky left-0 z-10 border-b border-r-2 border-border bg-card py-[5px] pl-5 pr-2 text-left text-[11px] font-medium text-muted-foreground max-md:pl-3.5';
-const SHEET_LABEL = 'sticky left-0 z-10 max-w-[108px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left text-[12.5px] leading-snug md:min-w-[260px] md:max-w-[340px]';
+const SHEET_LABEL = 'sticky left-0 z-10 max-w-[116px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left text-[11px] leading-snug md:min-w-[260px] md:max-w-[340px] md:text-[12.5px]';
 const CLICKABLE = new Set(['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace', 'cash']);
 const LINE_LABEL: Record<string, string> = Object.fromEntries([...LINES, ...MEASURE_LINES].map((l) => [l.id, l.label]));
 const REQUIRED = new Set(REQUIRED_LINE_ORDER);
 /**
- * Sheet labels as the sheet has them; leading spaces mark a sub-row, shown indented. On a phone a long label is clamped to two lines (the text in the
+ * Sheet labels as the sheet has them; leading spaces mark a sub-row, shown indented. On a phone a long label is clamped to three lines at a smaller size, so a sub-row's own word (Salaries, Rent) still shows (the text in the
  * DOM, so its accessible name, stays the full sheet label; the title shows it on hover).
  */
-const CLAMP = 'max-md:line-clamp-2';
+const CLAMP = 'max-md:line-clamp-3';
 const sheetLabel = (r: SheetRow) => <span className={cn('block [overflow-wrap:anywhere]', CLAMP, r.label.startsWith(' ') && 'pl-3')}>{r.label.trim()}</span>;
 
 /**
