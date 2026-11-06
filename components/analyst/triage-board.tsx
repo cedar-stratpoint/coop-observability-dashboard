@@ -3,7 +3,9 @@
 import Link from 'next/link';
 import {useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
-import {Check, Loader2, MapPin, Search, User} from 'lucide-react';
+import {AlertDialog} from '@base-ui/react/alert-dialog';
+import {AlertTriangle, Check, Loader2, MapPin, Pencil, Search, Store, User} from 'lucide-react';
+import {Button} from '@/components/ui/button';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
@@ -178,6 +180,150 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
   );
 }
 
+/** Rough check: the read store name shares no meaningful word with the chosen store, so
+ *  it's probably a different store wrongly grouped under the same code (e.g. "SM Sta Maria"
+ *  read under code 5300 = "DS STA ROSA 2"). Used only to hint, never to decide. */
+function looksDifferent(readName: string | null, storeName: string): boolean {
+  const words = (s: string) => new Set((s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length >= 3));
+  const a = words(readName ?? '');
+  if (a.size === 0) return false;
+  const b = words(storeName);
+  for (const w of a) if (b.has(w)) return false;
+  return true;
+}
+
+/** Confirm or change the store for a whole group at once. Coop suggests the registry store
+ *  for the group's code; the user keeps it or picks another and ticks which forms to point
+ *  at it — so a wrongly-grouped form (a different store read under the same code) can be
+ *  left out instead of mis-stamped. Reuses the per-form assign action, applied in bulk. */
+function GroupStoreDialog({company, group, stores, onClose}: {company: string; group: {code: string; name: string | null; forms: TriageForm[]}; stores: StoreOption[]; onClose: () => void}) {
+  const router = useRouter();
+  const [q, setQ] = useState('');
+  const suggested = useMemo(() => stores.find((s) => s.code === group.code) ?? null, [stores, group.code]);
+  const [picked, setPicked] = useState<StoreOption | null>(suggested);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(group.forms.map((f) => f.key)));
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const matches = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return stores.filter((s) => !t || s.code.toLowerCase().includes(t) || s.name.toLowerCase().includes(t)).slice(0, 6);
+  }, [q, stores]);
+  const toggle = (key: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+  async function apply() {
+    if (!picked) return setErr('Pick a store first.');
+    const forms = group.forms.filter((f) => selected.has(f.key));
+    if (!forms.length) return setErr('Tick at least one form.');
+    setPending(true);
+    setErr(null);
+    const results = await Promise.all(forms.map((f) => assignFormStoreAction({company, uploadIds: f.uploadIds, storeCode: picked.code})));
+    setPending(false);
+    const bad = results.find((r) => !r.ok);
+    if (bad && !bad.ok) return setErr(bad.error);
+    onClose();
+    router.refresh();
+  }
+
+  return (
+    <AlertDialog.Root open onOpenChange={(o) => (o ? null : onClose())}>
+      <AlertDialog.Portal>
+        <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+          <div className="flex items-start gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+              <Store className="size-4" aria-hidden />
+            </span>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <AlertDialog.Title className="font-heading text-base font-semibold">Confirm the store for this group</AlertDialog.Title>
+              <AlertDialog.Description className="text-sm text-muted-foreground">
+                Point the ticked forms to one store. Coop suggests the registry match for code {group.code}.
+              </AlertDialog.Description>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 rounded-md border border-border px-2">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search store by name or code…" className="h-8 w-full bg-transparent text-sm outline-none" />
+            </div>
+            <div className="flex max-h-32 flex-col gap-0.5 overflow-y-auto">
+              {matches.length === 0 ? (
+                <span className="px-2 py-1.5 text-xs text-muted-foreground">No store matches that.</span>
+              ) : (
+                matches.map((st) => {
+                  const on = picked?.code === st.code;
+                  return (
+                    <button
+                      key={st.code}
+                      type="button"
+                      onClick={() => setPicked(st)}
+                      className={cn('flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors', on ? 'bg-primary/10' : 'hover:bg-muted')}
+                    >
+                      <span className="min-w-0 truncate">
+                        {st.name} <span className="font-mono text-xs text-muted-foreground">· {st.code}</span>
+                        {suggested?.code === st.code && <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">suggested</span>}
+                      </span>
+                      {on && <Check className="size-3.5 shrink-0 text-primary" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Apply to these forms</span>
+            <ul className="flex max-h-44 flex-col divide-y divide-border overflow-y-auto rounded-lg border border-border">
+              {group.forms.map((f) => {
+                const on = selected.has(f.key);
+                const diff = picked ? looksDifferent(f.storeName, picked.name) : false;
+                return (
+                  <li key={f.key}>
+                    <button type="button" onClick={() => toggle(f.key)} className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left transition-colors hover:bg-muted/50">
+                      <span className={cn('grid size-4 shrink-0 place-items-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>
+                        {on && <Check className="size-3" />}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm">{f.storeName ?? (f.storeCode ? `Store ${f.storeCode}` : 'Store not readable')}</span>
+                        <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
+                          {fmtTriagePeriod(f.periodStart, f.periodEnd)}{f.consultant ? ` · ${f.consultant}` : ''}
+                        </span>
+                      </span>
+                      {diff && (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{color: toneText('var(--status-warn)')}}>
+                          <AlertTriangle className="size-3" /> looks different
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {err && <span role="alert" className="text-xs text-[color:var(--status-crit)]">{err}</span>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {picked ? <>Pointing to <span className="font-medium text-foreground">{picked.name}</span></> : 'Pick a store'}
+            </span>
+            <div className="flex gap-2">
+              <AlertDialog.Close render={<Button variant="ghost" size="sm" />}>Cancel</AlertDialog.Close>
+              <Button size="sm" onClick={apply} disabled={pending || !picked || selected.size === 0}>
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                Apply to {selected.size} {selected.size === 1 ? 'form' : 'forms'}
+              </Button>
+            </div>
+          </div>
+        </AlertDialog.Popup>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
 function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: StoreOption[]; canEdit: boolean; company: string}) {
   const s = statusOf(form);
   const needsStore = s.rank === 0;
@@ -266,6 +412,11 @@ export function TriageBoard({
     return {needsStore, groups, singles, counts, storeCount, n: withStatus.length};
   }, [data.forms]);
 
+  // The registry's canonical name for a code, so a group reads by its real store name
+  // (e.g. "DS STA ROSA 2") instead of whatever one form's scan happened to say.
+  const storeByCode = useMemo(() => new Map(stores.map((s) => [s.code, s.name])), [stores]);
+  const [editGroup, setEditGroup] = useState<{code: string; name: string | null; forms: TriageForm[]} | null>(null);
+
   const t = data.totals;
 
   const summaryLine =
@@ -344,21 +495,26 @@ export function TriageBoard({
             </section>
           )}
 
-          {groups.map((g) => (
-            <section key={g.code} className="flex flex-col gap-3">
-              <GroupHeading
-                title={g.name ?? `Store ${g.code}`}
-                code={g.name ? g.code : undefined}
-                count={g.forms.length}
-                countLabel="forms"
-              />
-              <FormGrid>
-                {g.forms.map((f) => (
-                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
-                ))}
-              </FormGrid>
-            </section>
-          ))}
+          {groups.map((g) => {
+            const registryName = storeByCode.get(g.code);
+            return (
+              <section key={g.code} className="flex flex-col gap-3">
+                <GroupHeading
+                  title={registryName ?? g.name ?? `Store ${g.code}`}
+                  code={g.code}
+                  count={g.forms.length}
+                  countLabel="forms"
+                  linked={Boolean(registryName)}
+                  onEditStore={canEdit && stores.length > 0 ? () => setEditGroup(g) : undefined}
+                />
+                <FormGrid>
+                  {g.forms.map((f) => (
+                    <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                  ))}
+                </FormGrid>
+              </section>
+            );
+          })}
 
           {singles.length > 0 && (
             <section className="flex flex-col gap-3">
@@ -393,6 +549,8 @@ export function TriageBoard({
           </Card>
         </section>
       )}
+
+      {editGroup && <GroupStoreDialog company={company} group={editGroup} stores={stores} onClose={() => setEditGroup(null)} />}
     </div>
   );
 }
@@ -403,7 +561,7 @@ function FormGrid({children}: {children: React.ReactNode}) {
 
 /** A store (or triage bucket) heading above its cards: the store name once, its code, and
  *  how many forms sit under it — so repeated periods of one store read as one store. */
-function GroupHeading({title, code, count, countLabel = 'form', tone}: {title: string; code?: string; count: number; countLabel?: string; tone?: Tone}) {
+function GroupHeading({title, code, count, countLabel = 'form', tone, onEditStore, linked}: {title: string; code?: string; count: number; countLabel?: string; tone?: Tone; onEditStore?: () => void; linked?: boolean}) {
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-border pb-1.5">
       <h3 className="flex min-w-0 items-baseline gap-2">
@@ -414,9 +572,30 @@ function GroupHeading({title, code, count, countLabel = 'form', tone}: {title: s
         </span>
         {code && <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">· {code}</span>}
       </h3>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-        {count} {count === 1 ? countLabel.replace(/s$/, '') : countLabel.endsWith('s') ? countLabel : `${countLabel}s`}
-      </span>
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {count} {count === 1 ? countLabel.replace(/s$/, '') : countLabel.endsWith('s') ? countLabel : `${countLabel}s`}
+        </span>
+        {onEditStore &&
+          (linked ? (
+            <button
+              type="button"
+              onClick={onEditStore}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Pencil className="size-3" /> Change store
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onEditStore}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors"
+              style={tint('crit')}
+            >
+              <MapPin className="size-3" /> Confirm store
+            </button>
+          ))}
+      </div>
     </div>
   );
 }
