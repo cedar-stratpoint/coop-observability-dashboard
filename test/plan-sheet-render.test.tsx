@@ -176,3 +176,25 @@ describe('BHR-07: the legend above the grid', () => {
     expect(html).toContain('worked out from the rows above');
   });
 });
+
+// Owner, 2026-11-06 ("cant fill ?"): on a phone the grid shows 3 months; the typed-once lines (opening cash, opening inventory, opening customers)
+// take the FIRST month only, so a window that starts later showed an empty row. The first visible cell now offers to jump back to that month.
+describe('typed-once lines on a phone window that starts after the first month', () => {
+  const win = (start: number) => renderToStaticMarkup(
+    <table><tbody><SheetRows plan={plan} nowKey="2026-11" actuals={{}} edit={edit(true)} col={(i) => (i >= start ? '' : 'max-md:hidden')} win={{start, toFirst: () => {}}} onWhy={() => {}} inputsOpen setInputsOpen={() => {}} /></tbody></table>,
+  );
+  it('the first visible month of opening cash says where to type it, phone only', () => {
+    const cash = line(win(1), 'data-sheet-actual', 'opening_cash')!;
+    expect(cash.inner).toMatch(/data-once-jump[^>]*>.*Type in Aug(&#x27;|')26/);
+    expect(cash.inner.match(/data-once-jump/g)?.length).toBe(1);
+    expect(cash.inner).toMatch(/md:hidden/);
+  });
+  it('no jump when the window already shows the first month', () => {
+    expect(line(win(0), 'data-sheet-actual', 'opening_cash')!.inner).not.toMatch(/data-once-jump/);
+  });
+  it('opening inventory and opening customers get the same jump', () => {
+    const html = win(1);
+    expect(line(html, 'data-sheet-actual', 44)!.inner).toMatch(/data-once-jump/);
+    expect(line(html, 'data-sheet-actual', 120)!.inner).toMatch(/data-once-jump/);
+  });
+});

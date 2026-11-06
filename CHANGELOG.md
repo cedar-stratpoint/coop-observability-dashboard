@@ -18,6 +18,8 @@ The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It i
 - **Denser grid** (owner: "ang laki and ang wide nung cells"): at 1440 the label column is capped at 260px (was 340), month columns ~81-89px (were 84-109; a long hint never widens a column now), rows ~26-27px on desktop (were 30-31), so 12 months show fully instead of 10. Phone keeps the 3-month window and 44px inputs. Trade-off: about half the long sheet labels now wrap to two lines.
 - Tests: `test/plan-sheet-source.test.ts` (one source per actual row, cited rows exist, type rows = `TYPED_ROW`), render tests in `test/plan-sheet-render.test.tsx`, and a `PLAN_WORKBOOK`-gated check that every row a Calc label cites is in the real sheet formula. Data catalog not affected (no data change). Story: BHR-07.
 
+- **Typed-once lines on a phone** (owner: "cant fill ?"): opening cash, opening inventory and opening customers take the first month only, so a 3-month window that starts later showed an empty row. The window's first visible cell now says "Type in <first month>" and jumps back to it.
+
 ## 2026-11-06 — Health report SQL: one file, final schema only
 
 - **Decision: ship the final schema, not the local iterations.** No hosted database ever had the plan tables (staging checked: `to_regclass('public.plan_actuals')` is NULL; PROD is never touched), so there is nothing to migrate and nothing to drop. `supabase/plan_report.sql` is now the only plan SQL file: the five tables, the four RPCs, RLS on with no policies, anon and authenticated revoked. RPC behaviour is unchanged.

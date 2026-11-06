@@ -167,7 +167,28 @@ function stillToFill(s: ActualSource | null, lines: LineSeries, i: number): {ful
 /** The INPUTS — DRIVERS block's toggle, rows 6 to 46 behind it. */
 const INPUTS_COUNT = SHEET_ROWS.filter((r) => blockOf(r.row) === 'inputs' && r.row > 5 && r.kind !== 'header').length;
 
-export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; col: (i: number) => string; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
+/** The phone's 3-month window: where it starts, and a jump back to the first month. */
+export interface PhoneWindow {start: number; toFirst: () => void}
+
+/**
+ * A typed-once line (opening cash, inventory, customers) has its one cell in the FIRST month. On a phone window that starts later the row looked
+ * empty ("cant fill ?", owner 2026-11-06), so the window's first visible cell offers a jump back. Phone only: the desktop grid shows the first month.
+ */
+function OnceCell({i, plan, win, col}: {i: number; plan: PlanData; win?: PhoneWindow; col: string}) {
+  const jump = win && win.start > 0 && i === win.start;
+  return (
+    <td className={cn('border-b border-r border-border', col)}>
+      {jump && (
+        <button type="button" data-once-jump onClick={win.toFirst}
+          className="flex min-h-11 w-full items-center justify-end px-2 text-[12px] font-medium text-foreground/80 underline decoration-dotted underline-offset-2 md:hidden">
+          Type in {monthLabel(plan.months[0])}
+        </button>
+      )}
+    </td>
+  );
+}
+
+export function SheetRows({plan, nowKey, actuals, edit, col, win, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; col: (i: number) => string; win?: PhoneWindow; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
   const sheet = useMemo(() => sheetActuals(plan, actuals, edit.lines), [plan, actuals, edit.lines]);
   const n = plan.months.length;
   const ActualLabel = ({row}: {row: number}) => <th scope="row" className={cn(SUB_CELL, 'md:max-w-[260px]')}><span className="uppercase">actual</span><SourceChip source={actualSource(row)!} /></th>;
@@ -222,7 +243,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
             {kind === 'typed' && (
               <tr data-sheet-actual={r.row} data-actual-kind="typed">
                 <ActualLabel row={r.row} />
-                {plan.months.map((mo, i) => (once && i > 0) ? <td key={mo} className={cn('border-b border-r border-border', col(i))} /> : <TypedCell key={mo} metric={typed} mo={mo} i={i} plan={plan} nowKey={nowKey} edit={edit} status={statusAt(i)} col={col(i)} />)}
+                {plan.months.map((mo, i) => (once && i > 0) ? <OnceCell key={mo} i={i} plan={plan} win={win} col={col(i)} /> : <TypedCell key={mo} metric={typed} mo={mo} i={i} plan={plan} nowKey={nowKey} edit={edit} status={statusAt(i)} col={col(i)} />)}
               </tr>
             )}
             {kind === 'computed' && ((src) => (
@@ -248,7 +269,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
               // The sheet starts cash from 0 and has no opening-cash cell: Coop asks for the bank balance at the start of the first month, once.
               <tr data-sheet-actual="opening_cash" data-actual-kind="typed">
                 <th scope="row" className={SUB_CELL}><span className="uppercase">opening cash</span><InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="About opening cash" className="ml-0.5" /><SourceChip source={actualSource('opening_cash')!} /></th>
-                {plan.months.map((mo, i) => i > 0 ? <td key={mo} className={cn('border-b border-r border-border', col(i))} /> : <TypedCell key={mo} metric="opening_cash" mo={mo} i={0} plan={plan} nowKey={nowKey} edit={edit} status="info" col={col(i)} />)}
+                {plan.months.map((mo, i) => i > 0 ? <OnceCell key={mo} i={i} plan={plan} win={win} col={col(i)} /> : <TypedCell key={mo} metric="opening_cash" mo={mo} i={0} plan={plan} nowKey={nowKey} edit={edit} status="info" col={col(i)} />)}
               </tr>
             )}
           </Fragment>
