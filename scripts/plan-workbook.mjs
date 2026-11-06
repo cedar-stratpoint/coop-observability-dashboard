@@ -1,37 +1,21 @@
 // Reads the Cedar Tree business plan workbook (sheet 'Business Plan', Aug'26 to Dec'27 in columns C..S) into plan targets.
-// Shared by scripts/seed-plan-from-workbook.mjs (the private loader) and test/plan-seed.test.ts (cell-for-cell check, only when PLAN_WORKBOOK is set). No database, no network.
-// No plan figure lives in the repo: every number comes from the workbook file at run time.
+// Shared by scripts/seed-plan-from-workbook.mjs (the private loader) and the workbook-gated tests (only when PLAN_WORKBOOK is set). No database, no network.
+// No plan figure lives in the repo: every number comes from the workbook file at run time. Every value is a TARGET: the workbook holds no actual (BHR-06).
+// Which rows to read, their unit and target id come from the sheet's row map, src/plan-sheet.json (labels only), shared with the page.
+import {readFileSync} from 'node:fs';
 import ExcelJS from 'exceljs';
 
 export const FIRST_COL = 3; // C
 export const MONTH_COUNT = 17;
-/** metric id -> workbook row and scale (thousands -> pesos is x1000; ratios and counts are kept as they are). */
-export const SOURCE = {
-  gmv_total: {row: 51, scale: 1000}, gmv_marketplace: {row: 48, scale: 1000}, gmv_website: {row: 49, scale: 1000}, gmv_events: {row: 50, scale: 1000},
-  cm1: {row: 56, scale: 1000}, cm1_pct: {row: 57, scale: 1}, cm2: {row: 62, scale: 1000}, cm2_pct: {row: 63, scale: 1},
-  cm3: {row: 72, scale: 1000}, cm3_pct: {row: 73, scale: 1}, overhead: {row: 39, scale: 1000},
-  ebitda: {row: 75, scale: 1000}, ebitda_pct: {row: 76, scale: 1},
-  // Plan targets for the typed cost lines (BHR): the workbook formulas that PLAN what an admin later types as paid. content_other is rows 69 + 70 (see below).
-  cogs: {row: 55, scale: 1000}, platform_fees: {row: 59, scale: 1000}, fulfilment: {row: 60, scale: 1000}, event_costs: {row: 61, scale: 1000},
-  ad_marketplace: {row: 66, scale: 1000}, ad_website: {row: 67, scale: 1000}, event_marketing: {row: 68, scale: 1000},
-  bridge_funding: {row: 87, scale: 1000}, liability_settlement: {row: 88, scale: 1000}, freight_onetime: {row: 89, scale: 1000},
-  inv_purchases: {row: 41, scale: 1000}, cash: {row: 90, scale: 1000}, roas: {row: 9, scale: 1}, cac: {row: 96, scale: 1}, customers: {row: 113, scale: 1},
-};
-/** Workbook sub-rows behind the three consolidated typed lines (the Fixed overhead / COGS / Content and other breakdown the modal asks for). Plan values only. */
-export const PART_SOURCE = {
-  overhead: {salaries: 33, rent: 34, accounting: 35, tech: 36, growth_consultant: 37, rnd: 38},
-  cogs: {marketplace_cogs: 52, website_cogs: 53, events_cogs: 54},
-  content_other: {content_socials: 69, other_spend: 70},
-};
-export const COVERAGE_ROW = 45; // one scalar in column C, not a monthly series
+/** The sheet rows 4 to 125 (src/plan-sheet.json); a row with a unit holds values. Thousands of pesos become pesos (x1000); every other unit is kept as it is. */
+export const SHEET = JSON.parse(readFileSync(new URL('../src/plan-sheet.json', import.meta.url), 'utf8'));
+const scaleOf = (unit) => (unit === 'php' ? 1000 : 1);
+const idOf = (r) => r.id ?? `r${r.row}`;
+const isSingle = (r) => r.kind === 'static' || !!r.single;
+/** metric id -> workbook row and scale, for the monthly rows the page already had an id for (gmv_total, cash, cogs, ...). */
+export const SOURCE = Object.fromEntries(SHEET.filter((r) => r.unit && r.id && !isSingle(r)).map((r) => [r.id, {row: r.row, scale: scaleOf(r.unit)}]));
 /** Scalar workbook inputs (column C): the customer roll's repeat rate (row 118) and average order value (row 119, thousands -> pesos). Stored as plan targets repeat_rate / aov, the same value for every month. */
 export const ASSUMPTION_SOURCE = {repeat_rate: {row: 118, scale: 1}, aov: {row: 119, scale: 1000}};
-/** The known ACTUAL opening facts, prefilled once through plan_seed_actual: opening stock (row 44) and opening customers (row 120) in the first month, bridge funding (row 87) in month index 1 (Sep'26), which the owner confirmed. */
-export const PREFILL_SOURCE = [
-  {metric: 'opening_inventory', row: 44, scale: 1000, month: 0, source: 'workbook'},
-  {metric: 'opening_customers', row: 120, scale: 1, month: 0, source: 'workbook'},
-  {metric: 'bridge_funding', row: 87, scale: 1000, month: 1, source: 'owner'},
-];
 
 const val = (c) => { const v = c.value; return v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v) ? v.result : v; };
 
@@ -63,19 +47,24 @@ export async function readWorkbook(file) {
     return `20${m[2]}-${String('JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(m[1]) / 3 + 1).padStart(2, '0')}-01`;
   });
   const targets = {};
-  for (const [id, {row, scale}] of Object.entries(SOURCE)) targets[id] = months.map((_, i) => Math.round(raw(row, i) * scale * 1e6) / 1e6);
-  // Content, socials and other: one typed line in Coop, two workbook rows (69 content & socials, 70 other spend).
-  targets.content_other = months.map((_, i) => Math.round((raw(69, i) + raw(70, i)) * 1000 * 1e6) / 1e6);
+  const round = (v) => Math.round(v * 1e6) / 1e6;
+  // Every value row of the sheet is a target series of 17 months. A setting or market-sizing row (one value in column C) repeats that value every month;
+  // a check row is 1 for OK and 0 for its failing word; a blank cell is no target (null), never a 0.
+  for (const r of SHEET.filter((x) => x.unit)) {
+    const at = (i) => {
+      const c = cell(r.row, i);
+      if (c.value === null || c.value === undefined) return null;
+      if (r.unit === 'check') return String(val(c)).startsWith('OK') ? 1 : 0;
+      return round(raw(r.row, i) * scaleOf(r.unit));
+    };
+    targets[idOf(r)] = isSingle(r) ? months.map(() => at(0)) : months.map((_, i) => at(i));
+  }
   // One sign convention: overhead is stored as a positive cost; the workbook's row 74 is the same figure, negative.
   for (let i = 0; i < MONTH_COUNT; i++) {
     if (Math.abs(raw(74, i) + raw(39, i)) > 1e-9) throw new Error(`row 74 is not -row 39 in month ${i}`);
     if (Math.abs(raw(9, i) - raw(13, i)) > 1e-9) throw new Error(`marketplace and website ROAS differ in month ${i}`);
   }
-  const coverage = Number(val(ws.getRow(COVERAGE_ROW).getCell(FIRST_COL)));
-  if (!(coverage > 0)) throw new Error('coverage target (row 45) is not a number');
-  targets.coverage = months.map(() => coverage);
-  const partTargets = Object.fromEntries(Object.entries(PART_SOURCE).map(([line, parts]) => [line, Object.fromEntries(Object.entries(parts).map(([part, row]) => [part, months.map((_, i) => Math.round(raw(row, i) * 1000 * 1e6) / 1e6)]))]));
+  if (!(targets.coverage[0] > 0)) throw new Error('coverage target (row 45) is not a number');
   const assumptions = Object.fromEntries(Object.entries(ASSUMPTION_SOURCE).map(([id, {row, scale}]) => [id, Math.round(raw(row, 0) * scale * 1e6) / 1e6]));
-  const prefills = PREFILL_SOURCE.map(({metric, row, scale, month, source}) => ({month: months[month], metric, amountPhp: Math.round(raw(row, month) * scale * 1e6) / 1e6, source}));
-  return {months, targets, partTargets, assumptions, prefills};
+  return {months, targets, assumptions};
 }

@@ -1,7 +1,7 @@
-// Opening balances and prefilled facts, with made-up numbers only (the repo is public; the real prefill values come from the private loader, and
-// test/plan-seed.test.ts checks them against the workbook when PLAN_WORKBOOK is set). Opening cash, settlement, freight and later funding are unknown and stay empty.
+// Opening balances, with made-up numbers only (the repo is public). They are typed by an admin: the plan workbook's opening values are plan assumptions,
+// never actuals (BHR-06), so nothing prefills them. Opening cash, settlement, freight and funding are unknown until typed and stay empty.
 import {describe, expect, it} from 'vitest';
-import {GAP, LINES, ALL_LINE_IDS, cashSeries, customerSeries, derivedActuals, filledCount, inventorySeries, lineInputText, monthComplete, nextEmptyLine, prefillTag, validateLine, type ActualCell} from '../src/plan-compute';
+import {GAP, LINES, ALL_LINE_IDS, cashSeries, customerSeries, derivedActuals, filledCount, inventorySeries, lineInputText, monthComplete, nextEmptyLine, validateLine, type ActualCell} from '../src/plan-compute';
 
 const ok = (value: number): ActualCell => ({value, state: 'ok'});
 const RATES = {repeatRate: 0.1, aov: 500};
@@ -20,15 +20,15 @@ describe('the opening balances are editable typed measures, first month only, ne
   it('are not among the lines that gate Close month', () => {
     const all = Object.fromEntries(LINES.map((l) => [l.id, [1]]));
     expect(monthComplete(all, 0)).toBe(true);
-    expect(filledCount({...all, opening_inventory: [410_000], opening_customers: [420]}, 0)).toBe(13);
+    expect(filledCount({...all, opening_inventory: [410_000], opening_customers: [420]}, 0)).toBe(21);
     expect(nextEmptyLine({opening_inventory: [410_000], opening_customers: [420]}, 0)).not.toMatch(/opening/);
   });
-  it('prefilled funding counts as typed for its own month only', () => {
+  it('typed funding counts for its own month only', () => {
     const lines = {bridge_funding: [null, 1_500_000, null]};
     expect(filledCount(lines, 1)).toBe(1);
     expect(filledCount(lines, 0)).toBe(0);
     expect(filledCount(lines, 2)).toBe(0);
-    expect(monthComplete(lines, 1)).toBe(false); // one line of 13 does not make a month closable
+    expect(monthComplete(lines, 1)).toBe(false); // one line of 21 does not make a month closable
     expect(nextEmptyLine(lines, 1)).not.toBe('bridge_funding');
     expect(nextEmptyLine(lines, 0)).toBeTruthy();
   });
@@ -72,15 +72,5 @@ describe('cash: funding of 1,500k counts exactly as the workbook formula, but ca
   it('the unknown lines stay missing and block cash: no settlement/freight typed means waiting', () => {
     const c = cashSeries([e(-100), e(-100)], {...lines({liability_settlement: [null, null]}), opening_cash: [1000]});
     expect(c.map((x) => x.value)).toEqual([null, null]);
-  });
-});
-
-describe('prefillTag', () => {
-  it('names the source in plain words, and is null for a typed cell', () => {
-    expect(prefillTag('workbook')).toEqual({short: 'workbook', full: 'from workbook'});
-    expect(prefillTag('owner')).toEqual({short: 'owner', full: 'per owner, from workbook'});
-    expect(prefillTag(null)).toBeNull();
-    expect(prefillTag(undefined)).toBeNull();
-    expect(prefillTag('typed')).toBeNull();
   });
 });

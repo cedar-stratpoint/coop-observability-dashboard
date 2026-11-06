@@ -1,5 +1,5 @@
 -- Business Health Report (plan vs actual): tables (BHR-01) and the write RPCs (typed lines BHR-03; close and unlock BHR-04; target edit as a new plan version BHR-05).
--- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actual_parts.sql and supabase/plan_part_targets.sql. The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
+-- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql, supabase/plan_part_targets.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
 -- Design: knowledge/best-practices/plan-versions-and-locked-actuals.md. Money is stored in pesos.
 -- RLS is ON with NO policies on every table: only the service role (Coop server-side) gets through. Never add an anon policy.
 
@@ -34,7 +34,7 @@ create table if not exists public.plan_actuals (
   check (month = date_trunc('month', month)::date)
 );
 
--- Provenance of a PREFILLED cell: 'workbook' = a fact from the Cedar Tree workbook, 'owner' = also confirmed by the owner. Null = typed by an admin (an admin save always clears it).
+-- Provenance of a cell. Was set only by the removed workbook prefill ('workbook' / 'owner', BHR-06 deletes those rows); an admin save always clears it, so it is null for every typed value. Kept, additive-only.
 alter table public.plan_actuals add column if not exists source text check (source in ('workbook', 'owner'));
 
 -- A closed month is a row, not a flag (BHR-04). It remembers the plan version it closed under and a snapshot of the GMV actuals,
@@ -81,13 +81,15 @@ revoke all on public.plan_versions, public.plan_targets, public.plan_actuals, pu
 -- Compare-and-set: the caller passes the value it last saw (p_expected, null = the cell was empty). Under a per-month advisory lock the
 -- current value is compared; a different one means someone else saved first -> 'stale_value', nothing written. The lock also means a log
 -- row can never carry a stale old value, however two admins interleave (BHR-04 close and unlock take the same lock).
--- p_amount null clears the cell (missing again). Only the workbook's INPUT rows are saved here: the 13 typed lines (overhead, bridge_funding = row 87,
--- liability_settlement = row 88, freight_onetime = row 89, inv_purchases_paid = the stock bought rows 41 / 82, cogs, platform_fees, fulfilment, event_costs,
--- ad_marketplace, ad_website, event_marketing, content_other), in pesos, never negative, plus the optional ROAS (a multiple; workbook row 9 is an input).
+-- p_amount null clears the cell (missing again). Only the workbook's INPUT rows are saved here: the 21 typed lines, one per sheet row (BHR-06: the itemised rows
+-- salaries..rnd = rows 33-38, marketplace/website/events_cogs = rows 52-54, content_socials / other_spend = rows 69 / 70; their totals overhead, cogs and
+-- content_other are computed in the app and rejected here as invalid_line), bridge_funding = row 87,
+-- liability_settlement = row 88, freight_onetime = row 89, inv_purchases_paid = the stock bought rows 41 / 82, platform_fees, fulfilment, event_costs,
+-- ad_marketplace, ad_website, event_marketing), in pesos, never negative, plus the optional ROAS (a multiple; workbook row 9 is an input).
 -- Cash, CAC, active customers and inventory coverage are formulas in the workbook, so they are DERIVED in the app and rejected here (invalid_line).
 -- opening_cash (the bank balance at the start of the first plan month; the workbook has no such cell) is the one value that may be negative and is only accepted for the first plan month; derived cash starts from it.
--- opening_inventory (workbook row 44, pesos) and opening_customers (row 120, a count) are also first-month-only and never negative; a save by an admin clears the cell's prefill tag (source).
--- ROAS and opening cash are not required to close a month (plan_close_month counts the 13 lines), but a close locks them and an unlock logs them. CREATE OR REPLACE makes re-running this file safe. Errors are plain message codes the action maps to words.
+-- opening_inventory (workbook row 44, pesos) and opening_customers (row 120, a count) are also first-month-only and never negative; typed by an admin (the workbook's opening values are plan assumptions, BHR-06).
+-- ROAS and opening cash are not required to close a month (plan_close_month counts the 21 lines), but a close locks them and an unlock logs them. CREATE OR REPLACE makes re-running this file safe. Errors are plain message codes the action maps to words.
 create or replace function public.plan_set_actual(p_month date, p_metric text, p_amount numeric, p_expected numeric, p_by text)
 returns jsonb
 language plpgsql
@@ -99,7 +101,7 @@ declare
   had boolean;
   ts  timestamptz := now();
 begin
-  if p_metric is null or p_metric not in ('overhead','cogs','platform_fees','fulfilment','event_costs','ad_marketplace','ad_website','event_marketing','content_other','roas','bridge_funding','liability_settlement','freight_onetime','inv_purchases_paid','opening_cash','opening_inventory','opening_customers') then
+  if p_metric is null or p_metric not in ('salaries','rent','accounting','tech','growth_consultant','rnd','marketplace_cogs','website_cogs','events_cogs','content_socials','other_spend','platform_fees','fulfilment','event_costs','ad_marketplace','ad_website','event_marketing','roas','bridge_funding','liability_settlement','freight_onetime','inv_purchases_paid','opening_cash','opening_inventory','opening_customers') then
     raise exception 'invalid_line';
   end if;
   if p_month is null or p_month <> date_trunc('month', p_month)::date then raise exception 'invalid_month'; end if;
@@ -132,42 +134,15 @@ revoke all on function public.plan_set_actual(date, text, numeric, numeric, text
 grant execute on function public.plan_set_actual(date, text, numeric, numeric, text) to service_role;
 
 -- ---------------------------------------------------------------------------------------------------------------------------------
--- One-time workbook PREFILL of known actuals (scripts/seed-plan-from-workbook.mjs calls this). Actual data only, tagged with its source. It NEVER overwrites:
--- a cell that already has a value, a cell an admin has ever saved or cleared (any log row for the month and line, so a cleared prefill is not brought back), or a closed month.
--- Returns {seeded: false} in those cases, so running it twice changes nothing. Only the three prefillable lines are accepted; the opening balances only for the first plan month.
--- Service role only, like the other RPCs: a non-admin can reach no write path.
-create or replace function public.plan_seed_actual(p_month date, p_metric text, p_amount numeric, p_source text, p_by text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare ts timestamptz := now();
-begin
-  if p_metric is null or p_metric not in ('opening_inventory','opening_customers','bridge_funding') then raise exception 'invalid_line'; end if;
-  if p_source is null or p_source not in ('workbook','owner') then raise exception 'invalid_source'; end if;
-  if p_month is null or p_month <> date_trunc('month', p_month)::date then raise exception 'invalid_month'; end if;
-  if p_amount is null or p_amount < 0 then raise exception 'negative_cost'; end if;
-  if p_metric in ('opening_inventory','opening_customers') and p_month is distinct from (select min(month) from plan_targets) then raise exception 'invalid_line'; end if;
-  perform pg_advisory_xact_lock(hashtext('plan_month:' || p_month::text));
-  if exists (select 1 from plan_month_closes where month = p_month)
-     or exists (select 1 from plan_actuals where month = p_month and metric = p_metric)
-     or exists (select 1 from plan_actuals_log where month = p_month and metric = p_metric) then
-    return jsonb_build_object('seeded', false);
-  end if;
-  insert into plan_actuals (month, metric, amount_php, updated_by, updated_at, source) values (p_month, p_metric, p_amount, p_by, ts, p_source);
-  insert into plan_actuals_log (at, actor, month, metric, action, new_value, reason) values (ts, p_by, p_month, p_metric, 'seed', p_amount, 'prefilled (' || p_source || ')');
-  return jsonb_build_object('seeded', true, 'amount', p_amount);
-end;
-$$;
-revoke all on function public.plan_seed_actual(date, text, numeric, text, text) from public, anon, authenticated;
-grant execute on function public.plan_seed_actual(date, text, numeric, text, text) to service_role;
+-- BHR-06: the plan workbook holds TARGETS only, so nothing may write a workbook value as an actual. The one-time prefill RPC (plan_seed_actual) is gone;
+-- the rows it wrote are removed by supabase/plan_actuals_remove_workbook_prefill.sql. Idempotent.
+drop function if exists public.plan_seed_actual(date, text, numeric, text, text);
 
 -- ---------------------------------------------------------------------------------------------------------------------------------
 -- BHR-04: close a month, and unlock it with a reason. Same rules as plan_set_actual: one function = one transaction, the same per-month
 -- advisory lock (so a close, an unlock and an edit of one month never interleave and no log row carries a stale value), service role only.
 -- p_gmv is the month's GMV actuals the server action computed at close time ({gmv_events: {value, state}, ...}); it is stored with the close so
--- a closed month reads its GMV from the snapshot, never live. Closing needs all 13 typed lines to hold a value (a typed 0 counts). A re-close takes a
+-- a closed month reads its GMV from the snapshot, never live. Closing needs all 21 typed lines (the itemised rows, never their totals) to hold a value (a typed 0 counts). A re-close takes a
 -- new snapshot and records the plan version current THEN. A close also needs every earlier plan month closed first ('earlier_month_open') and the month to be over (Manila) and all three GMV channels complete in p_gmv ('month_not_over', 'gmv_incomplete'). The month's lines are locked because plan_set_actual rejects a closed month.
 create or replace function public.plan_close_month(p_month date, p_by text, p_gmv jsonb)
 returns jsonb
@@ -194,8 +169,8 @@ begin
   -- Oldest first: cash chains month to month, so no plan month before this one may still be open. Any earlier plan month is already over, so "earlier and not closed" is the whole test.
   if exists (select 1 from plan_targets t where t.month < p_month and not exists (select 1 from plan_month_closes c where c.month = t.month)) then raise exception 'earlier_month_open'; end if;
   select count(*) into n from plan_actuals
-    where month = p_month and metric in ('overhead','bridge_funding','liability_settlement','freight_onetime','inv_purchases_paid','cogs','platform_fees','fulfilment','event_costs','ad_marketplace','ad_website','event_marketing','content_other');
-  if n < 13 then raise exception 'month_incomplete'; end if;
+    where month = p_month and metric in ('salaries','rent','accounting','tech','growth_consultant','rnd','marketplace_cogs','website_cogs','events_cogs','content_socials','other_spend','bridge_funding','liability_settlement','freight_onetime','inv_purchases_paid','platform_fees','fulfilment','event_costs','ad_marketplace','ad_website','event_marketing');
+  if n < 21 then raise exception 'month_incomplete'; end if;
   select max(id) into v from plan_versions;
   if v is null then raise exception 'no_plan_version'; end if;
   insert into plan_month_closes (month, plan_version, closed_by, closed_at, gmv_snapshot) values (p_month, v, p_by, ts, p_gmv);

@@ -12,7 +12,7 @@ import path from 'node:path';
 import {makeEvaluator, type Audit} from './support/xlsx-eval';
 // @ts-expect-error plain .mjs shared with the private loader
 import {readWorkbook} from '../scripts/plan-workbook.mjs';
-import {GAP, LINES, derivedActuals, inventorySeries, plannedCogs, type ActualCell, type LineSeries} from '../src/plan-compute';
+import {GAP, LINES, derivedActuals, inventorySeries, plannedCogs, withTotals, type ActualCell, type LineSeries} from '../src/plan-compute';
 
 const WORKBOOK = process.env.PLAN_WORKBOOK;
 const hasWb = !!WORKBOOK && existsSync(WORKBOOK);
@@ -54,15 +54,12 @@ describe.skipIf(!hasWb)('workbook audit: the workbook is internally consistent',
     expect(A.rows.find((x) => x.row === 90)?.cells.every((c) => c.f)).toBe(true);
   });
 
-  it("the private loader's opening facts and scalar inputs are the workbook's cells", async () => {
+  it("the private loader's scalar inputs are the workbook's cells, and it loads no actual", async () => {
     const one = (r: number) => cached(r)[0] as number;
     const wb = await readWorkbook(WORKBOOK);
-    const pre = (m: string) => wb.prefills.find((p: {metric: string}) => p.metric === m).amountPhp;
-    expect(pre('opening_inventory')).toBe(one(44) * K);
-    expect(pre('opening_customers')).toBe(one(120));
     expect(wb.assumptions.repeat_rate).toBe(one(118));
     expect(wb.assumptions.aov).toBeCloseTo(one(119) * K, 9);
-    expect(wb.prefills.find((p: {metric: string}) => p.metric === 'bridge_funding').amountPhp).toBe((cached(87)[1] as number) * K);
+    expect(wb.prefills).toBeUndefined();
   });
 });
 
@@ -71,16 +68,18 @@ describe.skipIf(!hasWb)("Coop's derived rows equal the workbook's, month by mont
   const col = (r: number) => row(r).map((v) => v * K);
   const gmv = {gmv_marketplace: col(48).map(cell), gmv_website: col(49).map(cell), gmv_events: col(50).map(cell), gmv_total: col(51).map(cell)};
   // The typed lines are the workbook's input-side rows: what was actually paid (here: what the workbook says is paid), stock bought, funding, one-time payments.
+  // One typed line per itemised sheet row (overhead rows 33-38, COGS rows 52-54, content and other rows 69 and 70, BHR-06); their totals are summed, never typed.
   const lines: LineSeries = {
-    overhead: col(39), cogs: col(55), platform_fees: col(59), fulfilment: col(60), event_costs: col(61),
-    ad_marketplace: col(66), ad_website: col(67), event_marketing: col(68), content_other: col(69).map((v, i) => v + col(70)[i]),
+    salaries: col(33), rent: col(34), accounting: col(35), tech: col(36), growth_consultant: col(37), rnd: col(38),
+    marketplace_cogs: col(52), website_cogs: col(53), events_cogs: col(54), platform_fees: col(59), fulfilment: col(60), event_costs: col(61),
+    ad_marketplace: col(66), ad_website: col(67), event_marketing: col(68), content_socials: col(69), other_spend: col(70),
     inv_purchases_paid: col(41), bridge_funding: col(87), liability_settlement: col(88), freight_onetime: col(89),
   };
-  const withOpening: LineSeries = {...lines, opening_cash: [0]}; // the workbook starts from 0: typed explicitly, because Coop never assumes an opening balance
+  const withOpening: LineSeries = withTotals({...lines, opening_cash: [0]}); // the workbook starts from 0: typed explicitly, because Coop never assumes an opening balance
   // The customer roll's two scalar inputs, as the loader stores them in the plan targets (workbook rows 118 and 119).
   const scalars = {repeat_rate: cached(118).map(() => cached(118)[0] as number), aov: cached(119).map(() => (cached(119)[0] as number) * K)};
   const plan = {months: A.months.map(() => ''), targets: {gmv_total: col(51), cm1: col(56), ...scalars} as Record<string, (number | null)[]>};
-  // The workbook's opening stock and customers are typed facts in Coop (prefilled by the loader).
+  // Opening stock and customers are typed by an admin in Coop (the workbook's are plan assumptions): fed here from the sheet to prove the formulas.
   const opened: LineSeries = {...withOpening, opening_inventory: [(cached(44)[0] as number) * K], opening_customers: [cached(120)[0] as number]};
   const got = derivedActuals(plan, gmv, opened);
 
@@ -96,6 +95,11 @@ describe.skipIf(!hasWb)("Coop's derived rows equal the workbook's, month by mont
 
   it('uses every typed line Coop has, and only workbook input-side rows', () => {
     expect(Object.keys(lines).sort()).toEqual(LINES.map((l) => l.id).sort());
+  });
+  it('the summed totals equal the sheet: row 39 overhead, row 55 COGS (withTotals)', () => {
+    const t = withTotals(lines);
+    expect((t.overhead ?? []).every((v, i) => close(v as number, row(39)[i] * K))).toBe(true);
+    expect((t.cogs ?? []).every((v, i) => close(v as number, row(55)[i] * K))).toBe(true);
   });
   it('CM1, CM2, CM3, EBITDA and their margins (rows 56 57 62 63 72 73 75 76)', () => {
     expectRow('cm1', got.cm1, row(56), K); expectRow('cm1_pct', got.cm1_pct, row(57), 1);
@@ -115,7 +119,7 @@ describe.skipIf(!hasWb)("Coop's derived rows equal the workbook's, month by mont
     expectRow('cac', got.cac, row(96), 1); // ad spend in thousands x 1000 / new customers = pesos per customer: same unit as Coop
   });
   it('total ad spend in Coop (the four typed ad lines) is the workbook total ad spend (row 71)', () => {
-    const sum = COLS.map((_, i) => ['ad_marketplace', 'ad_website', 'event_marketing', 'content_other'].reduce((t, id) => t + (lines[id]?.[i] ?? 0), 0));
+    const sum = COLS.map((_, i) => ['ad_marketplace', 'ad_website', 'event_marketing', 'content_socials', 'other_spend'].reduce((t, id) => t + (lines[id]?.[i] ?? 0), 0));
     expect(sum.every((v, i) => close(v, row(71)[i] * K))).toBe(true);
   });
 });
@@ -123,8 +127,9 @@ describe.skipIf(!hasWb)("Coop's derived rows equal the workbook's, month by mont
 import {LINE_TARGET_ID} from '../src/plan-compute';
 describe.skipIf(!hasWb)('the loader reads the cost-line targets from the workbook rows that plan them', () => {
   const rowOf: Record<string, (i: number) => number> = {
-    overhead: (i) => row(39)[i], cogs: (i) => row(55)[i], platform_fees: (i) => row(59)[i], fulfilment: (i) => row(60)[i], event_costs: (i) => row(61)[i],
-    ad_marketplace: (i) => row(66)[i], ad_website: (i) => row(67)[i], event_marketing: (i) => row(68)[i], content_other: (i) => row(69)[i] + row(70)[i],
+    salaries: (i) => row(33)[i], rent: (i) => row(34)[i], accounting: (i) => row(35)[i], tech: (i) => row(36)[i], growth_consultant: (i) => row(37)[i], rnd: (i) => row(38)[i],
+    marketplace_cogs: (i) => row(52)[i], website_cogs: (i) => row(53)[i], events_cogs: (i) => row(54)[i], platform_fees: (i) => row(59)[i], fulfilment: (i) => row(60)[i], event_costs: (i) => row(61)[i],
+    ad_marketplace: (i) => row(66)[i], ad_website: (i) => row(67)[i], event_marketing: (i) => row(68)[i], content_socials: (i) => row(69)[i], other_spend: (i) => row(70)[i],
     inv_purchases_paid: (i) => row(41)[i], bridge_funding: (i) => row(87)[i], liability_settlement: (i) => row(88)[i], freight_onetime: (i) => row(89)[i],
   };
   it.each(LINES.map((l) => l.id))('%s equals the workbook in all 17 months', async (id) => {
@@ -138,29 +143,30 @@ describe('a missing input never becomes a guess', () => {
   const cell = (v: number): ActualCell => ({value: v, state: 'ok'});
   const n = 3;
   const full = (): LineSeries => ({...Object.fromEntries(LINES.map((l) => [l.id, Array(n).fill(1000)])), opening_cash: [0]});
+  const d = (l: LineSeries, g: Record<string, ActualCell[]> = gmv) => derivedActuals(plan, g, withTotals(l)); // the totals are always summed from their rows
   const gmv = {gmv_marketplace: Array(n).fill(cell(70_000)), gmv_website: Array(n).fill(cell(4_000)), gmv_total: Array(n).fill(cell(74_000))};
   const plan = {months: ['a', 'b', 'c'], targets: {} as Record<string, (number | null)[]>};
   it('cash waits for every input of its month and for every earlier month', () => {
-    expect(derivedActuals(plan, gmv, full()).cash.every((c) => c.value !== null)).toBe(true);
-    for (const id of ['cogs', 'inv_purchases_paid', 'bridge_funding', 'liability_settlement', 'freight_onetime', 'overhead', 'ad_website']) {
+    expect(d(full()).cash.every((c) => c.value !== null)).toBe(true);
+    for (const id of ['website_cogs', 'inv_purchases_paid', 'bridge_funding', 'liability_settlement', 'freight_onetime', 'rnd', 'ad_website', 'other_spend']) {
       const l = full();
       (l[id] as (number | null)[])[1] = null;
-      expect(derivedActuals(plan, gmv, l).cash.map((c) => c.value !== null), id).toEqual([true, false, false]);
+      expect(d(l).cash.map((c) => c.value !== null), id).toEqual([true, false, false]);
     }
-    expect(derivedActuals(plan, {...gmv, gmv_total: [cell(74_000), GAP, cell(74_000)]}, full()).cash.map((c) => c.value !== null)).toEqual([true, false, false]);
+    expect(d(full(), {...gmv, gmv_total: [cell(74_000), GAP, cell(74_000)]}).cash.map((c) => c.value !== null)).toEqual([true, false, false]);
   });
   it('cash waits for the opening cash: until typed, no month has a cash, never a guess', () => {
     const l = full();
     delete l.opening_cash;
-    expect(derivedActuals(plan, gmv, l).cash.every((c) => c.value === null)).toBe(true);
+    expect(d(l).cash.every((c) => c.value === null)).toBe(true);
   });
   it('a partial GMV gives a partial (grey) cash from that month on', () => {
-    const p = derivedActuals(plan, {...gmv, gmv_total: [cell(74_000), {value: 1, state: 'partial'}, cell(74_000)]}, full()).cash;
+    const p = d(full(), {...gmv, gmv_total: [cell(74_000), {value: 1, state: 'partial'}, cell(74_000)]}).cash;
     expect(p.map((c) => c.state)).toEqual(['ok', 'partial', 'partial']);
   });
   it('a typed 0 is a real 0, an empty cell is not', () => {
     const l = full();
     l.bridge_funding = [0, 0, 0];
-    expect(derivedActuals(plan, gmv, l).cash[2].value).not.toBeNull();
+    expect(d(l).cash[2].value).not.toBeNull();
   });
 });

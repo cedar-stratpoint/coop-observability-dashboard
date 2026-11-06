@@ -17,14 +17,14 @@ vi.mock('../src/plan-data', () => ({planClient: () => ({rpc}), getGmvActuals: gm
 
 import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '../src/plan-actions';
 
-const ok = {month: '2026-09-01', metric: 'cogs', amountPhp: 1000, expected: null};
+const ok = {month: '2026-09-01', metric: 'marketplace_cogs', amountPhp: 1000, expected: null};
 
 describe('savePlanLineAction', () => {
   beforeEach(() => { session.email = 'a@x.com'; memberships.rows = [{companyId: null, role: 'coop_admin'}]; rpc.mockClear(); rpc.mockResolvedValue({error: null}); revalidatePath.mockClear(); });
 
   it('a Coop Admin and a Zoomy company admin save through the one RPC with their email', async () => {
     expect(await savePlanLineAction(ok)).toEqual({ok: true});
-    expect(rpc).toHaveBeenCalledWith('plan_set_actual', {p_month: '2026-09-01', p_metric: 'cogs', p_amount: 1000, p_expected: null, p_by: 'a@x.com'});
+    expect(rpc).toHaveBeenCalledWith('plan_set_actual', {p_month: '2026-09-01', p_metric: 'marketplace_cogs', p_amount: 1000, p_expected: null, p_by: 'a@x.com'});
     memberships.rows = [{companyId: 'zoomy', role: 'company_admin'}];
     expect((await savePlanLineAction(ok)).ok).toBe(true);
     expect(rpc).toHaveBeenCalledTimes(2);

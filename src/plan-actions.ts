@@ -6,7 +6,6 @@ import {planEditor} from './plan-auth';
 import {PLAN_TAG, getGmvActuals, planClient} from './plan-data';
 import {METRICS, currentMonthKey, gmvSnapshot, MONTH_NOT_OVER, closeBlocker, monthEnded, monthTag, targetLock, validateLine} from './plan-compute';
 import {phDay} from './custom-range';
-import {validateParts} from './plan-parts';
 
 // Business Health Report writes. The ONLY write path for typed monthly lines: the editor check re-reads memberships (src/plan-auth.ts), input
 // is validated here, and the save is one SECURITY DEFINER RPC (supabase/plan_report.sql) that compares the value the person last saw and writes
@@ -33,7 +32,6 @@ const RPC_ERRORS: Record<string, string> = {
   calculated_target: 'Total GMV is calculated from the three channels, so it cannot be typed.',
   derived_target: 'That target is calculated by the workbook from other targets, so it cannot be typed.',
   no_changes: 'Change at least one target first.',
-  incomplete_parts: 'Fill in every part, type 0 for a part with no cost.',
   invalid_part: 'That breakdown does not belong to this line.',
   invalid_change: 'One of the targets is not a valid number.',
 };
@@ -61,28 +59,6 @@ export async function savePlanLineAction(input: {month: string; metric: string; 
   return {ok: true};
 }
 
-/**
- * Save a line as its BREAKDOWN (Fixed overhead, COGS, Content and other). One RPC (supabase/plan_actual_parts.sql) validates the parts, stores their sum as the line's total
- * (so every derived number reads the total as before), keeps the parts, and logs it, all in one transaction with the same compare-and-set on the total and the same closed-month lock.
- */
-export async function savePlanPartsAction(input: {month: string; line: string; parts: Record<string, number>; expected: number | null}): Promise<ActionResult> {
-  const editor = await planEditor();
-  if (!editor) return {ok: false, error: 'Not authorized. You need to be a Coop Admin or a Zoomy admin to change these numbers.'};
-  if (!input || typeof input.month !== 'string' || !MONTH.test(input.month)) return {ok: false, error: 'Unknown month.'};
-  const bad = validateParts(input.line, input.parts);
-  if (bad) return {ok: false, error: bad};
-  if (input.expected !== null && (typeof input.expected !== 'number' || !Number.isFinite(input.expected))) return {ok: false, error: 'Unreadable previous value. Refresh the page.'};
-  const sb = planClient();
-  if (!sb) return {ok: false, error: 'Demo mode: no database is connected, so nothing was saved.'};
-  const {error} = await sb.rpc('plan_set_actual_parts', {p_month: input.month, p_line: input.line, p_parts: input.parts, p_expected: input.expected, p_by: editor.email});
-  if (error) {
-    if (error.message?.trim() === 'stale_value') revalidatePath('/health-report');
-    else if (!RPC_ERRORS[error.message?.trim() ?? '']) console.error('savePlanPartsAction', error.message);
-    return {ok: false, error: rpcMessage(error.message)};
-  }
-  revalidatePath('/health-report');
-  return {ok: true};
-}
 
 const NOT_ALLOWED = 'Not authorized. You need to be a Coop Admin or a Zoomy admin to change these numbers.';
 
