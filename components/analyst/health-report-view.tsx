@@ -300,7 +300,7 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
           </thead>
           <tbody>
             <CloseRow plan={plan} col={col} edit={edit} actuals={actuals} />
-            <SheetRows plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} col={col} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
+            <SheetRows plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} col={col} win={{start, toFirst: () => setStart(0)}} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
           </tbody>
         </table>
       </div>
