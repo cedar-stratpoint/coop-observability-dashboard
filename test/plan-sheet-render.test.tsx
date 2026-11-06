@@ -129,14 +129,15 @@ describe('BHR-07: every actual line shows one small icon for where it comes from
     expect(sourceTip({kind: 'type', from: 'every month'} as never)).toBe('You type this every month.');
     expect(sourceTip({kind: 'type', from: 'once'} as never)).toBe('You type this once, in the first month.');
     expect(sourceTip({kind: 'auto', from: 'Shopee + Lazada'} as never)).toBe('Filled in by Coop from Shopee + Lazada.');
-    expect(sourceTip({kind: 'calc', from: '= rows 66-70', feeds: [66, 67, 68, 69, 70]} as never)).toBe("Worked out by the sheet's formula: = rows 66-70. It fills in once rows 66-70 are typed.");
+    expect(sourceTip({kind: 'calc', from: '= rows 66-70', feeds: [66, 67, 68, 69, 70]} as never)).toBe('Worked out: Marketplace ad spend + Website ad spend + Events ad spend + Content &amp; Socials spend + Other spend costs. It fills in once the ad spend lines are typed.'.replace('&amp;', '&'));
+    expect(sourceTip({kind: 'calc', from: '= 53 ÷ 49', feeds: [53]} as never)).toBe('Worked out: Website COGS ÷ Website GMV. It fills in once Website COGS is typed.');
   });
-  it('the owner example: row 71 waits with an empty-looking cell, the rows to fill only in the hover title and for screen readers', () => {
+  it('the owner example: row 71 waits with an empty-looking cell, the lines to fill only in the hover title and for screen readers', () => {
     const cells = [...line(html, 'data-sheet-actual', 71)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
     expect(cells).toHaveLength(3);
     for (const c of cells) {
-      expect(c[0]).toContain('title="Waiting: fill rows 66-70"');
-      expect(c[1]).toBe('<span class="sr-only">waiting, fill rows 66-70</span>');
+      expect(c[0]).toContain('title="Waiting: fill the ad spend lines"');
+      expect(c[1]).toBe('<span class="sr-only">waiting, fill the ad spend lines</span>');
     }
   });
 });
