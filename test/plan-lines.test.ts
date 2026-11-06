@@ -6,19 +6,19 @@ const ok = (value: number) => ({value, state: 'ok' as const});
 const full = {cogs: [400], platform_fees: [50], fulfilment: [30], event_costs: [20], ad_marketplace: [10], ad_website: [5], event_marketing: [3], content_other: [2], overhead: [100]};
 
 describe('the typed lines are the workbook INPUT rows only', () => {
-  it('are the 13 inputs; cash is NOT typed (it is derived), and none may be negative', () => {
-    expect(LINES.map((l) => l.id).sort()).toEqual(['ad_marketplace', 'ad_website', 'bridge_funding', 'cogs', 'content_other', 'event_costs', 'event_marketing', 'freight_onetime', 'fulfilment', 'inv_purchases_paid', 'liability_settlement', 'overhead', 'platform_fees']);
-    expect(REQUIRED_COUNT).toBe(13);
+  it('are the 21 inputs, one per itemised sheet row; cash and the totals are NOT typed (they are derived), and none may be negative', () => {
+    expect(LINES.map((l) => l.id).sort()).toEqual(['accounting', 'ad_marketplace', 'ad_website', 'bridge_funding', 'content_socials', 'event_costs', 'event_marketing', 'events_cogs', 'freight_onetime', 'fulfilment', 'growth_consultant', 'inv_purchases_paid', 'liability_settlement', 'marketplace_cogs', 'other_spend', 'platform_fees', 'rent', 'rnd', 'salaries', 'tech', 'website_cogs']);
+    expect(REQUIRED_COUNT).toBe(21);
     for (const derived of ['cash', 'cac', 'customers', 'coverage']) { expect(ALL_LINE_IDS).not.toContain(derived); expect(validateLine(derived, 1), derived).toBe('Unknown line.'); }
   });
   it('validateLine: rejects unknown lines, non-numbers and negative amounts; null clears', () => {
-    expect(validateLine('cogs', 10)).toBeNull();
-    expect(validateLine('cogs', 0)).toBeNull();
+    expect(validateLine('marketplace_cogs', 10)).toBeNull();
+    expect(validateLine('marketplace_cogs', 0)).toBeNull();
     expect(validateLine('cash', -500)).toBe('Unknown line.');
-    expect(validateLine('cogs', null)).toBeNull();
-    for (const bad of [-1, NaN, Infinity, '12', undefined, {}]) expect(validateLine('cogs', bad)).not.toBeNull();
+    expect(validateLine('marketplace_cogs', null)).toBeNull();
+    for (const bad of [-1, NaN, Infinity, '12', undefined, {}]) expect(validateLine('marketplace_cogs', bad)).not.toBeNull();
     expect(validateLine('nope', 1)).toBe('Unknown line.');
-    expect(validateLine('overhead', -0.01)).toMatch(/negative/);
+    expect(validateLine('salaries', -0.01)).toMatch(/negative/);
   });
   it('parseThousands: empty is missing, 0 is a real 0, junk is rejected', () => {
     expect(parseThousands('')).toEqual({ok: true, pesos: null});
@@ -31,12 +31,12 @@ describe('the typed lines are the workbook INPUT rows only', () => {
     expect(toThousands(12500)).toBe('12.5');
     expect(toThousands(0)).toBe('0');
   });
-  it('monthComplete needs all 13, a typed 0 counts, empty does not', () => {
+  it('monthComplete needs all 21, a typed 0 counts, empty does not', () => {
     const lines = Object.fromEntries(LINES.map((l) => [l.id, [0]]));
     expect(monthComplete(lines, 0)).toBe(true);
-    expect(filledCount(lines, 0)).toBe(13);
-    expect(monthComplete({...lines, cogs: [null]}, 0)).toBe(false);
-    expect(filledCount({...lines, cogs: [null]}, 0)).toBe(12);
+    expect(filledCount(lines, 0)).toBe(21);
+    expect(monthComplete({...lines, website_cogs: [null]}, 0)).toBe(false);
+    expect(filledCount({...lines, website_cogs: [null]}, 0)).toBe(20);
   });
 });
 
@@ -104,16 +104,17 @@ describe('closing a month (pure)', () => {
     expect(closeWaitingWho("Oct'26")).toBe("Ask a Coop Admin to fill in the Oct'26 lines.");
   });
   it('nextEmptyLine walks the grid order from the cell you are on, wraps, and skips filled cells (a real 0 counts)', () => {
-    const lines = {overhead: [5], bridge_funding: [0], liability_settlement: [0], freight_onetime: [0], inv_purchases_paid: [0], cogs: [null], platform_fees: [1], fulfilment: [null]} as never;
-    expect(nextEmptyLine(lines, 0)).toBe('cogs');
-    expect(nextEmptyLine(lines, 0, 'cogs')).toBe('fulfilment');
-    expect(nextEmptyLine(lines, 0, 'content_other')).toBe('cogs');
-    expect(nextEmptyLine(lines, 0, 'overhead', 'cogs')).toBe('fulfilment');
-    expect(nextEmptyLine({}, 0, 'content_other', 'overhead')).toBe('inv_purchases_paid');
+    const filled = Object.fromEntries(LINES.map((l) => [l.id, [0]]));
+    const lines = {...filled, website_cogs: [null], fulfilment: [null]} as never;
+    expect(nextEmptyLine(lines, 0)).toBe('website_cogs'); // sheet order: row 53 before row 60
+    expect(nextEmptyLine(lines, 0, 'website_cogs')).toBe('fulfilment');
+    expect(nextEmptyLine(lines, 0, 'freight_onetime')).toBe('website_cogs'); // wraps from row 89
+    expect(nextEmptyLine(lines, 0, 'salaries', 'website_cogs')).toBe('fulfilment');
+    expect(nextEmptyLine({}, 0, 'freight_onetime', 'salaries')).toBe('rent');
   });
-  it('nextEmptyLine is null when all 13 are in, and never offers the optional ROAS', () => {
+  it('nextEmptyLine is null when all 21 are in, and never offers the optional ROAS', () => {
     const full = Object.fromEntries(LINES.map((l) => [l.id, [1]])) as never;
-    expect(nextEmptyLine(full, 0, 'overhead')).toBeNull();
+    expect(nextEmptyLine(full, 0, 'salaries')).toBeNull();
   });
   it('daysSinceMonthEnd counts from the last day of the month', () => {
     expect(daysSinceMonthEnd('2026-10-01', '2026-11-05')).toBe(5);
@@ -173,10 +174,10 @@ describe('closing a month (pure)', () => {
 describe('ROAS: the one optional typed measure (workbook row 9 is an input)', () => {
   it('is typed in its own unit and kept out of the lines that gate Close month', () => {
     expect(MEASURE_LINES.map((l) => [l.id, l.unit])).toEqual([['roas', 'x'], ['opening_cash', 'php'], ['opening_inventory', 'php'], ['opening_customers', 'count']]);
-    expect(ALL_LINE_IDS).toHaveLength(17); // 13 typed lines + ROAS + the three opening balances
+    expect(ALL_LINE_IDS).toHaveLength(25); // 21 typed lines + ROAS + the three opening balances
     const lines = Object.fromEntries(LINES.map((l) => [l.id, [0]]));
     expect(monthComplete(lines, 0)).toBe(true); // no ROAS typed, still closable
-    expect(filledCount({...lines, roas: [3.2]}, 0)).toBe(13); // ROAS is not counted
+    expect(filledCount({...lines, roas: [3.2]}, 0)).toBe(21); // ROAS is not counted
   });
 
   it('validateLine: never negative; 0 and decimals are fine; clear is fine; non-numbers are not', () => {
@@ -302,36 +303,45 @@ describe('the close gate: the month is over (Manila time) AND all three GMV chan
   });
 });
 
-import {LINE_TARGET_ID, assemblePlan, lineVariance} from '../src/plan-compute';
+import {LINE_TARGET_ID, assemblePlan} from '../src/plan-compute';
+import {LINE_ROW, sheetStatus} from '../src/plan-sheet';
+
+/** The colour of a typed actual cell: its own sheet row's rule (BHR-06). */
+const lineStatus = (id: string, actual: number | null, target: number | null, phase: 'past' | 'current' | 'future', gmv?: {actual: number; target: number}) =>
+  sheetStatus({row: LINE_ROW[id], actual: actual === null ? GAP : {value: actual, state: 'ok'}, target, phase, ctx: {actualGmv: gmv?.actual, targetGmv: gmv?.target}});
 
 describe('plan targets for the typed lines (BHR cost-line targets)', () => {
-  it('every typed line names the target it is judged against; stock bought is the inv_purchases target', () => {
+  it('every typed line names the target it is judged against: its own sheet row; stock bought is the inv_purchases target', () => {
     expect(Object.keys(LINE_TARGET_ID).sort()).toEqual(LINES.map((l) => l.id).sort());
     expect(LINE_TARGET_ID.inv_purchases_paid).toBe('inv_purchases');
-    expect(LINE_TARGET_ID.overhead).toBe('overhead');
-    expect(LINE_TARGET_ID.cogs).toBe('cogs');
+    expect(LINE_TARGET_ID.salaries).toBe('r33');
+    expect(LINE_TARGET_ID.marketplace_cogs).toBe('r52');
   });
   it('assemblePlan keeps the cost-line targets (and still ignores unknown metrics)', () => {
-    const p = assemblePlan('v', [{month: '2026-10-01', metric: 'cogs', value: 5}, {month: '2026-10-01', metric: 'bridge_funding', value: 7}, {month: '2026-10-01', metric: 'nope', value: 1}]);
-    expect(p.targets.cogs).toEqual([5]);
+    const p = assemblePlan('v', [{month: '2026-10-01', metric: 'r52', value: 5}, {month: '2026-10-01', metric: 'bridge_funding', value: 7}, {month: '2026-10-01', metric: 'nope', value: 1}]);
+    expect(p.targets.r52).toEqual([5]);
     expect(p.targets.bridge_funding).toEqual([7]);
     expect(p.targets.nope).toBeUndefined();
   });
-  it('cost variance is lower-is-better: under plan is ok, over plan is bad; the diff is actual minus plan', () => {
-    expect(lineVariance({id: 'cogs', actual: 90, target: 100, phase: 'past'})).toEqual({diff: -10, status: 'ok'});
-    expect(lineVariance({id: 'cogs', actual: 100, target: 100, phase: 'past'})).toEqual({diff: 0, status: 'ok'});
-    expect(lineVariance({id: 'ad_website', actual: 130, target: 100, phase: 'past'})).toEqual({diff: 30, status: 'bad'});
-    expect(lineVariance({id: 'overhead', actual: 130, target: 100, phase: 'past'}).status).toBe('bad');
+  it('a typed cost is lower-is-better (variable costs as a share of GMV, BHR-06)', () => {
+    const gmv = {actual: 1000, target: 1000};
+    expect(lineStatus('marketplace_cogs', 90, 100, 'past', gmv)).toBe('ok');
+    expect(lineStatus('marketplace_cogs', 100, 100, 'past', gmv)).toBe('ok');
+    expect(lineStatus('ad_website', 130, 100, 'past', gmv)).toBe('bad');
+    expect(lineStatus('marketplace_cogs', 120, 100, 'past', {actual: 2000, target: 1000})).toBe('ok'); // a lower share of a bigger GMV
+    expect(lineStatus('marketplace_cogs', 90, 100, 'past')).toBe('waiting'); // no GMV yet
+    expect(lineStatus('salaries', 130, 100, 'past')).toBe('bad'); // overhead rows are absolute
+    expect(lineStatus('salaries', 100, 100, 'past')).toBe('ok');
   });
-  it('funding, settlement, freight and stock bought show a variance but are never red or green', () => {
+  it('funding, settlement, freight and stock bought are never red or green', () => {
     for (const id of ['bridge_funding', 'liability_settlement', 'freight_onetime', 'inv_purchases_paid']) {
-      expect(lineVariance({id, actual: 150, target: 100, phase: 'past'}), id).toEqual({diff: 50, status: 'info'});
-      expect(lineVariance({id, actual: 0, target: 100, phase: 'past'}).status, id).toBe('info');
+      expect(lineStatus(id, 150, 100, 'past'), id).toBe('info');
+      expect(lineStatus(id, 0, 100, 'past'), id).toBe('info');
     }
   });
-  it('the month in progress is never judged; a missing actual or target has no variance and waits', () => {
-    expect(lineVariance({id: 'cogs', actual: 500, target: 100, phase: 'current'}).status).toBe('live');
-    expect(lineVariance({id: 'cogs', actual: null, target: 100, phase: 'past'})).toEqual({diff: null, status: 'waiting'});
-    expect(lineVariance({id: 'cogs', actual: 5, target: null, phase: 'past'})).toEqual({diff: null, status: 'waiting'});
+  it('the month in progress is never judged; a missing actual or target waits', () => {
+    expect(lineStatus('marketplace_cogs', 500, 100, 'current', {actual: 1, target: 1})).toBe('live');
+    expect(lineStatus('marketplace_cogs', null, 100, 'past')).toBe('waiting');
+    expect(lineStatus('salaries', 5, null, 'past')).toBe('waiting');
   });
 });

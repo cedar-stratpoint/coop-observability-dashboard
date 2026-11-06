@@ -7,138 +7,27 @@ import {cn} from '@/lib/utils';
 import {HelpTip as InfoTip} from './help-tip';
 import {PLAN_HELP} from '@/src/plan-help';
 import type {PlanVersionInfo} from '@/src/plan-data';
-import {closeMonthAction, savePlanLineAction, savePlanPartsAction, unlockMonthAction} from '@/src/plan-actions';
-import {PartsModal} from './plan-parts-modal';
-import {consistentParts, hasParts, partTargets, sumPesos} from '@/src/plan-parts';
+import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '@/src/plan-actions';
 import {
-  METRICS, METRIC_GROUPS, cardMonths, currentIndex, fmtPlan, metricStatus, monthPhase, runwayMonths, stepWindow, windowStart,
-  GAP, type LineSources, OPENING_IDS, prefillTag, LINE_TARGET_ID, NEUTRAL_LINES, lineVariance, toThousands, GRID_LINE_LABEL, GRID_METRIC_GROUPS, LINE_GROUPS, LINES, MEASURE_GROUP, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, lineInputText, lineUnitWords, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, parseLineInput, stockOrderSeries, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type PlanData, type Status,
+  METRICS, cardMonths, currentIndex, fmtPlan, metricStatus, monthPhase, runwayMonths, stepWindow, windowStart,
+  GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type PlanData, type Status,
 } from '@/src/plan-compute';
+import {SHEET_ROWS, blockOf, rowOfLine} from '@/src/plan-sheet';
+import {GROUP_ROW, LABEL_CELL, SheetRows, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
 
 // Business Health Report: the workbook plan month by month beside the actuals. GMV actuals (BHR-02) come from Coop's readers; a month with
 // no data is an empty cell that says waiting, never PHP 0 and never red. Green = met or beat, red = missed, grey = waiting, partial,
 // month in progress, or no source.
 const WINDOW = 3;
-const MONTH_FMT = new Intl.DateTimeFormat('en-US', {month: 'short', year: '2-digit', timeZone: 'UTC'});
 /** Chart axis: every month is labelled; the year shows on the first month and each January so 17 labels still fit. */
 const axisLabel = (m: string, i: number) => (i === 0 || m.slice(5, 7) === '01' ? monthLabel(m).replace("'", '’') : monthLabel(m).split("'")[0]);
-const monthLabel = (m: string) => {
-  const [s, y] = MONTH_FMT.format(new Date(`${m}T00:00:00Z`)).split(' ');
-  return `${s}'${y}`;
-};
 const shortMonth = (m: string) => monthLabel(m).split("'")[0];
 
-const STATUS_TEXT: Record<Status, string> = {ok: 'Met', bad: 'Missed', waiting: 'Waiting', live: 'Month to date', future: 'Upcoming', nosource: 'No source yet', partial: 'Partial', info: 'Typed', derived: 'Info only', modelled: 'Modelled'};
-type Actuals = Record<string, ActualCell[]>;
-
-/** Editing: who may type, the last saved values (pesos), and how to save one cell. Read-only users get `canEdit: false` and never see an input. */
-interface Edit {
-  canEdit: boolean; lines: LineSeries; closes: Record<string, ClosedMonth>; today: string;
-  /** Where a prefilled cell came from ('workbook' | 'owner'), by line then month; null = typed by an admin. */
-  sources: LineSources;
-  /** Saved breakdowns of the consolidated lines by line then month index ({part: pesos}); only counted while they still add up to the saved total. */
-  parts: PartsSeries;
-  /** Open the breakdown modal of a consolidated cell. */
-  openParts: (month: string, line: string) => void;
-  save: (month: string, metric: string, pesos: number | null, expected: number | null) => Promise<string | null>;
-  close: (month: string) => Promise<string | null>;
-  askUnlock: (month: string) => void;
-  /** The oldest unclosed month that still has empty required lines: those cells are outlined amber. */
-  fill: string | null;
-  /** The cell carrying the accent ring and the 'Type ...' tag (set by Fill in and by Enter, cleared on blur). */
-  ring: {month: string; metric: string} | null;
-  clearRing: () => void;
-  /** Jump to the next empty required line of `month` after `metric` (the one being saved counts as filled). False when none is left. */
-  next: (month: string, metric: string, treatFilled: boolean) => boolean;
-}
-type PartsSeries = Record<string, (Record<string, number> | null)[]>;
-const EMPTY_PARTS: PartsSeries = {};
 const EMPTY_CLOSES: Record<string, ClosedMonth> = {};
 const EMPTY_ACTUALS: Actuals = {};
 const EMPTY_LINES: LineSeries = {};
-const EMPTY_SOURCES: LineSources = {};
-const NO_EDIT: Edit = {canEdit: false, lines: {}, sources: {}, parts: EMPTY_PARTS, openParts: () => {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false};
-const LINE_LABEL = Object.fromEntries([...LINES, ...MEASURE_LINES].map((l) => [l.id, l.label]));
-/** Shown beside the plan, never red or green: the workbook's coverage target is a stock-holding policy, where more is not better. */
+const NO_EDIT: Edit = {canEdit: false, lines: {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false};
 const NEUTRAL = new Set<string>(['coverage']);
-const MEASURE_IDS = new Set<string>(MEASURE_LINES.map((l) => l.id));
-/** Typed lines that are optional (never amber, never needed to close): ROAS. */
-const OPTIONAL_IDS = MEASURE_IDS;
-/** The typed groups in grid order (the artifact's): overhead, what feeds each margin, the cash-flow items with the opening cash first, then optional ROAS. Everything else in the grid is calculated. */
-const TYPED_GROUPS: readonly {label: string; ids: readonly string[]}[] = [...LINE_GROUPS.flatMap((g) => (g.label === 'cash flow items' ? [{label: 'opening balances', ids: OPENING_IDS}, g] : [g])), MEASURE_GROUP];
-/** The workbook value Coop already uses for an opening balance nobody has typed or prefilled yet (shown grey, so the number in use is never hidden). */
-const GROUP_TITLE = (label: string) => (label === 'overhead' ? 'Actuals · overhead' : label === 'efficiency' ? 'Efficiency (optional)' : label.charAt(0).toUpperCase() + label.slice(1));
-/** What a typed line is for, shown as the row's tooltip. */
-const LINE_HINT: Record<string, string> = {
-  overhead: 'Salaries, rent, accounting, tech, consultant, R&D. Feeds EBITDA', cogs: 'CM1 is GMV minus this. Also feeds CM2, CM3', platform_fees: 'Feeds CM2', fulfilment: 'Feeds CM2', event_costs: 'Booth, rent, manpower. Feeds CM2',
-  ad_marketplace: 'Shopee and Lazada ads. Feeds CM3, CAC', ad_website: 'Feeds CM3, CAC', event_marketing: 'Ads and promo for events. Feeds CM3, CAC', content_other: 'Feeds CM3, CAC',
-  inv_purchases_paid: 'Paid to suppliers. Feeds cash and stock on hand', bridge_funding: 'Adds to cash', liability_settlement: 'Subtracts from cash', freight_onetime: 'Subtracts from cash',
-  opening_cash: 'Typed once. Cash is calculated from it, so it waits until it is in.', opening_inventory: 'Stock on hand on day 1 (workbook row 44). Stock on hand and coverage start from it. Never needed to close.', opening_customers: 'Active customers on day 1 (workbook row 120). The customer count starts from it. Never needed to close.', roas: 'Paid GMV per peso of ad spend. Optional, never needed to close.',
-};
-
-/**
- * One typed cell (the input lines in thousands of pesos like the workbook; ROAS as a multiple). Saves when you leave the cell or press Enter. Empty = missing, 0 = a real 0.
- * On a rejected save (not numeric, negative cost, someone else saved first, closed month) the cell goes back to the saved value and says why.
- */
-function LineCell({month, metric, saved, edit}: {month: string; metric: string; saved: number | null; edit: Edit}) {
-  const show = saved === null ? '' : lineInputText(metric, saved);
-  const [text, setText] = useState(show);
-  const [err, setErr] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-  useEffect(() => { setText(show); }, [show]);
-  const isTgt = edit.ring?.month === month && edit.ring.metric === metric;
-  const commit = () => {
-    if (text.trim() === show) { setText(show); return; }
-    const p = parseLineInput(metric, text);
-    if (!p.ok) { setErr('Enter a number.'); setText(show); return; }
-    setErr(null);
-    start(async () => {
-      const e = await edit.save(month, metric, p.value, saved);
-      if (e) { setErr(e); setText(show); }
-    });
-  };
-  const label = `${LINE_LABEL[metric] ?? metric}, ${monthLabel(month)}, ${lineUnitWords(metric)}`;
-  return (
-    <>
-      <input inputMode="decimal" value={text} aria-label={label} aria-invalid={err ? true : undefined} disabled={pending} data-line={metric} data-month={month}
-        onChange={(e) => setText(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={() => { if (isTgt) edit.clearRing(); commit(); }} onKeyDown={(e) => { if (e.key === 'Enter') { const el = e.target as HTMLInputElement; if (REQUIRED_LINE_ORDER.includes(metric)) { e.preventDefault(); const filled = text.trim() !== ''; el.blur(); if (edit.next(month, metric, filled)) return; } const all = Array.from(document.querySelectorAll<HTMLInputElement>(`input[data-month="${month}"]`)); const next = all[all.indexOf(el) + 1]; el.blur(); next?.focus(); } if (e.key === 'Escape') { setText(show); setErr(null); } }}
-        className={cn('block h-11 w-[72px] rounded-none border-0 bg-transparent px-2 text-right text-base font-medium tabular-nums transition-colors hover:bg-accent focus-visible:bg-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary md:h-[30px] md:text-[12.5px]', pending && 'opacity-60', err && 'outline outline-2 -outline-offset-2 outline-[var(--status-crit)]')} />
-      {err && <span role="alert" className="mt-0.5 block max-w-[170px] whitespace-normal text-right text-[10.5px] leading-tight text-[var(--status-crit)]">{err}</span>}
-    </>
-  );
-}
-
-/** The consolidated cell: the total as now, a small parts icon and a dotted underline say it opens a breakdown. Enter or click opens the modal. */
-function PartsButton({month, metric, saved, editable, hasBreakdown, edit}: {month: string; metric: string; saved: number | null; editable: boolean; hasBreakdown: boolean; edit: Edit}) {
-  const label = `${LINE_LABEL[metric] ?? metric}, ${monthLabel(month)}, ${saved === null ? 'not typed' : `${toThousands(saved)} thousand pesos`}`;
-  return (
-    <button type="button" data-month={month} data-line={metric} data-testid="parts-cell" aria-haspopup="dialog" aria-label={`${label}. ${editable ? 'Open the breakdown' : 'See the breakdown'}`}
-      title={editable ? (hasBreakdown ? 'Click to see or change the breakdown' : 'Click to enter the breakdown') : 'Click to see the breakdown'}
-      onClick={() => edit.openParts(month, metric)}
-      className={cn('flex h-11 w-[72px] items-center justify-end gap-1 rounded-none border-0 bg-transparent px-2 text-right text-base tabular-nums transition-colors hover:bg-accent focus-visible:bg-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-md:h-12', editable ? 'font-medium' : 'text-muted-foreground')}>
-      <Rows3 className={cn('size-3 shrink-0', hasBreakdown ? 'text-primary' : 'text-muted-foreground/50')} aria-hidden />
-      {saved === null ? <span className="sr-only">waiting</span> : <span className="underline decoration-muted-foreground/40 decoration-dotted underline-offset-4">{toThousands(saved)}</span>}
-    </button>
-  );
-}
-
-/** A typed cell: an input for an editor (past and current months), the saved number for everyone else. */
-function TypedCell({month, metric, i, plan, nowKey, edit, className, children}: {month: string; metric: string; i: number; plan: PlanData; nowKey: string; edit: Edit; className?: string; children: React.ReactNode}) {
-  const saved = edit.lines[metric]?.[i] ?? null;
-  const editable = edit.canEdit && monthPhase(plan.months[i], nowKey) !== 'future' && !edit.closes[month];
-  const tgt = editable && edit.ring?.month === month && edit.ring.metric === metric;
-  const need = saved === null && edit.fill === month && REQUIRED_LINE_ORDER.includes(metric) && !edit.closes[month];
-  const tag = saved === null ? null : prefillTag(edit.sources[metric]?.[i]);
-  // A consolidated line (Fixed overhead, COGS, Content and other) is a button that opens its breakdown. Readers and closed months only get it when a breakdown exists to look at.
-  const hasBreakdown = hasParts(metric) && consistentParts(metric, saved, edit.parts[metric]?.[i] ?? undefined);
-  const partsCell = hasParts(metric) && (editable || hasBreakdown) ? <PartsButton month={month} metric={metric} saved={saved} editable={editable} hasBreakdown={hasBreakdown} edit={edit} /> : null;
-  return <td className={cn(className, 'relative', need && !tgt && 'bhr-need', tgt && 'bhr-tgt')} data-tip={tgt ? `Type ${GRID_LINE_LABEL[metric] ?? metric} for ${monthLabel(month)}` : undefined} title={edit.closes[month] ? 'Closed month, locked' : undefined}>
-    {partsCell ?? (editable ? <LineCell month={month} metric={metric} saved={saved} edit={edit} /> : children)}
-    {tag && <span data-prefill={tag.short} title={tag.full} aria-label={tag.full} className="pointer-events-none absolute left-1 top-px text-[8px] font-medium uppercase leading-none tracking-wide text-primary">{tag.short}</span>}
-  </td>;
-}
-const cellOf = (actuals: Actuals, id: string, i: number): ActualCell => actuals[id]?.[i] ?? GAP;
-
 function statusOf(m: MetricDef, plan: PlanData, i: number, nowKey: string, actuals: Actuals): Status {
   return metricStatus({direction: m.direction, actual: cellOf(actuals, m.id, i).value, partial: cellOf(actuals, m.id, i).state === 'partial', target: plan.targets[m.id]?.[i] ?? null, phase: monthPhase(plan.months[i], nowKey), hasSource: m.source !== 'none', informational: NEUTRAL.has(m.id), modelled: m.modelled});
 }
@@ -285,13 +174,7 @@ function RunwayCard({plan, nowKey, actuals, opening}: {plan: PlanData; nowKey: s
   );
 }
 
-const cellActual = (s: Status) => (s === 'ok' ? 'bg-[var(--status-good)]/15 text-[var(--status-good)]' : s === 'bad' ? 'bg-[var(--status-crit)]/15 text-[var(--status-crit)]' : 'text-muted-foreground');
 const DEF_BY_ID = Object.fromEntries(METRICS.map((m) => [m.id, m])) as Record<string, MetricDef>;
-const CLICKABLE = new Set(['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace', 'cash']);
-const GROUP_ROW = 'sticky left-0 z-10 whitespace-normal border-b border-border bg-muted px-2 py-[5px] text-left text-[11px] font-medium uppercase tracking-[0.07em] text-muted-foreground';
-const LABEL_CELL = 'sticky left-0 z-10 max-w-[108px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left leading-snug md:min-w-[150px] md:max-w-none md:whitespace-nowrap';
-const SUB_CELL = 'sticky left-0 z-10 border-b border-r-2 border-border bg-card py-[5px] pl-5 pr-2 text-left text-[11px] font-medium text-muted-foreground max-md:pl-3.5';
-
 /** Cash plan (dashed, from the workbook) against cash actual (solid, only months whose cash is calculated). Money in thousands of pesos. */
 function CashChart({plan, nowKey, actuals}: {plan: PlanData; nowKey: string; actuals: Actuals}) {
   const n = plan.months.length;
@@ -364,7 +247,7 @@ function StockChart({plan, nowKey}: {plan: PlanData; nowKey: string}) {
   );
 }
 
-function Grid({plan, nowKey, actuals, edit, reveal, onWhy}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; reveal: {month: string; n: number} | null; onWhy: (id: string, i: number) => void}) {
+function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; reveal: {month: string; n: number} | null; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
   const total = plan.months.length;
   const cur = currentIndex(plan.months, nowKey);
   const [start, setStart] = useState(() => windowStart(total, WINDOW, cur));
@@ -402,11 +285,11 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy}: {plan: PlanData; now
         <table className="w-full border-separate border-spacing-0 text-[12.5px] tabular-nums md:w-max md:min-w-full" data-testid="plan-grid">
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-30 min-w-[108px] border-b border-r-2 border-border bg-card px-2 py-2 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground max-md:top-[117px] md:min-w-[150px]">₱&apos;000 / month</th>
+              <th className="sticky left-0 top-0 z-30 min-w-[108px] border-b border-r-2 border-border bg-card px-2 py-2 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground max-md:top-[117px] md:min-w-[150px]">{SHEET_ROWS[0].label}</th>
               {plan.months.map((mo, i) => {
                 const phase = monthPhase(mo, nowKey);
                 return (
-                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[84px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
+                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[84px] max-md:min-w-[80px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
                     {monthLabel(mo)}{edit.closes[mo] && <Lock aria-label="Closed" className="ml-1 inline size-3 align-[-1px] text-muted-foreground" />}
                     {phase !== 'past' && <span className="block text-[10.5px] font-normal">{phase === 'current' ? 'MTD' : 'Target'}</span>}
                   </th>
@@ -415,97 +298,12 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy}: {plan: PlanData; now
             </tr>
           </thead>
           <tbody>
-            <TypedRows plan={plan} nowKey={nowKey} col={col} edit={edit} />
             <CloseRow plan={plan} col={col} edit={edit} actuals={actuals} />
-            {GRID_METRIC_GROUPS.map((g) => (
-              <MetricGroup key={g.label} canEditHint={edit.canEdit} group={g} plan={plan} nowKey={nowKey} actuals={actuals} col={col} onWhy={onWhy} />
-            ))}
+            <SheetRows plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} col={col} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
           </tbody>
         </table>
       </div>
     </div>
-  );
-}
-
-/** The typed lines, one row each, grouped by what they feed, each with its target row under it. Closed months are grey and locked, missing cells of an ended month amber, future months blank. */
-function TypedRows({plan, nowKey, col, edit}: {plan: PlanData; nowKey: string; col: (i: number) => string; edit: Edit}) {
-  return (
-    <>
-      {TYPED_GROUPS.map((g) => (
-        <Fragment key={g.label}>
-          <tr><td className={GROUP_ROW}>{GROUP_TITLE(g.label)}</td><td colSpan={plan.months.length} className="border-b border-border bg-muted" /></tr>
-          {g.ids.map((id) => (
-            <Fragment key={id}>
-            <tr>
-              <th scope="row" className={cn(LABEL_CELL, 'text-[12.5px] font-normal')}>{GRID_LINE_LABEL[id]}{id !== 'opening_cash' && LINE_HINT[id] && <InfoTip text={LINE_HINT[id]} label={`About ${GRID_LINE_LABEL[id]}`} className="ml-0.5" />}{id === 'opening_cash' && <InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="About opening cash" className="ml-0.5" />}</th>
-              {plan.months.map((mo, i) => {
-                const phase = monthPhase(mo, nowKey);
-                const v = edit.lines[id]?.[i] ?? null;
-                const isClosed = !!edit.closes[mo];
-                const base = cn('border-b border-r border-border p-0 text-right', col(i));
-                if (phase === 'future' || (OPENING_IDS.includes(id) && i > 0)) return <td key={mo} className={base} />; // the opening balances live in the first month only
-                const shade = isClosed ? 'bg-muted' : v === null && phase === 'past' && !OPTIONAL_IDS.has(id) ? 'bg-[var(--amber-bg)]' : '';
-                return <TypedCell key={mo} month={mo} metric={id} i={i} plan={plan} nowKey={nowKey} edit={edit} className={cn(base, shade)}>{v === null ? <span className="sr-only">waiting</span> : <span className="block px-2 py-[5px] text-muted-foreground max-md:py-3">{lineInputText(id, v)}</span>}</TypedCell>;
-              })}
-            </tr>
-            {LINE_TARGET_ID[id as keyof typeof LINE_TARGET_ID] && (
-              <tr key={`${id}-plan`} data-testid="line-plan-row" data-line={id}>
-                <th scope="row" className={SUB_CELL}>target{NEUTRAL_LINES.has(id) ? <span className="ml-1 font-normal">(not judged)</span> : null}</th>
-                {plan.months.map((mo, i) => {
-                  const target = plan.targets[LINE_TARGET_ID[id as keyof typeof LINE_TARGET_ID]]?.[i] ?? null;
-                  const actual = edit.lines[id]?.[i] ?? null;
-                  const vr = lineVariance({id, actual, target, phase: monthPhase(mo, nowKey)});
-                  const pct = vr.diff !== null && vr.status !== 'live' && target ? (vr.diff / Math.abs(target)) * 100 : null;
-                  return (
-                    <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground', col(i))}>
-                      {target === null ? <span className="sr-only">no target</span> : toThousands(target)}
-                      {pct !== null && vr.diff !== null && <small data-testid="line-variance" title={`${vr.diff > 0 ? '+' : vr.diff < 0 ? '−' : ''}${toThousands(Math.abs(vr.diff))} against plan${vr.status === 'info' ? '' : vr.status === 'ok' ? ', under plan' : ', over plan'}`} className={cn('ml-1.5 text-[10.5px] font-medium', vr.status === 'ok' && 'text-[var(--status-good)]', vr.status === 'bad' && 'text-[var(--status-crit)]')}>{pct > 0.5 ? '+' : pct < -0.5 ? '−' : ''}{Math.abs(pct).toFixed(0)}%</small>}
-                    </td>
-                  );
-                })}
-              </tr>
-            )}
-            </Fragment>
-          ))}
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
-/** One metric group under the grid: per metric a bold target row, then one indented ACTUAL row coloured against the target (italic while the month is in progress). */
-function MetricGroup({group, plan, nowKey, actuals, col, onWhy, canEditHint}: {canEditHint: boolean; group: {label: string; ids: readonly string[]}; plan: PlanData; nowKey: string; actuals: Actuals; col: (i: number) => string; onWhy: (id: string, i: number) => void}) {
-  return (
-    <>
-      <tr><td className={GROUP_ROW}>{group.label}</td><td colSpan={plan.months.length} className="border-b border-border bg-muted" /></tr>
-      {group.ids.map((id) => {
-        const m = DEF_BY_ID[id];
-        const hint = m.source === 'calc' && m.hint ? m.hint : MEASURE_IDS.has(m.id) && !(actuals[m.id] ?? []).some((c) => c.value !== null) ? (canEditHint ? (m.hint ?? 'Type it in the open cell.') : PLAN_HELP.notTyped) : null;
-        return (
-          <Fragment key={id}>
-            <tr>
-              <th scope="row" className={cn(LABEL_CELL, 'text-[12.5px] font-semibold')}>{m.label}{hint && <InfoTip text={hint} label={`About ${m.label}`} className="ml-0.5" />}</th>
-              {plan.months.map((mo, i) => <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground', col(i))}>{fmtPlan(m.unit, plan.targets[m.id]?.[i])}</td>)}
-            </tr>
-            <tr>
-              <th scope="row" className={cn(SUB_CELL, 'uppercase')}>Actual</th>
-              {plan.months.map((mo, i) => {
-                const s = statusOf(m, plan, i, nowKey, actuals);
-                const c = cellOf(actuals, m.id, i);
-                const click = CLICKABLE.has(m.id) && s === 'bad';
-                const cls = cn('border-b border-r border-border px-2 py-[5px] text-right font-semibold', cellActual(s), s === 'live' && 'font-normal italic', click && 'cursor-pointer hover:outline hover:outline-2 hover:-outline-offset-2 hover:outline-[var(--status-crit)]', col(i));
-                const shown = m.source === 'none' ? <span className="sr-only">no source yet</span>
-                  : c.value === null ? <span className="sr-only">waiting</span>
-                  : <>{fmtPlan(m.unit, c.value)}{c.state === 'partial' && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">partial</span>}{c.state === 'ok' && c.note && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">may overstate</span>}</>;
-                return click
-                  ? <td key={mo} title={c.note ? `${c.note} Click to see why.` : 'Click to see why'} className={cls} onClick={() => onWhy(m.id, i)}>{shown}</td>
-                  : <td key={mo} title={c.note} className={cls}>{shown}</td>;
-              })}
-            </tr>
-          </Fragment>
-        );
-      })}
-    </>
   );
 }
 
@@ -554,28 +352,27 @@ function CloseCell({month, filled, complete, blocker, short, className, edit}: {
   );
 }
 
-export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: savedLines = EMPTY_LINES, sources: savedSources = EMPTY_SOURCES, canEdit = false, parts: savedParts = EMPTY_PARTS, linesNotice = null, closes = EMPTY_CLOSES, today = '', versions = []}: {versions?: PlanVersionInfo[]; parts?: PartsSeries; plan: PlanData; nowKey: string; gmv?: Actuals; lines?: LineSeries; sources?: LineSources; canEdit?: boolean; linesNotice?: string | null; closes?: Record<string, ClosedMonth>; today?: string}) {
+export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: savedLines = EMPTY_LINES, canEdit = false, linesNotice = null, closes = EMPTY_CLOSES, today = '', versions = []}: {versions?: PlanVersionInfo[]; plan: PlanData; nowKey: string; gmv?: Actuals; lines?: LineSeries; canEdit?: boolean; linesNotice?: string | null; closes?: Record<string, ClosedMonth>; today?: string}) {
   const [gmvOpen, setGmvOpen] = useState(false);
   const [reveal, setReveal] = useState<{month: string; n: number} | null>(null);
   const [lines, setLines] = useState<LineSeries>(savedLines);
   useEffect(() => { setLines(savedLines); }, [savedLines]);
-  const [sources, setSources] = useState<LineSources>(savedSources);
-  useEffect(() => { setSources(savedSources); }, [savedSources]);
-  const [parts, setParts] = useState<PartsSeries>(savedParts);
-  useEffect(() => { setParts(savedParts); }, [savedParts]);
-  const [partsOpen, setPartsOpen] = useState<{month: string; line: string} | null>(null);
+  // The INPUTS — DRIVERS block (rows 5 to 46) starts collapsed; Fill in and Enter open it when the next line to type lives there.
+  const [inputsOpen, setInputsOpen] = useState(false);
   const router = useRouter();
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [unlockErr, setUnlockErr] = useState<string | null>(null);
   const [unlockPending, startUnlock] = useTransition();
   // Typed lines and the margins computed from them: recalculated here the moment a save succeeds, so the grid never waits on a refresh.
+  // The itemised rows are typed; their totals (overhead row 39, COGS row 55, content and other) are their sums, never typed (withTotals).
+  const summed = useMemo(() => withTotals(lines), [lines]);
   const actuals = useMemo<Actuals>(() => {
     const typed: Actuals = {};
-    for (const l of [...LINES, ...MEASURE_LINES]) typed[l.id] = plan.months.map((_, i): ActualCell => { const v = lines[l.id]?.[i] ?? null; return v === null ? GAP : {value: v, state: 'ok'}; });
+    for (const id of [...LINES.map((l) => l.id), ...MEASURE_LINES.map((l) => l.id), 'overhead', 'cogs', 'content_other']) typed[id] = plan.months.map((_, i): ActualCell => { const v = summed[id]?.[i] ?? null; return v === null ? GAP : {value: v, state: 'ok'}; });
     const live = applySnapshots(gmv, plan.months, closes); // a closed month's GMV is its snapshot, never live
-    return {...live, ...typed, ...derivedActuals(plan, live, lines)}; // margins, cash, coverage, customers and CAC are derived, never typed
-  }, [gmv, lines, plan, closes]);
+    return {...live, ...typed, ...derivedActuals(plan, live, summed)}; // margins, cash, coverage, customers and CAC are derived, never typed
+  }, [gmv, summed, plan, closes]);
   const queue = useMemo(() => closeQueue(plan.months, closes, today), [plan.months, closes, today]);
   const waiting = closeWaiting(plan.months, closes, today); // the oldest unclosed month: the header Close button starts here
   const fill = queue.find((m) => REQUIRED_COUNT - filledCount(lines, plan.months.indexOf(m)) > 0) ?? null; // the oldest one that still has lines to type: Fill in and the amber ring start here
@@ -584,6 +381,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
   // Fill in / Enter: bring the month into the phone window, put the ring and the tag on the cell, scroll it into view and focus it (Enter focuses at once, Fill in after the scroll).
   const goCell = useCallback((month: string, metric: string, smooth: boolean) => {
     setReveal((r) => ({month, n: (r?.n ?? 0) + 1}));
+    if (blockOf(rowOfLine(metric) ?? 999) === 'inputs') setInputsOpen(true);
     setRing({month, metric});
     const go = (tries: number) => requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(`#all-months [data-month="${month}"][data-line="${metric}"]`); // an input, or the button of a consolidated line
@@ -596,7 +394,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
     go(6);
   }, []);
   const edit = useMemo<Edit>(() => canEdit ? {
-    canEdit: true, lines, sources, closes, today, fill, ring, clearRing, parts, openParts: (month, line) => setPartsOpen({month, line}),
+    canEdit: true, lines: summed, closes, today, fill, ring, clearRing,
     next: (month, metric, treatFilled) => {
       const nx = nextEmptyLine(lines, plan.months.indexOf(month), metric, treatFilled ? metric : undefined);
       if (!nx) return false;
@@ -610,10 +408,9 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
       if (!r.ok) { router.refresh(); return r.error; }
       const i = plan.months.indexOf(month);
       setLines((prev) => ({...prev, [metric]: (prev[metric] ?? plan.months.map(() => null)).map((v, k) => (k === i ? pesos : v))}));
-      if (pesos !== expected) setSources((prev) => ({...prev, [metric]: (prev[metric] ?? plan.months.map(() => null)).map((v, k) => (k === i ? null : v))})); // an admin save replaces the prefill: the tag goes
       return null;
     },
-  } : {...NO_EDIT, lines, sources, closes, today, fill, parts, openParts: (month, line) => setPartsOpen({month, line})}, [canEdit, lines, sources, closes, today, fill, ring, clearRing, goCell, plan.months, router, parts]);
+  } : {...NO_EDIT, lines: summed, closes, today, fill}, [canEdit, lines, summed, closes, today, fill, ring, clearRing, goCell, plan.months, router]);
   const fillIn = (month: string) => goCell(month, nextEmptyLine(lines, plan.months.indexOf(month)) ?? REQUIRED_LINE_ORDER[0], true);
   const unlock = () => {
     if (!unlocking) return;
@@ -701,9 +498,9 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
               <CashChart plan={plan} nowKey={nowKey} actuals={actuals} />
               <StockChart plan={plan} nowKey={nowKey} />
             </div>
-            <div className="mt-3.5 rounded-lg border border-border bg-card p-4">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="font-serif text-base leading-tight">All months<InfoTip text={PLAN_HELP.grid(REQUIRED_COUNT)} label="How to fill the grid" className="ml-1" /></h3>
+            <div className="mt-3.5 rounded-lg border border-border bg-card p-4 max-md:px-0">
+              <div className="mb-2 flex items-center justify-between gap-2 max-md:px-3">
+                <h3 className="font-serif text-base leading-tight">All months<InfoTip text={PLAN_HELP.grid(REQUIRED_COUNT)} label="How to fill the grid" className="ml-1" /><InfoTip text={PLAN_HELP.sheet} label="How the Business Plan rows are judged" className="ml-0.5" /></h3>
               </div>
               {unlocking && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2" data-testid="unlock-panel">
@@ -720,33 +517,11 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
                 </div>
               )}
 
-              <Grid plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} reveal={reveal} onWhy={onWhy} />
+              <Grid plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} reveal={reveal} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
             </div>
           </div>
         )}
       </section>
-      {partsOpen && (() => {
-        const {month, line} = partsOpen;
-        const i = plan.months.indexOf(month);
-        const total = lines[line]?.[i] ?? null;
-        const saved = parts[line]?.[i] ?? undefined;
-        const ok = consistentParts(line, total, saved);
-        const closed = !!closes[month];
-        const lineTarget = plan.targets[LINE_TARGET_ID[line as keyof typeof LINE_TARGET_ID]]?.[i] ?? null;
-        return <PartsModal key={`${month}-${line}`} month={month} monthLabel={monthLabel(month)} line={line} lineLabel={GRID_LINE_LABEL[line] ?? line} total={total} parts={ok ? saved ?? null : null}
-          targets={partTargets(line, i, lineTarget, plan.partTargets ?? {})} lineTarget={lineTarget} readOnly={!canEdit || closed} closed={closed} canUnlock={canEdit}
-          onClose={() => setPartsOpen(null)} onUnlock={() => edit.askUnlock(month)}
-          saveParts={async (pesos) => {
-            const r = await savePlanPartsAction({month, line, parts: pesos, expected: total});
-            if (!r.ok) { router.refresh(); return r.error; }
-            const sum = sumPesos(Object.values(pesos));
-            setLines((prev) => ({...prev, [line]: (prev[line] ?? plan.months.map(() => null)).map((v, k) => (k === i ? sum : v))}));
-            setParts((prev) => ({...prev, [line]: (prev[line] ?? plan.months.map(() => null)).map((v, k) => (k === i ? pesos : v))}));
-            setSources((prev) => ({...prev, [line]: (prev[line] ?? plan.months.map(() => null)).map((v, k) => (k === i ? null : v))}));
-            return null;
-          }}
-          saveTotal={(pesos) => edit.save(month, line, pesos, total)} />;
-      })()}
     </div>
   );
 }

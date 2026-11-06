@@ -9,9 +9,8 @@
 // Env: SUPABASE_URL_ARCHIVE and SUPABASE_SERVICE_ROLE_KEY_ARCHIVE (the local stack: `set -a; . scripts/local-supabase/.local-env; set +a`).
 // What it loads, all idempotent (a re-run changes nothing, and never overwrites a value an admin edited):
 //   plan_versions     one version `vSept26`
-//   plan_targets      the monthly targets, plus the two scalar inputs repeat_rate and aov (the same value every month)
-//   plan_part_targets the per-part targets behind overhead, COGS and content and other (supabase/plan_part_targets.sql)
-//   plan_actuals      the three known prefills, through the plan_seed_actual RPC (opening stock, opening customers, Sep'26 funding tagged owner)
+//   plan_targets      a target series for EVERY value row of the Business Plan sheet, rows 4 to 125 (src/plan-sheet.json); settings and market sizing repeat their one value every month
+// It writes NO actual: every workbook value is a plan figure (BHR-06, knowledge/lessons/plan-workbook-is-targets-only.md). Actuals are typed by an admin or read from Coop's sources.
 // It prints counts only, never a figure.
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -25,13 +24,11 @@ const COVERAGE_NOTE = 'one constant in the workbook (row 45), repeated for every
 const BATCH = 500;
 
 /** Pure. The parsed workbook -> the rows to insert. Nothing here knows a number. */
-export function buildRows({months, targets, partTargets, assumptions, prefills}) {
+export function buildRows({months, targets, assumptions}) {
   const targetRows = [];
-  for (const [metric, series] of Object.entries(targets)) series.forEach((value, i) => targetRows.push({month: months[i], metric, value, note: metric === 'coverage' ? COVERAGE_NOTE : null}));
-  for (const [metric, value] of Object.entries(assumptions)) months.forEach((month) => targetRows.push({month, metric, value, note: 'scalar workbook input, repeated for every month'}));
-  const partRows = [];
-  for (const [line, parts] of Object.entries(partTargets)) for (const [part, series] of Object.entries(parts)) series.forEach((value, i) => partRows.push({month: months[i], line, part, value}));
-  return {targetRows, partRows, prefills: prefills.map((p) => ({month: p.month, metric: p.metric, amount: p.amountPhp, source: p.source}))};
+  for (const [metric, series] of Object.entries(targets)) series.forEach((value, i) => { if (value !== null) targetRows.push({month: months[i], metric, value, note: metric === 'coverage' ? COVERAGE_NOTE : null}); });
+  for (const [metric, value] of Object.entries(assumptions)) if (!(metric in targets)) months.forEach((month) => targetRows.push({month, metric, value, note: 'scalar workbook input, repeated for every month'}));
+  return {targetRows};
 }
 
 /** Pure. Why this URL may not be written to, or null when it may. A non-local project needs BOTH the flag and the env switch. Never echoes the URL. */
@@ -51,7 +48,7 @@ async function main(argv, env) {
   if (!file) fail('usage: node scripts/seed-plan-from-workbook.mjs "<workbook.xlsx>" [--apply] [--allow-hosted-staging]');
   const parsed = await readWorkbook(path.resolve(file));
   const rows = buildRows(parsed);
-  console.log(`workbook ok: ${parsed.months.length} months, ${Object.keys(parsed.targets).length} target metrics, ${Object.keys(parsed.assumptions).length} scalar inputs, ${rows.partRows.length} part-target rows, ${rows.prefills.length} prefills`);
+  console.log(`workbook ok: ${parsed.months.length} months, ${Object.keys(parsed.targets).length} target metrics, ${Object.keys(parsed.assumptions).length} scalar inputs, no actuals (the itemised rows' targets are sheet rows r33-r38, r52-r54, r69, r70)`);
 
   const url = env.SUPABASE_URL_ARCHIVE, key = env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE;
   const refusal = urlRefusal(url, {allowHostedFlag: argv.includes('--allow-hosted-staging'), env});
@@ -75,18 +72,8 @@ async function main(argv, env) {
     const r = await sb.from('plan_targets').upsert(part.map((t) => ({plan_version: versionId, ...t})), {onConflict: 'plan_version,month,metric', ignoreDuplicates: true});
     if (r.error) fail(`plan_targets write failed: ${r.error.message}`);
   }
-  for (const part of chunks(rows.partRows, BATCH)) {
-    const r = await sb.from('plan_part_targets').upsert(part, {onConflict: 'month,line,part', ignoreDuplicates: true});
-    if (r.error) fail(`plan_part_targets write failed (is supabase/plan_part_targets.sql applied?): ${r.error.message}`);
-  }
-  let seeded = 0;
-  for (const p of rows.prefills) {
-    const r = await sb.rpc('plan_seed_actual', {p_month: p.month, p_metric: p.metric, p_amount: p.amount, p_source: p.source, p_by: 'seed'});
-    if (r.error) fail(`plan_seed_actual ${p.metric} failed: ${r.error.message}`);
-    if (r.data?.seeded) seeded++;
-  }
   const after = (await sb.from('plan_targets').select('metric', {count: 'exact', head: true}).eq('plan_version', versionId)).count ?? 0;
-  console.log(`applied: version ${LABEL} now has ${after} target rows, part targets written, ${seeded} of ${rows.prefills.length} prefills newly seeded (the rest were already there or were edited by an admin)`);
+  console.log(`applied: version ${LABEL} now has ${after} target rows, no actuals written`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main(process.argv.slice(2), process.env);

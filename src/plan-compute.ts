@@ -1,6 +1,8 @@
 // Business Health Report: pure plan-vs-actual logic. No I/O. Money is in pesos (the workbook's thousands are converted once, in the seed).
 // Green = met or beat, red = missed, grey = waiting / no source / future / month in progress. Nothing here invents an actual.
 
+import SHEET_JSON from './plan-sheet.json';
+
 export type PlanUnit = 'php' | 'pct' | 'x' | 'peso' | 'count' | 'months';
 /** coop = pulled from Coop's readers (BHR-02), typed = entered by an admin (BHR-03), calc = computed by the workbook's own formula from the other lines, none = no source today. */
 export type ActualSource = 'coop' | 'typed' | 'calc' | 'none';
@@ -123,8 +125,6 @@ export interface PlanData {
   versionId?: number | null;
   months: string[];
   targets: Record<string, (number | null)[]>;
-  /** Per-part targets behind the consolidated lines (line -> part -> value per month index, pesos), loaded privately into plan_part_targets. Empty when none are loaded. */
-  partTargets?: Record<string, Record<string, (number | null)[]>>;
 }
 
 /** The plan months (Aug 2026 to Dec 2027, 17 of them): the page layout when no target is stored yet (mock mode, a fresh database). Dates only, no figure. */
@@ -132,29 +132,30 @@ export const PLAN_MONTHS: readonly string[] = Array.from({length: 17}, (_, i) =>
 
 /** Plan rows that feed a chart, not a grid row: the workbook's inventory purchases (row 41, the stock orders needed to hold the coverage target). */
 export const PLAN_EXTRA_TARGETS: readonly string[] = ['inv_purchases', 'repeat_rate', 'aov'];
-/** The plan target each typed line is judged against (workbook rows 39, 41, 55, 59-61, 66-70, 87-89, loaded by scripts/seed-plan-from-workbook.mjs). Stock bought is the workbook's inventory-purchases row. */
+/** The plan target each typed line is judged against: its own sheet row (33-38, 41, 52-54, 59-61, 66-70, 87-89, loaded by scripts/seed-plan-from-workbook.mjs). Stock bought is the workbook's inventory-purchases row. */
 export const LINE_TARGET_ID: Record<LineId, string> = {
-  overhead: 'overhead', bridge_funding: 'bridge_funding', liability_settlement: 'liability_settlement', freight_onetime: 'freight_onetime', inv_purchases_paid: 'inv_purchases',
-  cogs: 'cogs', platform_fees: 'platform_fees', fulfilment: 'fulfilment', event_costs: 'event_costs', ad_marketplace: 'ad_marketplace', ad_website: 'ad_website', event_marketing: 'event_marketing', content_other: 'content_other',
+  salaries: 'r33', rent: 'r34', accounting: 'r35', tech: 'r36', growth_consultant: 'r37', rnd: 'r38',
+  marketplace_cogs: 'r52', website_cogs: 'r53', events_cogs: 'r54', content_socials: 'r69', other_spend: 'r70',
+  bridge_funding: 'bridge_funding', liability_settlement: 'liability_settlement', freight_onetime: 'freight_onetime', inv_purchases_paid: 'inv_purchases',
+  platform_fees: 'platform_fees', fulfilment: 'fulfilment', event_costs: 'event_costs', ad_marketplace: 'ad_marketplace', ad_website: 'ad_website', event_marketing: 'event_marketing',
 };
 /** Cash-flow lines are shown against their plan but never judged red or green: funding is not a cost, and a payment or stock order above plan is not by itself bad. */
 export const NEUTRAL_LINES: ReadonlySet<string> = new Set(['bridge_funding', 'liability_settlement', 'freight_onetime', 'inv_purchases_paid']);
-/** Actual minus plan for one typed line, and how to colour it: costs are lower-is-better (over plan is bad), the cash-flow lines are never judged. */
-export function lineVariance(i: {id: string; actual: number | null; target: number | null; phase: MonthPhase}): {diff: number | null; status: Status} {
-  const status = metricStatus({direction: 'lower', actual: i.actual, target: i.target, phase: i.phase, hasSource: true, informational: NEUTRAL_LINES.has(i.id)});
-  return {diff: i.actual === null || i.target === null ? null : i.actual - i.target, status};
-}
 /** Planned stock purchases per month, as the plan has them (null = the plan has no value). */
 export const stockOrderSeries = (plan: {targets: Record<string, (number | null)[]>}): (number | null)[] => plan.targets.inv_purchases ?? [];
 
 export interface PlanTargetRow {month: string; metric: string; value: number | string | null}
 
+/** A Business Plan sheet row's target id: the page's own id where it has one (gmv_total, cash, ...), else `r<row>` (BHR-06, src/plan-sheet.json). */
+export const sheetTargetId = (r: {row: number; id?: string}): string => r.id ?? `r${r.row}`;
+/** Every sheet row that holds a value: the plan keeps a target series for each. */
+const extraTargetIds: readonly string[] = (SHEET_JSON as {row: number; id?: string; unit?: string}[]).filter((r) => r.unit).map(sheetTargetId);
 /** Rows of one plan version -> PlanData. Months come from the rows, sorted; a metric with no row in a month is null (a gap, never 0). */
 export function assemblePlan(label: string, rows: readonly PlanTargetRow[], versionId: number | null = null, fallbackMonths: readonly string[] = []): PlanData {
   const fromRows = [...new Set(rows.map((r) => r.month))].sort();
   const months = fromRows.length ? fromRows : [...fallbackMonths];
   const targets: Record<string, (number | null)[]> = {};
-  for (const id of [...METRICS.map((m) => m.id), ...PLAN_EXTRA_TARGETS, ...Object.values(LINE_TARGET_ID)]) targets[id] = months.map(() => null);
+  for (const id of [...METRICS.map((m) => m.id), ...PLAN_EXTRA_TARGETS, ...Object.values(LINE_TARGET_ID), ...extraTargetIds]) targets[id] = months.map(() => null);
   for (const r of rows) {
     const series = targets[r.metric];
     if (!series || r.value === null) continue; // an unknown metric id is ignored, not rendered
@@ -170,49 +171,64 @@ export function assemblePlan(label: string, rows: readonly PlanTargetRow[], vers
  * workbook computes by formula (margins, EBITDA, cash, inventory, coverage, customers, CAC) is NOT typed: it is derived below from these and the GMV readers.
  * Typed in thousands of pesos, stored in pesos, never negative.
  */
-export type LineId = 'overhead' | 'bridge_funding' | 'liability_settlement' | 'freight_onetime' | 'inv_purchases_paid' | 'cogs' | 'platform_fees' | 'fulfilment' | 'event_costs' | 'ad_marketplace' | 'ad_website' | 'event_marketing' | 'content_other';
+export type LineId = 'salaries' | 'rent' | 'accounting' | 'tech' | 'growth_consultant' | 'rnd' | 'marketplace_cogs' | 'website_cogs' | 'events_cogs' | 'content_socials' | 'other_spend'
+  | 'bridge_funding' | 'liability_settlement' | 'freight_onetime' | 'inv_purchases_paid' | 'platform_fees' | 'fulfilment' | 'event_costs' | 'ad_marketplace' | 'ad_website' | 'event_marketing';
 export interface LineDef {id: LineId; label: string}
+/**
+ * Where the sheet itemises a cost, so does Coop (owner, 2026-11-06): each sheet row is its own typed line. Overhead is rows 33 to 38, COGS rows 52 to 54,
+ * content and other rows 69 and 70. Their totals (row 39, row 55, content and other) are computed by withTotals, never typed.
+ */
 export const LINES: readonly LineDef[] = [
-  {id: 'overhead', label: 'Fixed overhead'},
+  {id: 'salaries', label: 'Salaries'}, {id: 'rent', label: 'Rent'}, {id: 'accounting', label: 'Accounting'}, {id: 'tech', label: 'Tech costs'},
+  {id: 'growth_consultant', label: 'Growth consultant'}, {id: 'rnd', label: 'R&D / product dev, testing and sampling'},
   {id: 'bridge_funding', label: 'Bridge funding in'},
   {id: 'liability_settlement', label: 'Liability settlement (one-time)'},
   {id: 'freight_onetime', label: 'Large shipping / freight (one-time)'},
   {id: 'inv_purchases_paid', label: 'Inventory purchases paid'},
-  {id: 'cogs', label: 'COGS'},
+  {id: 'marketplace_cogs', label: 'Marketplace COGS'}, {id: 'website_cogs', label: 'Website COGS'}, {id: 'events_cogs', label: 'Events COGS'},
   {id: 'platform_fees', label: 'Platform fees'},
   {id: 'fulfilment', label: 'Fulfilment'},
   {id: 'event_costs', label: 'Event costs'},
   {id: 'ad_marketplace', label: 'Marketplace ad spend'},
   {id: 'ad_website', label: 'Website ad spend'},
   {id: 'event_marketing', label: 'Event marketing'},
-  {id: 'content_other', label: 'Content, socials, other'},
+  {id: 'content_socials', label: 'Content and socials'}, {id: 'other_spend', label: 'Other spend'},
 ];
+/** The computed totals and the typed rows each one sums (row 39 = rows 33-38, row 55 = rows 52-54, content and other = rows 69 + 70). */
+export const TOTAL_LINES: Readonly<Record<'overhead' | 'cogs' | 'content_other', readonly LineId[]>> = {
+  overhead: ['salaries', 'rent', 'accounting', 'tech', 'growth_consultant', 'rnd'],
+  cogs: ['marketplace_cogs', 'website_cogs', 'events_cogs'],
+  content_other: ['content_socials', 'other_spend'],
+};
+/**
+ * The typed lines plus their computed totals, which every formula reads (margins, cash, CAC). A total is the sum of its rows in a month only when every
+ * row is typed (a real 0 counts); one blank row leaves it null (waiting), never 0. A stored parent value is ignored: the parent is never typed.
+ */
+export function withTotals(lines: LineSeries): LineSeries {
+  const out: Record<string, (number | null)[] | undefined> = {...lines};
+  for (const [total, rows] of Object.entries(TOTAL_LINES)) {
+    const n = Math.max(0, ...rows.map((r) => lines[r]?.length ?? 0));
+    out[total] = Array.from({length: n}, (_, i) => {
+      let t = 0;
+      for (const r of rows) { const v = lines[r]?.[i]; if (typeof v !== 'number') return null; t += v; }
+      return Math.round(t * 100) / 100; // whole centavos, so 0.1 + 0.2 is 0.3
+    });
+  }
+  return out;
+}
 export const LINE_IDS: readonly string[] = LINES.map((l) => l.id);
 /** How many typed lines a month needs before it can close. */
 export const REQUIRED_COUNT = LINES.length;
 
-/** The typed lines in the All months grid, in the approved artifact's order: overhead, what feeds each margin, then the cash-flow inputs (opening cash is typed first in that group). */
-export const LINE_GROUPS: readonly {label: string; ids: readonly LineId[]}[] = [
-  {label: 'overhead', ids: ['overhead']},
-  {label: 'feeds CM1', ids: ['cogs']},
-  {label: 'feeds CM2', ids: ['platform_fees', 'fulfilment', 'event_costs']},
-  {label: 'feeds CM3', ids: ['ad_marketplace', 'ad_website', 'event_marketing', 'content_other']},
-  {label: 'cash flow items', ids: ['inv_purchases_paid', 'bridge_funding', 'liability_settlement', 'freight_onetime']},
-];
 /** Row labels of the typed lines in the grid (the prototype's wording; LINES keeps the short names used elsewhere). */
 export const GRID_LINE_LABEL: Record<string, string> = {
   roas: 'ROAS: paid GMV per peso of ad spend', opening_cash: 'Opening cash (bank balance at Aug 1)', opening_inventory: 'Opening stock at Aug 1', opening_customers: 'Opening active customers at Aug 1',
   bridge_funding: 'Bridge funding in', liability_settlement: 'Liability settlement (one-time)', freight_onetime: 'Large shipping / freight (one-time)', inv_purchases_paid: 'Stock bought (inventory purchases paid)',
-  overhead: 'Fixed overhead', cogs: 'Cost of goods sold', platform_fees: 'Platform fees paid', fulfilment: 'Fulfilment and delivery cost',
-  event_costs: 'Event costs', ad_marketplace: 'Marketplace ad spend', ad_website: 'Website ad spend', event_marketing: 'Event marketing', content_other: 'Content, socials and other spend',
+  salaries: 'Salaries', rent: 'Rent', accounting: 'Accounting', tech: 'Tech costs', growth_consultant: 'Growth consultant', rnd: 'R&D / product dev, testing and sampling',
+  overhead: 'Total company overhead', marketplace_cogs: 'Marketplace COGS', website_cogs: 'Website COGS', events_cogs: 'Events COGS', cogs: 'Total COGS',
+  platform_fees: 'Platform fees paid', fulfilment: 'Fulfilment and delivery cost',
+  event_costs: 'Event costs', ad_marketplace: 'Marketplace ad spend', ad_website: 'Website ad spend', event_marketing: 'Event marketing', content_socials: 'Content and socials spend', other_spend: 'Other spend', ad_total: 'Total ad spend',
 };
-/** The metric rows under KEY METRICS, in the prototype's order and grouping. */
-export const GRID_METRIC_GROUPS: readonly {label: string; ids: readonly string[]}[] = [
-  {label: 'Key metrics', ids: ['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace']},
-  {label: 'Cash and stock', ids: ['cash', 'coverage']},
-  {label: 'Margin and efficiency', ids: ['cm1_pct', 'cm1', 'cm2_pct', 'cm2', 'cm3_pct', 'cm3', 'overhead', 'ebitda', 'ebitda_pct', 'roas', 'cac']},
-  {label: 'Customers', ids: ['customers']},
-];
 
 /** Server-side check of one typed value (pesos). null = clearing the cell. Returns an error message, or null when fine. */
 export function validateLine(metric: unknown, amount: unknown): string | null {
@@ -261,19 +277,16 @@ export const OPENING_IDS: readonly string[] = ['opening_cash', 'opening_inventor
 /** Opening cash is the bank balance at the START of the first plan month: the workbook has no such cell (row 90 starts from 0), so Coop asks for it once. The only typed value that may be negative. */
 export const MEASURE_LINES: readonly MeasureLineDef[] = [
   {id: 'roas', label: 'ROAS', unit: 'x'}, {id: 'opening_cash', label: 'Opening cash', unit: 'php'},
-  // Opening stock and opening customers are workbook facts the private loader prefills (plan_seed_actual) and an admin may correct; until one exists the stock and customer rows wait. First month only, never needed to close.
+  // Opening stock and opening customers are typed by an admin (the workbook's values are plan assumptions, never actuals: BHR-06); until one is typed the stock and customer rows wait. First month only, never needed to close.
   {id: 'opening_inventory', label: 'Opening stock', unit: 'php'}, {id: 'opening_customers', label: 'Opening customers', unit: 'count'},
 ];
 export const ALL_LINE_IDS: readonly string[] = [...LINE_IDS, ...MEASURE_LINES.map((l) => l.id)];
-export const MEASURE_GROUP: {label: string; ids: readonly MeasureLineDef['id'][]} = {label: 'efficiency', ids: ['roas']};
 const measureOf = (id: string) => MEASURE_LINES.find((l) => l.id === id);
 /** Unit a line is typed and stored in. The lines are typed in thousands of pesos and stored in pesos; ROAS is typed and stored as it is. */
 export const lineUnit = (id: string): PlanUnit => measureOf(id)?.unit ?? 'php';
 
 /** Typed lines by month: line id -> value per month (null = empty). */
 export type LineSeries = Partial<Record<string, (number | null)[]>>;
-/** Provenance of a prefilled cell by line and month ('workbook' | 'owner'); null = typed by an admin. */
-export type LineSources = Partial<Record<string, (string | null)[]>>;
 
 /** True when every typed line holds a value in month i (a real 0 counts). */
 export const monthComplete = (lines: LineSeries, i: number): boolean => LINES.every((l) => typeof lines[l.id]?.[i] === 'number');
@@ -364,8 +377,9 @@ export function lastPastMonths(months: readonly string[], nowKey: string): numbe
   return past.slice(-3);
 }
 
-/** The lines that close a month, in grid order: the order Enter and "Fill in" walk. */
-export const REQUIRED_LINE_ORDER: readonly string[] = LINE_GROUPS.flatMap((g) => g.ids);
+/** The lines that close a month, in sheet row order (33-38, 41, 52-54, 59-61, 66-70, 87-89): the order Enter and "Fill in" walk. */
+const SHEET_ROW_OF = new Map((SHEET_JSON as {row: number; id?: string; unit?: string}[]).filter((r) => r.unit).map((r) => [sheetTargetId(r), r.row]));
+export const REQUIRED_LINE_ORDER: readonly string[] = LINES.map((l) => l.id).sort((a, b) => (SHEET_ROW_OF.get(LINE_TARGET_ID[a]) ?? 0) - (SHEET_ROW_OF.get(LINE_TARGET_ID[b]) ?? 0));
 /**
  * The next still-empty required line of month i, walking the grid order from just after `after` and wrapping (so the cell you are on comes last).
  * `treatFilled` = a line being saved right now (typed but not back from the server yet). Null when all are in. A real 0 counts as filled.
@@ -472,17 +486,11 @@ export function overlayClosedTargets(plan: PlanData, closes: Readonly<Record<str
 
 /* ---------- Derived rows: everything the workbook computes by formula is computed here by the same formula, never typed ---------- */
 
-/** Where a prefilled cell came from: 'workbook' = a fact from the plan workbook, 'owner' = also confirmed by the owner. The values are loaded privately (scripts/seed-plan-from-workbook.mjs through plan_seed_actual): none is in the repo. */
-export type PrefillSource = 'workbook' | 'owner';
 /** The customer roll's two scalar inputs, read from the plan targets repeat_rate and aov (loaded from the workbook). Null = not loaded: customers and CAC wait. */
 export interface CustomerAssumptions {repeatRate: number | null; aov: number | null}
 export const assumptionsOf = (plan: {targets: Record<string, (number | null)[]>}): CustomerAssumptions => ({
   repeatRate: plan.targets.repeat_rate?.find((v) => v !== null) ?? null, aov: plan.targets.aov?.find((v) => v !== null) ?? null,
 });
-/** The tag a prefilled cell carries (a typed cell has none): `short` is shown in the cell, `full` is its tooltip. */
-export function prefillTag(source: string | null | undefined): {short: string; full: string} | null {
-  return source === 'workbook' ? {short: 'workbook', full: 'from workbook'} : source === 'owner' ? {short: 'owner', full: 'per owner, from workbook'} : null;
-}
 
 /**
  * Workbook row 90 (cash, month end) = previous cash + row 86 + funding (87) − settlement (88) − freight (89), with row 86 = EBITDA + COGS − inventory purchases
@@ -546,33 +554,37 @@ export function coverageSeries(onHand: readonly ActualCell[], nextCogs: readonly
  * Needs the marketplace and website GMV of this month and every earlier one (a gap waits, a partial GMV is partial), and for CAC all four ad lines.
  * Cohorts need GMV only, so a month with no ad spend typed still has its customers.
  */
-export function customerSeries(gmvMarketplace: readonly ActualCell[], gmvWebsite: readonly ActualCell[], lines: LineSeries, assume: CustomerAssumptions): {customers: ActualCell[]; cac: ActualCell[]} {
-  const customers: ActualCell[] = [], cac: ActualCell[] = [];
+export function customerSeries(gmvMarketplace: readonly ActualCell[], gmvWebsite: readonly ActualCell[], lines: LineSeries, assume: CustomerAssumptions): {customers: ActualCell[]; cac: ActualCell[]; newCustomers: ActualCell[]; repeatGmv: ActualCell[]; newGmv: ActualCell[]} {
+  const customers: ActualCell[] = [], cac: ActualCell[] = [], newCustomers: ActualCell[] = [], repeatGmv: ActualCell[] = [], newGmv: ActualCell[] = [];
+  const gap3 = () => { newCustomers.push(GAP); repeatGmv.push(GAP); newGmv.push(GAP); };
   let base: number | null = lines.opening_customers?.[0] ?? null, partial = false;
   const adIds = ['ad_marketplace', 'ad_website', 'event_marketing', 'content_other'];
   gmvMarketplace.forEach((m, i) => {
     const w = gmvWebsite[i] ?? GAP;
-    if (base === null) { customers.push(GAP); cac.push(GAP); return; }
+    if (base === null) { customers.push(GAP); cac.push(GAP); gap3(); return; }
     customers.push({value: base, state: partial ? 'partial' : 'ok', ...(partial ? {note: 'Understated: a GMV channel was missing in an earlier month.'} : {})});
-    if (m.value === null || w.value === null || assume.repeatRate === null || assume.aov === null) { base = null; cac.push(GAP); return; }
+    if (m.value === null || w.value === null || assume.repeatRate === null || assume.aov === null) { base = null; cac.push(GAP); gap3(); return; }
     const repeat = base * assume.repeatRate * assume.aov;
-    const fresh = Math.max(0, m.value + w.value - repeat) / assume.aov;
+    const freshGmv = Math.max(0, m.value + w.value - repeat);
+    const fresh = freshGmv / assume.aov;
     const isPartial = partial || m.state === 'partial' || w.state === 'partial';
+    const c = (value: number): ActualCell => (isPartial ? {value, state: 'partial', note: 'Understated: a GMV channel is missing.'} : {value, state: 'ok'});
+    repeatGmv.push(c(repeat)); newGmv.push(c(freshGmv)); newCustomers.push(c(fresh));
     const ads = adIds.map((id) => lines[id]?.[i] ?? null);
     cac.push(ads.some((a) => a === null) || fresh <= 0 ? GAP : {value: (ads as number[]).reduce((t, v) => t + v, 0) / fresh, state: isPartial ? 'partial' : 'ok', ...(isPartial ? {note: 'CAC is overstated: a GMV channel is missing.'} : {})});
     base += fresh;
     partial = isPartial;
   });
-  return {customers, cac};
+  return {customers, cac, newCustomers, repeatGmv, newGmv};
 }
 
-/** Every actual Coop derives (not typed, not read from a source): margins, cash, coverage, active customers and CAC. `live` = GMV cells by metric id (after closed-month snapshots), `lines` = pesos. */
+/** Every actual Coop derives (not typed, not read from a source): margins, cash, stock on hand, coverage, the customer roll (rows 113, 122-124) and CAC. `live` = GMV cells by metric id (after closed-month snapshots), `lines` = pesos. */
 export function derivedActuals(plan: {months: readonly string[]; targets: Record<string, (number | null)[]>}, live: Readonly<Record<string, ActualCell[]>>, lines: LineSeries): Record<string, ActualCell[]> {
   const pad = (id: string): ActualCell[] => plan.months.map((_, i) => live[id]?.[i] ?? GAP);
   const margins = marginCells(pad('gmv_total'), lines);
   const onHand = inventorySeries(lines, plan.months.length);
-  const {customers, cac} = customerSeries(pad('gmv_marketplace'), pad('gmv_website'), lines, assumptionsOf(plan));
-  return {...margins, cash: cashSeries(margins.ebitda, lines), coverage: coverageSeries(onHand, plannedCogs(plan)), customers, cac};
+  const {customers, cac, newCustomers, repeatGmv, newGmv} = customerSeries(pad('gmv_marketplace'), pad('gmv_website'), lines, assumptionsOf(plan));
+  return {...margins, cash: cashSeries(margins.ebitda, lines), on_hand: onHand, coverage: coverageSeries(onHand, plannedCogs(plan)), customers, cac, new_customers: newCustomers, repeat_gmv: repeatGmv, new_gmv: newGmv};
 }
 
 /** The one header button for the month whose close is waiting: named for the month, quiet (blocked) with the reason when it cannot close yet. Null = no button. */
