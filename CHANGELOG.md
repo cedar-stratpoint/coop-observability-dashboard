@@ -24,6 +24,8 @@ On the review page the "Page 21 of 98" sat as faint breadcrumb text next to the 
 
 - **Chart y-axis fixed** (owner: "sure ka tama to?"): the cash chart read 0k, 0k, 1k, 1k, 2k because its gridlines sat on padded, un-round values and each label was rounded to the nearest thousand. Both hand-drawn charts (cash, target stock orders) now use round steps from `src/plan-axis.ts` and labels keep the decimals their step needs (0, 500, 1k, 1.5k, 2k).
 
+- **Equal is met, also against a rounded target** (owner check: Aug'26 filled with the workbook's own values): CM3 %, EBITDA % and break-even ROAS were red. The loader stores targets rounded to 6 decimals while the page works actuals out at full precision, so equal missed by under 0.000001. The judge now allows that stored rounding (`STORED` in `src/plan-sheet.ts`); a real miss is still a miss.
+
 ## 2026-11-06 — Health report SQL: one file, final schema only
 
 - **Decision: ship the final schema, not the local iterations.** No hosted database ever had the plan tables (staging checked: `to_regclass('public.plan_actuals')` is NULL; PROD is never touched), so there is nothing to migrate and nothing to drop. `supabase/plan_report.sql` is now the only plan SQL file: the five tables, the four RPCs, RLS on with no policies, anon and authenticated revoked. RPC behaviour is unchanged.
