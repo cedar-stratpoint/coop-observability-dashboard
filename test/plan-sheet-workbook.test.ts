@@ -111,18 +111,49 @@ describe.skipIf(!hasWb)("the sheet's derived actual rows use the workbook's own 
   const plan = {months: A.months.map(() => ''), targets};
   const actuals = hasWb ? sheetActuals(plan, {...gmv, ...derivedActuals(plan, gmv, lines)}, lines) : {};
   const rows = [8, 12, 24, 25, 26, 30, 33, 38, 39, 52, 53, 54, 55, 58, 69, 70, 71, 74, 77, 81, 83, 84, 85, 86, 90, 91, 94, 95, 113, 114, 115, 121, 122, 123, 124, 125];
-  it.each(rows)('row %i equals the workbook in every month it can be computed', (r) => {
+  // The only months Coop cannot compute (L2: asserted, not skipped): the first month of a growth row (no month before it), the last month of forward
+  // coverage and its check (the sheet divides by a COGS beyond the plan), and channel COGS % where that channel's GMV is 0 (a divide by zero).
+  const zeroGmv = (r: number) => num(r).flatMap((v, i) => (v === 0 ? [i] : []));
+  const NULL_MONTHS: Record<number, () => number[]> = {8: () => [0], 12: () => [0], 84: () => [16], 85: () => [16], 24: () => zeroGmv(48), 25: () => zeroGmv(49), 26: () => zeroGmv(50)};
+  it.each(rows)('row %i equals the workbook in every month, and waits only where the sheet has inputs Coop does not hold', (r) => {
     const row = SHEET_ROWS.find((x) => x.row === r)!;
     const scale = row.unit === 'check' ? 1 : unitScale(row.unit!);
     const want = val(r);
+    const got = actuals[r] ?? [];
+    expect(got, `row ${r} has a cell per month`).toHaveLength(17);
+    const nulls = got.flatMap((c, i) => (c.value === null ? [i] : []));
+    expect(nulls, `row ${r} waiting months`).toEqual(NULL_MONTHS[r]?.() ?? []);
     const diffs: string[] = [];
-    (actuals[r] ?? []).forEach((c, i) => {
-      if (c.value === null) return; // the first month of a growth row, the last month of coverage: the sheet uses inputs Coop does not hold
+    got.forEach((c, i) => {
+      if (c.value === null) return;
       const w = row.unit === 'check' ? (String(want[i]).startsWith('OK') ? 1 : 0) : num(r)[i] * scale;
       if (!close(c.value, w)) diffs.push(`month ${i}`);
     });
-    expect((actuals[r] ?? []).filter((c) => c.value !== null).length, `row ${r} computes something`).toBeGreaterThan(0);
     expect(diffs, `row ${r}`).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasWb)("M4 / L5: the row map carries the sheet's own number format", () => {
+  it('fmt is the number format of the monthly cells (column C for a single value); fmtFirst is column C where it differs', async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(WORKBOOK as string);
+    const ws = wb.getWorksheet('Business Plan')!;
+    const fmtOf = (r: number, c: string) => ws.getCell(`${c}${r}`).numFmt ?? 'General';
+    const plain = (f: string | undefined) => f?.replace(/\\/g, ''); // ExcelJS drops the format code's backslash escapes; the map keeps the raw code
+    const bad: string[] = [];
+    for (const r of SHEET_ROWS.filter((x) => x.unit && x.unit !== 'check')) {
+      const single = r.kind === 'static' || !!r.single;
+      const monthly = fmtOf(r.row, single ? 'C' : 'D');
+      if (plain(r.fmt) !== monthly) bad.push(`row ${r.row} fmt`);
+      const first = fmtOf(r.row, 'C');
+      if (plain(r.fmtFirst ?? r.fmt) !== first) bad.push(`row ${r.row} fmtFirst`);
+    }
+    expect(bad).toEqual([]);
+  });
+  it('rows 47 and 80 repeat the month headings in the sheet (L4)', () => {
+    for (const r of [47, 80]) expect(SHEET_ROWS.find((x) => x.row === r)!.months, `row ${r}`).toBe(true);
+    expect(SHEET_ROWS.filter((x) => x.months).map((x) => x.row)).toEqual([47, 80]);
+    for (const r of [47, 80]) for (const c of COLS) expect(String(audit(r)?.cells.find((x) => x.c === c)?.f ?? ''), `${c}${r}`).toMatch(/^=?[A-Z]+(4|47)$/);
   });
 });
 

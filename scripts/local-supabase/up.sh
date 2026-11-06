@@ -91,7 +91,7 @@ apply_sql() {
   local f out v
   # The explore views and pos_orders_completed depend on the pos_* tables, which scripts/coop-chat-ro-fixture.sql drops and recreates: drop them first (harmless if absent).
   for v in $PRE_DROP_VIEWS; do psql_pg -o /dev/null -c "set client_min_messages = warning; drop view if exists public.$v" || die "could not drop $v"; done
-  for f in scripts/coop-chat-ro-fixture.sql scripts/coop-stock-fixture.sql scripts/local-supabase/seed-digest.sql supabase/coop_chat_readonly.sql supabase/coop_chat_digest.sql supabase/coop_chat_stock.sql supabase/coop_reports.sql supabase/plan_report.sql supabase/plan_actuals_remove_workbook_prefill.sql supabase/plan_actual_parts.sql supabase/plan_part_targets.sql supabase/plan_actuals_itemise.sql scripts/local-supabase/seed-plan-synthetic.sql scripts/local-supabase/seed-dev-admin.sql; do
+  for f in scripts/coop-chat-ro-fixture.sql scripts/coop-stock-fixture.sql scripts/local-supabase/seed-digest.sql supabase/coop_chat_readonly.sql supabase/coop_chat_digest.sql supabase/coop_chat_stock.sql supabase/coop_reports.sql supabase/plan_report.sql supabase/plan_actuals_remove_workbook_prefill.sql supabase/plan_actual_parts.sql supabase/plan_actuals_itemise.sql scripts/local-supabase/seed-plan-synthetic.sql scripts/local-supabase/seed-dev-admin.sql; do
     if [ ! -f "$ROOT/$f" ]; then echo "skipped $f (not found yet; run scripts/local-supabase/up.sh --reapply once it exists)"; continue; fi
     out="$(psql_pg -o /dev/null < "$ROOT/$f" 2>&1)" || { echo "$out" | grep -v '^NOTICE:' >&2; die "failed applying $f"; }
     echo "applied $f"

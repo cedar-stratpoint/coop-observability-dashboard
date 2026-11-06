@@ -8,6 +8,20 @@
 -- A row already typed is never overwritten. Same per-month lock as the RPCs. Lossless, so it also runs in a closed month (the total is unchanged).
 -- Idempotent: a second run finds nothing to split. Apply by hand per environment AFTER supabase/plan_report.sql and supabase/plan_actual_parts.sql.
 -- Never prints a value.
+--
+-- CLOSED MONTHS (review M6): a kept total-only row in a CLOSED month leaves its total (row 39 / 55 / 71) waiting, and with it every later month's cash,
+-- because a closed month cannot be retyped. This file does not unlock anything. Run the preflight below FIRST (read-only, counts only, no value). If it
+-- returns more than 0, an admin unlocks each named month with a reason (the page's Unlock), types its itemised rows, and closes it again.
+-- PREFLIGHT BEGIN
+-- select count(distinct a.month) as closed_months, count(*) as total_only_rows
+-- from public.plan_actuals a
+-- join public.plan_month_closes c on c.month = a.month
+-- where a.metric in ('overhead', 'cogs', 'content_other')
+--   and not coalesce((
+--     select count(*) = (case a.metric when 'overhead' then 6 when 'cogs' then 3 else 2 end) and sum(p.amount_php) = a.amount_php
+--     from public.plan_actual_parts p where p.month = a.month and p.metric = a.metric), false);
+-- PREFLIGHT END
+-- To list them: same query with `select a.month, a.metric ... order by 1, 2` in place of the counts.
 do $$
 declare
   r record;

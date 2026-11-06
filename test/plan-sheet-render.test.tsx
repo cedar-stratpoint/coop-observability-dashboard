@@ -61,9 +61,9 @@ describe('itemised overhead: rows 33 to 38 typed in place, row 39 the computed s
   });
   it('row 39 shows the sum of its rows, and waits (never 0) when a row is blank', () => {
     const cells = [...line(html, 'data-sheet-actual', 39)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((m) => m[1]);
-    expect(cells[0]).toContain('₱1.4k'); // 1,000 + 200 + 50 + 30 + 20 + 100 pesos
+    expect(cells[0]).toBe('1.4'); // 1,000 + 200 + 50 + 30 + 20 + 100 pesos, in the sheet's thousands with one decimal
     expect(cells[1]).toContain('waiting'); // Sep: rent blank
-    expect(cells[1]).not.toContain('₱0');
+    expect(cells[1]).not.toContain('0.0');
     expect(cells[2]).toContain('waiting');
   });
 });
@@ -79,5 +79,33 @@ describe('INPUTS — DRIVERS is collapsed by default; read-only viewers get no i
     const html = render(true, false);
     expect(html).not.toContain('<input');
     expect(line(html, 'data-sheet-actual', 33)!.inner).toContain('1');
+  });
+});
+
+describe('L4: rows 47 and 80 repeat the month headings, like the sheet', () => {
+  const html = render(true);
+  it.each([47, 80])('row %i shows one month label per month column', (row) => {
+    const tr = line(html, 'data-sheet-row', row)!;
+    const cells = [...tr.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((m) => m[1]);
+    expect(cells.slice(1).map((c) => c.replace(/&#x27;/g, "'"))).toEqual(["Aug'26", "Sep'26", "Oct'26"]);
+  });
+});
+
+describe('L6: long sheet labels are clamped to two lines on a phone, the full text kept', () => {
+  const html = render(true);
+  it.each([38, 100, 102, 110])('row %i: the label text is the sheet label, with a title and a two-line clamp', (row) => {
+    const r = SHEET_ROWS.find((x) => x.row === row)!;
+    const th = /<th[^>]*>(.*?)<\/th>/.exec(line(html, 'data-sheet-row', row)!.inner)!;
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    expect(th[0]).toContain(`title="${esc(r.label.trim())}"`);
+    expect(th[1]).toContain(esc(r.label.trim()));
+    expect(th[1]).toContain('max-md:line-clamp-2');
+  });
+  it.each([93, 117])('section row %i: clamped with a title too', (row) => {
+    const r = SHEET_ROWS.find((x) => x.row === row)!;
+    const tr = line(html, 'data-sheet-row', row)!;
+    expect(tr.inner).toContain('max-md:line-clamp-2');
+    expect(tr.inner).toContain('title="');
+    expect(tr.inner.replace(/&amp;/g, '&').replace(/&#x27;/g, "'")).toContain(r.label);
   });
 });
