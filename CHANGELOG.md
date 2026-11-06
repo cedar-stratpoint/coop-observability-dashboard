@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Upload: an inline staging tray instead of a confirm modal
+
+The earlier confirm step was a modal that popped the instant a file was picked, which read like a one-shot "upload this one file". Replaced with an inline staging tray: picking or dropping files now lists them on screen (name, size, remove), the dropzone stays open above to add more, and a persistent "Upload N files" button at the bottom right confirms. Nothing reads until Upload is pressed; Clear discards. Files de-dupe by name+size, so dropping the same one twice doesn't double it.
+
 ## 2026-11-06 — Reader: fallback Anthropic key when the primary fails
 
 The primary Goldline key can be temporary (expires) or hit its credit limit mid-batch. A single call now tries the primary key first and, only on a KEY-level error (expired, revoked, out of credits, or a workspace-scope problem), retries the same call on `GOLDLINE_ANTHROPIC_API_KEY_FALLBACK` (with its own optional `GOLDLINE_ANTHROPIC_WORKSPACE_ID_FALLBACK`). Transient errors (429/529/timeout) and content errors (our own page_mismatch) stay on the same key, so a real reading problem isn't masked and the fallback's budget isn't burned. `extractionConfigured` is true if either key is set. Unit-tested; the fallback is off unless its env var is set.
