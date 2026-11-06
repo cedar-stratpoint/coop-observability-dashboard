@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Uploads: confirm before processing, Confirm-store hover, surface the assign error
+
+- **Confirm before a scan starts reading.** Choosing or dropping a file used to begin processing immediately. It now holds the files and asks first, in a small modal that lists what was picked (and notes a multi-page PDF is split into pages), so a 98-page scan only starts on a deliberate "Upload".
+- **"Confirm store" looks clickable.** The needs-a-store button now lifts with a shadow on hover, presses on click, and nudges its pin icon, with a focus ring and reduced-motion fallback, so it reads as the action it is.
+- **Surface the real reason a store assignment fails.** "Couldn't assign the store" was a dead end. It now appends the actual error detail (the pages are still saved), so a Staging failure is diagnosable instead of silent. (We couldn't reproduce the reported failure from the logs; this makes the next attempt tell us what's wrong.)
+
 ## 2026-11-06 — Classifier: read duplex blank back-sides as "Blank page"
 
 These forms are scanned duplex (auto-flip), so roughly half of every scan is a blank back side. A faint blank sometimes classified as "unknown" and read as "Not an inventory page" rather than a clean "Blank page". The classifier prompt now tells the reader that blanks are common and expected, that faint scanner noise / a smudge / a crease / light bleed-through still counts as blank, and to prefer "blank" over "unknown" on a near-empty page (and never use "unknown" for an empty page). Both outcomes were already set aside calmly; this just gives the right label. Needs a Staging re-run to confirm against real scans.

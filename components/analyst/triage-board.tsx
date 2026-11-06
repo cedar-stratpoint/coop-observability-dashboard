@@ -130,10 +130,10 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors hover:border-[color:var(--status-crit)]"
+        className="group inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:border-[color:var(--status-crit)] hover:shadow-md active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[color:var(--status-crit)]/35 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
         style={{...tint('crit'), borderColor: 'color-mix(in oklab, var(--status-crit) 28%, transparent)'}}
       >
-        <MapPin className="size-3.5" /> Confirm store
+        <MapPin className="size-3.5 transition-transform duration-150 ease-out group-hover:-rotate-6 motion-reduce:transition-none" /> Confirm store
       </button>
     );
   }
