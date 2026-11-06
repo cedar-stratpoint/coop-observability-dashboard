@@ -222,11 +222,11 @@ const CALC: Readonly<Record<number, ActualSource>> = {
   62: calc('= 56 − 59 − 60 − 61', CM2), 63: calc('= 62 ÷ 51', CM2),
   71: calc('= rows 66-70', ADS), 72: calc('= 62 − 71', CM3), 73: calc('= 72 ÷ 51', CM3),
   74: calc('= − 39', OVH), 75: calc('= 72 + 74', EBITDA), 76: calc('= 75 ÷ 51', EBITDA), 77: calc('= one ÷ 63', CM2),
-  81: calc('= 75', EBITDA), 83: calc('= last month (first: 44) + 41 − 55', STOCK), 84: calc('= 83 ÷ next month planned 55', STOCK), 85: calc('= 84 vs 45', STOCK),
-  86: calc('= 81 + 55 − 41', [...EBITDA, 41]), 90: calc('= last month (first: opening cash) + 86 + 87 − 88 − 89', CASH, 'opening_cash'), 91: calc('= 90 not below zero', CASH, 'opening_cash'),
+  81: calc('= 75', EBITDA), 83: calc('= last month + 41 − 55', STOCK), 84: calc('= 83 ÷ next month planned 55', STOCK), 85: calc('= 84 vs 45', STOCK),
+  86: calc('= 81 + 55 − 41', [...EBITDA, 41]), 90: calc('= last month + 86 + 87 − 88 − 89', CASH, 'opening_cash'), 91: calc('= 90 not below zero', CASH, 'opening_cash'),
   94: calc('= 51', []), 95: calc('= 94 × twelve', []), 96: calc('= 71 ÷ 122', [...ADS, ...CUST]),
   113: calc('= 121', CUST), 114: calc('= 113 ÷ 103', CUST), 115: calc('= 95 ÷ 110', []),
-  121: calc('= last month (first: 120) + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
+  121: calc('= last month + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
   125: calc('= 123 within 48 + 49', CUST),
 };
 const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'sum of rows 48-50'};

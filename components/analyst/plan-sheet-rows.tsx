@@ -1,7 +1,7 @@
 'use client';
 
 import {Fragment, useEffect, useMemo, useState, useTransition} from 'react';
-import {ChevronDown} from 'lucide-react';
+import {ChevronDown, PencilLine, SquareFunction, Zap, type LucideIcon} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {HelpTip as InfoTip} from './help-tip';
 import {PLAN_HELP} from '@/src/plan-help';
@@ -9,7 +9,7 @@ import {
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_LINE_ORDER, lineInputText, lineUnitWords, monthPhase, parseLineInput,
   type ActualCell, type ClosedMonth, type LineSeries, type PlanData, type Status,
 } from '@/src/plan-compute';
-import {SHEET_ROWS, actualKind, blockOf, fmtCell, isSingle, judgedAs, sheetActuals, sheetCtx, sheetStatus, shownRows, targetId, TYPED_ROW, type SheetRow} from '@/src/plan-sheet';
+import {SHEET_ROWS, actualKind, actualSource, blockOf, rowRange, fmtCell, isSingle, judgedAs, sheetActuals, sheetCtx, sheetStatus, shownRows, targetId, TYPED_ROW, type ActualSource, type SheetRow} from '@/src/plan-sheet';
 
 // BHR-06: the All months grid IS the Business Plan sheet. Rows 5 to 125 down in sheet order with the sheet's labels, months across. Every target cell is
 // the workbook value. Under each row that can have an actual sits an "actual" line: an entry cell for a typed row (one per itemised sheet row), the value
@@ -30,8 +30,6 @@ export interface Edit {
   save: (month: string, metric: string, pesos: number | null, expected: number | null) => Promise<string | null>;
   close: (month: string) => Promise<string | null>;
   askUnlock: (month: string) => void;
-  /** The oldest unclosed month that still has empty required lines: those cells are outlined amber. */
-  fill: string | null;
   /** The cell carrying the accent ring and the 'Type ...' tag (set by Fill in and by Enter, cleared on blur). */
   ring: {month: string; metric: string} | null;
   clearRing: () => void;
@@ -43,8 +41,8 @@ export const cellOf = (actuals: Actuals, id: string, i: number): ActualCell => a
 export const cellActual = (s: Status) => (s === 'ok' ? 'bg-[var(--status-good)]/15 text-[var(--status-good)]' : s === 'bad' ? 'bg-[var(--status-crit)]/15 text-[var(--status-crit)]' : 'text-muted-foreground');
 export const GROUP_ROW = 'sticky left-0 z-10 whitespace-normal border-b border-border bg-muted px-2 py-[5px] text-left text-[11px] font-medium uppercase tracking-[0.07em] text-muted-foreground';
 export const LABEL_CELL = 'sticky left-0 z-10 max-w-[108px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left leading-snug md:min-w-[150px] md:max-w-none md:whitespace-nowrap';
-export const SUB_CELL = 'sticky left-0 z-10 border-b border-r-2 border-border bg-card py-[5px] pl-5 pr-2 text-left text-[11px] font-medium text-muted-foreground max-md:pl-3.5';
-const SHEET_LABEL = 'sticky left-0 z-10 max-w-[116px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] text-left text-[11px] leading-snug md:min-w-[260px] md:max-w-[340px] md:text-[12.5px]';
+export const SUB_CELL = 'sticky left-0 z-10 border-b border-r-2 border-border bg-card py-[5px] md:py-[3px] pl-5 pr-2 text-left text-[11px] font-medium text-muted-foreground max-md:pl-3.5';
+const SHEET_LABEL = 'sticky left-0 z-10 max-w-[116px] whitespace-normal border-b border-r-2 border-border bg-card px-2 py-[5px] md:py-[3px] text-left text-[11px] leading-snug md:min-w-[220px] md:max-w-[260px] md:text-[12.5px]';
 const CLICKABLE = new Set(['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace', 'cash']);
 const LINE_LABEL: Record<string, string> = Object.fromEntries([...LINES, ...MEASURE_LINES].map((l) => [l.id, l.label]));
 const REQUIRED = new Set(REQUIRED_LINE_ORDER);
@@ -91,7 +89,7 @@ function LineCell({month, metric, saved, edit}: {month: string; metric: string; 
           }
           if (e.key === 'Escape') { setText(show); setErr(null); }
         }}
-        className={cn('block h-11 w-[72px] rounded-none border-0 bg-transparent px-2 text-right text-base font-semibold tabular-nums transition-colors hover:bg-accent focus-visible:bg-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary md:h-[30px] md:text-[12.5px]', pending && 'opacity-60', err && 'outline outline-2 -outline-offset-2 outline-[var(--status-crit)]')} />
+        className={cn('block h-11 w-[72px] rounded-none border-0 bg-transparent px-2 text-right text-base font-semibold tabular-nums transition-colors hover:bg-accent focus-visible:bg-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary md:h-[26px] md:text-[12.5px]', pending && 'opacity-60', err && 'outline outline-2 -outline-offset-2 outline-[var(--status-crit)]')} />
       {err && <span role="alert" className="mt-0.5 block max-w-[170px] whitespace-normal text-right text-[10.5px] leading-tight text-[var(--status-crit)]">{err}</span>}
     </>
   );
@@ -104,17 +102,66 @@ function TypedCell({metric, mo, i, plan, nowKey, edit, status, col}: {metric: st
   const closed = !!edit.closes[mo];
   const editable = edit.canEdit && phase !== 'future' && !closed;
   const tgt = editable && edit.ring?.month === mo && edit.ring.metric === metric;
-  const required = REQUIRED.has(metric);
-  const need = saved === null && edit.fill === mo && required && !closed;
-  const shade = closed ? 'bg-muted' : saved === null && phase === 'past' && required ? 'bg-[var(--amber-bg)]' : cellActual(status);
+  // BHR-07: every empty typed cell in an open month (past or current, not closed) is waiting for someone to type it, required or not.
+  const need = saved === null && phase !== 'future' && !closed;
+  const shade = closed ? 'bg-muted' : need ? '' : cellActual(status);
   return (
     <td data-status={status} data-typed={metric} className={cn('relative border-b border-r border-border p-0 text-right font-semibold', shade, need && !tgt && 'bhr-need', tgt && 'bhr-tgt', col)}
       data-tip={tgt ? `Type ${GRID_LINE_LABEL[metric] ?? LINE_LABEL[metric] ?? metric} for ${monthLabel(mo)}` : undefined} title={closed ? 'Closed month, locked' : undefined}>
       {editable ? <LineCell month={mo} metric={metric} saved={saved} edit={edit} />
         : phase === 'future' ? null
-        : saved === null ? <span className="sr-only">waiting</span> : <span className="block px-2 py-[5px] max-md:py-3">{lineInputText(metric, saved)}</span>}
+        : saved === null ? <span className="sr-only">waiting</span> : <span className="block px-2 py-[3px] max-md:py-3">{lineInputText(metric, saved)}</span>}
     </td>
   );
+}
+
+/**
+ * BHR-07: where an actual line's number comes from, as a small chip on its label (owner, 2026-11-06). Type = you type it (amber, like the empty cells
+ * waiting for you), Auto = read from a Coop source, Calc = the sheet's formula over the rows above. Below md the chip is its icon; the words stay as sr-only.
+ */
+const SOURCE: Record<ActualSource['kind'], {Icon: LucideIcon; word: string; tone: string; tip: (s: ActualSource) => string}> = {
+  type: {Icon: PencilLine, word: 'Type', tone: 'border-[var(--bhr-warn)]/30 bg-[var(--amber-bg)] text-[var(--bhr-warn)]',
+    tip: (s) => (s.from === 'once' ? 'You type this once, in the first month' : s.from === 'optional' ? 'You type this (optional)' : 'You type this every month')},
+  auto: {Icon: Zap, word: 'Auto', tone: 'border-border bg-card text-foreground/80', tip: (s) => `Filled in by Coop: ${s.from}`},
+  calc: {Icon: SquareFunction, word: 'Calc', tone: 'border-border bg-muted text-muted-foreground', tip: (s) => `Worked out by the sheet's formula: row ${s.from}`},
+};
+const chipWords = (s: ActualSource) => s.kind === 'type' ? (s.from === 'once' ? 'Type once' : s.from === 'optional' ? 'Type · optional' : 'Type')
+  : s.kind === 'auto' ? `Auto · ${s.from}` : `Calc ${s.from}`;
+function SourceChip({source}: {source: ActualSource}) {
+  const {Icon, tone, tip} = SOURCE[source.kind];
+  return (
+    <span data-source={source.kind} title={tip(source)} className={cn('ml-1.5 inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-px align-[1px] text-[10.5px] font-medium normal-case leading-tight tracking-normal max-md:ml-1 max-md:px-1', tone)}>
+      <Icon className="size-3 shrink-0" aria-hidden /><span className="[overflow-wrap:anywhere] max-md:sr-only">{chipWords(source)}</span>
+    </span>
+  );
+}
+/** One line above the grid that reads the three chips. */
+export function SourceLegend() {
+  const item = (k: ActualSource['kind'], words: string) => { const {Icon} = SOURCE[k]; return <span className="inline-flex items-center gap-1"><Icon className="size-3.5 shrink-0" aria-hidden />{words}</span>; };
+  return (
+    <p data-testid="source-legend" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+      <span className="font-medium text-foreground/80">Actual lines:</span>{item('type', 'you type')}<span aria-hidden>·</span>{item('auto', 'from Coop')}<span aria-hidden>·</span>{item('calc', 'worked out from the rows above')}
+    </p>
+  );
+}
+/**
+ * The typed rows a waiting calc line still needs this month: `full` for the tooltip ("fill rows 33-38, 66-70 and opening cash"), `short` for the cell, the
+ * first run only ("fill rows 33-38 +2"), since the grid sizes its columns to their content. Null when none is empty (it waits for GMV or an earlier month).
+ */
+function stillToFill(s: ActualSource | null, lines: LineSeries, i: number): {full: string; word: string; short: string} | null {
+  if (s?.kind !== 'calc') return null;
+  const empty = (s.feeds ?? []).filter((row) => {
+    const id = TYPED_ROW[row];
+    return (lines[id]?.[actualSource(row)?.from === 'once' ? 0 : i] ?? null) === null;
+  }).sort((a, b) => a - b);
+  const open = s.opening && (lines[s.opening]?.[0] ?? null) === null ? ['opening cash'] : [];
+  const runs = empty.length ? rowRange(empty).split(', ') : [];
+  const parts = [...(runs.length ? [`${empty.length > 1 ? 'rows' : 'row'} ${runs.join(', ')}`] : []), ...open];
+  if (!parts.length) return null;
+  const rest = runs.length - 1 + open.length;
+  // The cell shows "fill 66-70" (the word "rows" kept for screen readers) so it fits an ~80px month column on one line.
+  const word = runs.length ? (/-/.test(runs[0]) || rest > 0 ? 'rows ' : 'row ') : '';
+  return {full: `fill ${parts.join(' and ')}`, word, short: `${runs.length ? runs[0] : 'opening cash'}${runs.length && rest > 0 ? ` +${rest}` : ''}`};
 }
 
 /** The INPUTS — DRIVERS block's toggle, rows 6 to 46 behind it. */
@@ -123,7 +170,7 @@ const INPUTS_COUNT = SHEET_ROWS.filter((r) => blockOf(r.row) === 'inputs' && r.r
 export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; col: (i: number) => string; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
   const sheet = useMemo(() => sheetActuals(plan, actuals, edit.lines), [plan, actuals, edit.lines]);
   const n = plan.months.length;
-  const ActualLabel = ({label = 'actual'}: {label?: string}) => <th scope="row" className={cn(SUB_CELL, 'uppercase')}>{label}</th>;
+  const ActualLabel = ({row}: {row: number}) => <th scope="row" className={cn(SUB_CELL, 'md:max-w-[260px]')}><span className="uppercase">actual</span><SourceChip source={actualSource(row)!} /></th>;
   return (
     <>
       {shownRows(inputsOpen).map((r) => {
@@ -131,7 +178,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
         if (r.kind === 'section') {
           if (r.row === 5) return (
             <tr key={key} data-sheet-row={r.row}>
-              <td className={cn(GROUP_ROW, 'p-0 md:max-w-[340px]')}>
+              <td className={cn(GROUP_ROW, 'p-0 md:max-w-[260px]')}>
                 <button type="button" aria-expanded={inputsOpen} data-testid="inputs-toggle" onClick={() => setInputsOpen(!inputsOpen)}
                   className="flex min-h-8 w-full items-center gap-1.5 px-2 py-[5px] text-left uppercase tracking-[0.07em] transition-[color,transform] duration-150 ease-out hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary active:scale-[0.99] motion-reduce:transition-none max-md:min-h-11">
                   <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none', !inputsOpen && '-rotate-90')} aria-hidden />
@@ -145,7 +192,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
           const band = cn('border-b border-border', r.sub ? 'bg-muted/50' : 'bg-muted');
           return (
             <tr key={key} data-sheet-row={r.row}>
-              <td title={r.label} className={cn(GROUP_ROW, 'md:max-w-[340px]', r.sub && 'bg-muted/50 normal-case tracking-normal text-foreground/80')}><span className={cn('block [overflow-wrap:anywhere]', CLAMP)}>{r.label}</span></td>
+              <td title={r.label} className={cn(GROUP_ROW, 'md:max-w-[260px]', r.sub && 'bg-muted/50 normal-case tracking-normal text-foreground/80')}><span className={cn('block [overflow-wrap:anywhere]', CLAMP)}>{r.label}</span></td>
               {/* Rows 47 and 80 repeat the month headings across, as the sheet does. */}
               {r.months ? plan.months.map((mo, i) => <td key={mo} className={cn(band, 'border-r px-2 py-[5px] text-right text-[11px] font-medium tracking-[0.07em] text-muted-foreground', col(i))}>{monthLabel(mo)}</td>) : <td colSpan={n} className={band} />}
             </tr>
@@ -159,12 +206,12 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
         const targetLine = isSingle(r) ? (
           <tr data-sheet-row={r.row} data-line-kind="target" data-greyed={greyed || undefined} className={cn(greyed && 'text-muted-foreground')}>
             <th scope="row" title={r.label.trim()} className={cn(SHEET_LABEL, 'font-normal', greyed && 'text-muted-foreground')}>{sheetLabel(r)}</th>
-            <td colSpan={n} className={cn('border-b border-border px-2 py-[5px] text-left text-muted-foreground', greyed && 'bg-muted/40')}>{fmtCell(r, plan.targets[id]?.find((v) => v !== null) ?? null)}<span className="ml-2 text-[10.5px]">one value, not monthly</span></td>
+            <td colSpan={n} className={cn('border-b border-border px-2 py-[5px] text-left md:py-[3px] text-muted-foreground', greyed && 'bg-muted/40')}>{fmtCell(r, plan.targets[id]?.find((v) => v !== null) ?? null)}<span className="ml-2 text-[10.5px]">one value, not monthly</span></td>
           </tr>
         ) : (
           <tr data-sheet-row={r.row} data-line-kind="target" data-dir={r.dir}>
             <th scope="row" title={r.label.trim()} className={cn(SHEET_LABEL, 'font-semibold')}>{sheetLabel(r)}</th>
-            {plan.months.map((mo, i) => <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground', col(i))}>{fmtCell(r, plan.targets[id]?.[i], i)}</td>)}
+            {plan.months.map((mo, i) => <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground md:py-[3px]', col(i))}>{fmtCell(r, plan.targets[id]?.[i], i)}</td>)}
           </tr>
         );
         // A typed line entered once (the opening balances) takes the first month only.
@@ -174,32 +221,33 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
             {targetLine}
             {kind === 'typed' && (
               <tr data-sheet-actual={r.row} data-actual-kind="typed">
-                <ActualLabel label={REQUIRED.has(typed) ? 'actual' : once ? 'actual (typed once)' : 'actual (optional)'} />
+                <ActualLabel row={r.row} />
                 {plan.months.map((mo, i) => (once && i > 0) ? <td key={mo} className={cn('border-b border-r border-border', col(i))} /> : <TypedCell key={mo} metric={typed} mo={mo} i={i} plan={plan} nowKey={nowKey} edit={edit} status={statusAt(i)} col={col(i)} />)}
               </tr>
             )}
-            {kind === 'computed' && (
+            {kind === 'computed' && ((src) => (
               <tr data-sheet-actual={r.row} data-actual-kind="computed">
-                <ActualLabel />
+                <ActualLabel row={r.row} />
                 {plan.months.map((mo, i) => {
                   const c = sheet[r.row]?.[i] ?? GAP;
                   const phase = monthPhase(mo, nowKey);
                   const s = statusAt(i);
                   const click = CLICKABLE.has(id) && s === 'bad';
-                  const cls = cn('border-b border-r border-border px-2 py-[5px] text-right font-semibold', cellActual(s), s === 'live' && 'font-normal italic', click && 'cursor-pointer hover:outline hover:outline-2 hover:-outline-offset-2 hover:outline-[var(--status-crit)]', col(i));
-                  const shown = phase === 'future' ? null : c.value === null ? <span className="sr-only">waiting</span>
+                  const cls = cn('border-b border-r border-border px-2 py-[5px] text-right font-semibold md:py-[3px]', cellActual(s), s === 'live' && 'font-normal italic', click && 'cursor-pointer hover:outline hover:outline-2 hover:-outline-offset-2 hover:outline-[var(--status-crit)]', col(i));
+                  const fill = phase !== 'future' && c.value === null ? stillToFill(src, edit.lines, i) : null;
+                  const shown = phase === 'future' ? null : c.value === null ? (fill ? <span className="-mx-1 block w-0 min-w-[calc(100%+0.5rem)] whitespace-normal text-[10.5px] font-normal leading-tight text-muted-foreground"><span className="sr-only">waiting, </span>fill <span className="sr-only">{fill.word}</span>{fill.short}</span> : <span className="sr-only">waiting</span>)
                     : <>{fmtCell(r, c.value, i)}{c.state === 'partial' && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">partial</span>}</>;
-                  const title = s === 'ok' || s === 'bad' ? `${STATUS_TEXT[s]}${judgedAs(r)}` : s === 'modelled' ? 'Modelled from plan assumptions, not judged' : c.note;
+                  const title = fill ? `Waiting: ${fill.full}` : s === 'ok' || s === 'bad' ? `${STATUS_TEXT[s]}${judgedAs(r)}` : s === 'modelled' ? 'Modelled from plan assumptions, not judged' : c.note;
                   return click
                     ? <td key={mo} data-status={s} title={`${title}. Click to see why`} className={cls} onClick={() => onWhy(id, i)}>{shown}</td>
                     : <td key={mo} data-status={s} title={title} className={cls}>{shown}</td>;
                 })}
               </tr>
-            )}
+            ))(actualSource(r.row))}
             {r.row === 90 && (
               // The sheet starts cash from 0 and has no opening-cash cell: Coop asks for the bank balance at the start of the first month, once.
               <tr data-sheet-actual="opening_cash" data-actual-kind="typed">
-                <th scope="row" className={cn(SUB_CELL, 'uppercase')}>opening cash<InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="About opening cash" className="ml-0.5" /></th>
+                <th scope="row" className={SUB_CELL}><span className="uppercase">opening cash</span><InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="About opening cash" className="ml-0.5" /><SourceChip source={actualSource('opening_cash')!} /></th>
                 {plan.months.map((mo, i) => i > 0 ? <td key={mo} className={cn('border-b border-r border-border', col(i))} /> : <TypedCell key={mo} metric="opening_cash" mo={mo} i={0} plan={plan} nowKey={nowKey} edit={edit} status="info" col={col(i)} />)}
               </tr>
             )}
