@@ -13,7 +13,7 @@ import {
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type PlanData, type Status,
 } from '@/src/plan-compute';
 import {SHEET_ROWS, blockOf, rowOfLine} from '@/src/plan-sheet';
-import {GROUP_ROW, LABEL_CELL, SheetRows, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
+import {GROUP_ROW, LABEL_CELL, SheetRows, SourceLegend, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
 
 // Business Health Report: the workbook plan month by month beside the actuals. GMV actuals (BHR-02) come from Coop's readers; a month with
 // no data is an empty cell that says waiting, never PHP 0 and never red. Green = met or beat, red = missed, grey = waiting, partial,
@@ -26,7 +26,7 @@ const shortMonth = (m: string) => monthLabel(m).split("'")[0];
 const EMPTY_CLOSES: Record<string, ClosedMonth> = {};
 const EMPTY_ACTUALS: Actuals = {};
 const EMPTY_LINES: LineSeries = {};
-const NO_EDIT: Edit = {canEdit: false, lines: {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false};
+const NO_EDIT: Edit = {canEdit: false, lines: {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, ring: null, clearRing: () => {}, next: () => false};
 const NEUTRAL = new Set<string>(['coverage']);
 function statusOf(m: MetricDef, plan: PlanData, i: number, nowKey: string, actuals: Actuals): Status {
   return metricStatus({direction: m.direction, actual: cellOf(actuals, m.id, i).value, partial: cellOf(actuals, m.id, i).state === 'partial', target: plan.targets[m.id]?.[i] ?? null, phase: monthPhase(plan.months[i], nowKey), hasSource: m.source !== 'none', informational: NEUTRAL.has(m.id), modelled: m.modelled});
@@ -268,6 +268,7 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
   const closed = plan.months.filter((m) => edit.closes[m]);
   return (
     <div>
+      <SourceLegend />
       {closed.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground" data-testid="lock-note">
           <span className="inline-flex items-center gap-1.5"><Lock className="size-3.5" aria-hidden />{closed.map(shortMonth).join(', ')} closed and locked.</span>
@@ -289,7 +290,7 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
               {plan.months.map((mo, i) => {
                 const phase = monthPhase(mo, nowKey);
                 return (
-                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[84px] max-md:min-w-[80px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
+                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[76px] max-md:min-w-[80px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
                     {monthLabel(mo)}{edit.closes[mo] && <Lock aria-label="Closed" className="ml-1 inline size-3 align-[-1px] text-muted-foreground" />}
                     {phase !== 'past' && <span className="block text-[10.5px] font-normal">{phase === 'current' ? 'MTD' : 'Target'}</span>}
                   </th>
@@ -375,7 +376,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
   }, [gmv, summed, plan, closes]);
   const queue = useMemo(() => closeQueue(plan.months, closes, today), [plan.months, closes, today]);
   const waiting = closeWaiting(plan.months, closes, today); // the oldest unclosed month: the header Close button starts here
-  const fill = queue.find((m) => REQUIRED_COUNT - filledCount(lines, plan.months.indexOf(m)) > 0) ?? null; // the oldest one that still has lines to type: Fill in and the amber ring start here
+  const fill = queue.find((m) => REQUIRED_COUNT - filledCount(lines, plan.months.indexOf(m)) > 0) ?? null; // the oldest one that still has lines to type: Fill in starts here
   const [ring, setRing] = useState<{month: string; metric: string} | null>(null);
   const clearRing = useCallback(() => setRing(null), []);
   // Fill in / Enter: bring the month into the phone window, put the ring and the tag on the cell, scroll it into view and focus it (Enter focuses at once, Fill in after the scroll).
@@ -394,7 +395,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
     go(6);
   }, []);
   const edit = useMemo<Edit>(() => canEdit ? {
-    canEdit: true, lines: summed, closes, today, fill, ring, clearRing,
+    canEdit: true, lines: summed, closes, today, ring, clearRing,
     next: (month, metric, treatFilled) => {
       const nx = nextEmptyLine(lines, plan.months.indexOf(month), metric, treatFilled ? metric : undefined);
       if (!nx) return false;
@@ -410,7 +411,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
       setLines((prev) => ({...prev, [metric]: (prev[metric] ?? plan.months.map(() => null)).map((v, k) => (k === i ? pesos : v))}));
       return null;
     },
-  } : {...NO_EDIT, lines: summed, closes, today, fill}, [canEdit, lines, summed, closes, today, fill, ring, clearRing, goCell, plan.months, router]);
+  } : {...NO_EDIT, lines: summed, closes, today}, [canEdit, lines, summed, closes, today, ring, clearRing, goCell, plan.months, router]);
   const fillIn = (month: string) => goCell(month, nextEmptyLine(lines, plan.months.indexOf(month)) ?? REQUIRED_LINE_ORDER[0], true);
   const unlock = () => {
     if (!unlocking) return;

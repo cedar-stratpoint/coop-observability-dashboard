@@ -9,7 +9,7 @@ vi.mock('@/lib/utils', () => ({cn: (...a: unknown[]) => a.filter((x) => typeof x
 vi.mock('@/src/plan-help', async () => await import('../src/plan-help'));
 vi.mock('@/src/plan-compute', async () => await import('../src/plan-compute'));
 vi.mock('@/src/plan-sheet', async () => await import('../src/plan-sheet'));
-import {SheetRows, type Edit} from '../components/analyst/plan-sheet-rows';
+import {SheetRows, SourceLegend, type Edit} from '../components/analyst/plan-sheet-rows';
 import {withTotals, type PlanData} from '../src/plan-compute';
 import {SHEET_ROWS, actualKind} from '../src/plan-sheet';
 
@@ -17,7 +17,7 @@ const months = ['2026-08-01', '2026-09-01', '2026-10-01'];
 const plan: PlanData = {source: 'db', notice: null, label: 'v', months, targets: {r33: [1000, 1000, 1000], overhead: [5000, 5000, 5000]}};
 // Aug: every overhead row typed; Sep: rent blank; Oct: nothing.
 const lines = withTotals({salaries: [1000, 1000, null], rent: [200, null, null], accounting: [50, 50, null], tech: [30, 30, null], growth_consultant: [20, 20, null], rnd: [100, 100, null]});
-const edit = (canEdit: boolean): Edit => ({canEdit, lines, closes: {}, today: '2026-11-06', save: async () => null, close: async () => null, askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false});
+const edit = (canEdit: boolean): Edit => ({canEdit, lines, closes: {}, today: '2026-11-06', save: async () => null, close: async () => null, askUnlock: () => {}, ring: null, clearRing: () => {}, next: () => false});
 const render = (inputsOpen: boolean, canEdit = true) => renderToStaticMarkup(
   <table><tbody><SheetRows plan={plan} nowKey="2026-11" actuals={{}} edit={edit(canEdit)} col={() => ''} onWhy={() => {}} inputsOpen={inputsOpen} setInputsOpen={() => {}} /></tbody></table>,
 );
@@ -107,5 +107,72 @@ describe('L6: long sheet labels are clamped to three lines on a phone, the full 
     expect(tr.inner).toContain('max-md:line-clamp-3');
     expect(tr.inner).toContain('title="');
     expect(tr.inner.replace(/&amp;/g, '&').replace(/&#x27;/g, "'")).toContain(r.label);
+  });
+});
+
+describe('BHR-07: every actual line says where it comes from', () => {
+  const html = render(true);
+  const chip = (row: number | string) => /<span[^>]*data-source="(\w+)"[^>]*>(.*?)<\/span><\/th>/.exec(line(html, 'data-sheet-actual', row)!.inner);
+  const text = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
+  it.each([[33, 'type', 'Type'], [44, 'type', 'Type once'], [9, 'type', 'Type · optional'], ['opening_cash', 'type', 'Type once'],
+    [48, 'auto', 'Auto · Shopee + Lazada'], [51, 'auto', 'Auto · sum of rows 48-50'], [71, 'calc', 'Calc = rows 66-70'], [56, 'calc', 'Calc = 51 − 55']] as const)('row %s: a %s chip that says "%s"', (row, kind, words) => {
+    const m = chip(row);
+    expect(m, `row ${row}`).not.toBeNull();
+    expect(m![1]).toBe(kind);
+    expect(text(m![2])).toContain(words);
+    expect(m![0]).toContain('<svg'); // the icon (lucide), hidden from screen readers
+    expect(m![0]).toMatch(/title="[^"]+"/);
+  });
+  it('the chip words stay in the accessible text on a phone (icon only, words sr-only below md)', () => {
+    expect(chip(71)![0]).toContain('max-md:sr-only');
+  });
+  it('the owner example: row 71 waits and says which rows to fill', () => {
+    const cells = [...line(html, 'data-sheet-actual', 71)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
+    expect(cells).toHaveLength(3);
+    for (const c of cells) { expect(text(c[1])).toBe('waiting, fill rows 66-70'); expect(c[0]).toContain('title="Waiting: fill rows 66-70"'); expect(c[1]).toContain('sr-only">rows </span>66-70'); } // the cell shows "fill 66-70"
+  });
+  it('a calc line names only the rows still empty that month (row 39, Sep: rent blank)', () => {
+    const cells = [...line(html, 'data-sheet-actual', 39)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
+    expect(cells[0][1]).toBe('1.4');
+    expect(text(cells[1][1])).toContain('fill row 34');
+    expect(text(cells[2][1])).toContain('fill rows 33-38');
+  });
+  it('a long list shows its first run in the cell (+ how many more) and all of it in the title, and never widens the column', () => {
+    const c = /<td[^>]*>.*?<\/td>/.exec(line(html, 'data-sheet-actual', 90)!.inner)![0];
+    expect(text(c)).toContain('fill rows 41 +5'); // Aug has rows 33-38 typed: 41, 52-54, 59-61, 66-70, 87-89 and opening cash are left, in sheet order
+    expect(c).toMatch(/title="Waiting: fill rows [^"]*and opening cash"/);
+    expect(c).toContain('w-0 min-w-[calc(100%+0.5rem)]'); // sized to its cell, never to its text
+  });
+});
+
+describe('BHR-07: every empty typed cell in an open month is highlighted', () => {
+  // Aug closed, Sep past and open, Oct the current month, Nov ahead.
+  const m4 = ['2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01'];
+  const p4: PlanData = {...plan, months: m4};
+  const l4 = withTotals({salaries: [1000, 1000, null, null], rnd: [null, null, null, null]});
+  const e4: Edit = {...edit(true), lines: l4, closes: {'2026-08-01': {by: 'a', at: '2026-09-02', planVersion: 1, gmv: {}}}};
+  const html = renderToStaticMarkup(<table><tbody><SheetRows plan={p4} nowKey="2026-10" actuals={{}} edit={e4} col={() => ''} onWhy={() => {}} inputsOpen setInputsOpen={() => {}} /></tbody></table>);
+  const tds = (row: number | string) => [...line(html, 'data-sheet-actual', row)!.inner.matchAll(/<td([^>]*)>/g)].map((m) => m[1]);
+  const need = (attrs: string) => /class="[^"]*\bbhr-need\b/.test(attrs);
+  it.each([38, 66, 87, 9])('row %i (empty): highlighted in Sep and Oct, not in closed Aug, not in Nov ahead', (row) => {
+    expect(tds(row).map(need)).toEqual([false, true, true, false]);
+  });
+  it('a typed cell with a value is not highlighted (salaries, Sep)', () => {
+    expect(tds(33).map(need)).toEqual([false, false, true, false]);
+  });
+  it('typed-once lines are highlighted in the first month only, and only while it is open', () => {
+    expect(tds(44).map(need)).toEqual([false, false, false, false]); // Aug is closed
+  });
+  it('calc and auto lines are never highlighted', () => {
+    for (const row of [39, 48, 51, 71, 90]) expect(tds(row).some(need), `row ${row}`).toBe(false);
+  });
+});
+
+describe('BHR-07: the legend above the grid', () => {
+  it('names the three sources', () => {
+    const html = renderToStaticMarkup(<SourceLegend />);
+    expect(html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')).toContain('you type');
+    expect(html).toContain('from Coop');
+    expect(html).toContain('worked out from the rows above');
   });
 });
