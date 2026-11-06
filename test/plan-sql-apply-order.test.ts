@@ -7,7 +7,7 @@ import {describe, expect, it} from 'vitest';
 
 const root = path.resolve(__dirname, '..');
 const read = (f: string) => readFileSync(path.join(root, f), 'utf8');
-const ORDER = ['plan_report.sql', 'plan_actuals_remove_workbook_prefill.sql', 'plan_actual_parts.sql', 'plan_actuals_itemise.sql'];
+const ORDER = ['plan_report.sql', 'plan_actuals_drop_derived.sql', 'plan_actuals_remove_workbook_prefill.sql', 'plan_actual_parts.sql', 'plan_actuals_itemise.sql'];
 const planFiles = (text: string) => [...text.matchAll(/supabase\/(plan_[a-z_]+\.sql)|`(plan_[a-z_]+\.sql)`/g)].map((m) => m[1] ?? m[2]);
 
 describe('M5: the plan SQL apply order', () => {

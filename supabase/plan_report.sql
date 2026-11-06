@@ -1,5 +1,5 @@
 -- Business Health Report (plan vs actual): tables (BHR-01) and the write RPCs (typed lines BHR-03; close and unlock BHR-04; target edit as a new plan version BHR-05).
--- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off; run its PREFLIGHT query first). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
+-- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_drop_derived.sql (one-off), supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off; run its PREFLIGHT query first). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
 -- Design: knowledge/best-practices/plan-versions-and-locked-actuals.md. Money is stored in pesos.
 -- RLS is ON with NO policies on every table: only the service role (Coop server-side) gets through. Never add an anon policy.
 
@@ -63,8 +63,19 @@ create table if not exists public.plan_actuals_log (
 create index if not exists plan_actuals_log_month_idx on public.plan_actuals_log (month, at desc);
 
 -- BHR-05 first shipped a free-form dated-entries ledger (plan_dated_entries). The workbook has one monthly number per row instead (rows 87, 88, 89 and the
--- stock bought), so those are now typed lines in plan_actuals (see plan_set_actual below) and the ledger is dropped. It held no real data. Idempotent.
-drop table if exists public.plan_dated_entries;
+-- stock bought), so those are now typed lines in plan_actuals (see plan_set_actual below). The ledger is dropped only when it is EMPTY: if it holds rows
+-- it is kept and named in a NOTICE (export them, then drop it by hand). Nothing reads it any more. Idempotent.
+do $$
+declare n bigint;
+begin
+  if to_regclass('public.plan_dated_entries') is null then return; end if;
+  execute 'select count(*) from public.plan_dated_entries' into n;
+  if n = 0 then
+    drop table public.plan_dated_entries;
+  else
+    raise notice 'kept plan_dated_entries: it holds % row(s). Export them, then run: drop table public.plan_dated_entries;', n;
+  end if;
+end $$;
 
 alter table public.plan_versions      enable row level security;
 alter table public.plan_targets       enable row level security;
