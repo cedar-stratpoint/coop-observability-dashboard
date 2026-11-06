@@ -12,7 +12,7 @@ import {makeEvaluator, type Audit} from './support/xlsx-eval';
 import {readWorkbook} from '../scripts/plan-workbook.mjs';
 // @ts-expect-error plain .mjs
 import {buildRows} from '../scripts/seed-plan-from-workbook.mjs';
-import {SHEET_ROWS, sheetActuals, targetId, unitScale} from '../src/plan-sheet';
+import {SHEET_ROWS, actualSource, rowRefs, sheetActuals, targetId, unitScale} from '../src/plan-sheet';
 import {derivedActuals, withTotals, type ActualCell, type LineSeries} from '../src/plan-compute';
 
 const WORKBOOK = process.env.PLAN_WORKBOOK;
@@ -174,5 +174,32 @@ describe.skipIf(!hasWb)('AC10: no workbook figure is committed', () => {
     }
     expect(figures.size).toBeGreaterThan(100);
     expect([...new Set(hits)]).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasWb)('BHR-07: each calc label cites rows the sheet formula really uses', () => {
+  // The rows a sheet row's formulas reference (any month column), e.g. E71 =SUM(E66:E70) -> 66..70.
+  const refs = (row: number): Set<number> => {
+    const out = new Set<number>();
+    for (const c of audit(row)?.cells ?? []) for (const m of String(c.f ?? '').matchAll(/\$?[A-Z]+\$?(\d+)(?::\$?[A-Z]+\$?(\d+))?/g)) {
+      const a = Number(m[1]), b = Number(m[2] ?? m[1]);
+      for (let r = a; r <= b; r++) out.add(r);
+    }
+    out.delete(row);
+    return out;
+  };
+  it('every row a calc label cites is in its formula, one step down, or (for a sheet input row) in the formula that uses it', () => {
+    const bad: string[] = [];
+    for (const r of SHEET_ROWS) {
+      const s = actualSource(r.row);
+      if (s?.kind !== 'calc') continue;
+      const own = refs(r.row);
+      const ok = new Set<number>(own);
+      for (const x of own) for (const y of refs(x)) ok.add(y); // one step down: 86 cites 41 through 82 (= 41)
+      for (const c of rowRefs(s.from)) if (refs(c).has(r.row)) { ok.add(c); for (const y of refs(c)) ok.add(y); } // an input row: 24 = 52 / 48 because 52 = 48 x 24
+      const miss = rowRefs(s.from).filter((c) => !ok.has(c));
+      if (miss.length) bad.push(`row ${r.row} cites ${miss.join(', ')}`);
+    }
+    expect(bad).toEqual([]);
   });
 });

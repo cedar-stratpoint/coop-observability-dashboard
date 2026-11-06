@@ -203,6 +203,56 @@ const ACTUAL_ROWS: ReadonlySet<number> = new Set(Object.keys(rowFormulas({months
 /** What a sheet row's second line holds: an entry cell (a typed line), a value computed by the sheet's formula, or nothing (target line only). */
 export const actualKind = (row: number): 'typed' | 'computed' | null => (TYPED_ROW[row] ? 'typed' : ACTUAL_ROWS.has(row) ? 'computed' : null);
 
+/**
+ * BHR-07: where an actual line's number comes from. type = an admin types it (`from`: every month, once in the first month, or optional);
+ * auto = read from a Coop source (`from` names it); calc = the sheet's own formula over the rows above (`from` in the sheet's row numbers) and `feeds`,
+ * the typed rows it ultimately needs, so a waiting line can say which rows to fill. `opening` = a typed opening balance with no sheet row it also needs.
+ */
+export interface ActualSource {kind: 'type' | 'auto' | 'calc'; from: string; feeds?: readonly number[]; opening?: 'opening_cash'}
+const span = (a: number, b: number) => Array.from({length: b - a + 1}, (_, k) => a + k);
+const OVH = span(33, 38), COGS = span(52, 54), FEES = span(59, 61), ADS = span(66, 70), CUST = [120], STOCK = [44, 41, ...COGS];
+const CM2 = [...COGS, ...FEES], CM3 = [...CM2, ...ADS], EBITDA = [...CM3, ...OVH], CASH = [...EBITDA, 41, 87, 88, 89];
+const calc = (from: string, feeds: readonly number[], opening?: 'opening_cash'): ActualSource => ({kind: 'calc', from, feeds, ...(opening ? {opening} : {})});
+/** One explicit table, Coop's formula per calc row in the sheet's own row numbers (the sheet's, or its inverse where the sheet row is an input). */
+const CALC: Readonly<Record<number, ActualSource>> = {
+  8: calc('= 48 vs last month', []), 12: calc('= 49 vs last month', []),
+  24: calc('= 52 ÷ 48', [52]), 25: calc('= 53 ÷ 49', [53]), 26: calc('= 54 ÷ 50', [54]), 30: calc('= 60 ÷ (48 + 49)', [60]),
+  39: calc('= rows 33-38', OVH),
+  55: calc('= rows 52-54', COGS), 56: calc('= 51 − 55', COGS), 57: calc('= 56 ÷ 51', COGS), 58: calc('= 59 ÷ (48 + 49)', [59]),
+  62: calc('= 56 − 59 − 60 − 61', CM2), 63: calc('= 62 ÷ 51', CM2),
+  71: calc('= rows 66-70', ADS), 72: calc('= 62 − 71', CM3), 73: calc('= 72 ÷ 51', CM3),
+  74: calc('= − 39', OVH), 75: calc('= 72 + 74', EBITDA), 76: calc('= 75 ÷ 51', EBITDA), 77: calc('= one ÷ 63', CM2),
+  81: calc('= 75', EBITDA), 83: calc('= last month (first: 44) + 41 − 55', STOCK), 84: calc('= 83 ÷ next month planned 55', STOCK), 85: calc('= 84 vs 45', STOCK),
+  86: calc('= 81 + 55 − 41', [...EBITDA, 41]), 90: calc('= last month (first: opening cash) + 86 + 87 − 88 − 89', CASH, 'opening_cash'), 91: calc('= 90 not below zero', CASH, 'opening_cash'),
+  94: calc('= 51', []), 95: calc('= 94 × twelve', []), 96: calc('= 71 ÷ 122', [...ADS, ...CUST]),
+  113: calc('= 121', CUST), 114: calc('= 113 ÷ 103', CUST), 115: calc('= 95 ÷ 110', []),
+  121: calc('= last month (first: 120) + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
+  125: calc('= 123 within 48 + 49', CUST),
+};
+const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'sum of rows 48-50'};
+const ONCE = new Set(['opening_inventory', 'opening_customers', 'opening_cash']);
+/** The source of a sheet row's actual line (or the opening-cash line typed under row 90). Null = the row has no actual line. */
+export function actualSource(row: number | 'opening_cash'): ActualSource | null {
+  if (row === 'opening_cash') return {kind: 'type', from: 'once'};
+  const typed = TYPED_ROW[row];
+  if (typed) return {kind: 'type', from: ONCE.has(typed) ? 'once' : LINE_ROW[typed] ? 'every month' : 'optional'};
+  if (AUTO[row]) return {kind: 'auto', from: AUTO[row]};
+  return ACTUAL_ROWS.has(row) ? CALC[row] ?? null : null;
+}
+/** The row numbers a formula text cites, ranges expanded ("= rows 33-38", "= 51 − 55"). */
+export const rowRefs = (text: string): number[] => [...text.matchAll(/(\d+)(?:-(\d+))?/g)].flatMap((m) => (m[2] ? span(Number(m[1]), Number(m[2])) : [Number(m[1])]));
+/** Row numbers as runs: 33-38, 52-54, 60. */
+export function rowRange(rows: readonly number[]): string {
+  const out: string[] = [];
+  for (let k = 0; k < rows.length; k++) {
+    let e = k;
+    while (rows[e + 1] === rows[e] + 1) e++;
+    out.push(e > k + 1 ? `${rows[k]}-${rows[e]}` : e === k + 1 ? `${rows[k]}, ${rows[e]}` : `${rows[k]}`);
+    k = e;
+  }
+  return out.join(', ');
+}
+
 /** A sheet value as the grid shows it. Money in thousands like the sheet, a check as OK or the row's failing word. */
 export function fmtSheet(unit: SheetUnit, v: number | null | undefined, fail?: string): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
