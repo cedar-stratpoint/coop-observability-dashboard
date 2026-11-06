@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Upload progress: a living bar so a long scan doesn't feel stuck
+
+Reading a big scan can sit for minutes on one page, and a flat fill bar made that look frozen. The upload progress bars now have a subtle glossy gradient fill and a sheen that keeps gliding across the filled portion, so an in-flight read reads as "still working" (a labor illusion) instead of stalled. The fill width is still the real progress; the sheen is transform-only and purposeful (a minutes-long, occasional wait, not a decorative pulse), matching the house "Ask coop" shine. The main bar is a touch taller for presence. Collapses to a static fill under reduced motion via the app-wide rule. Built with the motion skill (Jakub polish, Emil restraint, a touch of Jhey for the requested fun).
+
 ## 2026-11-06 — Observability: a read_logs table for the scan-read pipeline
 
 To debug and harden the reader, every page the uploader reads (and every store-assign attempt) now writes one durable row to a new Nichido `read_logs` table: the identity (company, scan source, upload, filename, page, size), the classifier/extract summary (page kind, form version, orientation, snapped vs raw store, row count, doc confidence, flagged, off-manifest), **timings** (how long classify and the read each took, so the slow dense pages are visible), and the **final outcome** including the real error and the stage it died in. The full extraction rows stay in `extractions`; `read_logs` keeps a lean summary plus a `detail` jsonb with the raw classifier output.
