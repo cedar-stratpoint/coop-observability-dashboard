@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Reader: fallback Anthropic key when the primary fails
+
+The primary Goldline key can be temporary (expires) or hit its credit limit mid-batch. A single call now tries the primary key first and, only on a KEY-level error (expired, revoked, out of credits, or a workspace-scope problem), retries the same call on `GOLDLINE_ANTHROPIC_API_KEY_FALLBACK` (with its own optional `GOLDLINE_ANTHROPIC_WORKSPACE_ID_FALLBACK`). Transient errors (429/529/timeout) and content errors (our own page_mismatch) stay on the same key, so a real reading problem isn't masked and the fallback's budget isn't burned. `extractionConfigured` is true if either key is set. Unit-tested; the fallback is off unless its env var is set.
+
 ## 2026-11-06 — Reader: support an org-scoped Anthropic key (workspace-id header)
 
 An Anthropic API key created at the org level (not inside a workspace) must name the workspace to run and bill in, via an `anthropic-workspace-id` header, or every request 400s. The Goldline reader now sends that header when `GOLDLINE_ANTHROPIC_WORKSPACE_ID` is set, and omits it cleanly for a workspace-scoped key (no behaviour change there). Verified live against the key: with the workspace header, `/v1/models` and a `claude-sonnet-5-5` message both return 200. Set both `GOLDLINE_ANTHROPIC_API_KEY` and `GOLDLINE_ANTHROPIC_WORKSPACE_ID` in Vercel for an org-scoped key.
