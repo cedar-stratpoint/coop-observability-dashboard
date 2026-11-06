@@ -399,7 +399,18 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     return c;
   }, [g.items]);
   const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
-  const filtered = filter === 'all' ? g.items : g.items.filter((i) => itemCategory(i) === filter);
+  // Pages the user just hit retry on: keep them in view while they re-read (even under a
+  // filter they no longer match) so the row shows "Retrying…" in place instead of popping
+  // out the instant the icon is clicked.
+  const [retrying, setRetrying] = useState<Set<string>>(() => new Set());
+  const handleRetry = (id: string) => {
+    setRetrying((s) => new Set(s).add(id));
+    api.retry(id);
+  };
+  const filtered =
+    filter === 'all'
+      ? g.items
+      : g.items.filter((i) => itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working'));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
   const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
@@ -458,7 +469,7 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
           )}
           <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
             {shown.map((i) => (
-              <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+              <FileRow key={i.id} i={i} batchId={batchId} now={now} retrying={retrying.has(i.id)} onRetry={() => handleRetry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
             ))}
           </ul>
           {pageCount > 1 && (
@@ -488,11 +499,14 @@ function CategoryPill({cat}: {cat: ItemCategory}) {
   );
 }
 
-function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void}) {
+function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void; retrying?: boolean}) {
   const pct = itemPercent(i, now);
   const failed = i.state === 'failed';
   const done = i.state === 'done';
   const cat = itemCategory(i);
+  // The user just hit retry and it's re-reading: show "Retrying…" in place (spinner +
+  // a soft active tint), so the click lands as visible feedback, not a vanishing row.
+  const isRetrying = retrying && (i.state === 'queued' || i.state === 'running');
   // A read page opens the batch review on that page's tab (the same view as "Review &
   // commit"), so there is one place to review. The whole row is the target (stretched
   // link), so there's no small "Open" to aim for.
@@ -500,9 +514,10 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
   return (
     <li
       className={cn(
-        'relative flex items-center gap-3 px-3.5 py-2.5',
+        'relative flex items-center gap-3 px-3.5 py-2.5 transition-colors duration-300 ease-out',
         i.state === 'cancelled' && 'opacity-50',
-        href && 'transition-colors duration-150 ease-out hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
+        isRetrying && 'bg-primary/5',
+        href && 'hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
       )}
     >
       {href && (
@@ -521,7 +536,12 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
           </span>
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(i.size)}</span>
         </div>
-        {cat === 'sales' || cat === 'blank' || cat === 'other' ? (
+        {isRetrying ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium" style={{color: 'color-mix(in oklab, var(--primary) 70%, var(--foreground))'}}>
+            <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+            <span className="truncate">Retrying…{i.state === 'running' ? ' reading the page' : ''}</span>
+          </span>
+        ) : cat === 'sales' || cat === 'blank' || cat === 'other' ? (
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <CategoryPill cat={cat} /> <span className="truncate">set aside, not counted</span>
           </span>
