@@ -440,14 +440,17 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
       </button>
       {open && (
         <div className="flex flex-col border-t border-border bg-muted/20">
-          {/* Filter chips — only when there's more than one bucket to sort between. */}
+          {/* Filter chips — only when there's more than one bucket to sort between. A
+              "Show" label + a separator line make the row read as a control, and the
+              failures chip is tinted so it doesn't blend in. */}
           {present.length >= 2 && (
-            <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-2.5" role="group" aria-label="Filter pages">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-3" role="group" aria-label="Filter pages">
+              <span className="mr-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
               <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
                 All <span className="tabular-nums opacity-70">{g.items.length}</span>
               </FilterChip>
               {present.map((c) => (
-                <FilterChip key={c} active={filter === c} onClick={() => choose(c)}>
+                <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
                   {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
                 </FilterChip>
               ))}
@@ -564,16 +567,23 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
   );
 }
 
-/** A small toggle chip for the per-scan page filter (All / Read / Couldn't read / …). */
-function FilterChip({active, onClick, children}: {active: boolean; onClick: () => void; children: React.ReactNode}) {
+/** A toggle chip for the per-scan page filter (All / Read / Couldn't read / …). `crit`
+ *  tints the failures chip red so it stands out from the calm set-aside buckets. */
+function FilterChip({active, onClick, tone = 'default', children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; children: React.ReactNode}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-        active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+        'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        tone === 'crit'
+          ? active
+            ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
+            : 'border-[color:var(--status-crit)]/40 bg-[color:var(--status-crit)]/5 text-[color:var(--status-crit)] hover:bg-[color:var(--status-crit)]/12'
+          : active
+            ? 'border-primary bg-primary/15 text-foreground'
+            : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
       )}
     >
       {children}
