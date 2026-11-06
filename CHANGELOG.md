@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Per file view: paginated, with a 5 / 10 / 20 / 50 page size
+
+A 98-page scan listed all its pages at once in the Per-file view, so the page scrolled a long way. It now paginates: a footer shows "1 to 20 of 98 pages", a **Per page** selector (5, 10, 20, 50; default 20, remembered per browser), and the shared numbered pager. Same one-row-per-page dedupe as before; the "earlier attempts" toggles and delete flow are unchanged.
+
 ## 2026-11-06 — Health report: every actual line says where it comes from; empty typed cells highlighted; denser grid
 
 The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It is the sum of rows 66-70, which are typed. **Decision: every actual line names its source, and a computed line that is waiting points at the rows to fill.**
