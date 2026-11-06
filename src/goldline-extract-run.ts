@@ -76,9 +76,16 @@ export function extractionConfigured(): boolean {
   return Boolean(process.env.GOLDLINE_ANTHROPIC_API_KEY);
 }
 
-/** Goldline's own Anthropic client (its key, not Ask Coop's). */
+/** Goldline's own Anthropic client (its key, not Ask Coop's). An org-scoped key must
+ *  say which workspace to bill/run in, via the anthropic-workspace-id header; set
+ *  GOLDLINE_ANTHROPIC_WORKSPACE_ID for those. A workspace-scoped key needs no header, so
+ *  the var is optional and omitted cleanly when unset. */
 function goldlineClient(): Anthropic {
-  return new Anthropic({apiKey: process.env.GOLDLINE_ANTHROPIC_API_KEY});
+  const workspaceId = process.env.GOLDLINE_ANTHROPIC_WORKSPACE_ID?.trim();
+  return new Anthropic({
+    apiKey: process.env.GOLDLINE_ANTHROPIC_API_KEY,
+    ...(workspaceId ? {defaultHeaders: {'anthropic-workspace-id': workspaceId}} : {}),
+  });
 }
 
 /** A document content block for a base64 PDF — shared by the detect + extract calls. */
