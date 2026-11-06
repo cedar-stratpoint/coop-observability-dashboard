@@ -16,6 +16,7 @@ import {UploadQueueIndicator} from './upload-queue-indicator';
 import {BrandMark} from './brand-mark';
 import {brandFor} from '@/src/brands';
 import {shouldRedirectFromZoomy} from '@/src/company-nav';
+import {leafActive, pathUnder} from '@/src/nav-active';
 import {PlaybookProvider} from './playbook';
 import {CoopChatProvider, AskCoopPill} from './coop-chat';
 import {CustomRangePicker} from './custom-range-picker';
@@ -29,6 +30,7 @@ type NavItem = {href: string; label: string; icon: React.ComponentType<{classNam
 const OVERVIEW: NavItem = {href: '/', label: 'Overview', icon: Home};
 const OVERVIEW_CHILDREN: NavItem[] = [
   {href: '/health', label: 'Business Health', icon: Gauge},
+  {href: '/health-report', label: 'Business Health Report', icon: ClipboardList},
   {href: '/?channel=all', label: 'Sales', icon: BarChart3},
   {href: '/offline-sales', label: 'Offline Sales', icon: Receipt},
   {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
@@ -55,37 +57,6 @@ const FLAT_TABS: NavItem[] = [
   {href: '/repricer', label: 'Repricer', icon: Tag},
   {href: '/settings', label: 'Settings', icon: Settings},
 ];
-
-// Active detection. '/' is the Overview home ONLY without a channel; '/?channel='
-// is the Sales compare view. Everything else matches by path prefix.
-const leafActive = (href: string, pathname: string, channel: string | null) => {
-  if (href === '/') return pathname === '/' && !channel;
-  if (href === '/?channel=all') return pathname === '/' && Boolean(channel);
-  // Transactions (/offline-sales/orders) and Events (/offline-sales/events) live
-  // under /offline-sales, so all three must not light up together: Offline Sales
-  // owns /offline-sales and any other subpath, while Transactions and Events each
-  // own their own subtree. This transfers the highlight to the child when you open
-  // it from the Offline Sales page.
-  if (href === '/offline-sales') {
-    return pathname === '/offline-sales'
-      || (pathname.startsWith('/offline-sales/')
-        && !pathname.startsWith('/offline-sales/events')
-        && !pathname.startsWith('/offline-sales/orders'));
-  }
-  if (href === '/offline-sales/orders') return pathname.startsWith('/offline-sales/orders');
-  if (href === '/offline-sales/events') return pathname.startsWith('/offline-sales/events');
-  // Goldline: SKU linking (/stock/skus), Restock (/stock/restock), Orders (/stock/orders)
-  // and Audit (/stock/audit) own their subtrees; Inventory owns the rest of /stock.
-  if (href === '/stock')
-    return (
-      pathname.startsWith('/stock') &&
-      !pathname.startsWith('/stock/skus') &&
-      !pathname.startsWith('/stock/restock') &&
-      !pathname.startsWith('/stock/orders') &&
-      !pathname.startsWith('/stock/audit')
-    );
-  return pathname.startsWith(href.split('?')[0]);
-};
 
 /** The Coop wordmark — lowercase, with the second "o" in brand green. */
 function CoopMark() {
@@ -165,7 +136,9 @@ export function DashboardShell({
     Boolean(current) &&
     !isHome &&
     !pathname.startsWith('/settings') &&
-    !pathname.startsWith('/health') &&
+    !pathUnder('/health', pathname) &&
+    // Business Health Report: plan vs actual by calendar month, no digest week.
+    !pathUnder('/health-report', pathname) &&
     !pathname.startsWith('/repricer') &&
     // Saved reports carry their own dates (live range or pinned), not a digest week.
     !pathname.startsWith('/reports') &&
@@ -248,12 +221,14 @@ export function DashboardShell({
   // Settings for non-Zoomy views only matters to multi-role users (Starting view).
   const multiView = Boolean(nav && nav.views.length > 1);
   const settingsTab: NavItem = {href: '/settings', label: 'Settings', icon: Settings};
+  // The one Zoomy page the Coop Admin may open (it is one of the plan's two editors): plan vs actual, no customer data.
+  const healthReportTab: NavItem = {href: '/health-report', label: 'Business Health Report', icon: ClipboardList};
 
   const overviewChildren = isZoomy ? OVERVIEW_CHILDREN : [];
   const flatTabs = isZoomy
     ? FLAT_TABS
     : isCoopAdminView
-      ? [usersTab, ...(multiView ? [settingsTab] : [])]
+      ? [usersTab, healthReportTab, ...(multiView ? [settingsTab] : [])]
       : [overviewTab, storesTab, stockTab, restockTab, ordersTab, skuLinksTab, flagsTab, auditTab, basTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
 
   // ── Mobile nav model (below md only) ──────────────────────────────────────
@@ -279,6 +254,7 @@ export function DashboardShell({
   const moreItems: NavItem[] = isZoomy
     ? [
         {href: '/health', label: 'Business Health', icon: Gauge},
+        {href: '/health-report', label: 'Business Health Report', icon: ClipboardList},
         {href: '/offline-sales/orders', label: 'Transactions', icon: ReceiptText},
         {href: '/offline-sales/events', label: 'Events', icon: CalendarDays},
         {href: '/customers', label: 'Customers', icon: Users},
@@ -288,9 +264,7 @@ export function DashboardShell({
         {href: '/settings', label: 'Settings', icon: Settings},
       ]
     : isCoopAdminView
-      ? multiView
-        ? [settingsTab]
-        : []
+      ? [healthReportTab, ...(multiView ? [settingsTab] : [])]
       : [restockTab, ordersTab, storesTab, skuLinksTab, flagsTab, basTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 

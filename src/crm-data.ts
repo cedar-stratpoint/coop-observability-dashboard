@@ -3,6 +3,7 @@ import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
 import {envelope, MEMBERSHIP_FALLBACK, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder} from './crm-project';
+import {crmCoverage} from './plan-gmv';
 import type {RemoteSpinLead} from './spin-leads-sync';
 import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
 
@@ -96,6 +97,26 @@ const ordersCached = unstable_cache(async (): Promise<CrmOrder[]> => {
     return [];
   }
 }, ['crm-orders'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
+
+/**
+ * The Business Health Report's Website read. Unlike getCrmOrders it never turns a failure into "no orders": null means the CRM is not
+ * configured or the read failed (a gap on the report), and `truncated` says the Worker's newest-1000 cap (or its own order count from
+ * /api/metrics) shows older orders were not returned, so older months must not be reported as a number.
+ */
+export const getCrmOrdersForPlan = cache((): Promise<{orders: CrmOrder[]; truncated: boolean} | null> =>
+  crmConfigured() ? ordersForPlanCached() : Promise.resolve(null),
+);
+
+const ordersForPlanCached = unstable_cache(async (): Promise<{orders: CrmOrder[]; truncated: boolean} | null> => {
+  try {
+    const orders = (envelope(await crmGet<unknown>('/api/orders'), 'orders') ?? []).map(projectOrder);
+    const metrics = await getCrmMetrics(); // soft: null just means we rely on the cap alone
+    return {orders, truncated: crmCoverage(orders.length, metrics?.orders ?? null).truncated};
+  } catch (err) {
+    console.warn(`CRM orders (plan) read failed: ${(err as Error).message}`);
+    return null;
+  }
+}, ['crm-orders-plan'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
 export const getCrmCheckouts = cache((): Promise<CrmCheckout[]> =>
   crmConfigured() ? checkoutsCached() : Promise.resolve([]),
