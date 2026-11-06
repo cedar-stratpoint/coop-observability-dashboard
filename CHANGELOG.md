@@ -27,6 +27,11 @@ The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It i
 - **Chart y-axis fixed** (owner: "sure ka tama to?"): the cash chart read 0k, 0k, 1k, 1k, 2k because its gridlines sat on padded, un-round values and each label was rounded to the nearest thousand. Both hand-drawn charts (cash, target stock orders) now use round steps from `src/plan-axis.ts` and labels keep the decimals their step needs (0, 500, 1k, 1.5k, 2k).
 
 - **Equal is met, also against a rounded target** (owner check: Aug'26 filled with the workbook's own values): CM3 %, EBITDA % and break-even ROAS were red. The loader stores targets rounded to 6 decimals while the page works actuals out at full precision, so equal missed by under 0.000001. The judge now allows that stored rounding (`STORED` in `src/plan-sheet.ts`); a real miss is still a miss.
+## 2026-11-06 — Forms board: confirm a store for a whole group at once
+
+A store group is built from the store code the scan read, so its heading showed whatever name one form happened to read ("SM Sta Rosa DS") rather than the registry's real name, and there was no way to fix a code for several forms together. The group heading now shows the **registry's canonical name** for the code (e.g. "DS STA ROSA 2") when the code is a known store, with the code beside it. A new **Confirm store / Change store** control on the heading opens a dialog that **suggests the registry store for the code**; you keep it or pick another, then it points the forms in the group to that store in one go (reusing the per-form assign, applied in bulk).
+
+Because a scan can misread a code and lump a different store into the group, the dialog lists every form with its read name and a tick, all on by default, and flags any whose name shares no word with the chosen store as "looks different", so an odd one (e.g. "SM Sta Maria" under 5300) can be unticked instead of mis-stamped. A code already matched to a registry store reads as linked (quiet "Change store"); an unknown code prompts in the accent colour.
 
 ## 2026-11-06 — Per file: one row per page, earlier attempts folded away
 
