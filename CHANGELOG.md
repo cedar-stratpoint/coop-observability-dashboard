@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Per file: one row per page, earlier attempts folded away
+
+Each retry and each re-upload of a scan makes a fresh `uploads` row per page, and the failed ones aren't removed, so the Per-file view piled up the same page many times (one 98-page scan had grown to 244 rows across a day of testing). It now shows **one row per page** — the current, best attempt (a committed or read page beats one processing, which beats a set-aside, which beats a failure; newest breaks a tie) — with the older tries folded behind an "N earlier attempts" toggle. Expanding lists them with their status and a delete button, so stale attempts can be cleared with the normal delete flow. No data is removed automatically; "Delete scan" still clears the whole drop.
+
 ## 2026-11-06 — Review: the "Page N of M" reads as a pill
 
 On the review page the "Page 21 of 98" sat as faint breadcrumb text next to the scan name and was easy to miss. It's now a small accent pill (tinted background, border, semibold tabular figures), so which page you're reviewing reads at a glance.
