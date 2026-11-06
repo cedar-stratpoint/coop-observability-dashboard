@@ -229,7 +229,7 @@ const CALC: Readonly<Record<number, ActualSource>> = {
   121: calc('= last month + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
   125: calc('= 123 within 48 + 49', CUST),
 };
-const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'sum of rows 48-50'};
+const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'Marketplace GMV + Website GMV + Events GMV'};
 const ONCE = new Set(['opening_inventory', 'opening_customers', 'opening_cash']);
 /** The source of a sheet row's actual line (or the opening-cash line typed under row 90). Null = the row has no actual line. */
 export function actualSource(row: number | 'opening_cash'): ActualSource | null {
@@ -241,6 +241,34 @@ export function actualSource(row: number | 'opening_cash'): ActualSource | null 
 }
 /** The row numbers a formula text cites, ranges expanded ("= rows 33-38", "= 51 − 55"). */
 export const rowRefs = (text: string): number[] => [...text.matchAll(/(\d+)(?:-(\d+))?/g)].flatMap((m) => (m[2] ? span(Number(m[1]), Number(m[2])) : [Number(m[1])]));
+/**
+ * The grid never shows row numbers (owner, 2026-11-06: "hindi naman maidentify ni user anong row number yun"), so tips name the lines. A line's short
+ * name comes from its sheet label: no "less:", no units in brackets, no "→ drives ..." or "= ..." tail; an overhead sub-row is its own word (Salaries).
+ */
+export function rowName(row: number): string {
+  const label = SHEET_ROWS.find((r) => r.row === row)?.label ?? `line ${row}`;
+  let t = label.trim().replace(/^less:\s*/i, '').replace(/\s*\([^)]*\)/g, '').replace(/\s*(→|=).*$/, '').replace(/\s+—\s+PLUG$/, '');
+  const parts = t.split(/\s+[—–]\s+/);
+  t = (/^Company overhead/.test(t) && parts[1] ? parts[1] : parts[0]).replace(/\s{2,}/g, ' ').trim();
+  t = t.replace(/^TOTAL\b/, 'Total');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+/** A formula from the CALC table in line names: "= rows 66-70" → "Marketplace ad spend + ... + Other spend costs", "= 62 − 71" → "CM2 − Total ad spend". */
+export function namedFormula(from: string): string {
+  return from.replace(/^=\s*/, '').replace(/\+ 74\b/, '− 39').replace(/^− 39$/, '− 39') // row 74 is overhead stored negative: read it as minus the overhead total
+    .replace(/rows (\d+)-(\d+)/g, (_, a, b) => span(Number(a), Number(b)).map(rowName).join(' + '))
+    .replace(/\b(\d{2,3})\b/g, (_, n) => rowName(Number(n)))
+    .replace(/\bone\b/g, '1').replace(/\btwelve\b/g, '12');
+}
+/** The typed lines a calc line needs, in words; a whole block reads as its group ("the ad spend lines"). */
+const GROUPS: ReadonlyArray<[readonly number[], string]> = [[OVH, 'the overhead lines'], [COGS, 'the COGS lines'], [FEES, 'the platform fee, fulfilment and events cost lines'], [ADS, 'the ad spend lines']];
+export function feedNames(rows: readonly number[]): string {
+  const left = new Set(rows);
+  const words: string[] = [];
+  for (const [g, name] of GROUPS) if (g.every((r) => left.has(r))) { g.forEach((r) => left.delete(r)); words.push(name); }
+  for (const r of [...left].sort((a, b) => a - b)) words.push(rowName(r));
+  return words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0] ?? '';
+}
 /** Row numbers as runs: 33-38, 52-54, 60. */
 export function rowRange(rows: readonly number[]): string {
   const out: string[] = [];

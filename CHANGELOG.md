@@ -22,6 +22,8 @@ The owner read the empty row 71 ("less: Total ad spend") as a cell to fill. It i
 
 - **Decluttered on owner feedback** ("too cluttered and messy"): the worded chips, the legend and the "fill 33-38 +6" text in waiting cells are gone. Each ACTUAL label has ONE small icon (pencil = you type, bolt = from Coop, function = worked out) that opens the source or formula on hover, tap or focus; a waiting cell keeps that only as its hover title and screen-reader text. Lesson: `knowledge/lessons/grid-cells-hold-numbers-only.md`.
 
+- **Tips name the lines, never row numbers** (owner: a user cannot tell what "row 66" is): "Worked out: Marketplace ad spend + ... + Other spend costs. It fills in once the ad spend lines are typed." The CALC table keeps the sheet's row numbers (checked against the workbook); `rowName`, `namedFormula` and `feedNames` in `src/plan-sheet.ts` turn them into words.
+
 ## 2026-11-06 — Health report SQL: one file, final schema only
 
 - **Decision: ship the final schema, not the local iterations.** No hosted database ever had the plan tables (staging checked: `to_regclass('public.plan_actuals')` is NULL; PROD is never touched), so there is nothing to migrate and nothing to drop. `supabase/plan_report.sql` is now the only plan SQL file: the five tables, the four RPCs, RLS on with no policies, anon and authenticated revoked. RPC behaviour is unchanged.

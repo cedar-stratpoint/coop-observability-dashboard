@@ -9,7 +9,7 @@ import {
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_LINE_ORDER, lineInputText, lineUnitWords, monthPhase, parseLineInput,
   type ActualCell, type ClosedMonth, type LineSeries, type PlanData, type Status,
 } from '@/src/plan-compute';
-import {SHEET_ROWS, actualKind, actualSource, blockOf, rowRange, fmtCell, isSingle, judgedAs, sheetActuals, sheetCtx, sheetStatus, shownRows, targetId, TYPED_ROW, type ActualSource, type SheetRow} from '@/src/plan-sheet';
+import {SHEET_ROWS, actualKind, actualSource, blockOf, feedNames, namedFormula, fmtCell, isSingle, judgedAs, sheetActuals, sheetCtx, sheetStatus, shownRows, targetId, TYPED_ROW, type ActualSource, type SheetRow} from '@/src/plan-sheet';
 
 // BHR-06: the All months grid IS the Business Plan sheet. Rows 5 to 125 down in sheet order with the sheet's labels, months across. Every target cell is
 // the workbook value. Under each row that can have an actual sits an "actual" line: an entry cell for a typed row (one per itemised sheet row), the value
@@ -122,8 +122,9 @@ function TypedCell({metric, mo, i, plan, nowKey, edit, status, col}: {metric: st
 export function sourceTip(s: ActualSource): string {
   if (s.kind === 'type') return s.from === 'once' ? 'You type this once, in the first month.' : s.from === 'optional' ? 'You type this (optional).' : 'You type this every month.';
   if (s.kind === 'auto') return `Filled in by Coop from ${s.from}.`;
-  const feeds = s.feeds?.length ? ` It fills in once ${s.feeds.length > 1 ? 'rows' : 'row'} ${rowRange(s.feeds)}${s.opening ? ' and opening cash' : ''} are typed.` : '';
-  return `Worked out by the sheet's formula: ${s.from}.${feeds}`;
+  const need = [feedNames(s.feeds ?? []), s.opening ? 'opening cash' : ''].filter(Boolean);
+  const feeds = need.length ? ` It fills in once ${need.join(' and ')} ${need.length > 1 || /^the /.test(need[0]) ? 'are' : 'is'} typed.` : '';
+  return `Worked out: ${namedFormula(s.from)}.${feeds}`;
 }
 const SOURCE: Record<ActualSource['kind'], {icon: LucideIcon; label: string; tone: string}> = {
   type: {icon: PencilLine, label: 'You type this line', tone: 'text-[var(--bhr-warn)]'},
@@ -140,7 +141,7 @@ const SourceTip = ({source}: {source: ActualSource}) => {
 function stillToFill(s: ActualSource | null, lines: LineSeries, i: number): {full: string} | null {
   if (s?.kind !== 'calc') return null;
   const empty = (s.feeds ?? []).filter((row) => (lines[TYPED_ROW[row]]?.[actualSource(row)?.from === 'once' ? 0 : i] ?? null) === null).sort((a, b) => a - b);
-  const parts = [...(empty.length ? [`${empty.length > 1 ? 'rows' : 'row'} ${rowRange(empty)}`] : []), ...(s.opening && (lines[s.opening]?.[0] ?? null) === null ? ['opening cash'] : [])];
+  const parts = [...(empty.length ? [feedNames(empty)] : []), ...(s.opening && (lines[s.opening]?.[0] ?? null) === null ? ['opening cash'] : [])];
   return parts.length ? {full: `fill ${parts.join(' and ')}`} : null;
 }
 
