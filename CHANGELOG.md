@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Review: the "Page N of M" reads as a pill
+
+On the review page the "Page 21 of 98" sat as faint breadcrumb text next to the scan name and was easy to miss. It's now a small accent pill (tinted background, border, semibold tabular figures), so which page you're reviewing reads at a glance.
+
 ## 2026-11-06 — Health report SQL: one file, final schema only
 
 - **Decision: ship the final schema, not the local iterations.** No hosted database ever had the plan tables (staging checked: `to_regclass('public.plan_actuals')` is NULL; PROD is never touched), so there is nothing to migrate and nothing to drop. `supabase/plan_report.sql` is now the only plan SQL file: the five tables, the four RPCs, RLS on with no policies, anon and authenticated revoked. RPC behaviour is unchanged.
