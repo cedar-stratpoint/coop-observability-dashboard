@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Per file view: paginated, with a 5 / 10 / 20 / 50 page size
+
+A 98-page scan listed all its pages at once in the Per-file view, so the page scrolled a long way. It now paginates: a footer shows "1 to 20 of 98 pages", a **Per page** selector (5, 10, 20, 50; default 20, remembered per browser), and the shared numbered pager. Same one-row-per-page dedupe as before; the "earlier attempts" toggles and delete flow are unchanged.
+
 ## 2026-11-06 — Forms board: confirm a store for a whole group at once
 
 A store group is built from the store code the scan read, so its heading showed whatever name one form happened to read ("SM Sta Rosa DS") rather than the registry's real name, and there was no way to fix a code for several forms together. The group heading now shows the **registry's canonical name** for the code (e.g. "DS STA ROSA 2") when the code is a known store, with the code beside it. A new **Confirm store / Change store** control on the heading opens a dialog that **suggests the registry store for the code**; you keep it or pick another, then it points the forms in the group to that store in one go (reusing the per-form assign, applied in bulk).
