@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "check:pagination": "node scripts/check-pagination.mjs",
     "test": "vitest run",
+    "test:plan-local": "set -a; . scripts/local-supabase/.local-env; set +a; vitest run test/plan- --no-file-parallelism",
     "shopee:import": "tsx scripts/shopee-import.ts"
   },
   "dependencies": {

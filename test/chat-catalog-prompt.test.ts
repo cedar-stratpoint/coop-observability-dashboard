@@ -12,7 +12,7 @@ import {estimateTokens} from '../src/chat/skills/load';
 import {buildPreamble} from '../src/chat/preamble';
 import type {MetricData} from '../src/chat/result-types';
 
-const BUDGET = 14400; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic)
+const BUDGET = 14500; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic); 14,424 on 2026-11-05 with the plan tables and /health-report page
 
 describe('2b.2 data index in the cached prompt', () => {
   const text = buildDataIndexText();
@@ -41,7 +41,7 @@ describe('2b.2 data index in the cached prompt', () => {
     expect(text).toMatch(/- sales: default completed orders \(pos_orders_completed\)/);
   });
   it('stays small (most-used tables only, never the whole catalog)', () => {
-    expect(estimateTokens(text)).toBeLessThan(1700); // measured about 1,500 on 2026-10-07 (Train 3 Task 8); 1,612 on 2026-10-22 after the Shopee import tables (import_runs, marketplace_daily_observations) joined the digest domain line; 1,682 after the four weekly report tables and their four views
+    expect(estimateTokens(text)).toBeLessThan(1800); // measured about 1,500 on 2026-10-07 (Train 3 Task 8), 1,705 on 2026-11-05 after the catalog caught up with 5 pages and the plan tables
     expect(estimateTokens(text)).toBeLessThan(estimateTokens(JSON.stringify(CATALOG_DATA)) / 3);
   });
   it('the Explore system prompt uses it instead of the coop_explore_ views list', () => {
@@ -90,7 +90,7 @@ describe('3.1 and 3.2 pages and go-links come from the catalog', () => {
     expect(resolvePage('/crm')?.shows).toBe('redirects to /customers/website-crm');
   });
   it('go-links are the catalog pages Ask Coop can read plus the channel links, and the client list is the same', () => {
-    expect(GO_PATHS).toEqual(['/', '/traffic', '/health', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
+    expect(GO_PATHS).toEqual(['/', '/traffic', '/health', '/health-report', '/repricer', '/offline-sales', '/offline-sales/orders', '/offline-sales/events', '/offline-sales/rankings', '/inventory', '/customers/all', '/customers/website-crm', '/customers/leads', '/customers/lazada', '/reports', '/?channel=all', '/?channel=shopee', '/?channel=lazada', '/?channel=website']);
     const client = readFileSync('components/analyst/coop-chat.tsx', 'utf8');
     const m = /const APP_PATHS = new Set\(\[([^\]]*)\]\)/.exec(client);
     expect(m && [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1])).toEqual([...GO_PATHS]);

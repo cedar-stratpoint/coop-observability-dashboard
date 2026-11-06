@@ -3,9 +3,9 @@ import {cache} from 'react';
 import {cookies} from 'next/headers';
 import {redirect} from 'next/navigation';
 import {auth} from '@/auth';
-import {homeFor, shouldRedirectFromZoomy} from '@/src/company-nav';
+import {healthReportAccess, homeFor, shouldRedirectFromZoomy} from '@/src/company-nav';
 import {currentEnv} from '@/src/coop-env-server';
-import {devSessionWithMemberships} from '@/src/dev-auth';
+import {devAuthEnabled, devSessionWithMemberships} from '@/src/dev-auth';
 import type {CoopEnvKey} from '@/src/coop-env';
 import {
   COOP_VIEW_KEY,
@@ -81,6 +81,18 @@ export async function getDataContext(requested?: string | null): Promise<ActiveC
 export async function requireZoomyData(): Promise<void> {
   const ctx = await getActiveContext();
   if (shouldRedirectFromZoomy(ctx)) redirect(homeFor(ctx));
+}
+
+/**
+ * Guard for the Business Health Report: a Zoomy data viewer or a Coop Admin (who is otherwise bounced off Zoomy pages). A Goldline view is
+ * sent to its own home; a signed-out visitor to sign-in (the middleware already does this for pages; this covers a layout rendered without it).
+ * A signed-in user with no membership, and the local dev bypass, stay on the legacy Zoomy path like requireZoomyData.
+ */
+export async function requireHealthReportAccess(): Promise<void> {
+  const ctx = await getActiveContext();
+  const verdict = healthReportAccess(ctx);
+  if (verdict === 'bounce') redirect(homeFor(ctx));
+  if (verdict === 'signin' && !devAuthEnabled() && !(await sessionOnce())) redirect('/signin');
 }
 
 /** One selectable view for the shell switcher, with a display name resolved. */
