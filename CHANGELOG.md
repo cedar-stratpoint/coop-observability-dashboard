@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Health report: Website GMV covers every plan month (paged CRM read)
+
+The Website row of the Business Health Report read the Worker's unfiltered `/api/orders`, which only returns the newest 1,000 orders, so months older than that window stayed a gap. Decision: page the Worker's filtered mode instead (`from`, `limit=500`, `fields`, `cursor`, which returns `{orders, next_cursor, total_matching}`). No CRM change is needed. The read is a pure `collectOrderPages` (`src/plan-gmv.ts`): it follows `next_cursor` until null, stops at 40 pages and then reports truncated, and a failed page makes the whole read a gap, never a partial (understated) sum. An old Worker that ignores the filter (no `next_cursor` field) behaves as before: newest 1,000 and the existing cap rule with the `/api/metrics` order count. The status rules and `websiteCells` are unchanged. Not verified: a live call to the staging Worker; the Checklist's live check is still open.
+
 ## 2026-11-06 — Classifier: read duplex blank back-sides as "Blank page"
 
 These forms are scanned duplex (auto-flip), so roughly half of every scan is a blank back side. A faint blank sometimes classified as "unknown" and read as "Not an inventory page" rather than a clean "Blank page". The classifier prompt now tells the reader that blanks are common and expected, that faint scanner noise / a smudge / a crease / light bleed-through still counts as blank, and to prefer "blank" over "unknown" on a near-empty page (and never use "unknown" for an empty page). Both outcomes were already set aside calmly; this just gives the right label. Needs a Staging re-run to confirm against real scans.

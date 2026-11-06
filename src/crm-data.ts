@@ -3,7 +3,7 @@ import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
 import {envelope, MEMBERSHIP_FALLBACK, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder} from './crm-project';
-import {crmCoverage} from './plan-gmv';
+import {collectOrderPages, crmCoverage} from './plan-gmv';
 import type {RemoteSpinLead} from './spin-leads-sync';
 import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
 
@@ -100,18 +100,25 @@ const ordersCached = unstable_cache(async (): Promise<CrmOrder[]> => {
 
 /**
  * The Business Health Report's Website read. Unlike getCrmOrders it never turns a failure into "no orders": null means the CRM is not
- * configured or the read failed (a gap on the report), and `truncated` says the Worker's newest-1000 cap (or its own order count from
- * /api/metrics) shows older orders were not returned, so older months must not be reported as a number.
+ * configured or any page failed (a gap on the report). It pages the Worker's filtered /api/orders from `fromDay` (the first plan month),
+ * so `truncated` is only true when the page ceiling was hit. An old Worker that ignores the filter (no `next_cursor`) returns its newest
+ * 1000, so that case keeps the cap rule with the /api/metrics order count.
  */
-export const getCrmOrdersForPlan = cache((): Promise<{orders: CrmOrder[]; truncated: boolean} | null> =>
-  crmConfigured() ? ordersForPlanCached() : Promise.resolve(null),
+export const getCrmOrdersForPlan = cache((fromDay: string): Promise<{orders: CrmOrder[]; truncated: boolean} | null> =>
+  crmConfigured() ? ordersForPlanCached(fromDay) : Promise.resolve(null),
 );
 
-const ordersForPlanCached = unstable_cache(async (): Promise<{orders: CrmOrder[]; truncated: boolean} | null> => {
+const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<{orders: CrmOrder[]; truncated: boolean} | null> => {
   try {
-    const orders = (envelope(await crmGet<unknown>('/api/orders'), 'orders') ?? []).map(projectOrder);
+    const fields = 'shopifyOrderId,createdAt,financialStatus,totalPrice';
+    const read = await collectOrderPages<CrmOrder>(async (cursor) => {
+      const qs = `from=${encodeURIComponent(fromDay)}&limit=500&fields=${fields}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const body = await crmGet<{next_cursor?: string | null}>(`/api/orders?${qs}`);
+      return {orders: (envelope(body, 'orders') ?? []).map(projectOrder), nextCursor: body.next_cursor};
+    });
+    if (!read.legacy) return {orders: read.orders, truncated: !read.complete};
     const metrics = await getCrmMetrics(); // soft: null just means we rely on the cap alone
-    return {orders, truncated: crmCoverage(orders.length, metrics?.orders ?? null).truncated};
+    return {orders: read.orders, truncated: crmCoverage(read.orders.length, metrics?.orders ?? null).truncated};
   } catch (err) {
     console.warn(`CRM orders (plan) read failed: ${(err as Error).message}`);
     return null;
