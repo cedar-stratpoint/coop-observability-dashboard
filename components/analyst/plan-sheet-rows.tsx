@@ -116,52 +116,32 @@ function TypedCell({metric, mo, i, plan, nowKey, edit, status, col}: {metric: st
 }
 
 /**
- * BHR-07: where an actual line's number comes from, as a small chip on its label (owner, 2026-11-06). Type = you type it (amber, like the empty cells
- * waiting for you), Auto = read from a Coop source, Calc = the sheet's formula over the rows above. Below md the chip is its icon; the words stay as sr-only.
+ * BHR-07: where an actual line's number comes from, said once in the ⓘ on its label (owner, 2026-11-06: chips and "fill" text in the cells were
+ * "too cluttered and messy"; the cells hold numbers only). Type = an admin types it, Auto = read from a Coop source, Calc = the sheet's formula.
  */
-const SOURCE: Record<ActualSource['kind'], {Icon: LucideIcon; word: string; tone: string; tip: (s: ActualSource) => string}> = {
-  type: {Icon: PencilLine, word: 'Type', tone: 'border-[var(--bhr-warn)]/30 bg-[var(--amber-bg)] text-[var(--bhr-warn)]',
-    tip: (s) => (s.from === 'once' ? 'You type this once, in the first month' : s.from === 'optional' ? 'You type this (optional)' : 'You type this every month')},
-  auto: {Icon: Zap, word: 'Auto', tone: 'border-border bg-card text-foreground/80', tip: (s) => `Filled in by Coop: ${s.from}`},
-  calc: {Icon: SquareFunction, word: 'Calc', tone: 'border-border bg-muted text-muted-foreground', tip: (s) => `Worked out by the sheet's formula: row ${s.from}`},
+export function sourceTip(s: ActualSource): string {
+  if (s.kind === 'type') return s.from === 'once' ? 'You type this once, in the first month.' : s.from === 'optional' ? 'You type this (optional).' : 'You type this every month.';
+  if (s.kind === 'auto') return `Filled in by Coop from ${s.from}.`;
+  const feeds = s.feeds?.length ? ` It fills in once ${s.feeds.length > 1 ? 'rows' : 'row'} ${rowRange(s.feeds)}${s.opening ? ' and opening cash' : ''} are typed.` : '';
+  return `Worked out by the sheet's formula: ${s.from}.${feeds}`;
+}
+const SOURCE: Record<ActualSource['kind'], {icon: LucideIcon; label: string; tone: string}> = {
+  type: {icon: PencilLine, label: 'You type this line', tone: 'text-[var(--bhr-warn)]'},
+  auto: {icon: Zap, label: 'Filled in by Coop', tone: ''},
+  calc: {icon: SquareFunction, label: 'Worked out by a formula', tone: ''},
 };
-const chipWords = (s: ActualSource) => s.kind === 'type' ? (s.from === 'once' ? 'Type once' : s.from === 'optional' ? 'Type · optional' : 'Type')
-  : s.kind === 'auto' ? `Auto · ${s.from}` : `Calc ${s.from}`;
-function SourceChip({source}: {source: ActualSource}) {
-  const {Icon, tone, tip} = SOURCE[source.kind];
-  return (
-    <span data-source={source.kind} title={tip(source)} className={cn('ml-1.5 inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-px align-[1px] text-[10.5px] font-medium normal-case leading-tight tracking-normal max-md:ml-1 max-md:px-1', tone)}>
-      <Icon className="size-3 shrink-0" aria-hidden /><span className="[overflow-wrap:anywhere] max-md:sr-only">{chipWords(source)}</span>
-    </span>
-  );
-}
-/** One line above the grid that reads the three chips. */
-export function SourceLegend() {
-  const item = (k: ActualSource['kind'], words: string) => { const {Icon} = SOURCE[k]; return <span className="inline-flex items-center gap-1"><Icon className="size-3.5 shrink-0" aria-hidden />{words}</span>; };
-  return (
-    <p data-testid="source-legend" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
-      <span className="font-medium text-foreground/80">Actual lines:</span>{item('type', 'you type')}<span aria-hidden>·</span>{item('auto', 'from Coop')}<span aria-hidden>·</span>{item('calc', 'worked out from the rows above')}
-    </p>
-  );
-}
-/**
- * The typed rows a waiting calc line still needs this month: `full` for the tooltip ("fill rows 33-38, 66-70 and opening cash"), `short` for the cell, the
- * first run only ("fill rows 33-38 +2"), since the grid sizes its columns to their content. Null when none is empty (it waits for GMV or an earlier month).
- */
-function stillToFill(s: ActualSource | null, lines: LineSeries, i: number): {full: string; word: string; short: string} | null {
+/** One small icon on the actual line's label that says its kind; tap or hover for where the number comes from. */
+const SourceTip = ({source}: {source: ActualSource}) => {
+  const {icon, label, tone} = SOURCE[source.kind];
+  return <InfoTip text={sourceTip(source)} icon={icon} data-source={source.kind} label={`${label}: where this actual comes from`} className={cn('ml-0.5 [&_svg]:size-3.5', tone)} />;
+};
+
+/** The typed rows a waiting calc line still needs this month, for the cell's hover title and screen readers ("fill rows 33-38 and opening cash"). Null when none is empty (it waits for GMV or an earlier month). */
+function stillToFill(s: ActualSource | null, lines: LineSeries, i: number): {full: string} | null {
   if (s?.kind !== 'calc') return null;
-  const empty = (s.feeds ?? []).filter((row) => {
-    const id = TYPED_ROW[row];
-    return (lines[id]?.[actualSource(row)?.from === 'once' ? 0 : i] ?? null) === null;
-  }).sort((a, b) => a - b);
-  const open = s.opening && (lines[s.opening]?.[0] ?? null) === null ? ['opening cash'] : [];
-  const runs = empty.length ? rowRange(empty).split(', ') : [];
-  const parts = [...(runs.length ? [`${empty.length > 1 ? 'rows' : 'row'} ${runs.join(', ')}`] : []), ...open];
-  if (!parts.length) return null;
-  const rest = runs.length - 1 + open.length;
-  // The cell shows "fill 66-70" (the word "rows" kept for screen readers) so it fits an ~80px month column on one line.
-  const word = runs.length ? (/-/.test(runs[0]) || rest > 0 ? 'rows ' : 'row ') : '';
-  return {full: `fill ${parts.join(' and ')}`, word, short: `${runs.length ? runs[0] : 'opening cash'}${runs.length && rest > 0 ? ` +${rest}` : ''}`};
+  const empty = (s.feeds ?? []).filter((row) => (lines[TYPED_ROW[row]]?.[actualSource(row)?.from === 'once' ? 0 : i] ?? null) === null).sort((a, b) => a - b);
+  const parts = [...(empty.length ? [`${empty.length > 1 ? 'rows' : 'row'} ${rowRange(empty)}`] : []), ...(s.opening && (lines[s.opening]?.[0] ?? null) === null ? ['opening cash'] : [])];
+  return parts.length ? {full: `fill ${parts.join(' and ')}`} : null;
 }
 
 /** The INPUTS — DRIVERS block's toggle, rows 6 to 46 behind it. */
@@ -191,7 +171,7 @@ function OnceCell({i, plan, win, col}: {i: number; plan: PlanData; win?: PhoneWi
 export function SheetRows({plan, nowKey, actuals, edit, col, win, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; col: (i: number) => string; win?: PhoneWindow; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
   const sheet = useMemo(() => sheetActuals(plan, actuals, edit.lines), [plan, actuals, edit.lines]);
   const n = plan.months.length;
-  const ActualLabel = ({row}: {row: number}) => <th scope="row" className={cn(SUB_CELL, 'md:max-w-[260px]')}><span className="uppercase">actual</span><SourceChip source={actualSource(row)!} /></th>;
+  const ActualLabel = ({row}: {row: number}) => <th scope="row" className={cn(SUB_CELL, 'md:max-w-[260px]')}><span className="uppercase">actual</span><SourceTip source={actualSource(row)!} /></th>;
   return (
     <>
       {shownRows(inputsOpen).map((r) => {
@@ -256,7 +236,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, win, onWhy, inputsO
                   const click = CLICKABLE.has(id) && s === 'bad';
                   const cls = cn('border-b border-r border-border px-2 py-[5px] text-right font-semibold md:py-[3px]', cellActual(s), s === 'live' && 'font-normal italic', click && 'cursor-pointer hover:outline hover:outline-2 hover:-outline-offset-2 hover:outline-[var(--status-crit)]', col(i));
                   const fill = phase !== 'future' && c.value === null ? stillToFill(src, edit.lines, i) : null;
-                  const shown = phase === 'future' ? null : c.value === null ? (fill ? <span className="-mx-1 block w-0 min-w-[calc(100%+0.5rem)] whitespace-normal text-[10.5px] font-normal leading-tight text-muted-foreground"><span className="sr-only">waiting, </span>fill <span className="sr-only">{fill.word}</span>{fill.short}</span> : <span className="sr-only">waiting</span>)
+                  const shown = phase === 'future' ? null : c.value === null ? <span className="sr-only">{fill ? `waiting, ${fill.full}` : 'waiting'}</span>
                     : <>{fmtCell(r, c.value, i)}{c.state === 'partial' && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">partial</span>}</>;
                   const title = fill ? `Waiting: ${fill.full}` : s === 'ok' || s === 'bad' ? `${STATUS_TEXT[s]}${judgedAs(r)}` : s === 'modelled' ? 'Modelled from plan assumptions, not judged' : c.note;
                   return click
@@ -268,7 +248,7 @@ export function SheetRows({plan, nowKey, actuals, edit, col, win, onWhy, inputsO
             {r.row === 90 && (
               // The sheet starts cash from 0 and has no opening-cash cell: Coop asks for the bank balance at the start of the first month, once.
               <tr data-sheet-actual="opening_cash" data-actual-kind="typed">
-                <th scope="row" className={SUB_CELL}><span className="uppercase">opening cash</span><InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="About opening cash" className="ml-0.5" /><SourceChip source={actualSource('opening_cash')!} /></th>
+                <th scope="row" className={SUB_CELL}><span className="uppercase">opening cash</span><InfoTip text={PLAN_HELP.openingCash(edit.canEdit, (edit.lines.opening_cash?.[0] ?? null) !== null)} label="You type this line: about opening cash" icon={PencilLine} data-source="type" className="ml-0.5 text-[var(--bhr-warn)] [&_svg]:size-3.5" /></th>
                 {plan.months.map((mo, i) => i > 0 ? <OnceCell key={mo} i={i} plan={plan} win={win} col={col(i)} /> : <TypedCell key={mo} metric="opening_cash" mo={mo} i={0} plan={plan} nowKey={nowKey} edit={edit} status="info" col={col(i)} />)}
               </tr>
             )}
