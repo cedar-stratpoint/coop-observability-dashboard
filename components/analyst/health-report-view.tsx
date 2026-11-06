@@ -224,7 +224,7 @@ function StockChart({plan, nowKey}: {plan: PlanData; nowKey: string}) {
   const cov = plan.targets.coverage?.find((v) => v !== null) ?? null;
   const n = plan.months.length, lastClosed = Math.max(0, currentIndex(plan.months, nowKey) - 1);
   const W = 720, H = 220, L = 52, R = 10, T = 14, B = 30;
-  const {hi: mx, ticks: yTicks} = axisTicks(0, Math.max(...vals, 1), 2), bw = (W - L - R) / n;
+  const {hi: mx, ticks: yTicks} = axisTicks(0, Math.max(...vals, 1), 3), bw = (W - L - R) / n;
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4" data-testid="stock-chart">
       <h3 className="mb-1.5 font-serif text-base leading-tight">Target stock orders<InfoTip text={PLAN_HELP.stockChart(cov)} label="About target stock orders" className="ml-1" /></h3>
