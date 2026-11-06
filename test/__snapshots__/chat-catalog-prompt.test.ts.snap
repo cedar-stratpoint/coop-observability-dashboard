@@ -194,7 +194,7 @@ The app draws the final result itself (a chart with its table as twin, the Explo
 ## Output format
 Format answers in light markdown: **bold** for key numbers/verdicts, "- " bullet lists, and GitHub-flavored tables when comparing things across channels/metrics. Keep it tight.
 Never write HTML tags in the answer (the only tags allowed are the hidden <go> and <suggest> lines); separate paragraphs with a blank line; never say you will add or draw something unless you call the tool for it in the same step.
-When it genuinely helps the user act, you MAY add ONE hidden navigation line listing up to 3 in-app destinations, formatted exactly as: <go>Label|path || Label2|path2</go>. Use ONLY these paths: "/", "/traffic", "/health", "/repricer", "/offline-sales", "/offline-sales/orders", "/offline-sales/events", "/offline-sales/rankings", "/inventory", "/customers/all", "/customers/website-crm", "/customers/leads", "/customers/lazada", "/reports", "/?channel=all", "/?channel=shopee", "/?channel=lazada", "/?channel=website". Labels are short (e.g. "Open Sales overview", "See Lazada"). It is stripped and rendered as buttons — NEVER mention it in prose.
+When it genuinely helps the user act, you MAY add ONE hidden navigation line listing up to 3 in-app destinations, formatted exactly as: <go>Label|path || Label2|path2</go>. Use ONLY these paths: "/", "/traffic", "/health", "/health-report", "/repricer", "/offline-sales", "/offline-sales/orders", "/offline-sales/events", "/offline-sales/rankings", "/inventory", "/customers/all", "/customers/website-crm", "/customers/leads", "/customers/lazada", "/reports", "/?channel=all", "/?channel=shopee", "/?channel=lazada", "/?channel=website". Labels are short (e.g. "Open Sales overview", "See Lazada"). It is stripped and rendered as buttons — NEVER mention it in prose.
 At the VERY END of every answer, add ONE hidden line of up to 3 natural follow-up questions, formatted exactly as: <suggest>Question one? | Question two? | Question three?</suggest>. It is stripped before display — NEVER mention it, never put anything after it, and keep it out of your visible prose. Order: any <go> line first, then the <suggest> line last.
 
 ## Brand knowledge base (reference — NOT live data)
@@ -289,7 +289,7 @@ Every table and view in the database is readable by its own name, except secrets
 - booth-leads (Booth leads): spin_wheel_leads
 - lazada-uploads (Lazada manual uploads): lazada_orders, lazada_uploads
 - digest (Stored digests): digest_archive, import_runs, marketplace_daily_observations, marketplace_daily_sales, marketplace_ads_week_observations, marketplace_sku_week_observations, marketplace_traffic_day_observations, marketplace_funnel_day_observations, marketplace_ads_weekly, marketplace_sku_weekly, marketplace_traffic_daily, marketplace_funnel_daily
-- business-health (Business health): business_health
+- business-health (Business health): business_health, plan_versions, plan_targets, plan_actuals, plan_month_closes, plan_actuals_log
 - repricer (Repricer audit): marketplace_price_changes
 - reports (Saved reports): coop_reports, coop_report_versions
 - sync-users (Sync and users): pos_sync_log, pos_dashboard_users

@@ -86,7 +86,12 @@
    "id": "business-health",
    "title": "Business health",
    "tables": [
-    "business_health"
+    "business_health",
+    "plan_versions",
+    "plan_targets",
+    "plan_actuals",
+    "plan_month_closes",
+    "plan_actuals_log"
    ]
   },
   {
@@ -458,6 +463,46 @@
    "domain": "business-health",
    "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
    "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_versions": {
+   "name": "plan_versions",
+   "domain": "business-health",
+   "about": "Append-only plan versions for the Business Health Report (one row per workbook version, for example vSept26).",
+   "columns": "id, label, reason, created_by, created_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_targets": {
+   "name": "plan_targets",
+   "domain": "business-health",
+   "about": "Plan targets for one version, one row per month and metric.",
+   "columns": "plan_version, month (first day of the month), metric (gmv_total, gmv_events, gmv_website, gmv_marketplace, cm1, cm1_pct, cm2, cm2_pct, cm3, cm3_pct, overhead, ebitda, ebitda_pct, cash, coverage, roas, cac, customers, the two scalar workbook inputs of the customer roll, repeat_rate (row 118) and aov (row 119, pesos), the same value in every month, and inv_purchases, the workbook's inventory purchases row 41, the stock orders needed to hold the coverage target, drawn as the Planned stock orders chart and not a grid row; and the plan targets of the typed cost lines, each the workbook formula row that plans what an admin later types as paid: cogs row 55, platform_fees 59, fulfilment 60, event_costs 61, ad_marketplace 66, ad_website 67, event_marketing 68, content_other rows 69 + 70, bridge_funding 87, liability_settlement 88, freight_onetime 89, shown as a Plan row with a variance under each typed line in the grid), value (pesos for money, a ratio for percentages, so 0.65 = 65%), note. Overhead is a positive cost (workbook row 74 is the same figure, negative). Coverage is one workbook constant (row 45) repeated for every month. BHR-06 (2026-11-06): the loader also stores a target for EVERY other value row of the Business Plan sheet, rows 4 to 125, as metric r<row> (for example r8 marketplace GMV growth, r74 overhead stored negative as in the sheet, r84 forward coverage, r103 net addressable households, r110 SAM); the row map (label, unit, direction, id) is zoomy-observability-dashboard/src/plan-sheet.json, labels only. Units as the row map says: money in pesos (the sheet's thousands x1000), r105 to r107 in pesos millions as the sheet has them, r96 CAC and r111 in pesos, percentages as ratios, check rows (r85, r91, r125) as 1 = OK and 0 = the sheet's failing word; a setting or market-sizing row (one value in column C) repeats that value every month; a blank sheet cell has no row (never a 0). Targets only, never actuals: the workbook holds no actual.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_actuals": {
+   "name": "plan_actuals",
+   "domain": "business-health",
+   "about": "Typed monthly lines entered by a Coop Admin or Zoomy company admin: only the workbook's INPUT rows, one per itemised sheet row, typed on that row's actual line in the All months grid (BHR-06). Twenty-one lines (all in pesos, never negative, all gate Close month): the six overhead rows salaries, rent, accounting, tech, growth_consultant, rnd (rows 33 to 38), COGS by channel marketplace_cogs, website_cogs, events_cogs (rows 52 to 54), platform_fees, fulfilment, event_costs, ad_marketplace, ad_website, event_marketing, content_socials (row 69), other_spend (row 70), and the four cash-flow inputs bridge_funding (workbook row 87), liability_settlement (row 88), freight_onetime (row 89) and inv_purchases_paid (the stock bought, rows 41 and 82); plus two optional measures: roas (a multiple, 3.2 = 3.2x; workbook row 9 is an input; stored exactly as typed in amount_php, the column name predates it; never required to close) opening_cash (the bank balance at the start of the FIRST plan month only, in pesos, the one value that may be negative; derived cash starts from it; never required to close), and the two opening balances opening_inventory (pesos) and opening_customers (a count), typed by an admin, first plan month only, never negative, never required to close (stock on hand and the customer roll start from them; until typed they wait). The workbook's rows 44 and 120 are plan assumptions, shown as targets only. BHR-06 (2026-11-06): the workbook holds TARGETS only, so nothing stores a workbook value here. The loader writes no actual. The totals overhead (row 39), cogs (row 55) and content_other are NOT typed: they are the sum of their rows (withTotals, src/plan-compute.ts), waiting while any row is blank (never 0); plan_set_actual rejects them (invalid_line). A missing row = not entered; a stored 0 = a real 0. Cash at month end, CAC, active customers and inventory coverage are formulas in the workbook (rows 90, 96, 113, 84), so they are NOT stored: Coop derives them with the same formulas (derivedActuals, src/plan-compute.ts; proven cell by cell by test/plan-workbook-equality.test.ts) and plan_set_actual rejects them (invalid_line). Cash = last cash + EBITDA + COGS − stock bought + funding − settlement − freight, starting from the typed opening_cash (the workbook has no opening-cash cell and starts from 0; until it is typed, every month waits); a month waits until every input behind it, this month and every earlier one, is typed.",
+   "columns": "month, metric, amount_php (pesos), updated_by, updated_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_month_closes": {
+   "name": "plan_month_closes",
+   "domain": "business-health",
+   "about": "A closed month is a row. It records the plan version the month closed under and a snapshot of the GMV actuals taken at close.",
+   "columns": "month, plan_version, closed_by, closed_at, gmv_snapshot (jsonb).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "plan_actuals_log": {
+   "name": "plan_actuals_log",
+   "domain": "business-health",
+   "about": "Change log for typed lines, closes and unlocks (written in the same transaction as the change by the BHR-03/04 RPCs).",
+   "columns": "id, at, actor, month, metric, action, old_value, new_value, reason.",
    "prefer": null,
    "testOrders": null
   },
@@ -1040,6 +1085,18 @@
    "domains": [
     "business-health",
     "pos-sales"
+   ],
+   "fenced": false,
+   "access": "full",
+   "redirectTo": null
+  },
+  {
+   "route": "/health-report",
+   "title": "Business Health Report",
+   "shows": "Plan vs actual by month: the Cedar Tree workbook targets (versioned) beside Coop's actuals. GMV actuals are real (BHR-02): Events GMV = non-voided pos_orders with an event, Website GMV = CRM orders other than refunded and voided (pending, authorized, partially_paid, paid count; partially_refunded counts in full and is flagged \"may overstate\"), Marketplace GMV = Shopee + Lazada per-day sales; a month with no data, a failed or truncated CRM read is an empty \"waiting\" cell, never 0 or red; only the workbook's input rows are typed into the grid by a Coop Admin or Zoomy company admin (server action savePlanLineAction, src/plan-actions.ts), each on its own sheet row's actual line (BHR-06): the six overhead rows (salaries to R&D, rows 33 to 38), COGS by channel (rows 52 to 54), platform fees, fulfilment, event costs, the ad lines and content and other (rows 66 to 70; totals rows 39, 55 and 71 are sums, never typed, waiting while a row is blank), and the cash-flow inputs (bridge funding row 87, liability settlement row 88, freight row 89, inventory purchases paid), plus optional ROAS and the one-time opening_cash (the bank balance at the start of the first month, typed once in the first month's column, may be negative); everything the workbook computes by formula is calculated here by the same formula and never typed (derivedActuals): CM1 to EBITDA, cash at month end (opening cash, then last cash + EBITDA + COGS − stock bought + funding − settlement − freight; the workbook has no opening-cash cell, so every month waits until the opening cash is typed; a \"Check against your bank\" tooltip sits on the cash row and card), inventory coverage (stock on hand ÷ next month's planned COGS), active customers and CAC (the workbook's customer roll); a calculated cell waits until every input behind it, this month and earlier, is typed; everyone else with access is read-only, no inputs; admins close a month (Close month, only after the month has ended in Manila time, only with Events, Website and Marketplace GMV all complete (no gap, no partial; the button says what blocks it), and only with all 21 typed lines filled; GMV snapshot frozen, cells locked) and unlock it with a required reason, and a \"close is waiting\" banner shows until it is closed (closeMonthAction, unlockMonthAction); admins also get one header button named for the waiting month (for example Close Oct'26: primary when ready, quiet with the reason in its info tooltip when blocked, hidden when nothing waits; it scrolls to that month's Close row and focuses its Close button); the breakdown modal is retired (BHR-06): the itemised rows are typed in place; the Edit targets drawer was removed (BHR-05 UI, 2026-11-05) because every target is derived and locked: the server action editTargetsAction and the plan_edit_targets RPC stay for a future plan engine, and the current target version shows in the Target badge tooltip. All explanatory copy (where the numbers come from, grid how-to, card and chart notes, view-only note) lives in info (i) tooltips, copy in src/plan-help.ts; only state and safety text stays visible. Funding, one-time payments and stock bought are not a free-form ledger: they are the workbook's own monthly rows (Actuals · cash flow, as in the workbook, thousands of pesos, never negative). Calculated rows say \"calculated: ...\" under their label; forward coverage is judged within ±25% of the coverage target; Rough runway is information only: cash divided by the average net cash burn of the last 3 months, \"not burning\" when cash did not fall. ROAS is the one optional typed measure (\"type it in the open cell\"; readers: \"not typed yet\"). Open to a Zoomy data viewer and to a Coop Admin (requireHealthReportAccess); a Goldline view is bounced. Mock mode (no env) renders the page with empty targets and a banner (the repo holds no plan figure; targets are loaded privately by scripts/seed-plan-from-workbook.mjs)",
+   "data": "pos_orders, pos_events, digest_archive, marketplace_daily_sales, plan_actuals, plan_month_closes, plan_versions, plan_targets, website CRM (API)",
+   "domains": [
+    "business-health"
    ],
    "fenced": false,
    "access": "full",

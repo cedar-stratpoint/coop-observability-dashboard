@@ -78,6 +78,19 @@ export function canEditData(role: CompanyRole): boolean {
   return role === 'company_admin' || role === 'store_manager';
 }
 
+/** Holds an active (not suspended) cross-tenant Coop Admin role. Pure: callers pass memberships RE-READ from the database, never a session token. */
+export function isActiveCoopAdmin(memberships: readonly Membership[]): boolean {
+  return memberships.some((m) => m.companyId === null && m.role === 'coop_admin' && m.status !== 'suspended');
+}
+
+/**
+ * Who may type into the Business Health Report: a Coop Admin or a Zoomy company admin. NOT store_manager (canEditData admits them),
+ * not an analyst. Everyone else with Zoomy access reads the same numbers without inputs.
+ */
+export function canEditPlan(memberships: readonly Membership[]): boolean {
+  return isActiveCoopAdmin(memberships) || memberships.some((m) => m.companyId === 'zoomy' && m.role === 'company_admin' && m.status !== 'suspended');
+}
+
 /** Only a Coop Admin may grant/change/revoke roles (v1: no company self-serve). */
 export function canManageRoles(role: CompanyRole): boolean {
   return role === 'coop_admin';
