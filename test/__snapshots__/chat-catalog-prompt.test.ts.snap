@@ -289,7 +289,7 @@ Every table and view in the database is readable by its own name, except secrets
 - booth-leads (Booth leads): spin_wheel_leads
 - lazada-uploads (Lazada manual uploads): lazada_orders, lazada_uploads
 - digest (Stored digests): digest_archive, import_runs, marketplace_daily_observations, marketplace_daily_sales, marketplace_ads_week_observations, marketplace_sku_week_observations, marketplace_traffic_day_observations, marketplace_funnel_day_observations, marketplace_ads_weekly, marketplace_sku_weekly, marketplace_traffic_daily, marketplace_funnel_daily
-- business-health (Business health): business_health, plan_versions, plan_targets, plan_actuals, plan_actual_parts, plan_part_targets, plan_month_closes, plan_actuals_log
+- business-health (Business health): business_health, plan_versions, plan_targets, plan_actuals, plan_month_closes, plan_actuals_log
 - repricer (Repricer audit): marketplace_price_changes
 - reports (Saved reports): coop_reports, coop_report_versions
 - sync-users (Sync and users): pos_sync_log, pos_dashboard_users
