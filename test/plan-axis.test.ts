@@ -27,3 +27,11 @@ describe('chart y-axis ticks', () => {
     expect(ticks.length).toBeGreaterThan(1);
   });
 });
+
+describe('the target stock chart keeps its bars tall', () => {
+  it('a peak near 550k reads 0, 200k, 400k, 600k (not up to 1M)', () => {
+    const {ticks, hi} = axisTicks(0, 551_000, 3);
+    expect(ticks.map((v) => fmtAxisTick(v, ticks[1] - ticks[0]))).toEqual(['0', '200k', '400k', '600k']);
+    expect(551_000 / hi).toBeGreaterThan(0.85);
+  });
+});
