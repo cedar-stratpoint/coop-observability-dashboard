@@ -3,7 +3,7 @@
 import {describe, expect, it} from 'vitest';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
-import {BAND, SHEET_ROWS, blockOf, fmtSheet, judge, sheetActuals, sheetStatus, shownRows, targetId, SHEET_TARGET_IDS, type SheetDir} from '../src/plan-sheet';
+import {BAND, SHEET_ROWS, actualSource, blockOf, fmtSheet, judge, sheetActuals, sheetStatus, shownRows, targetId, SHEET_TARGET_IDS, type SheetDir} from '../src/plan-sheet';
 import {GAP, NEUTRAL_LINES, LINE_TARGET_ID, assemblePlan, withTotals, type ActualCell} from '../src/plan-compute';
 
 const rowsOf = (pred: (r: (typeof SHEET_ROWS)[number]) => boolean) => SHEET_ROWS.filter(pred).map((r) => r.row);
@@ -245,5 +245,54 @@ describe('AC10: the repo holds labels only', () => {
     // digits left may only be inside labels (years, "row 13"), never a value field
     for (const r of JSON.parse(raw) as Record<string, unknown>[]) for (const [k, val] of Object.entries(r)) if (k !== 'row') expect(typeof val === 'number', `row ${r.row} ${k}`).toBe(false);
     expect(withoutRows).not.toMatch(/:\s*-?\d/);
+  });
+});
+
+// Owner, 2026-11-06: "hindi naman maidentify ni user anong row number yun". The grid never shows row numbers, so every tip names the lines instead.
+import {feedNames, namedFormula, rowName} from '../src/plan-sheet';
+describe('BHR-07: tips name the lines, never row numbers', () => {
+  it('short line names from the sheet labels', () => {
+    expect(rowName(33)).toBe('Salaries');
+    expect(rowName(66)).toBe('Marketplace ad spend');
+    expect(rowName(9)).toBe('Marketplace ROAS');
+    expect(rowName(88)).toBe('Liability settlement');
+    expect(rowName(122)).toBe('New customers acquired this month');
+  });
+  it('formulas in line names', () => {
+    expect(namedFormula('= rows 66-70')).toBe('Marketplace ad spend + Website ad spend + Events ad spend + Content & Socials spend + Other spend costs');
+    expect(namedFormula('= 62 − 71')).toBe('CM2 − Total ad spend');
+    expect(namedFormula('= one ÷ 63')).toBe('1 ÷ CM2 Margin %');
+    expect(namedFormula('= 94 × twelve')).toBe('Monthly Recurring Revenue × 12');
+    expect(namedFormula('= 72 + 74')).toBe('CM3 − Total Company overhead'); // row 74 is overhead stored negative
+    expect(namedFormula('= 51 − 55')).toBe('Total GMV − Total COGS');
+  });
+  it('the lines to type, grouped when a whole block is needed', () => {
+    expect(feedNames([66, 67, 68, 69, 70])).toBe('the ad spend lines');
+    expect(feedNames([34])).toBe('Rent');
+    expect(feedNames([33, 34, 35, 36, 37, 38, 52, 53, 54])).toBe('the overhead lines and the COGS lines');
+    expect(feedNames([41, 87])).toBe('Inventory purchases and Bridge funding in');
+  });
+  it('no tip text for any actual line cites a bare row number', () => {
+    for (const r of SHEET_ROWS) {
+      const s = actualSource(r.row);
+      if (s?.kind !== 'calc') continue;
+      expect(namedFormula(s.from), `row ${r.row}`).not.toMatch(/\b(?!12\b)\d{2,3}\b/); // 12 = months in a year
+    }
+  });
+});
+
+// Owner check, 2026-11-06: Aug'26 filled with the workbook's own values showed CM3 %, EBITDA % and break-even ROAS red. The loader stores targets rounded to
+// 6 decimals (scripts/plan-workbook.mjs) while the page works the actual out at full precision, so "equal" missed by < 0.000001. That is met.
+describe('judge: an actual equal to its workbook target at full precision is met, though the stored target is rounded to 6 decimals', () => {
+  it.each([
+    ['H', -0.088529, -0.08852941176470587], // CM3 margin %, negative
+    ['H', -2.382647, -2.3826470588235294], // EBITDA margin %
+    ['L', 2.423378, 2.4233784746970777], // break-even ROAS, lower is better
+  ] as const)('%s target %s, actual %s', (dir, target, actual) => {
+    expect(judge(dir as SheetDir, target, actual, {})).toBe('met');
+  });
+  it('a real miss is still a miss', () => {
+    expect(judge('H', -0.088529, -0.0886, {})).toBe('missed');
+    expect(judge('L', 2.423378, 2.4243, {})).toBe('missed');
   });
 });

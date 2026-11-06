@@ -9,7 +9,7 @@ vi.mock('@/lib/utils', () => ({cn: (...a: unknown[]) => a.filter((x) => typeof x
 vi.mock('@/src/plan-help', async () => await import('../src/plan-help'));
 vi.mock('@/src/plan-compute', async () => await import('../src/plan-compute'));
 vi.mock('@/src/plan-sheet', async () => await import('../src/plan-sheet'));
-import {SheetRows, type Edit} from '../components/analyst/plan-sheet-rows';
+import {SheetRows, sourceTip, type Edit} from '../components/analyst/plan-sheet-rows';
 import {withTotals, type PlanData} from '../src/plan-compute';
 import {SHEET_ROWS, actualKind} from '../src/plan-sheet';
 
@@ -17,7 +17,7 @@ const months = ['2026-08-01', '2026-09-01', '2026-10-01'];
 const plan: PlanData = {source: 'db', notice: null, label: 'v', months, targets: {r33: [1000, 1000, 1000], overhead: [5000, 5000, 5000]}};
 // Aug: every overhead row typed; Sep: rent blank; Oct: nothing.
 const lines = withTotals({salaries: [1000, 1000, null], rent: [200, null, null], accounting: [50, 50, null], tech: [30, 30, null], growth_consultant: [20, 20, null], rnd: [100, 100, null]});
-const edit = (canEdit: boolean): Edit => ({canEdit, lines, closes: {}, today: '2026-11-06', save: async () => null, close: async () => null, askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false});
+const edit = (canEdit: boolean): Edit => ({canEdit, lines, closes: {}, today: '2026-11-06', save: async () => null, close: async () => null, askUnlock: () => {}, ring: null, clearRing: () => {}, next: () => false});
 const render = (inputsOpen: boolean, canEdit = true) => renderToStaticMarkup(
   <table><tbody><SheetRows plan={plan} nowKey="2026-11" actuals={{}} edit={edit(canEdit)} col={() => ''} onWhy={() => {}} inputsOpen={inputsOpen} setInputsOpen={() => {}} /></tbody></table>,
 );
@@ -107,5 +107,83 @@ describe('L6: long sheet labels are clamped to three lines on a phone, the full 
     expect(tr.inner).toContain('max-md:line-clamp-3');
     expect(tr.inner).toContain('title="');
     expect(tr.inner.replace(/&amp;/g, '&').replace(/&#x27;/g, "'")).toContain(r.label);
+  });
+});
+
+describe('BHR-07: every actual line shows one small icon for where it comes from (owner: chips and "fill" text were too cluttered)', () => {
+  const html = render(true);
+  const label = (row: number | string) => /<th[^>]*>(.*?)<\/th>/.exec(line(html, 'data-sheet-actual', row)!.inner)![1];
+  const text = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
+  it.each([[33, 'type'], [44, 'type'], [9, 'type'], ['opening_cash', 'type'], [48, 'auto'], [51, 'auto'], [71, 'calc'], [56, 'calc']] as const)('row %s: one %s icon button, no words', (row, kind) => {
+    const th = label(row);
+    expect(th.match(/<button/g)?.length, `row ${row}`).toBe(1);
+    expect(th).toContain(`data-source="${kind}"`);
+    expect(th).toContain('<svg');
+    expect(text(th).trim().toLowerCase()).toMatch(/^(actual|opening cash)$/); // no chip words beside the label
+  });
+  it('the icon says what it is to a screen reader', () => {
+    expect(label(71)).toMatch(/aria-label="Worked out by a formula: where this actual comes from"/);
+    expect(label(48)).toMatch(/aria-label="Filled in by Coop: where this actual comes from"/);
+  });
+  it('the tip text: typed, auto and calc (with the rows that feed it)', () => {
+    expect(sourceTip({kind: 'type', from: 'every month'} as never)).toBe('You type this every month.');
+    expect(sourceTip({kind: 'type', from: 'once'} as never)).toBe('You type this once, in the first month.');
+    expect(sourceTip({kind: 'auto', from: 'Shopee + Lazada'} as never)).toBe('Filled in by Coop from Shopee + Lazada.');
+    expect(sourceTip({kind: 'calc', from: '= rows 66-70', feeds: [66, 67, 68, 69, 70]} as never)).toBe('Worked out: Marketplace ad spend + Website ad spend + Events ad spend + Content &amp; Socials spend + Other spend costs. It fills in once the ad spend lines are typed.'.replace('&amp;', '&'));
+    expect(sourceTip({kind: 'calc', from: '= 53 ÷ 49', feeds: [53]} as never)).toBe('Worked out: Website COGS ÷ Website GMV. It fills in once Website COGS is typed.');
+  });
+  it('the owner example: row 71 waits with an empty-looking cell, the lines to fill only in the hover title and for screen readers', () => {
+    const cells = [...line(html, 'data-sheet-actual', 71)!.inner.matchAll(/<td[^>]*>(.*?)<\/td>/g)];
+    expect(cells).toHaveLength(3);
+    for (const c of cells) {
+      expect(c[0]).toContain('title="Waiting: fill the ad spend lines"');
+      expect(c[1]).toBe('<span class="sr-only">waiting, fill the ad spend lines</span>');
+    }
+  });
+});
+
+describe('BHR-07: every empty typed cell in an open month is highlighted', () => {
+  // Aug closed, Sep past and open, Oct the current month, Nov ahead.
+  const m4 = ['2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01'];
+  const p4: PlanData = {...plan, months: m4};
+  const l4 = withTotals({salaries: [1000, 1000, null, null], rnd: [null, null, null, null]});
+  const e4: Edit = {...edit(true), lines: l4, closes: {'2026-08-01': {by: 'a', at: '2026-09-02', planVersion: 1, gmv: {}}}};
+  const html = renderToStaticMarkup(<table><tbody><SheetRows plan={p4} nowKey="2026-10" actuals={{}} edit={e4} col={() => ''} onWhy={() => {}} inputsOpen setInputsOpen={() => {}} /></tbody></table>);
+  const tds = (row: number | string) => [...line(html, 'data-sheet-actual', row)!.inner.matchAll(/<td([^>]*)>/g)].map((m) => m[1]);
+  const need = (attrs: string) => /class="[^"]*\bbhr-need\b/.test(attrs);
+  it.each([38, 66, 87, 9])('row %i (empty): highlighted in Sep and Oct, not in closed Aug, not in Nov ahead', (row) => {
+    expect(tds(row).map(need)).toEqual([false, true, true, false]);
+  });
+  it('a typed cell with a value is not highlighted (salaries, Sep)', () => {
+    expect(tds(33).map(need)).toEqual([false, false, true, false]);
+  });
+  it('typed-once lines are highlighted in the first month only, and only while it is open', () => {
+    expect(tds(44).map(need)).toEqual([false, false, false, false]); // Aug is closed
+  });
+  it('calc and auto lines are never highlighted', () => {
+    for (const row of [39, 48, 51, 71, 90]) expect(tds(row).some(need), `row ${row}`).toBe(false);
+  });
+});
+
+
+// Owner, 2026-11-06 ("cant fill ?"): on a phone the grid shows 3 months; the typed-once lines (opening cash, opening inventory, opening customers)
+// take the FIRST month only, so a window that starts later showed an empty row. The first visible cell now offers to jump back to that month.
+describe('typed-once lines on a phone window that starts after the first month', () => {
+  const win = (start: number) => renderToStaticMarkup(
+    <table><tbody><SheetRows plan={plan} nowKey="2026-11" actuals={{}} edit={edit(true)} col={(i) => (i >= start ? '' : 'max-md:hidden')} win={{start, toFirst: () => {}}} onWhy={() => {}} inputsOpen setInputsOpen={() => {}} /></tbody></table>,
+  );
+  it('the first visible month of opening cash says where to type it, phone only', () => {
+    const cash = line(win(1), 'data-sheet-actual', 'opening_cash')!;
+    expect(cash.inner).toMatch(/data-once-jump[^>]*>.*Type in Aug(&#x27;|')26/);
+    expect(cash.inner.match(/data-once-jump/g)?.length).toBe(1);
+    expect(cash.inner).toMatch(/md:hidden/);
+  });
+  it('no jump when the window already shows the first month', () => {
+    expect(line(win(0), 'data-sheet-actual', 'opening_cash')!.inner).not.toMatch(/data-once-jump/);
+  });
+  it('opening inventory and opening customers get the same jump', () => {
+    const html = win(1);
+    expect(line(html, 'data-sheet-actual', 44)!.inner).toMatch(/data-once-jump/);
+    expect(line(html, 'data-sheet-actual', 120)!.inner).toMatch(/data-once-jump/);
   });
 });

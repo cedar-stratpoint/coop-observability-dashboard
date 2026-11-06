@@ -5,6 +5,7 @@ import {useRouter} from 'next/navigation';
 import {Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Rows3, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {HelpTip as InfoTip} from './help-tip';
+import {axisTicks, fmtAxisTick} from '@/src/plan-axis';
 import {PLAN_HELP} from '@/src/plan-help';
 import type {PlanVersionInfo} from '@/src/plan-data';
 import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '@/src/plan-actions';
@@ -26,7 +27,7 @@ const shortMonth = (m: string) => monthLabel(m).split("'")[0];
 const EMPTY_CLOSES: Record<string, ClosedMonth> = {};
 const EMPTY_ACTUALS: Actuals = {};
 const EMPTY_LINES: LineSeries = {};
-const NO_EDIT: Edit = {canEdit: false, lines: {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, fill: null, ring: null, clearRing: () => {}, next: () => false};
+const NO_EDIT: Edit = {canEdit: false, lines: {}, closes: EMPTY_CLOSES, today: '', save: async () => 'Read only.', close: async () => 'Read only.', askUnlock: () => {}, ring: null, clearRing: () => {}, next: () => false};
 const NEUTRAL = new Set<string>(['coverage']);
 function statusOf(m: MetricDef, plan: PlanData, i: number, nowKey: string, actuals: Actuals): Status {
   return metricStatus({direction: m.direction, actual: cellOf(actuals, m.id, i).value, partial: cellOf(actuals, m.id, i).state === 'partial', target: plan.targets[m.id]?.[i] ?? null, phase: monthPhase(plan.months[i], nowKey), hasSource: m.source !== 'none', informational: NEUTRAL.has(m.id), modelled: m.modelled});
@@ -183,16 +184,14 @@ function CashChart({plan, nowKey, actuals}: {plan: PlanData; nowKey: string; act
   const vals = [...tgt, ...act].filter((v): v is number => v !== null);
   if (n < 2 || vals.length === 0) return null;
   const W = 720, H = 240, L = 52, R = 14, T = 14, B = 30;
-  let lo = Math.min(...vals), hi = Math.max(...vals);
-  if (hi === lo) { hi += 1; lo -= 1; }
-  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+  const {lo, hi, ticks} = axisTicks(Math.min(...vals), Math.max(...vals));
+  const step = ticks[1] - ticks[0];
   const x = (i: number) => L + (i * (W - L - R)) / (n - 1);
   const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
   const path = (ids: number[], f: (i: number) => number | null) => ids.map((i, k) => `${k ? 'L' : 'M'}${x(i).toFixed(1)} ${y(f(i) as number).toFixed(1)}`).join(' ');
   const planIds = plan.months.map((_, i) => i).filter((i) => tgt[i] !== null && tgt[i] !== undefined);
   const actIds = plan.months.map((_, i) => i).filter((i) => act[i] !== null);
   const cur = currentIndex(plan.months, nowKey);
-  const fmtAxis = (v: number) => { const a = Math.abs(v); return `${v < 0 ? '−' : ''}${a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : `${Math.round(a / 1000)}k`}`; };
   const def = DEF_BY_ID.cash, last = Math.max(0, cur - 1);
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4" data-testid="cash-chart">
@@ -202,7 +201,7 @@ function CashChart({plan, nowKey, actuals}: {plan: PlanData; nowKey: string; act
         <span className="inline-flex items-center gap-1.5"><svg aria-hidden viewBox="0 0 22 8" className="h-2 w-[22px]"><line x1="0" x2="22" y1="4" y2="4" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="5 4" /></svg>Target from workbook</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Cash at month end, target against actual, by month" className="block h-auto w-full" fontSize="11" fill="var(--muted-foreground)">
-        {[0, 1, 2, 3, 4].map((k) => { const v = lo + ((hi - lo) * k) / 4; return <g key={k}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border)" /><text x={L - 6} y={y(v) + 4} textAnchor="end">{fmtAxis(v)}</text></g>; })}
+        {ticks.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border)" /><text x={L - 6} y={y(v) + 4} textAnchor="end">{fmtAxisTick(v, step)}</text></g>)}
         {plan.months.map((mo, i) => <text key={mo} x={x(i)} y={H - 10} textAnchor="middle" fontSize={n > 12 ? 9.5 : 11} fontWeight={i === last ? 600 : 400} fill={i === last ? 'var(--foreground)' : undefined}>{axisLabel(mo, i)}</text>)}
         <rect x={x(last) - 9} y={T} width={18} height={H - T - B} fill="var(--accent)" />
         {planIds.length > 1 && <path d={path(planIds, (i) => tgt[i])} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="6 5" />}
@@ -225,13 +224,12 @@ function StockChart({plan, nowKey}: {plan: PlanData; nowKey: string}) {
   const cov = plan.targets.coverage?.find((v) => v !== null) ?? null;
   const n = plan.months.length, lastClosed = Math.max(0, currentIndex(plan.months, nowKey) - 1);
   const W = 720, H = 220, L = 52, R = 10, T = 14, B = 30;
-  const mx = Math.max(...vals, 1), bw = (W - L - R) / n;
-  const fmtAxis = (v: number) => Math.round(v / 1000).toLocaleString('en-US');
+  const {hi: mx, ticks: yTicks} = axisTicks(0, Math.max(...vals, 1), 3), bw = (W - L - R) / n;
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4" data-testid="stock-chart">
       <h3 className="mb-1.5 font-serif text-base leading-tight">Target stock orders<InfoTip text={PLAN_HELP.stockChart(cov)} label="About target stock orders" className="ml-1" /></h3>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Planned inventory purchases by month" className="block h-auto w-full" fontSize="11" fill="var(--muted-foreground)">
-        {[0, 0.5, 1].map((f) => { const yy = T + (1 - f) * (H - T - B); return <g key={f}><line x1={L} x2={W - R} y1={yy} y2={yy} stroke="var(--border)" /><text x={L - 6} y={yy + 4} textAnchor="end">{fmtAxis(mx * f)}</text></g>; })}
+        {yTicks.map((v) => { const yy = T + (1 - v / mx) * (H - T - B); return <g key={v}><line x1={L} x2={W - R} y1={yy} y2={yy} stroke="var(--border)" /><text x={L - 6} y={yy + 4} textAnchor="end">{fmtAxisTick(v, yTicks[1] - yTicks[0])}</text></g>; })}
         {plan.months.map((mo, k) => {
           const v = series[k];
           const h = v === null || v === undefined ? 0 : (v / mx) * (H - T - B), bx = L + k * bw + 3;
@@ -289,7 +287,7 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
               {plan.months.map((mo, i) => {
                 const phase = monthPhase(mo, nowKey);
                 return (
-                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[84px] max-md:min-w-[80px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
+                  <th key={mo} className={cn('sticky top-0 z-20 border-b border-r border-border bg-card min-w-[76px] max-md:min-w-[80px] px-2 py-1.5 text-center text-[10.5px] uppercase leading-tight text-muted-foreground max-md:top-[117px]', phase === 'future' ? 'font-normal' : 'font-medium', col(i))}>
                     {monthLabel(mo)}{edit.closes[mo] && <Lock aria-label="Closed" className="ml-1 inline size-3 align-[-1px] text-muted-foreground" />}
                     {phase !== 'past' && <span className="block text-[10.5px] font-normal">{phase === 'current' ? 'MTD' : 'Target'}</span>}
                   </th>
@@ -299,7 +297,7 @@ function Grid({plan, nowKey, actuals, edit, reveal, onWhy, inputsOpen, setInputs
           </thead>
           <tbody>
             <CloseRow plan={plan} col={col} edit={edit} actuals={actuals} />
-            <SheetRows plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} col={col} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
+            <SheetRows plan={plan} nowKey={nowKey} actuals={actuals} edit={edit} col={col} win={{start, toFirst: () => setStart(0)}} onWhy={onWhy} inputsOpen={inputsOpen} setInputsOpen={setInputsOpen} />
           </tbody>
         </table>
       </div>
@@ -375,7 +373,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
   }, [gmv, summed, plan, closes]);
   const queue = useMemo(() => closeQueue(plan.months, closes, today), [plan.months, closes, today]);
   const waiting = closeWaiting(plan.months, closes, today); // the oldest unclosed month: the header Close button starts here
-  const fill = queue.find((m) => REQUIRED_COUNT - filledCount(lines, plan.months.indexOf(m)) > 0) ?? null; // the oldest one that still has lines to type: Fill in and the amber ring start here
+  const fill = queue.find((m) => REQUIRED_COUNT - filledCount(lines, plan.months.indexOf(m)) > 0) ?? null; // the oldest one that still has lines to type: Fill in starts here
   const [ring, setRing] = useState<{month: string; metric: string} | null>(null);
   const clearRing = useCallback(() => setRing(null), []);
   // Fill in / Enter: bring the month into the phone window, put the ring and the tag on the cell, scroll it into view and focus it (Enter focuses at once, Fill in after the scroll).
@@ -394,7 +392,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
     go(6);
   }, []);
   const edit = useMemo<Edit>(() => canEdit ? {
-    canEdit: true, lines: summed, closes, today, fill, ring, clearRing,
+    canEdit: true, lines: summed, closes, today, ring, clearRing,
     next: (month, metric, treatFilled) => {
       const nx = nextEmptyLine(lines, plan.months.indexOf(month), metric, treatFilled ? metric : undefined);
       if (!nx) return false;
@@ -410,7 +408,7 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
       setLines((prev) => ({...prev, [metric]: (prev[metric] ?? plan.months.map(() => null)).map((v, k) => (k === i ? pesos : v))}));
       return null;
     },
-  } : {...NO_EDIT, lines: summed, closes, today, fill}, [canEdit, lines, summed, closes, today, fill, ring, clearRing, goCell, plan.months, router]);
+  } : {...NO_EDIT, lines: summed, closes, today}, [canEdit, lines, summed, closes, today, ring, clearRing, goCell, plan.months, router]);
   const fillIn = (month: string) => goCell(month, nextEmptyLine(lines, plan.months.indexOf(month)) ?? REQUIRED_LINE_ORDER[0], true);
   const unlock = () => {
     if (!unlocking) return;
