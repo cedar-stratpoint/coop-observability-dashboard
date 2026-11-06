@@ -35,6 +35,17 @@ Apply on staging by hand in this order: `plan_report.sql`, `plan_actuals_remove_
 ## 2026-11-06 — Health report: Website GMV covers every plan month (paged CRM read)
 
 The Website row of the Business Health Report read the Worker's unfiltered `/api/orders`, which only returns the newest 1,000 orders, so months older than that window stayed a gap. Decision: page the Worker's filtered mode instead (`from`, `limit=500`, `fields`, `cursor`, which returns `{orders, next_cursor, total_matching}`). No CRM change is needed. The read is a pure `collectOrderPages` (`src/plan-gmv.ts`): it follows `next_cursor` until null, stops at 40 pages and then reports truncated, and a failed page makes the whole read a gap, never a partial (understated) sum. An old Worker that ignores the filter (no `next_cursor` field) behaves as before: newest 1,000 and the existing cap rule with the `/api/metrics` order count. The status rules and `websiteCells` are unchanged. Not verified: a live call to the staging Worker; the Checklist's live check is still open.
+## 2026-11-06 — Reader: more time for dense pages; clearer scan filter pills
+
+Two things from the first clean run (read_logs made the first one obvious):
+
+- **Dense pages were timing out.** The read_logs timings showed the accessories page (page 4) taking ~85s to read, right at the old 85s cap, so pages 23 and 33 (both page-4 forms with real data) failed with "couldn't read". Raised the read budget to 150s and the route's maxDuration to 300s, so a dense page has room to finish instead of tripping the wall. Classify stays 20s; 20 + 150 is well under 300.
+- **The scan filter pills are easier to spot.** The per-scan filter row now leads with a "SHOW" label, the chips are a touch larger, the failures chip ("Couldn't read") is tinted red so it doesn't blend in with the calm set-aside buckets, and a separator line plus padding sits between the chips and the first page row.
+
+## 2026-11-06 — Upload: an inline staging tray instead of a confirm modal
+
+The earlier confirm step was a modal that popped the instant a file was picked, which read like a one-shot "upload this one file". Replaced with an inline staging tray: picking or dropping files now lists them on screen (name, size, remove), the dropzone stays open above to add more, and a persistent "Upload N files" button at the bottom right confirms. Nothing reads until Upload is pressed; Clear discards. Files de-dupe by name+size, so dropping the same one twice doesn't double it.
+
 ## 2026-11-06 — Reader: fallback Anthropic key when the primary fails
 
 The primary Goldline key can be temporary (expires) or hit its credit limit mid-batch. A single call now tries the primary key first and, only on a KEY-level error (expired, revoked, out of credits, or a workspace-scope problem), retries the same call on `GOLDLINE_ANTHROPIC_API_KEY_FALLBACK` (with its own optional `GOLDLINE_ANTHROPIC_WORKSPACE_ID_FALLBACK`). Transient errors (429/529/timeout) and content errors (our own page_mismatch) stay on the same key, so a real reading problem isn't masked and the fallback's budget isn't burned. `extractionConfigured` is true if either key is set. Unit-tested; the fallback is off unless its env var is set.
