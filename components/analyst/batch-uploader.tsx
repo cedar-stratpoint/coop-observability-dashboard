@@ -2,8 +2,7 @@
 
 import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
-import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
+import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, CATEGORY_LABEL, FILTER_ORDER, type ItemCategory, type QueueGroup} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
@@ -33,8 +32,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const q = useUploadQueue();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  // Files chosen but not yet confirmed — a scan starts reading only once the user says go.
-  const [pending, setPending] = useState<File[] | null>(null);
+  // Files staged but not yet submitted — they show on screen and a scan starts reading
+  // only once the user hits Upload. The user can keep adding or remove any first.
+  const [pending, setPending] = useState<File[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const running = Boolean(q?.items.some((i) => i.state === 'running'));
   useEffect(() => {
@@ -57,17 +57,22 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   // split into one batch each once every page is read (q.forms).
   const manyForms = Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1;
 
-  // Hold the chosen files for a confirm step instead of reading them straight away — a
-  // 98-page scan shouldn't start processing the instant a file is picked.
+  // Stage the chosen files (append + de-dupe) instead of reading them straight away — a
+  // 98-page scan shouldn't start processing the instant a file is picked, and the user
+  // can review the selection, add more, or drop any before confirming.
   const pick = (files: FileList | null | undefined) => {
     if (!files?.length || disabled) return;
-    setPending(Array.from(files));
+    setPending((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      return [...prev, ...Array.from(files).filter((f) => !seen.has(`${f.name}:${f.size}`))];
+    });
     if (inputRef.current) inputRef.current.value = '';
   };
   const confirmPending = () => {
-    if (pending?.length) void q.addFiles(pending);
-    setPending(null);
+    if (pending.length) void q.addFiles(pending);
+    setPending([]);
   };
+  const removePending = (i: number) => setPending((prev) => prev.filter((_, idx) => idx !== i));
 
   const dropProps = {
     onDragEnter: (e: React.DragEvent) => {
@@ -86,8 +91,6 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   };
 
   return (
-    <>
-    <UploadConfirmDialog files={pending} onCancel={() => setPending(null)} onConfirm={confirmPending} />
     <Card {...dropProps} className={cn('transition-colors duration-150', dragging && hasItems && 'ring-2 ring-primary/60')}>
       <CardContent className="flex flex-col gap-4">
         <input
@@ -327,57 +330,50 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             </div>
           </>
         )}
+
+        {/* Staging tray: the files picked but not yet submitted. Shown on screen so the
+            user can add more (drop/browse above) or remove any, then confirm with Upload. */}
+        {pending.length > 0 && (
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-sm font-medium">
+                {pending.length} {pending.length === 1 ? 'file' : 'files'} ready to upload
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                {fmtSize(pending.reduce((a, f) => a + f.size, 0))}
+              </span>
+            </div>
+            <ul className="flex max-h-56 flex-col divide-y divide-border overflow-y-auto rounded-lg border border-border bg-background">
+              {pending.map((f, i) => (
+                <li key={`${f.name}-${f.size}-${i}`} className="flex items-center gap-2.5 px-3 py-2">
+                  <FileTypeBadge filename={f.name} />
+                  <span className="min-w-0 flex-1 truncate text-sm" title={f.name}>{f.name}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(f.size)}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${f.name}`}
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => removePending(i)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">Add more above, or remove any, then upload.</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setPending([])}>Clear</Button>
+                <Button size="sm" onClick={confirmPending} disabled={disabled}>
+                  <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
-    </>
-  );
-}
-
-/** Confirm before a chosen file starts processing — so picking a 98-page scan doesn't
- *  begin reading the instant it's selected. A multi-page PDF is split into pages after. */
-function UploadConfirmDialog({files, onConfirm, onCancel}: {files: File[] | null; onConfirm: () => void; onCancel: () => void}) {
-  const n = files?.length ?? 0;
-  const onePdf = n === 1 && /\.pdf$/i.test(files?.[0]?.name ?? '');
-  const totalMb = (files ?? []).reduce((a, f) => a + f.size, 0) / 1024 / 1024;
-  return (
-    <AlertDialog.Root open={n > 0} onOpenChange={(o) => (o ? null : onCancel())}>
-      <AlertDialog.Portal>
-        <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
-        <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-              <Upload className="size-4" aria-hidden />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <AlertDialog.Title className="font-heading text-base font-semibold">Start reading this upload?</AlertDialog.Title>
-              <AlertDialog.Description className="text-sm text-muted-foreground">
-                {onePdf
-                  ? 'This scan is split into one page per form and read automatically. It can take a while for a long scan.'
-                  : `${n} ${n === 1 ? 'file' : 'files'} will be read automatically.`}
-              </AlertDialog.Description>
-            </div>
-          </div>
-          {files && files.length > 0 && (
-            <div className="flex max-h-40 flex-col gap-1.5 overflow-y-auto rounded-lg border border-border bg-muted/30 p-2.5">
-              {files.slice(0, 6).map((f, i) => (
-                <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-xs">
-                  <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate" title={f.name}>{f.name}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(f.size)}</span>
-                </div>
-              ))}
-              {files.length > 6 && <span className="px-1 text-[11px] text-muted-foreground">and {files.length - 6} more · {totalMb.toFixed(1)} MB total</span>}
-            </div>
-          )}
-          <div className="flex flex-wrap justify-end gap-2">
-            <AlertDialog.Close render={<Button variant="ghost" />}>Cancel</AlertDialog.Close>
-            <Button onClick={onConfirm}>
-              <Upload className="size-4" /> Upload{n > 1 ? ` ${n} files` : ''}
-            </Button>
-          </div>
-        </AlertDialog.Popup>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
   );
 }
 
@@ -403,7 +399,18 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     return c;
   }, [g.items]);
   const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
-  const filtered = filter === 'all' ? g.items : g.items.filter((i) => itemCategory(i) === filter);
+  // Pages the user just hit retry on: keep them in view while they re-read (even under a
+  // filter they no longer match) so the row shows "Retrying…" in place instead of popping
+  // out the instant the icon is clicked.
+  const [retrying, setRetrying] = useState<Set<string>>(() => new Set());
+  const handleRetry = (id: string) => {
+    setRetrying((s) => new Set(s).add(id));
+    api.retry(id);
+  };
+  const filtered =
+    filter === 'all'
+      ? g.items
+      : g.items.filter((i) => itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working'));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
   const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
@@ -444,14 +451,17 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
       </button>
       {open && (
         <div className="flex flex-col border-t border-border bg-muted/20">
-          {/* Filter chips — only when there's more than one bucket to sort between. */}
+          {/* Filter chips — only when there's more than one bucket to sort between. A
+              "Show" label + a separator line make the row read as a control, and the
+              failures chip is tinted so it doesn't blend in. */}
           {present.length >= 2 && (
-            <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-2.5" role="group" aria-label="Filter pages">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-3" role="group" aria-label="Filter pages">
+              <span className="mr-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
               <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
                 All <span className="tabular-nums opacity-70">{g.items.length}</span>
               </FilterChip>
               {present.map((c) => (
-                <FilterChip key={c} active={filter === c} onClick={() => choose(c)}>
+                <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
                   {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
                 </FilterChip>
               ))}
@@ -459,7 +469,7 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
           )}
           <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
             {shown.map((i) => (
-              <FileRow key={i.id} i={i} batchId={batchId} now={now} onRetry={() => api.retry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+              <FileRow key={i.id} i={i} batchId={batchId} now={now} retrying={retrying.has(i.id)} onRetry={() => handleRetry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
             ))}
           </ul>
           {pageCount > 1 && (
@@ -489,11 +499,14 @@ function CategoryPill({cat}: {cat: ItemCategory}) {
   );
 }
 
-function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void}) {
+function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void; retrying?: boolean}) {
   const pct = itemPercent(i, now);
   const failed = i.state === 'failed';
   const done = i.state === 'done';
   const cat = itemCategory(i);
+  // The user just hit retry and it's re-reading: show "Retrying…" in place (spinner +
+  // a soft active tint), so the click lands as visible feedback, not a vanishing row.
+  const isRetrying = retrying && (i.state === 'queued' || i.state === 'running');
   // A read page opens the batch review on that page's tab (the same view as "Review &
   // commit"), so there is one place to review. The whole row is the target (stretched
   // link), so there's no small "Open" to aim for.
@@ -501,9 +514,10 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
   return (
     <li
       className={cn(
-        'relative flex items-center gap-3 px-3.5 py-2.5',
+        'relative flex items-center gap-3 px-3.5 py-2.5 transition-colors duration-300 ease-out',
         i.state === 'cancelled' && 'opacity-50',
-        href && 'transition-colors duration-150 ease-out hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
+        isRetrying && 'bg-primary/5',
+        href && 'hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
       )}
     >
       {href && (
@@ -522,7 +536,12 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
           </span>
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(i.size)}</span>
         </div>
-        {cat === 'sales' || cat === 'blank' || cat === 'other' ? (
+        {isRetrying ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium" style={{color: 'color-mix(in oklab, var(--primary) 70%, var(--foreground))'}}>
+            <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+            <span className="truncate">Retrying…{i.state === 'running' ? ' reading the page' : ''}</span>
+          </span>
+        ) : cat === 'sales' || cat === 'blank' || cat === 'other' ? (
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <CategoryPill cat={cat} /> <span className="truncate">set aside, not counted</span>
           </span>
@@ -568,16 +587,23 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
   );
 }
 
-/** A small toggle chip for the per-scan page filter (All / Read / Couldn't read / …). */
-function FilterChip({active, onClick, children}: {active: boolean; onClick: () => void; children: React.ReactNode}) {
+/** A toggle chip for the per-scan page filter (All / Read / Couldn't read / …). `crit`
+ *  tints the failures chip red so it stands out from the calm set-aside buckets. */
+function FilterChip({active, onClick, tone = 'default', children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; children: React.ReactNode}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
-        active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+        'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        tone === 'crit'
+          ? active
+            ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
+            : 'border-[color:var(--status-crit)]/40 bg-[color:var(--status-crit)]/5 text-[color:var(--status-crit)] hover:bg-[color:var(--status-crit)]/12'
+          : active
+            ? 'border-primary bg-primary/15 text-foreground'
+            : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
       )}
     >
       {children}

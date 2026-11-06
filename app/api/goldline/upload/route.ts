@@ -44,9 +44,11 @@ import {logReadEvent, type ReadLogInput} from '@/src/goldline-read-log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// PDF path runs two sequential Vision calls (detect 20s + extract 85s = 105s); 160s
-// gives headroom so a slow call throws in-code (catch → failed) rather than a hard kill.
-export const maxDuration = 160;
+// PDF path runs two sequential Vision calls (classify 20s + extract 150s = 170s). The
+// densest pages (page 4, the accessories list) measured ~85s+ to read and were timing
+// out at the old 85s cap, so the extract budget is 150s; 300s maxDuration keeps headroom
+// so a slow call throws in-code (catch → failed) rather than a hard platform kill.
+export const maxDuration = 300;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
