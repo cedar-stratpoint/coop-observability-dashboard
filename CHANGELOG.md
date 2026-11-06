@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Observability: a read_logs table for the scan-read pipeline
+
+To debug and harden the reader, every page the uploader reads (and every store-assign attempt) now writes one durable row to a new Nichido `read_logs` table: the identity (company, scan source, upload, filename, page, size), the classifier/extract summary (page kind, form version, orientation, snapped vs raw store, row count, doc confidence, flagged, off-manifest), **timings** (how long classify and the read each took, so the slow dense pages are visible), and the **final outcome** including the real error and the stage it died in. The full extraction rows stay in `extractions`; `read_logs` keeps a lean summary plus a `detail` jsonb with the raw classifier output.
+
+Now a failed or mis-read page is a SQL query away instead of a re-upload: "which form version fails most", "read-time p95 by page", "every failure in the last hour and why". Written best-effort by the server (service role) so it never blocks an upload; RLS-fenced like every other table; a `private.purge_read_logs(days)` function (auto-scheduled nightly when pg_cron is present) caps growth at 90 days. Applied to Nichido Staging (`o1_read_logs.sql`); promote to prod with the other reviewed SQL.
+
 ## 2026-11-06 — Uploads: confirm before processing, Confirm-store hover, surface the assign error
 
 - **Confirm before a scan starts reading.** Choosing or dropping a file used to begin processing immediately. It now holds the files and asks first, in a small modal that lists what was picked (and notes a multi-page PDF is split into pages), so a 98-page scan only starts on a deliberate "Upload".
