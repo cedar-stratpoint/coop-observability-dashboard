@@ -308,7 +308,7 @@ import {LINE_ROW, sheetStatus} from '../src/plan-sheet';
 
 /** The colour of a typed actual cell: its own sheet row's rule (BHR-06). */
 const lineStatus = (id: string, actual: number | null, target: number | null, phase: 'past' | 'current' | 'future', gmv?: {actual: number; target: number}) =>
-  sheetStatus({row: LINE_ROW[id], actual: actual === null ? GAP : {value: actual, state: 'ok'}, target, phase, ctx: {actualGmv: gmv?.actual, targetGmv: gmv?.target}});
+  sheetStatus({row: LINE_ROW[id], actual: actual === null ? GAP : {value: actual, state: 'ok'}, target, phase, ctx: {actualBase: gmv?.actual, targetBase: gmv?.target}});
 
 describe('plan targets for the typed lines (BHR cost-line targets)', () => {
   it('every typed line names the target it is judged against: its own sheet row; stock bought is the inv_purchases target', () => {

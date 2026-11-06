@@ -81,7 +81,7 @@ describe('AC3: market sizing rows 98 to 111 are greyed, never judged', () => {
 
 describe('AC5: direction per row', () => {
   const H = [8, 12, 9, 13, 16, 17, ...range(48, 51), 56, 57, 62, 63, 72, 73, 75, 76, 78, 81, 86, 90, 94, 95, 113, 114, 115, 121, 122, 123, 124];
-  const L = [10, 14, 24, 25, 26, 28, 29, 30, 31, ...range(33, 39), 58, 77, 96];
+  const L = [10, 14, 24, 25, 26, 28, 29, 30, 31, ...range(33, 39), 58, 69, 70, 77, 96];
   it('higher-is-better rows', () => { for (const r of H) expect(dirOf(r), `row ${r}`).toBe('H'); });
   it('lower-is-better rows', () => { for (const r of L) expect(dirOf(r), `row ${r}`).toBe('L'); });
   it('H: green at or above target, red below', () => {
@@ -97,18 +97,18 @@ describe('AC5: direction per row', () => {
 });
 
 describe('AC6: variable cost rows are judged as % of GMV, the peso value still shown', () => {
-  it('rows 52 to 55, 59 to 61 and 66 to 71 are pct_gmv', () => {
-    for (const r of [...range(52, 55), ...range(59, 61), ...range(66, 71)]) expect(dirOf(r), `row ${r}`).toBe('pct_gmv');
+  it('rows 52 to 55, 59 to 61, 66 to 68 and 71 are pct_gmv; 69 and 70 are fixed budgets (test/plan-sheet-review.test.ts)', () => {
+    for (const r of [...range(52, 55), ...range(59, 61), ...range(66, 68), 71]) expect(dirOf(r), `row ${r}`).toBe('pct_gmv');
   });
   it('a cost above its peso target is green when GMV grew more (a lower share of GMV)', () => {
-    expect(judge('pct_gmv', 100, 120, {actualGmv: 2000, targetGmv: 1000})).toBe('met'); // 6% against 10%
-    expect(judge('pct_gmv', 100, 80, {actualGmv: 500, targetGmv: 1000})).toBe('missed'); // 16% against 10%
-    expect(judge('pct_gmv', 100, 100, {actualGmv: 1000, targetGmv: 1000})).toBe('met');
+    expect(judge('pct_gmv', 100, 120, {actualBase: 2000, targetBase: 1000})).toBe('met'); // 6% against 10%
+    expect(judge('pct_gmv', 100, 80, {actualBase: 500, targetBase: 1000})).toBe('missed'); // 16% against 10%
+    expect(judge('pct_gmv', 100, 100, {actualBase: 1000, targetBase: 1000})).toBe('met');
   });
   it('waits without a GMV to divide by, never red', () => {
-    expect(judge('pct_gmv', 100, 120, {actualGmv: null, targetGmv: 1000})).toBe('waiting');
-    expect(judge('pct_gmv', 100, 120, {actualGmv: 0, targetGmv: 1000})).toBe('waiting');
-    expect(judge('pct_gmv', 100, 120, {actualGmv: 1000, targetGmv: null})).toBe('waiting');
+    expect(judge('pct_gmv', 100, 120, {actualBase: null, targetBase: 1000})).toBe('waiting');
+    expect(judge('pct_gmv', 100, 120, {actualBase: 0, targetBase: 1000})).toBe('waiting');
+    expect(judge('pct_gmv', 100, 120, {actualBase: 1000, targetBase: null})).toBe('waiting');
   });
 });
 
@@ -153,7 +153,7 @@ describe('AC9 (negative): never green or red', () => {
     expect(judge('none', 100, -1e9, {})).toBe('none');
   });
   it.each(['H', 'L', 'pct_gmv', 'band'] as SheetDir[])('a %s row with no actual waits, never red', (dir) => {
-    expect(judge(dir, 100, null, {actualGmv: 1, targetGmv: 1, coverage: null, coverageTarget: 1})).toBe('waiting');
+    expect(judge(dir, 100, null, {actualBase: 1, targetBase: 1, coverage: null, coverageTarget: 1})).toBe('waiting');
   });
   it('sheetStatus: a past month with no actual is waiting; current and future months are never judged', () => {
     const row = SHEET_ROWS.find((r) => r.row === 51)!;

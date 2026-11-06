@@ -83,3 +83,15 @@ describe.skipIf(!WORKBOOK || !existsSync(WORKBOOK))('the workbook reader against
     expect(Object.keys(assumptions).sort()).toEqual(['aov', 'repeat_rate']);
   });
 });
+
+describe('M3: the loader also fills the newest plan version (source check; behaviour in test/plan-loader-local.integration.test.ts)', () => {
+  const src = readFileSync(path.resolve(__dirname, '../scripts/seed-plan-from-workbook.mjs'), 'utf8');
+  it('never overwrites: every target write ignores rows already there', () => {
+    const upserts = [...src.matchAll(/from\('plan_targets'\)\.(upsert|insert|update)\(([^;]*)/g)];
+    expect(upserts.length).toBeGreaterThan(0);
+    for (const m of upserts) { expect(m[1]).toBe('upsert'); expect(m[2]).toMatch(/ignoreDuplicates: true/); }
+  });
+  it('reads the newest version the way the page does (highest id)', () => {
+    expect(src).toMatch(/from\('plan_versions'\)\.select\([^)]*\)\.order\('id', \{ascending: false\}\)\.limit\(1\)/);
+  });
+});

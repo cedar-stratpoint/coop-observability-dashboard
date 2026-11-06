@@ -61,4 +61,29 @@ describe.skipIf(!local)('BHR-06 itemise: totals become their sheet rows', () => 
     run();
     expect((await sb().rpc('plan_set_actual_parts', {p_month: M, p_line: 'cogs', p_parts: {}, p_expected: null, p_by: 'x'})).error).not.toBeNull();
   });
+
+  const psqlFile = (f: string) => execSync(`${PSQL} -q 2>&1`, {input: readFileSync(path.resolve(__dirname, '..', f), 'utf8'), encoding: 'utf8'});
+  const psqlRows = (q: string) => execSync(`${PSQL} -qAt -F '|' 2>&1`, {input: q, encoding: 'utf8'}).trim();
+
+  it('M5: re-applying the documented files, in order, does not bring the retired RPC back', () => {
+    for (const f of ['supabase/plan_report.sql', 'supabase/plan_actuals_remove_workbook_prefill.sql', 'supabase/plan_actual_parts.sql', 'supabase/plan_actuals_itemise.sql']) psqlFile(f);
+    psqlFile('supabase/plan_actual_parts.sql'); // even re-applied after the itemise step
+    expect(psqlRows("select count(*) from pg_proc where proname = 'plan_set_actual_parts';")).toBe('0');
+  });
+
+  it('M6: the preflight in the itemise header counts closed months that still hold a total-only row', async () => {
+    const q = /-- PREFLIGHT BEGIN\n([\s\S]*?)-- PREFLIGHT END/.exec(SQL)![1].split('\n').map((l) => l.replace(/^-- ?/, '')).join('\n');
+    const v = (await sb().from('plan_versions').select('id').order('id', {ascending: true}).limit(1)).data![0].id;
+    try {
+      await sb().from('plan_actuals').insert([{month: N, metric: 'overhead', amount_php: 100}, {month: N, metric: 'cogs', amount_php: 60}, {month: M, metric: 'cogs', amount_php: 7}]);
+      await sb().from('plan_actual_parts').insert([{month: M, metric: 'cogs', part: 'marketplace_cogs', amount_php: 7}, {month: M, metric: 'cogs', part: 'website_cogs', amount_php: 0}, {month: M, metric: 'cogs', part: 'events_cogs', amount_php: 0}]);
+      const before = psqlRows(q).split('\n').pop()!;
+      expect(before).toBe('0|0'); // no month closed yet
+      expect((await sb().from('plan_month_closes').insert([{month: N, plan_version: v, closed_by: 'probe-preflight'}, {month: M, plan_version: v, closed_by: 'probe-preflight'}])).error).toBeNull();
+      expect(psqlRows(q).split('\n').pop()).toBe('1|2'); // N: two totals with no breakdown; M has a full breakdown, so it would be split
+    } finally {
+      await sb().from('plan_month_closes').delete().eq('closed_by', 'probe-preflight');
+    }
+  });
 });
+

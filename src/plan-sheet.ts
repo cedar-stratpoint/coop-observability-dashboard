@@ -7,9 +7,9 @@ import {GAP, LINE_TARGET_ID, fmtPlan, sheetTargetId, type ActualCell, type LineS
 
 export type SheetKind = 'header' | 'section' | 'label' | 'spacer' | 'input' | 'formula' | 'check' | 'static';
 /**
- * H = higher is better, L = lower is better, pct_gmv = a variable cost judged as its share of Total GMV (actual cost / actual GMV against target cost /
- * target GMV, lower is better: owner decision 2026-11-06), band = within BAND of the coverage target, pass_fail = an OK / not-OK text check (never coloured),
- * none = never judged (plugs, budget inputs, financing, one-offs, settings, memo rows, market sizing).
+ * H = higher is better, L = lower is better, pct_gmv = a variable cost judged as its share of the base that drives it in the sheet's own formula (the row's
+ * `per`: actual cost / actual base against target cost / target base, lower is better; story AC6, review 2026-11-06), band = within BAND of the coverage
+ * target, pass_fail = an OK / not-OK text check (never coloured), none = never judged (plugs, budget inputs, financing, one-offs, settings, memo rows, market sizing).
  */
 export type SheetDir = 'H' | 'L' | 'pct_gmv' | 'band' | 'pass_fail' | 'none';
 /** mn = millions of pesos as the sheet has them, num = a plain number, check = 1 (OK) or 0 (the row's failing word). */
@@ -29,6 +29,19 @@ export interface SheetRow {
   single?: boolean;
   /** What a failing check row says (the sheet's own word). */
   fail?: string;
+  /**
+   * A pct_gmv row's base, the ids summed to divide by, as the sheet formula has them: 52 and 66 marketplace GMV (row 48), 53 and 67 website GMV (49),
+   * 54 events GMV (50), 59 and 60 marketplace + website GMV, 61 and 68 the number of events (row 16, r16: cost per event), totals 55 and 71 Total GMV.
+   */
+  per?: string[];
+  /** Modelled from plan assumptions (AOV, repeat rate), not a real count: CAC and the customer rows (96, 113, 114, 121-124). Shown, never green or red (AC5). */
+  modelled?: boolean;
+  /** A section row that repeats the month headings across, as the sheet does (rows 47 and 80). */
+  months?: boolean;
+  /** The sheet's Excel number format of the row's monthly cells (column C for a single value). */
+  fmt?: string;
+  /** The first month's format where the sheet formats it differently (row 46: the buffer in months, then a percent). */
+  fmtFirst?: string;
 }
 
 export const SHEET_ROWS: readonly SheetRow[] = RAW as SheetRow[];
@@ -50,8 +63,11 @@ export const shownRows = (inputsOpen: boolean): SheetRow[] => SHEET_ROWS.filter(
 /** Inventory on hand and forward coverage are green within ±25% of the coverage target (row 45): below it risks stock-outs, above it ties up cash. */
 export const BAND = 0.25;
 export type Verdict = 'met' | 'missed' | 'none' | 'waiting';
-export interface JudgeCtx {actualGmv?: number | null; targetGmv?: number | null; coverage?: number | null; coverageTarget?: number | null}
+/** actualBase / targetBase = the month's base of a pct_gmv row (see SheetRow.per); coverage / coverageTarget for a band row. */
+export interface JudgeCtx {actualBase?: number | null; targetBase?: number | null; coverage?: number | null; coverageTarget?: number | null}
 const EPS = 1e-9;
+/** At or beyond `b`, within float noise (an actual equal to its target is met). */
+const atLeast = (a: number, b: number) => a >= b - EPS * Math.max(1, Math.abs(b));
 /** Met or missed, for one month of one row. A missing actual (or the GMV / coverage it needs) is 'waiting', never 'missed'. */
 export function judge(dir: SheetDir, target: number | null, actual: number | null, ctx: JudgeCtx): Verdict {
   if (dir === 'none' || dir === 'pass_fail') return 'none';
@@ -63,12 +79,36 @@ export function judge(dir: SheetDir, target: number | null, actual: number | nul
   }
   if (target === null) return 'waiting';
   if (dir === 'pct_gmv') {
-    const a = ctx.actualGmv ?? null, t = ctx.targetGmv ?? null;
+    const a = ctx.actualBase ?? null, t = ctx.targetBase ?? null;
     if (a === null || t === null || a <= 0 || t <= 0) return 'waiting';
-    return actual / a <= target / t + EPS ? 'met' : 'missed';
+    return atLeast(target / t, actual / a) ? 'met' : 'missed';
   }
-  return (dir === 'H' ? actual >= target : actual <= target) ? 'met' : 'missed';
+  return (dir === 'H' ? atLeast(actual, target) : atLeast(target, actual)) ? 'met' : 'missed';
 }
+
+/**
+ * What one month of one row is judged with: the row's base (its `per` ids summed, actuals only when fully covered, targets of the same month) and the
+ * coverage band. A partial or missing base is null, so the cell waits. Coop has no actual event count yet, so rows 61 and 68 wait.
+ */
+export function sheetCtx(r: SheetRow, plan: {targets: Record<string, (number | null)[]>}, actuals: Readonly<Record<string, readonly ActualCell[]>>, i: number): JudgeCtx {
+  const coverageTarget = plan.targets.coverage?.find((v) => v !== null) ?? null;
+  const coverage = actuals.coverage?.[i]?.value ?? null;
+  if (!r.per) return {coverage, coverageTarget};
+  let actualBase: number | null = 0, targetBase: number | null = 0;
+  for (const id of r.per) {
+    const c = actuals[id]?.[i];
+    actualBase = actualBase === null || !c || c.state !== 'ok' || c.value === null ? null : actualBase + c.value;
+    const t = plan.targets[id]?.[i] ?? null;
+    targetBase = targetBase === null || t === null ? null : targetBase + t;
+  }
+  return {actualBase, targetBase, coverage, coverageTarget};
+}
+const BASE_NAME: Record<string, string> = {gmv_marketplace: 'Marketplace', gmv_website: 'Website', gmv_events: 'Events', gmv_total: 'Total'};
+/** How a met / missed cell was judged, for its tooltip. */
+export const judgedAs = (r: SheetRow): string => r.dir === 'band' ? ' (coverage within 25% of target)'
+  : r.dir !== 'pct_gmv' || !r.per ? '' : r.per.includes('r16') ? ' (per event)' : ` (as a share of ${r.per.map((id) => BASE_NAME[id] ?? id).join(' + ')} GMV)`;
+/** Row 77, break-even ROAS: zero or below means CM2 is not positive, so no ROAS breaks even. The sheet shows the value; Coop shows it red. */
+const BREAK_EVEN_ROW = 77;
 const toStatus = (v: Verdict): Status => (v === 'met' ? 'ok' : v === 'missed' ? 'bad' : v === 'waiting' ? 'waiting' : 'info');
 
 /** The colour of one actual cell: a month in progress or ahead is never judged, nor a partial (understated) actual. */
@@ -77,6 +117,8 @@ export function sheetStatus(i: {row: SheetRow; actual: ActualCell; target: numbe
   if (i.phase === 'future') return 'future';
   if (i.actual.value === null) return 'waiting';
   if (i.actual.state === 'partial') return 'partial';
+  if (i.row.modelled) return 'modelled';
+  if (i.row.row === BREAK_EVEN_ROW && i.actual.value <= 0) return 'bad';
   return toStatus(judge(i.row.dir ?? 'none', i.target, i.actual.value, i.ctx));
 }
 
@@ -144,10 +186,10 @@ function rowFormulas(plan: Plan, g: (id: string, i: number) => ActualCell): Reco
     66: same('ad_marketplace'), 67: same('ad_website'), 68: same('event_marketing'), 69: same('content_socials'), 70: same('other_spend'),
     71: ads, 72: same('cm3'), 73: same('cm3_pct'),
     74: (i) => f([g('overhead', i)], ([o]) => -o), // the sheet stores overhead negative here (= -row 39)
-    75: same('ebitda'), 76: same('ebitda_pct'), 77: (i) => f([g('cm2_pct', i)], ([p]) => (p > 0 ? 1 / p : null)),
+    75: same('ebitda'), 76: same('ebitda_pct'), 77: (i) => f([g('cm2_pct', i)], ([p]) => (p !== 0 ? 1 / p : null)), // negative when CM2 is, as the sheet
     // row 82 (the plug, = row 41) shows its target only
     81: same('ebitda'), 83: same('on_hand'), 84: same('coverage'),
-    85: (i) => f([g('coverage', i), scalar('coverage')], ([c, t]) => (c >= t ? 1 : 0)),
+    85: (i) => f([g('coverage', i), scalar('coverage')], ([c, t]) => (atLeast(c, t) ? 1 : 0)),
     86: (i) => f([g('ebitda', i), g('cogs', i), g('inv_purchases_paid', i)], ([e, c, b]) => e + c - b),
     87: same('bridge_funding'), 88: same('liability_settlement'), 89: same('freight_onetime'), 90: same('cash'),
     91: (i) => f([g('cash', i)], ([c]) => (c >= 0 ? 1 : 0)),
@@ -169,4 +211,30 @@ export function fmtSheet(unit: SheetUnit, v: number | null | undefined, fail?: s
   if (unit === 'num') return v.toLocaleString('en-US', {maximumFractionDigits: 2});
   if (unit === 'pct' && v !== 0 && Math.abs(v) < 0.01) return `${v < 0 ? '−' : ''}${(Math.abs(v) * 100).toFixed(3)}%`; // the penetration rows are tiny shares
   return fmtPlan(unit, v);
+}
+
+/**
+ * A value in the sheet's own Excel number format (`fmt`): its decimals, percent, grouping and suffix (x, mo). Negatives keep Coop's minus sign and a zero
+ * shows as 0.0 (the sheet shows a dash), so a real 0 never reads like an empty cell (—).
+ */
+export function fmtExcel(code: string, v: number): string {
+  const sec = code.split(';')[0];
+  if (sec === 'General') {
+    const t = Math.abs(v).toLocaleString('en-US', {maximumFractionDigits: 6, useGrouping: false});
+    return `${v < 0 && Number(t) !== 0 ? '−' : ''}${t}`;
+  }
+  const m = /^([#,0]*0)(?:\.(0+))?(%?)(.*)$/.exec(sec);
+  if (!m) return String(v);
+  const dec = m[2]?.length ?? 0, pct = m[3] === '%';
+  const x = Math.abs(pct ? v * 100 : v);
+  const t = x.toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: m[1].includes(',')});
+  const suffix = m[4].replace(/"([^"]*)"/g, '$1').replace(/\\(.)/g, '$1');
+  return `${v < 0 && /[1-9]/.test(t) ? '−' : ''}${t}${pct ? '%' : ''}${suffix}`;
+}
+/** A sheet cell as the grid shows it: the row's own number format (money in the sheet's thousands), a check as OK or its failing word. `i` = month index. */
+export function fmtCell(r: SheetRow, v: number | null | undefined, i = 0): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  const code = (i === 0 && r.fmtFirst) || r.fmt;
+  if (r.unit === 'check' || !code) return fmtSheet(r.unit ?? 'num', v, r.fail);
+  return fmtExcel(code, v / unitScale(r.unit!));
 }

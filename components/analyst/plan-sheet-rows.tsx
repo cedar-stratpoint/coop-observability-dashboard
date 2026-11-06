@@ -9,7 +9,7 @@ import {
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_LINE_ORDER, lineInputText, lineUnitWords, monthPhase, parseLineInput,
   type ActualCell, type ClosedMonth, type LineSeries, type PlanData, type Status,
 } from '@/src/plan-compute';
-import {SHEET_ROWS, actualKind, blockOf, fmtSheet, isSingle, sheetActuals, sheetStatus, shownRows, targetId, TYPED_ROW, type SheetRow} from '@/src/plan-sheet';
+import {SHEET_ROWS, actualKind, blockOf, fmtCell, isSingle, judgedAs, sheetActuals, sheetCtx, sheetStatus, shownRows, targetId, TYPED_ROW, type SheetRow} from '@/src/plan-sheet';
 
 // BHR-06: the All months grid IS the Business Plan sheet. Rows 5 to 125 down in sheet order with the sheet's labels, months across. Every target cell is
 // the workbook value. Under each row that can have an actual sits an "actual" line: an entry cell for a typed row (one per itemised sheet row), the value
@@ -48,14 +48,12 @@ const SHEET_LABEL = 'sticky left-0 z-10 max-w-[108px] whitespace-normal border-b
 const CLICKABLE = new Set(['gmv_total', 'gmv_events', 'gmv_website', 'gmv_marketplace', 'cash']);
 const LINE_LABEL: Record<string, string> = Object.fromEntries([...LINES, ...MEASURE_LINES].map((l) => [l.id, l.label]));
 const REQUIRED = new Set(REQUIRED_LINE_ORDER);
-/** Sheet labels as the sheet has them; leading spaces mark a sub-row, shown indented. */
-const sheetLabel = (r: SheetRow) => <span className={cn('block [overflow-wrap:anywhere]', r.label.startsWith(' ') && 'pl-3')}>{r.label.trim()}</span>;
-
-/** The month's Total GMV actual (only when complete) and target: what a variable cost is divided by when it is judged as a share of GMV. */
-export function gmvCtx(plan: PlanData, actuals: Actuals, i: number): {actual: number | null; target: number | null} {
-  const g = cellOf(actuals, 'gmv_total', i);
-  return {actual: g.state === 'ok' ? g.value : null, target: plan.targets.gmv_total?.[i] ?? null};
-}
+/**
+ * Sheet labels as the sheet has them; leading spaces mark a sub-row, shown indented. On a phone a long label is clamped to two lines (the text in the
+ * DOM, so its accessible name, stays the full sheet label; the title shows it on hover).
+ */
+const CLAMP = 'max-md:line-clamp-2';
+const sheetLabel = (r: SheetRow) => <span className={cn('block [overflow-wrap:anywhere]', CLAMP, r.label.startsWith(' ') && 'pl-3')}>{r.label.trim()}</span>;
 
 /**
  * One entry cell (money in thousands of pesos like the sheet; ROAS as a multiple). Saves when you leave the cell or press Enter. Empty = missing, 0 = a real 0.
@@ -125,8 +123,6 @@ const INPUTS_COUNT = SHEET_ROWS.filter((r) => blockOf(r.row) === 'inputs' && r.r
 export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, setInputsOpen}: {plan: PlanData; nowKey: string; actuals: Actuals; edit: Edit; col: (i: number) => string; onWhy: (id: string, i: number) => void; inputsOpen: boolean; setInputsOpen: (open: boolean) => void}) {
   const sheet = useMemo(() => sheetActuals(plan, actuals, edit.lines), [plan, actuals, edit.lines]);
   const n = plan.months.length;
-  const coverageTarget = plan.targets.coverage?.find((v) => v !== null) ?? null;
-  const ctx = (i: number) => { const g = gmvCtx(plan, actuals, i); return {actualGmv: g.actual, targetGmv: g.target, coverage: cellOf(actuals, 'coverage', i).value, coverageTarget}; };
   const ActualLabel = ({label = 'actual'}: {label?: string}) => <th scope="row" className={cn(SUB_CELL, 'uppercase')}>{label}</th>;
   return (
     <>
@@ -146,22 +142,29 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
               <td colSpan={n} className="border-b border-border bg-muted" />
             </tr>
           );
-          return <tr key={key} data-sheet-row={r.row}><td className={cn(GROUP_ROW, '[overflow-wrap:anywhere] md:max-w-[340px]', r.sub && 'bg-muted/50 normal-case tracking-normal text-foreground/80')}>{r.label}</td><td colSpan={n} className={cn('border-b border-border', r.sub ? 'bg-muted/50' : 'bg-muted')} /></tr>;
+          const band = cn('border-b border-border', r.sub ? 'bg-muted/50' : 'bg-muted');
+          return (
+            <tr key={key} data-sheet-row={r.row}>
+              <td title={r.label} className={cn(GROUP_ROW, 'md:max-w-[340px]', r.sub && 'bg-muted/50 normal-case tracking-normal text-foreground/80')}><span className={cn('block [overflow-wrap:anywhere]', CLAMP)}>{r.label}</span></td>
+              {/* Rows 47 and 80 repeat the month headings across, as the sheet does. */}
+              {r.months ? plan.months.map((mo, i) => <td key={mo} className={cn(band, 'border-r px-2 py-[5px] text-right text-[11px] font-medium tracking-[0.07em] text-muted-foreground', col(i))}>{monthLabel(mo)}</td>) : <td colSpan={n} className={band} />}
+            </tr>
+          );
         }
         if (r.kind === 'spacer') return <tr key={key} data-sheet-row={r.row} aria-hidden><td className="sticky left-0 h-2 border-b border-border bg-card" /><td colSpan={n} className="h-2 border-b border-border" /></tr>;
-        if (r.kind === 'label') return <tr key={key} data-sheet-row={r.row}><th scope="row" className={cn(SHEET_LABEL, 'font-medium text-muted-foreground')}>{sheetLabel(r)}</th><td colSpan={n} className="border-b border-border" /></tr>;
-        const id = targetId(r), unit = r.unit!, kind = actualKind(r.row), typed = TYPED_ROW[r.row];
+        if (r.kind === 'label') return <tr key={key} data-sheet-row={r.row}><th scope="row" title={r.label.trim()} className={cn(SHEET_LABEL, 'font-medium text-muted-foreground')}>{sheetLabel(r)}</th><td colSpan={n} className="border-b border-border" /></tr>;
+        const id = targetId(r), kind = actualKind(r.row), typed = TYPED_ROW[r.row];
         const greyed = r.kind === 'static';
-        const statusAt = (i: number) => sheetStatus({row: r, actual: sheet[r.row]?.[i] ?? GAP, target: plan.targets[id]?.[i] ?? null, phase: monthPhase(plan.months[i], nowKey), ctx: ctx(i)});
+        const statusAt = (i: number) => sheetStatus({row: r, actual: sheet[r.row]?.[i] ?? GAP, target: plan.targets[id]?.[i] ?? null, phase: monthPhase(plan.months[i], nowKey), ctx: sheetCtx(r, plan, actuals, i)});
         const targetLine = isSingle(r) ? (
           <tr data-sheet-row={r.row} data-line-kind="target" data-greyed={greyed || undefined} className={cn(greyed && 'text-muted-foreground')}>
-            <th scope="row" className={cn(SHEET_LABEL, 'font-normal', greyed && 'text-muted-foreground')}>{sheetLabel(r)}</th>
-            <td colSpan={n} className={cn('border-b border-border px-2 py-[5px] text-left text-muted-foreground', greyed && 'bg-muted/40')}>{fmtSheet(unit, plan.targets[id]?.find((v) => v !== null) ?? null)}<span className="ml-2 text-[10.5px]">one value, not monthly</span></td>
+            <th scope="row" title={r.label.trim()} className={cn(SHEET_LABEL, 'font-normal', greyed && 'text-muted-foreground')}>{sheetLabel(r)}</th>
+            <td colSpan={n} className={cn('border-b border-border px-2 py-[5px] text-left text-muted-foreground', greyed && 'bg-muted/40')}>{fmtCell(r, plan.targets[id]?.find((v) => v !== null) ?? null)}<span className="ml-2 text-[10.5px]">one value, not monthly</span></td>
           </tr>
         ) : (
           <tr data-sheet-row={r.row} data-line-kind="target" data-dir={r.dir}>
-            <th scope="row" className={cn(SHEET_LABEL, 'font-semibold')}>{sheetLabel(r)}</th>
-            {plan.months.map((mo, i) => <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground', col(i))}>{fmtSheet(unit, plan.targets[id]?.[i], r.fail)}</td>)}
+            <th scope="row" title={r.label.trim()} className={cn(SHEET_LABEL, 'font-semibold')}>{sheetLabel(r)}</th>
+            {plan.months.map((mo, i) => <td key={mo} className={cn('border-b border-r border-border px-2 py-[5px] text-right text-muted-foreground', col(i))}>{fmtCell(r, plan.targets[id]?.[i], i)}</td>)}
           </tr>
         );
         // A typed line entered once (the opening balances) takes the first month only.
@@ -185,8 +188,8 @@ export function SheetRows({plan, nowKey, actuals, edit, col, onWhy, inputsOpen, 
                   const click = CLICKABLE.has(id) && s === 'bad';
                   const cls = cn('border-b border-r border-border px-2 py-[5px] text-right font-semibold', cellActual(s), s === 'live' && 'font-normal italic', click && 'cursor-pointer hover:outline hover:outline-2 hover:-outline-offset-2 hover:outline-[var(--status-crit)]', col(i));
                   const shown = phase === 'future' ? null : c.value === null ? <span className="sr-only">waiting</span>
-                    : <>{fmtSheet(unit, c.value, r.fail)}{c.state === 'partial' && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">partial</span>}</>;
-                  const title = s === 'ok' || s === 'bad' ? `${STATUS_TEXT[s]}${r.dir === 'pct_gmv' ? ' (as a share of GMV)' : r.dir === 'band' ? ' (coverage within 25% of target)' : ''}` : c.note;
+                    : <>{fmtCell(r, c.value, i)}{c.state === 'partial' && <span className="block text-[10px] font-normal not-italic text-muted-foreground/80">partial</span>}</>;
+                  const title = s === 'ok' || s === 'bad' ? `${STATUS_TEXT[s]}${judgedAs(r)}` : s === 'modelled' ? 'Modelled from plan assumptions, not judged' : c.note;
                   return click
                     ? <td key={mo} data-status={s} title={`${title}. Click to see why`} className={cls} onClick={() => onWhy(id, i)}>{shown}</td>
                     : <td key={mo} data-status={s} title={title} className={cls}>{shown}</td>;

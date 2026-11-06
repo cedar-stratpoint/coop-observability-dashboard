@@ -1,3 +1,6 @@
+-- RETIRED (BHR-06 review, 2026-11-06): NOT in the apply order any more. Nothing reads or writes plan_part_targets: the itemised rows are sheet rows with
+-- their own targets in plan_targets (r33-r38, r52-r54, r69, r70), and the breakdown modal that showed these is gone. Kept only as the record of a
+-- table that may already exist where this file was applied earlier (harmless: RLS on, no policies, service role only). Do not apply it on a new database.
 -- Business Health Report: the per-part TARGETS behind the three consolidated lines (Fixed overhead, COGS, Content and other), shown as the grey value
 -- beside each part in the breakdown modal. Schema only: the values are loaded privately from the plan workbook by scripts/seed-plan-from-workbook.mjs
 -- (the repo is public and holds no plan figure). Run by hand per environment AFTER supabase/plan_report.sql. Idempotent.

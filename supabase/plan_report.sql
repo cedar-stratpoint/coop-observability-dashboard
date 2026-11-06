@@ -1,5 +1,5 @@
 -- Business Health Report (plan vs actual): tables (BHR-01) and the write RPCs (typed lines BHR-03; close and unlock BHR-04; target edit as a new plan version BHR-05).
--- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql, supabase/plan_part_targets.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
+-- Run by hand per environment in the Supabase SQL editor, then supabase/plan_actuals_remove_workbook_prefill.sql (BHR-06, one-off), supabase/plan_actual_parts.sql and supabase/plan_actuals_itemise.sql (BHR-06, one-off; run its PREFLIGHT query first). The targets are loaded privately by scripts/seed-plan-from-workbook.mjs (the repo is public and holds no plan figure). Idempotent.
 -- Design: knowledge/best-practices/plan-versions-and-locked-actuals.md. Money is stored in pesos.
 -- RLS is ON with NO policies on every table: only the service role (Coop server-side) gets through. Never add an anon policy.
 

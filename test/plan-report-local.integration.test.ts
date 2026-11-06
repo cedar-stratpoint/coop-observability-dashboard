@@ -9,7 +9,7 @@ const URL_ = process.env.SB_LOCAL_URL;
 const SECRET = process.env.SB_LOCAL_JWT_SECRET;
 if (URL_) assertLocalSupabase(URL_);
 const local = !!URL_ && !!SECRET;
-const TABLES = ['plan_versions', 'plan_targets', 'plan_part_targets', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
+const TABLES = ['plan_versions', 'plan_targets', 'plan_actual_parts', 'plan_actuals', 'plan_month_closes', 'plan_actuals_log'];
 
 function jwt(role: string): string {
   const b = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
