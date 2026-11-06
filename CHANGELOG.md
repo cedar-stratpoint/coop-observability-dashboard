@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-06 — Reader: support an org-scoped Anthropic key (workspace-id header)
+
+An Anthropic API key created at the org level (not inside a workspace) must name the workspace to run and bill in, via an `anthropic-workspace-id` header, or every request 400s. The Goldline reader now sends that header when `GOLDLINE_ANTHROPIC_WORKSPACE_ID` is set, and omits it cleanly for a workspace-scoped key (no behaviour change there). Verified live against the key: with the workspace header, `/v1/models` and a `claude-sonnet-5-5` message both return 200. Set both `GOLDLINE_ANTHROPIC_API_KEY` and `GOLDLINE_ANTHROPIC_WORKSPACE_ID` in Vercel for an org-scoped key.
+
 ## 2026-11-06 — Upload progress: a living bar so a long scan doesn't feel stuck
 
 Reading a big scan can sit for minutes on one page, and a flat fill bar made that look frozen. The upload progress bars now have a subtle glossy gradient fill and a sheen that keeps gliding across the filled portion, so an in-flight read reads as "still working" (a labor illusion) instead of stalled. The fill width is still the real progress; the sheen is transform-only and purposeful (a minutes-long, occasional wait, not a decorative pulse), matching the house "Ask coop" shine. The main bar is a touch taller for presence. Collapses to a static fill under reduced motion via the app-wide rule. Built with the motion skill (Jakub polish, Emil restraint, a touch of Jhey for the requested fun).
