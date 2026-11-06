@@ -2,7 +2,7 @@
 
 import {useCallback, useEffect, useId, useLayoutEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Info} from 'lucide-react';
+import {Info, type LucideIcon} from 'lucide-react';
 import {cn} from '@/lib/utils';
 
 const W = 280, GAP = 8, EDGE = 8;
@@ -12,7 +12,7 @@ const W = 280, GAP = 8, EDGE = 8;
  * wires aria-describedby and has a 32px+ touch target). Used for the Business Health Report's explanatory copy (`src/plan-help.ts`).
  * The tip is portalled to <body> with fixed positioning, so no overflow container or sticky header clips it.
  */
-export function HelpTip({text, label = 'More info', className}: {text: string; label?: string; className?: string}) {
+export function HelpTip({text, label = 'More info', className, icon: Icon = Info, ...rest}: {text: string; label?: string; className?: string; /** The trigger's glyph (default ⓘ). */ icon?: LucideIcon; 'data-source'?: string}) {
   const id = useId();
   const btn = useRef<HTMLButtonElement>(null);
   const tip = useRef<HTMLDivElement>(null);
@@ -42,13 +42,13 @@ export function HelpTip({text, label = 'More info', className}: {text: string; l
 
   return (
     <>
-      <button ref={btn} type="button" aria-label={label} aria-expanded={open} aria-describedby={open ? id : undefined}
+      <button ref={btn} type="button" {...rest} aria-label={label} aria-expanded={open} aria-describedby={open ? id : undefined}
         onPointerEnter={(e) => { if (e.pointerType === 'mouse') setOpen(true); }}
         onPointerLeave={(e) => { if (e.pointerType === 'mouse' && !pinned.current) setOpen(false); }}
         onFocus={() => setOpen(true)} onBlur={close}
         onClick={() => { if (open && pinned.current) close(); else { pinned.current = true; setOpen(true); } }}
         className={cn('-m-1.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full align-middle text-muted-foreground transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none max-md:size-9 [&_svg]:size-3.5', open && 'text-primary', className)}>
-        <Info aria-hidden />
+        <Icon aria-hidden />
       </button>
       {open && createPortal(
         <div ref={tip} id={id} role="tooltip" style={{position: 'fixed', left: pos?.left ?? 0, top: pos?.top ?? 0, maxWidth: W, visibility: pos ? 'visible' : 'hidden'}}

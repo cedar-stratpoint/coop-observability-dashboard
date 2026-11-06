@@ -66,8 +66,10 @@ export type Verdict = 'met' | 'missed' | 'none' | 'waiting';
 /** actualBase / targetBase = the month's base of a pct_gmv row (see SheetRow.per); coverage / coverageTarget for a band row. */
 export interface JudgeCtx {actualBase?: number | null; targetBase?: number | null; coverage?: number | null; coverageTarget?: number | null}
 const EPS = 1e-9;
-/** At or beyond `b`, within float noise (an actual equal to its target is met). */
-const atLeast = (a: number, b: number) => a >= b - EPS * Math.max(1, Math.abs(b));
+/** The loader stores targets rounded to 6 decimals (scripts/plan-workbook.mjs), so an actual equal to the workbook value can sit up to 5e-7 off it. */
+const STORED = 1e-6;
+/** At or beyond `b`, within float noise and the stored rounding (an actual equal to its workbook target is met). */
+const atLeast = (a: number, b: number) => a >= b - STORED - EPS * Math.abs(b);
 /** Met or missed, for one month of one row. A missing actual (or the GMV / coverage it needs) is 'waiting', never 'missed'. */
 export function judge(dir: SheetDir, target: number | null, actual: number | null, ctx: JudgeCtx): Verdict {
   if (dir === 'none' || dir === 'pass_fail') return 'none';
@@ -202,6 +204,84 @@ function rowFormulas(plan: Plan, g: (id: string, i: number) => ActualCell): Reco
 const ACTUAL_ROWS: ReadonlySet<number> = new Set(Object.keys(rowFormulas({months: [], targets: {}}, () => GAP)).map(Number));
 /** What a sheet row's second line holds: an entry cell (a typed line), a value computed by the sheet's formula, or nothing (target line only). */
 export const actualKind = (row: number): 'typed' | 'computed' | null => (TYPED_ROW[row] ? 'typed' : ACTUAL_ROWS.has(row) ? 'computed' : null);
+
+/**
+ * BHR-07: where an actual line's number comes from. type = an admin types it (`from`: every month, once in the first month, or optional);
+ * auto = read from a Coop source (`from` names it); calc = the sheet's own formula over the rows above (`from` in the sheet's row numbers) and `feeds`,
+ * the typed rows it ultimately needs, so a waiting line can say which rows to fill. `opening` = a typed opening balance with no sheet row it also needs.
+ */
+export interface ActualSource {kind: 'type' | 'auto' | 'calc'; from: string; feeds?: readonly number[]; opening?: 'opening_cash'}
+const span = (a: number, b: number) => Array.from({length: b - a + 1}, (_, k) => a + k);
+const OVH = span(33, 38), COGS = span(52, 54), FEES = span(59, 61), ADS = span(66, 70), CUST = [120], STOCK = [44, 41, ...COGS];
+const CM2 = [...COGS, ...FEES], CM3 = [...CM2, ...ADS], EBITDA = [...CM3, ...OVH], CASH = [...EBITDA, 41, 87, 88, 89];
+const calc = (from: string, feeds: readonly number[], opening?: 'opening_cash'): ActualSource => ({kind: 'calc', from, feeds, ...(opening ? {opening} : {})});
+/** One explicit table, Coop's formula per calc row in the sheet's own row numbers (the sheet's, or its inverse where the sheet row is an input). */
+const CALC: Readonly<Record<number, ActualSource>> = {
+  8: calc('= 48 vs last month', []), 12: calc('= 49 vs last month', []),
+  24: calc('= 52 ÷ 48', [52]), 25: calc('= 53 ÷ 49', [53]), 26: calc('= 54 ÷ 50', [54]), 30: calc('= 60 ÷ (48 + 49)', [60]),
+  39: calc('= rows 33-38', OVH),
+  55: calc('= rows 52-54', COGS), 56: calc('= 51 − 55', COGS), 57: calc('= 56 ÷ 51', COGS), 58: calc('= 59 ÷ (48 + 49)', [59]),
+  62: calc('= 56 − 59 − 60 − 61', CM2), 63: calc('= 62 ÷ 51', CM2),
+  71: calc('= rows 66-70', ADS), 72: calc('= 62 − 71', CM3), 73: calc('= 72 ÷ 51', CM3),
+  74: calc('= − 39', OVH), 75: calc('= 72 + 74', EBITDA), 76: calc('= 75 ÷ 51', EBITDA), 77: calc('= one ÷ 63', CM2),
+  81: calc('= 75', EBITDA), 83: calc('= last month + 41 − 55', STOCK), 84: calc('= 83 ÷ next month planned 55', STOCK), 85: calc('= 84 vs 45', STOCK),
+  86: calc('= 81 + 55 − 41', [...EBITDA, 41]), 90: calc('= last month + 86 + 87 − 88 − 89', CASH, 'opening_cash'), 91: calc('= 90 not below zero', CASH, 'opening_cash'),
+  94: calc('= 51', []), 95: calc('= 94 × twelve', []), 96: calc('= 71 ÷ 122', [...ADS, ...CUST]),
+  113: calc('= 121', CUST), 114: calc('= 113 ÷ 103', CUST), 115: calc('= 95 ÷ 110', []),
+  121: calc('= last month + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
+  125: calc('= 123 within 48 + 49', CUST),
+};
+const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'Marketplace GMV + Website GMV + Events GMV'};
+const ONCE = new Set(['opening_inventory', 'opening_customers', 'opening_cash']);
+/** The source of a sheet row's actual line (or the opening-cash line typed under row 90). Null = the row has no actual line. */
+export function actualSource(row: number | 'opening_cash'): ActualSource | null {
+  if (row === 'opening_cash') return {kind: 'type', from: 'once'};
+  const typed = TYPED_ROW[row];
+  if (typed) return {kind: 'type', from: ONCE.has(typed) ? 'once' : LINE_ROW[typed] ? 'every month' : 'optional'};
+  if (AUTO[row]) return {kind: 'auto', from: AUTO[row]};
+  return ACTUAL_ROWS.has(row) ? CALC[row] ?? null : null;
+}
+/** The row numbers a formula text cites, ranges expanded ("= rows 33-38", "= 51 − 55"). */
+export const rowRefs = (text: string): number[] => [...text.matchAll(/(\d+)(?:-(\d+))?/g)].flatMap((m) => (m[2] ? span(Number(m[1]), Number(m[2])) : [Number(m[1])]));
+/**
+ * The grid never shows row numbers (owner, 2026-11-06: "hindi naman maidentify ni user anong row number yun"), so tips name the lines. A line's short
+ * name comes from its sheet label: no "less:", no units in brackets, no "→ drives ..." or "= ..." tail; an overhead sub-row is its own word (Salaries).
+ */
+export function rowName(row: number): string {
+  const label = SHEET_ROWS.find((r) => r.row === row)?.label ?? `line ${row}`;
+  let t = label.trim().replace(/^less:\s*/i, '').replace(/\s*\([^)]*\)/g, '').replace(/\s*(→|=).*$/, '').replace(/\s+—\s+PLUG$/, '');
+  const parts = t.split(/\s+[—–]\s+/);
+  t = (/^Company overhead/.test(t) && parts[1] ? parts[1] : parts[0]).replace(/\s{2,}/g, ' ').trim();
+  t = t.replace(/^TOTAL\b/, 'Total');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+/** A formula from the CALC table in line names: "= rows 66-70" → "Marketplace ad spend + ... + Other spend costs", "= 62 − 71" → "CM2 − Total ad spend". */
+export function namedFormula(from: string): string {
+  return from.replace(/^=\s*/, '').replace(/\+ 74\b/, '− 39').replace(/^− 39$/, '− 39') // row 74 is overhead stored negative: read it as minus the overhead total
+    .replace(/rows (\d+)-(\d+)/g, (_, a, b) => span(Number(a), Number(b)).map(rowName).join(' + '))
+    .replace(/\b(\d{2,3})\b/g, (_, n) => rowName(Number(n)))
+    .replace(/\bone\b/g, '1').replace(/\btwelve\b/g, '12');
+}
+/** The typed lines a calc line needs, in words; a whole block reads as its group ("the ad spend lines"). */
+const GROUPS: ReadonlyArray<[readonly number[], string]> = [[OVH, 'the overhead lines'], [COGS, 'the COGS lines'], [FEES, 'the platform fee, fulfilment and events cost lines'], [ADS, 'the ad spend lines']];
+export function feedNames(rows: readonly number[]): string {
+  const left = new Set(rows);
+  const words: string[] = [];
+  for (const [g, name] of GROUPS) if (g.every((r) => left.has(r))) { g.forEach((r) => left.delete(r)); words.push(name); }
+  for (const r of [...left].sort((a, b) => a - b)) words.push(rowName(r));
+  return words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0] ?? '';
+}
+/** Row numbers as runs: 33-38, 52-54, 60. */
+export function rowRange(rows: readonly number[]): string {
+  const out: string[] = [];
+  for (let k = 0; k < rows.length; k++) {
+    let e = k;
+    while (rows[e + 1] === rows[e] + 1) e++;
+    out.push(e > k + 1 ? `${rows[k]}-${rows[e]}` : e === k + 1 ? `${rows[k]}, ${rows[e]}` : `${rows[k]}`);
+    k = e;
+  }
+  return out.join(', ');
+}
 
 /** A sheet value as the grid shows it. Money in thousands like the sheet, a check as OK or the row's failing word. */
 export function fmtSheet(unit: SheetUnit, v: number | null | undefined, fail?: string): string {
