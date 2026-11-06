@@ -280,3 +280,19 @@ describe('BHR-07: tips name the lines, never row numbers', () => {
     }
   });
 });
+
+// Owner check, 2026-11-06: Aug'26 filled with the workbook's own values showed CM3 %, EBITDA % and break-even ROAS red. The loader stores targets rounded to
+// 6 decimals (scripts/plan-workbook.mjs) while the page works the actual out at full precision, so "equal" missed by < 0.000001. That is met.
+describe('judge: an actual equal to its workbook target at full precision is met, though the stored target is rounded to 6 decimals', () => {
+  it.each([
+    ['H', -0.088529, -0.08852941176470587], // CM3 margin %, negative
+    ['H', -2.382647, -2.3826470588235294], // EBITDA margin %
+    ['L', 2.423378, 2.4233784746970777], // break-even ROAS, lower is better
+  ] as const)('%s target %s, actual %s', (dir, target, actual) => {
+    expect(judge(dir as SheetDir, target, actual, {})).toBe('met');
+  });
+  it('a real miss is still a miss', () => {
+    expect(judge('H', -0.088529, -0.0886, {})).toBe('missed');
+    expect(judge('L', 2.423378, 2.4243, {})).toBe('missed');
+  });
+});

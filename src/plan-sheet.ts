@@ -66,8 +66,10 @@ export type Verdict = 'met' | 'missed' | 'none' | 'waiting';
 /** actualBase / targetBase = the month's base of a pct_gmv row (see SheetRow.per); coverage / coverageTarget for a band row. */
 export interface JudgeCtx {actualBase?: number | null; targetBase?: number | null; coverage?: number | null; coverageTarget?: number | null}
 const EPS = 1e-9;
-/** At or beyond `b`, within float noise (an actual equal to its target is met). */
-const atLeast = (a: number, b: number) => a >= b - EPS * Math.max(1, Math.abs(b));
+/** The loader stores targets rounded to 6 decimals (scripts/plan-workbook.mjs), so an actual equal to the workbook value can sit up to 5e-7 off it. */
+const STORED = 1e-6;
+/** At or beyond `b`, within float noise and the stored rounding (an actual equal to its workbook target is met). */
+const atLeast = (a: number, b: number) => a >= b - STORED - EPS * Math.abs(b);
 /** Met or missed, for one month of one row. A missing actual (or the GMV / coverage it needs) is 'waiting', never 'missed'. */
 export function judge(dir: SheetDir, target: number | null, actual: number | null, ctx: JudgeCtx): Verdict {
   if (dir === 'none' || dir === 'pass_fail') return 'none';
