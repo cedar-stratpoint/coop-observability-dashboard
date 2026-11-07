@@ -11,23 +11,14 @@ import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
   createUpload,
-  findDuplicatePageKey,
   getBatch,
   getUpload,
   goldlineConfigured,
-  saveClassification,
-  saveExtraction,
   setUploadStatus,
   upsertSales,
 } from '@/src/goldline-data';
-import {classifyPage, extractInventoryPage, extractionConfigured, type ExtractedPage} from '@/src/goldline-extract-run';
-import {applyOrientation} from '@/src/goldline-orient';
-import {knownStoreCodes} from '@/src/goldline-store-registry';
-import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from '@/src/goldline-segment';
-import {getWriterProfile} from '@/src/goldline-writer-data';
-import {humanizeExtractError, MANIFESTS} from '@/src/goldline-extract';
-import {uploadSource} from '@/src/goldline-upload-groups';
-import {logReadEvent, type ReadLogInput} from '@/src/goldline-read-log';
+import {extractionConfigured} from '@/src/goldline-extract-run';
+import {runInventoryRead, type Emit} from '@/src/goldline-read-pipeline';
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
@@ -57,42 +48,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-// Progress events for the Uploads screen. Only REAL milestones are sent (stored,
-// page found, reading, saving) — the client draws its bar from these, never from a
-// fake timer alone. Opt-in: a request with `Accept: application/x-ndjson` gets one
-// JSON object per line and a final {type:'result'}; any other caller gets the
-// unchanged single JSON response.
-export type UploadStage =
-  | {type: 'stage'; stage: 'stored'}
-  | {type: 'stage'; stage: 'parsing'}
-  | {type: 'stage'; stage: 'detecting'}
-  | {type: 'stage'; stage: 'reading'; page: number; items: number}
-  | {type: 'stage'; stage: 'saving'};
-type Emit = (e: UploadStage) => void;
+// Progress events for the Uploads screen (the NDJSON stream re-emits them). The stage
+// union + Emit live with the shared read pipeline that produces them.
 type Outcome = {body: Record<string, unknown>; status: number};
 
-// The classify (~20s) and read (~60-85s) calls run silently. On a streamed upload a
-// proxy's idle-read timeout can cut the NDJSON connection during that silence, before
-// the final result line — the client then sees a bare 200 and "couldn't finish reading".
-// Re-emit the current stage on a 12s heartbeat so bytes keep flowing and the stream
-// stays open until the real result (success or a clean failure) is written.
-async function withHeartbeat<T>(emit: Emit, beat: UploadStage, work: () => Promise<T>): Promise<T> {
-  const iv = setInterval(() => emit(beat), 12_000);
-  try {
-    return await work();
-  } finally {
-    clearInterval(iv);
-  }
-}
-
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** Page-level confidence = mean of the per-row confidences (0 when empty). */
-function avgConfidence(page: ExtractedPage): number {
-  const cs = page.rows.map((r) => r.confidence).filter((c) => typeof c === 'number');
-  if (!cs.length) return 0;
-  return cs.reduce((a, b) => a + b, 0) / cs.length;
-}
 
 /** Accept only a full ISO date (YYYY-MM-DD) for the sales period. */
 function isoDate(v: FormDataEntryValue | null): string | null {
@@ -343,151 +303,17 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     });
   }
 
-  const pdfBase64 = Buffer.from(bytes).toString('base64');
-  // Accumulates what we learn about this page so the read_logs row is complete no matter
-  // which branch (set aside / read / failed) the page takes — including the catch below.
-  const rec: ReadLogInput = {companyId, uploadId, filename: file.name, fileSize: file.size, source: uploadSource(file.name)};
-  try {
-    // Phase 0: classify the page (number, kind, orientation, form version, handwritten
-    // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
-    // read store code to the known registry (handwritten codes misread at high
-    // confidence, e.g. 473→472), persist the classification + a semantic page_key, and
-    // flag any duplicate / re-upload — all before extraction. Version-aware extraction
-    // is Phase 1; here the extractor still reads the V1/V2 three-location layout.
-    emit({type: 'stage', stage: 'detecting'});
-    const classifyStart = Date.now();
-    const cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
-    rec.classifyMs = Date.now() - classifyStart;
-    const page = cls.page;
-    rec.page = page;
-    rec.pageKind = cls.kind;
-    rec.formVersion = cls.version;
-    rec.orientation = cls.orientation;
-    rec.storeFrom = cls.store_code;
-
-    // Reconcile the store code against the registry (best-effort: no registry = raw).
-    let registry: string[] = [];
-    try {
-      registry = await knownStoreCodes(companyId);
-    } catch (e) {
-      console.error('goldline upload: store registry read failed', msg(e));
-    }
-    const snap = snapStoreCode(cls.store_code, registry);
-    rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap};
-    const inv = isInventoryPage(cls);
-    const pk = inv
-      ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
-      : null;
-
-    // Duplicate / re-upload: same semantic page_key seen before. Flag, never drop.
-    let duplicateOf: Array<{id: string; status: string; created_at: string}> = [];
-    if (pk) {
-      try {
-        duplicateOf = await findDuplicatePageKey(companyId, pk, uploadId);
-      } catch (e) {
-        console.error('goldline upload: duplicate check failed', msg(e));
-      }
-    }
-
-    // Persist the classifier output on the upload row (metadata; best-effort).
-    await saveClassification({
-      uploadId,
-      pageNo: page,
-      pageKind: cls.kind,
-      orientation: cls.orientation,
-      formVersion: cls.version,
-      pageKey: pk,
-      classification: {...cls, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
-    }).catch((e) => console.error('goldline upload: saveClassification failed', msg(e)));
-
-    // Page-6 sales report and blanks/unrecognized pages are a clean, out-of-scope stop.
-    if (cls.kind === 'sales' || page === 6) {
-      const reason = 'This is the page 6 Sales Report, not an inventory page. It has been set aside (out of scope for now).';
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'sales'});
-      return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
-    }
-    if (!inv) {
-      // A blank back-side is a normal, expected part of a scan — set it aside quietly,
-      // like the sales report, rather than showing it as a failure.
-      if (cls.kind === 'blank') {
-        const reason = 'This looks like a blank page (a back side with no form). It has been set aside.';
-        await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-        await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'blank'});
-        return json({uploadId, status: 'rejected', error: reason, pageKind: 'blank'}, 422);
-      }
-      const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      await logReadEvent({...rec, status: 'rejected', stage: 'classified'});
-      return json({uploadId, status: 'rejected', error: reason, pageKind: cls.kind}, 422);
-    }
-
-    // Upright copy for extraction: rotate 180° pages before reading (no-op if upright).
-    const extractB64 = cls.orientation === 180
-      ? Buffer.from(await applyOrientation(bytes, 180)).toString('base64')
-      : pdfBase64;
-
-    const reading: UploadStage = {type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0};
-    emit(reading);
-    // The writer profile: an earlier reviewed copy of this page + notes from past
-    // corrections, learned from this database's committed scans (empty on any error).
-    const profile = await getWriterProfile(companyId, page, batchStore, ctx.storeScope);
-    // Phase 1: extract against the detected form version (legacy uses the 7-column
-    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
-    // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
-    const readStart = Date.now();
-    const extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
-    rec.readMs = Date.now() - readStart;
-    // Same store-scope fence for the scanned form's store.
-    const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
-    if (outPdf.length) {
-      const reason = `Scanned form is for store ${extracted.store_code}, outside your access.`;
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
-      await logReadEvent({...rec, status: 'rejected', stage: 'read', storeCode: extracted.store_code, rowCount: extracted.rows.length});
-      return json({uploadId, status: 'rejected', error: reason}, 403);
-    }
-    emit({type: 'stage', stage: 'saving'});
-    await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
-    await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
-    await logReadEvent({
-      ...rec,
-      status: 'needs_review',
-      stage: 'read',
-      rowCount: extracted.rows.length,
-      docConfidence: avgConfidence(extracted),
-      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
-      offManifest: extracted.rows.filter((r) => r.off_manifest).length,
-    });
-    return json({
-      uploadId,
-      status: 'needs_review',
-      page,
-      rows: extracted.rows.length,
-      docConfidence: avgConfidence(extracted),
-      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
-      // Phase 0 classification: the form version detected, whether the page was rotated
-      // upright, the store-code snap, and any duplicate / re-upload of this same page.
-      formVersion: cls.version,
-      rotated: cls.orientation === 180,
-      store: {code: snap.code, status: snap.status, from: snap.from ?? null, candidates: snap.candidates ?? null},
-      duplicateOf: duplicateOf.map((d) => ({uploadId: d.id, status: d.status, at: d.created_at})),
-      // The handwritten header (now read on every page) — lets a batch prefill store/period.
-      header: {
-        storeCode: extracted.store_code || snap.code || null,
-        storeName: extracted.store_name || null,
-        periodStart: extracted.period_start ?? cls.period_start ?? null,
-        periodEnd: extracted.period_end ?? cls.period_end ?? null,
-        consultant: extracted.consultant ?? cls.consultant ?? null,
-      },
-    });
-  } catch (e) {
-    // Log the raw error server-side; show the reviewer a human-readable reason; keep a
-    // scrubbed copy in error_detail for diagnosis (never shown prominently in the UI).
-    console.error('goldline upload: extraction failed', msg(e));
-    const friendly = humanizeExtractError(e);
-    await setUploadStatus(uploadId, 'failed', {rejectReason: friendly, errorDetail: msg(e)});
-    await logReadEvent({...rec, status: 'failed', stage: rec.readMs != null ? 'read' : 'classified', error: msg(e), detail: {...(rec.detail as object | null), error: msg(e)}});
-    return json({uploadId, status: 'failed', error: friendly}, 422);
-  }
+  // Read the page through the shared pipeline (classify → snap → rotate → extract → save),
+  // the same one the re-read action uses, so a re-read can never diverge from a fresh read.
+  const result = await runInventoryRead({
+    companyId,
+    uploadId,
+    bytes,
+    filename: file.name,
+    fileSize: file.size,
+    storeScope: ctx.storeScope,
+    batchStore,
+    emit,
+  });
+  return json(result.body, result.http);
 }
