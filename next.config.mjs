@@ -14,6 +14,13 @@ const nextConfig = {
   allowedDevOrigins: ['127.0.0.1'],
   // A small CSP (img-src, object-src, base-uri, frame-ancestors only); see security-headers.mjs.
   headers: async () => headerRules(),
+  experimental: {
+    // Keep dynamic pages (Uploads, scan views) in the client router cache for 30s so
+    // back-navigation and repeat visits are instant instead of refetching from scratch.
+    // Default is 0 (always refetch). A mutation still calls router.refresh(), which busts
+    // this, so edits show immediately; the window only covers idle back/forward nav.
+    staleTimes: {dynamic: 30},
+  },
 };
 
 // Service worker (Serwist). Precaches static build assets only; never caches

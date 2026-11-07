@@ -1,7 +1,8 @@
 import 'server-only';
+import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {getGlStores} from './goldline-ref-data';
+import {getGlStores, glTags} from './goldline-ref-data';
 import {runChecks} from './goldline-checks-data';
 import {cleanName, normName, resolveBa, shouldRecordBa, type StoreBa} from './goldline-ba';
 import {baScores, baTags, type BaScore, type FlagCause} from './goldline-checks';
@@ -81,23 +82,31 @@ export async function learnFormBa(companyId: string, input: {store: string; peri
   }
 }
 
-/** Each store's current BA, and every BA name, for the review screen's BA field. */
+/** Each store's current BA, and every BA name, for the review screen's BA field. Cached:
+ *  it's read on every scan navigation (store + BA views), BA data changes only when a form
+ *  is saved/committed (which revalidates glTags.uploads), and a 60s window covers the rest. */
 export async function getCurrentBas(companyId: string): Promise<{byStore: Record<string, string>; names: string[]}> {
   if (!nichidoConfigured()) return {byStore: {}, names: []};
-  try {
-    const dir = await getStoreBas(companyId);
-    const byStore: Record<string, string> = {};
-    const names = new Set<string>();
-    for (const [store, rows] of dir) {
-      for (const r of rows) names.add(r.name);
-      const cur = rows.find((r) => r.ended_on == null);
-      if (cur) byStore[store] = cur.name;
-    }
-    return {byStore, names: [...names].sort()};
-  } catch (e) {
-    console.error('getCurrentBas', e);
-    return {byStore: {}, names: []};
-  }
+  return unstable_cache(
+    async () => {
+      try {
+        const dir = await getStoreBas(companyId);
+        const byStore: Record<string, string> = {};
+        const names = new Set<string>();
+        for (const [store, rows] of dir) {
+          for (const r of rows) names.add(r.name);
+          const cur = rows.find((r) => r.ended_on == null);
+          if (cur) byStore[store] = cur.name;
+        }
+        return {byStore, names: [...names].sort()};
+      } catch (e) {
+        console.error('getCurrentBas', e);
+        return {byStore: {}, names: [] as string[]};
+      }
+    },
+    ['gl-current-bas', companyId],
+    {tags: [glTags.uploads(companyId), glTags.stores(companyId)], revalidate: 60},
+  )();
 }
 
 export type BaStoreRow = {
