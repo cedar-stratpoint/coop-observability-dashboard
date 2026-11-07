@@ -59,6 +59,7 @@ export type UploadRow = {
   storage_path: string | null;
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
+  page_kind?: string | null; // inventory | sales | blank | unknown, once classified
 };
 
 /**
@@ -590,7 +591,7 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
       (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
-          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,form_version')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,form_version,page_kind')
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})

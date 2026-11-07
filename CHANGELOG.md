@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Per file view: scan outcome summary and "Show" filter chips (the uploader results, made permanent)
+
+The rich results view the uploader shows right after a scan (how many pages read, set aside, or failed, with filter chips) used to vanish once you navigated away. That same experience now lives on the persistent **Per file** view, reachable any time from Uploads: a summary line ("66 of 98 read · 28 set aside · 4 failed") and a **Show** chip row (All, Read, Couldn't read, Sales report, Blank page, each with its count), matching the uploader's buckets and tinting the failures chip. Clicking a chip filters the page list below; a failed page shows its reason inline. Counts are over the deduped best attempt per page, and the chips compose with the version filter and per-file pagination. So there is now one results view, always reachable, instead of a transient one (Hick's Law: one place, clear filters). Server-side "Re-read" for a failed page is a planned follow-up; for now a failed page is deleted and re-uploaded.
+
 ## 2026-11-07 — Scan: form-version summary cards that filter the view
 
 A scan mixes inventory-form layouts (Legacy, V1, V2), and there was no way to see how many of each it held or to look at just one. A row of **summary cards sits above the Per store / Per BA / Per file toggle**: "All versions" plus one card per layout present, each showing its form count in the version's own colour (Legacy plum, V1 steel, V2 ochre). Clicking a card **filters every view below to that version** (`?version=` in the URL, so it is shareable and survives a view switch); clicking it again, or "All versions", clears it. The filter narrows the store and BA boards by form version and the Per-file list by page version, and composes with the BA filter and the per-file pagination. Counts come from the scan's forms, read in every view.
