@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Re-read a failed page in place, no re-upload (one shared read pipeline)
+
+A page that failed (a transient hiccup, say) could only be retried by re-uploading it, which the persistent Per-file view couldn't do. Now a failed page has a **Re-read** button there: it re-runs the reader on the file already in the bucket and updates the row in place, with a "Re-reading the page…" spinner while it works.
+
+To make this safe, the per-page read pipeline (classify, snap the store to the registry, flag duplicates, rotate if upside-down, extract, save, set status, log) moved out of the upload route into one shared `runInventoryRead` in `src/goldline-read-pipeline.ts`. **Both** a fresh upload and a Re-read call it, so the two can never drift. The route is otherwise unchanged (byte-for-byte behaviour; the full test suite passes). The new pieces are thin: `downloadUpload` (fetch the stored PDF, company-scoped) and `rereadUploadAction` (auth, run the pipeline, revalidate). Paired with the transient-retry fix above, a failed page now usually reads on one click. Edit role required; a failed read updates the row's reason as before.
+
 ## 2026-11-07 — Reader: retry a transient empty response instead of failing a readable page
 
 `read_logs` showed four "couldn't read" pages in the 98-page scan (23, 33, 57, 79) that all hold legitimate inventory data. The cause was not the pages: the extract call intermittently returned a fast 200 with an empty or non-JSON text block ("Vision returned no text content" / "did not return valid JSON"), and the reader failed the page on the spot, with no server-side retry. The same pages read fine on other passes, confirming a transient model hiccup rather than a bad scan. The classify, detect and extract calls now go through one `visionJson` helper that retries **only** that transient miss a couple of times (short backoff) before giving up; a real error (key, content, timeout, wrong shape) still fails fast. Those empty responses come back in seconds, so retrying them stays well within the route's duration budget even ahead of a dense 150s read. Fixes the four pages going forward (re-read them to clear the existing failures). Pure `isTransientJsonMiss` discriminator unit-tested.

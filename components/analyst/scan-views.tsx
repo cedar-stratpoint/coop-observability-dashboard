@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, Check, ChevronDown, Loader2, Search, Trash2, UserPen} from 'lucide-react';
+import {AlertTriangle, Check, ChevronDown, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel} from '@/src/upload-batch';
@@ -12,7 +12,7 @@ import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
-import {assignFormBaAction} from '@/app/uploads/actions';
+import {assignFormBaAction, rereadUploadAction} from '@/app/uploads/actions';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
@@ -60,6 +60,19 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const choose = (c: FileCat | 'all') => {
     setFilter(c);
     setPage(1);
+  };
+  // Pages being read again from the stored file (a failed page, retried in place).
+  const [rereading, setRereading] = useState<Set<string>>(() => new Set());
+  const reread = (id: string) => {
+    setRereading((s) => new Set(s).add(id));
+    rereadUploadAction({company, uploadId: id}).finally(() => {
+      setRereading((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+      router.refresh(); // picks up the new status / reason either way
+    });
   };
   // Pages per view is a per-viewer convenience: remembered in this browser only.
   useEffect(() => {
@@ -174,10 +187,17 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                     {label.title}
                   </Link>
                   {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
-                  {fileCat(u) === 'failed' && u.reject_reason && (
-                    <span className="truncate text-xs text-[color:var(--status-crit)]" title={u.reject_reason}>
-                      {u.reject_reason}
+                  {rereading.has(u.id) ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--primary)]">
+                      <Loader2 className="size-3 animate-spin" aria-hidden /> Re-reading the page…
                     </span>
+                  ) : (
+                    fileCat(u) === 'failed' &&
+                    u.reject_reason && (
+                      <span className="truncate text-xs text-[color:var(--status-crit)]" title={u.reject_reason}>
+                        {u.reject_reason}
+                      </span>
+                    )
                   )}
                   <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
@@ -195,6 +215,18 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                   </span>
                 </div>
                 <StatusPill status={u.status} />
+                {canEdit && fileCat(u) === 'failed' && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Re-read ${label.title}`}
+                    disabled={rereading.has(u.id)}
+                    className="relative z-10 shrink-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => reread(u.id)}
+                  >
+                    {rereading.has(u.id) ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+                  </Button>
+                )}
                 {canEdit && (
                   <Button
                     variant="ghost"
