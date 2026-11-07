@@ -323,6 +323,21 @@ html.coop-splash-seen .coop-splash { display: none; }
   animation: gl-progress-sheen 1.7s linear infinite;
 }
 
+/* Indeterminate variant: a work-in-progress read has no real percent (one await), so a
+   short fill travels across the track to show steady labor — the same gradient + sheen as
+   the determinate bar. Reduced motion (below) parks it as a static partial fill. */
+@keyframes gl-progress-slide {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+.gl-progress-indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  animation: gl-progress-slide 1.4s ease-in-out infinite;
+}
+
 /* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
    motion-reduce variant, so collapse every transition and animation here instead
    (the slide-in drawers, dialogs, hover tweens). Final states still apply, so

@@ -188,8 +188,17 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                   </Link>
                   {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
                   {rereading.has(u.id) ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--primary)]">
-                      <Loader2 className="size-3 animate-spin" aria-hidden /> Re-reading the page…
+                    <span className="flex flex-col gap-1">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--primary)]">
+                        <Loader2 className="size-3 animate-spin" aria-hidden /> Re-reading the page…
+                      </span>
+                      <span
+                        role="progressbar"
+                        aria-label="Re-reading the page"
+                        className="relative block h-1 w-full max-w-[240px] overflow-hidden rounded-full bg-primary/15"
+                      >
+                        <span className="gl-progress-fill gl-progress-indeterminate rounded-full" aria-hidden />
+                      </span>
                     </span>
                   ) : (
                     fileCat(u) === 'failed' &&
