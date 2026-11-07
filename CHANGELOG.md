@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Scan board: read only the one scan's pages at the DB
+
+Follow-up to the caching work: `triageBoard` no longer reads the company's whole set of classified pages and filters to one scan in memory. On a cache miss it now scopes the query with a prefix `LIKE` on the filename ("<source> (page%"), so opening a scan reads just its own pages. It can only ever over-match (a name sharing the prefix), never under-match, and the exact `uploadSource` filter still narrows it, so the result is unchanged (verified: still 51 forms across 6 stores on the test scan). This keeps the read bounded as a company accumulates scans, instead of growing with every scan ever uploaded.
+
 ## 2026-11-07 — Uploads: cache the heavy readers + client-cache dynamic pages (faster navigation)
 
 The Uploads section felt slow and the slowness was in the code, not the infra: the DB has sound indexes and only a few hundred rows. The scan page re-ran its heaviest readers on every navigation, including Back, because only `listUploads` was cached. Now the three uncached ones are cached the same way (`unstable_cache`, busted by the `glTags.uploads` / `glTags.stores` tags that every write already revalidates, with a short revalidate window):
