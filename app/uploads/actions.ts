@@ -7,8 +7,6 @@ import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {logReadEvent} from '@/src/goldline-read-log';
-import {extractionConfigured} from '@/src/goldline-extract-run';
-import {runInventoryRead} from '@/src/goldline-read-pipeline';
 import {auth} from '@/auth';
 import {
   BatchConflictError,
@@ -19,7 +17,6 @@ import {
   deleteImpact,
   deleteUpload,
   deleteScanGroup,
-  downloadUpload,
   getBatch,
   getBatchPages,
   getUpload,
@@ -486,39 +483,3 @@ export async function assignFormBaAction(input: {company: string | null; uploadI
   }
 }
 
-/** Read a stored page again, in place, without a re-upload — for a page that failed on a
- *  transient hiccup. Runs the SAME pipeline as a fresh upload (classify → extract → save),
- *  on the file already in the bucket, and updates the row's status. Returns the new status. */
-export async function rereadUploadAction(input: {company: string | null; uploadId: string}): Promise<{ok: true; status: string} | {ok: false; error: string}> {
-  const ctx = await getDataContext(input.company);
-  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
-  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
-  if (!extractionConfigured()) return {ok: false, error: 'The reader is not configured, so this page can’t be re-read here.'};
-  const uploadId = typeof input.uploadId === 'string' ? input.uploadId : '';
-  if (!uploadId) return {ok: false, error: 'No page to re-read.'};
-  try {
-    const file = await downloadUpload(ctx.companyId, uploadId);
-    if (!file) return {ok: false, error: 'Couldn’t load this page’s file to re-read. Try re-uploading it instead.'};
-    // Prefer the batch's store (if any) for the writer profile, like a fresh upload does.
-    const batchStore = file.batchId ? (await getBatch(ctx.companyId, file.batchId))?.store_code ?? null : null;
-    const result = await runInventoryRead({
-      companyId: ctx.companyId,
-      uploadId,
-      bytes: file.bytes,
-      filename: file.filename,
-      fileSize: file.fileSize,
-      storeScope: ctx.storeScope,
-      batchStore,
-    });
-    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
-    revalidatePath('/uploads/forms');
-    revalidatePath('/uploads');
-    const status = typeof result.body.status === 'string' ? result.body.status : 'processing';
-    if (status === 'failed') return {ok: false, error: typeof result.body.error === 'string' ? result.body.error : 'Couldn’t read this page.'};
-    return {ok: true, status};
-  } catch (e) {
-    console.error('rereadUploadAction', e);
-    const reason = e instanceof Error && e.message ? e.message : String(e);
-    return {ok: false, error: `Couldn’t re-read the page (${reason}).`};
-  }
-}
