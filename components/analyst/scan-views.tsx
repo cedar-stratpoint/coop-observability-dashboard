@@ -33,6 +33,20 @@ function tint(t: keyof typeof TONE) {
 // breaks a tie. Retries and re-uploads each make a fresh row, so a page can have many.
 const STATUS_RANK: Record<string, number> = {committed: 5, needs_review: 4, processing: 3, rejected: 2, failed: 1};
 
+// What a page turned into, for the "Show" filter — mirrors the uploader's buckets so the
+// persistent scan view reads the same way: a read inventory page, one Coop couldn't read,
+// a sales sheet or blank page set aside, or anything else parked.
+type FileCat = 'read' | 'failed' | 'sales' | 'blank' | 'other';
+const FILE_CAT_LABEL: Record<FileCat, string> = {read: 'Read', failed: "Couldn't read", sales: 'Sales report', blank: 'Blank page', other: 'Set aside'};
+const FILE_CAT_ORDER: FileCat[] = ['read', 'failed', 'sales', 'blank', 'other'];
+function fileCat(u: UploadRow): FileCat {
+  if (u.status === 'committed' || u.status === 'needs_review') return 'read';
+  if (u.status === 'failed') return 'failed';
+  if (u.page_kind === 'sales') return 'sales';
+  if (u.page_kind === 'blank') return 'blank';
+  return 'other';
+}
+
 /** The scan's pages as a plain list — "Page 10 of 98", in page order, each opening its
  *  review. One row per page: the current (best) attempt, with the older tries folded
  *  behind an "N earlier attempts" toggle so repeated retries/re-uploads don't pile up. */
@@ -42,6 +56,11 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
+  const [filter, setFilter] = useState<FileCat | 'all'>('all');
+  const choose = (c: FileCat | 'all') => {
+    setFilter(c);
+    setPage(1);
+  };
   // Pages per view is a per-viewer convenience: remembered in this browser only.
   useEffect(() => {
     try {
@@ -74,11 +93,22 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
       });
   }, [files]);
 
-  const total = groups.length;
+  // One category per page (its best attempt), so the summary and chips read the scan the
+  // way the uploader did: how many were read, set aside, or couldn't be read.
+  const counts = useMemo(() => {
+    const c: Record<FileCat, number> = {read: 0, failed: 0, sales: 0, blank: 0, other: 0};
+    for (const g of groups) c[fileCat(g.best)]++;
+    return c;
+  }, [groups]);
+  const setAside = counts.sales + counts.blank + counts.other;
+  const present = FILE_CAT_ORDER.filter((c) => counts[c] > 0);
+
+  const shown = filter === 'all' ? groups : groups.filter((g) => fileCat(g.best) === filter);
+  const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
   const from = (safePage - 1) * size;
-  const pageGroups = groups.slice(from, from + size);
+  const pageGroups = shown.slice(from, from + size);
 
   if (files.length === 0) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No files in this scan.</p>;
@@ -93,6 +123,39 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Scan outcome, the same way the uploader showed it — so this stays the one place to
+          come back to a scan and see what read, what was set aside, and what failed. */}
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground tabular-nums">
+          <span className="font-medium text-foreground">{counts.read}</span> of {groups.length} read
+          {setAside > 0 && <> · {setAside} set aside</>}
+          {counts.failed > 0 && (
+            <>
+              {' · '}
+              <span className="font-medium text-[color:var(--status-crit)]">{counts.failed}</span> failed
+            </>
+          )}
+        </p>
+        {present.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages">
+            <span className="mr-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
+            <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
+              All <span className="tabular-nums opacity-70">{groups.length}</span>
+            </FilterChip>
+            {present.map((c) => (
+              <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
+                {FILE_CAT_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="rounded-xl border border-border bg-card py-10 text-center text-sm text-muted-foreground">
+          No pages in this filter.
+        </p>
+      ) : (
       <div className="overflow-hidden rounded-xl border border-border bg-card">
       <ul role="list" className="flex flex-col divide-y divide-border">
         {pageGroups.map(({idx, best: u, others}) => {
@@ -111,6 +174,11 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                     {label.title}
                   </Link>
                   {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
+                  {fileCat(u) === 'failed' && u.reject_reason && (
+                    <span className="truncate text-xs text-[color:var(--status-crit)]" title={u.reject_reason}>
+                      {u.reject_reason}
+                    </span>
+                  )}
                   <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
                     {others.length > 0 && (
@@ -167,6 +235,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
         })}
       </ul>
       </div>
+      )}
 
       {total > PAGE_SIZES[0] && (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -190,6 +259,30 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
         }}
       />
     </div>
+  );
+}
+
+/** A rounded "Show" filter chip, matching the uploader's so the two scan views read alike;
+ *  the failures chip is tinted so it never blends into the row. */
+function FilterChip({active, onClick, tone = 'default', children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; children: React.ReactNode}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        tone === 'crit'
+          ? active
+            ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
+            : 'border-[color:var(--status-crit)]/40 bg-[color:var(--status-crit)]/5 text-[color:var(--status-crit)] hover:bg-[color:var(--status-crit)]/12'
+          : active
+            ? 'border-primary bg-primary/15 text-foreground'
+            : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
