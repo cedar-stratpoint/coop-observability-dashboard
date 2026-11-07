@@ -11,6 +11,7 @@ import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
   createUpload,
+  downloadUpload,
   getBatch,
   getUpload,
   goldlineConfigured,
@@ -135,6 +136,32 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
   } catch {
     return json({error: 'Expected multipart/form-data.'}, 400);
   }
+
+  // Re-read: no new file, just an existing page read again from the bucket. Goes through
+  // the same streamed path as a fresh upload (heartbeat keeps the long read's connection
+  // alive) and the same runInventoryRead pipeline, so the UI updates when it finishes.
+  const rereadId = form.get('reread_upload_id');
+  if (typeof rereadId === 'string' && rereadId) {
+    if (!extractionConfigured()) return json({error: 'The reader is not configured, so this page can’t be re-read.'}, 503);
+    const stored = await downloadUpload(companyId, rereadId);
+    if (!stored) return json({error: 'Couldn’t load this page’s file to re-read. Try re-uploading it instead.'}, 404);
+    track.uploadId = rereadId;
+    const batchStore = stored.batchId ? (await getBatch(companyId, stored.batchId))?.store_code ?? null : null;
+    emit({type: 'stage', stage: 'stored'});
+    const result = await runInventoryRead({
+      companyId,
+      uploadId: rereadId,
+      bytes: stored.bytes,
+      filename: stored.filename,
+      fileSize: stored.fileSize,
+      storeScope: ctx.storeScope,
+      batchStore,
+      emit,
+    });
+    revalidateTag(glTags.uploads(companyId), {expire: 0});
+    return json(result.body, result.http);
+  }
+
   const file = form.get('file');
   if (!(file instanceof File)) return json({error: 'No file provided (field "file").'}, 400);
 

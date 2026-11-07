@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Re-read updates the row in realtime (streamed, heartbeat-kept-alive)
+
+A re-read done through a plain server action left the row spinning until a manual refresh: the read runs 20 to 150s silently, so a proxy would cut the connection before the response arrived (the row had actually finished on the server). Re-read now goes through the **same streamed upload route as a fresh scan**, whose 12s heartbeat keeps the connection open, so the client gets the real result and the row flips to Read (or its new reason) the moment the read finishes, no refresh. The route grew a `reread_upload_id` branch that loads the stored file and runs the shared `runInventoryRead`; the transport grew `sendReread` (sharing the fresh-upload stream reader). The one-shot `rereadUploadAction` server action is removed in favour of this.
+
 ## 2026-11-07 — Re-read: the labor-illusion progress bar, so a re-read doesn't feel stuck
 
 A re-read runs the same 20 to 150s read as a fresh upload, so the bare "Re-reading the page…" spinner could look frozen. The failed row now shows the same living progress bar as the uploader (the ochre fill with its sweeping sheen), as an indeterminate travelling bar since a single read has no real percent. Reuses the existing `gl-progress-fill` look with a new `gl-progress-slide` keyframe; reduced motion parks it as a static partial fill and the spinner keeps turning.
