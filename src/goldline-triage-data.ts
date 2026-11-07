@@ -1,9 +1,11 @@
 import 'server-only';
+import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import {knownStoreCodes} from './goldline-store-registry';
+import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
 import type {FormVersion} from './goldline-extract';
 
@@ -128,6 +130,18 @@ function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>): TriageForm
  */
 export async function triageBoard(companyId: string, opts?: {source?: string}): Promise<TriageResult> {
   if (!nichidoConfigured()) return mockTriage();
+  const source = opts?.source ?? null;
+  // Cached so back-navigation and repeat opens don't re-read + re-segment every time. Any
+  // write to uploads (upload, assign, re-read, delete) revalidates glTags.uploads, so an
+  // edit still shows immediately; the 30s window only covers idle repeat views.
+  return unstable_cache(
+    () => loadTriageBoard(companyId, source),
+    ['gl-triage', companyId, source ?? 'all'],
+    {tags: [glTags.uploads(companyId)], revalidate: 30},
+  )();
+}
+
+async function loadTriageBoard(companyId: string, source: string | null): Promise<TriageResult> {
   const supa = nichidoDb();
   const all = (await fetchAllRows('uploads', (from, to) =>
     supa
@@ -139,7 +153,7 @@ export async function triageBoard(companyId: string, opts?: {source?: string}): 
       .order('created_at', {ascending: false})
       .range(from, to),
   )) as unknown as UploadClsRow[];
-  const rows = opts?.source ? all.filter((r) => uploadSource(r.filename) === opts.source) : all;
+  const rows = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Re-snap store codes against the current registry, then reconcile OCR year noise

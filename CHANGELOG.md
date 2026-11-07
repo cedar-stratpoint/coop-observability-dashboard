@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Uploads: cache the heavy readers + client-cache dynamic pages (faster navigation)
+
+The Uploads section felt slow and the slowness was in the code, not the infra: the DB has sound indexes and only a few hundred rows. The scan page re-ran its heaviest readers on every navigation, including Back, because only `listUploads` was cached. Now the three uncached ones are cached the same way (`unstable_cache`, busted by the `glTags.uploads` / `glTags.stores` tags that every write already revalidates, with a short revalidate window):
+
+- **`triageBoard`** (the big one: it reads the scan's classified pages and segments them) is cached per company + scan.
+- **`getCurrentBas`** and **`knownStoreCodes`** are cached (`listStores` already was, via `getGlStores`).
+
+Repeat server renders of a scan dropped from ~316ms to ~140ms in dev (no re-read + re-segment). Separately, **`experimental.staleTimes.dynamic = 30`** keeps dynamic pages in the client router cache for 30s, so Back and repeat visits are instant (served from the client, no server round-trip) instead of refetching from scratch; a mutation still calls `router.refresh()`, so edits show immediately. Noted follow-up: scope `triageBoard`'s read to one scan at the DB (today it reads the company's classified pages and filters in memory) for better scaling as scans accumulate.
+
 ## 2026-11-07 — Re-read updates the row in realtime (streamed, heartbeat-kept-alive)
 
 A re-read done through a plain server action left the row spinning until a manual refresh: the read runs 20 to 150s silently, so a proxy would cut the connection before the response arrived (the row had actually finished on the server). Re-read now goes through the **same streamed upload route as a fresh scan**, whose 12s heartbeat keeps the connection open, so the client gets the real result and the row flips to Read (or its new reason) the moment the read finishes, no refresh. The route grew a `reread_upload_id` branch that loads the stored file and runs the shared `runInventoryRead`; the transport grew `sendReread` (sharing the fresh-upload stream reader). The one-shot `rereadUploadAction` server action is removed in favour of this.
