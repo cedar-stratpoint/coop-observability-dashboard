@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-07 — Re-read: the labor-illusion progress bar, so a re-read doesn't feel stuck
+
+A re-read runs the same 20 to 150s read as a fresh upload, so the bare "Re-reading the page…" spinner could look frozen. The failed row now shows the same living progress bar as the uploader (the ochre fill with its sweeping sheen), as an indeterminate travelling bar since a single read has no real percent. Reuses the existing `gl-progress-fill` look with a new `gl-progress-slide` keyframe; reduced motion parks it as a static partial fill and the spinner keeps turning.
+
 ## 2026-11-07 — Re-read a failed page in place, no re-upload (one shared read pipeline)
 
 A page that failed (a transient hiccup, say) could only be retried by re-uploading it, which the persistent Per-file view couldn't do. Now a failed page has a **Re-read** button there: it re-runs the reader on the file already in the bucket and updates the row in place, with a "Re-reading the page…" spinner while it works.
