@@ -143,16 +143,22 @@ export async function triageBoard(companyId: string, opts?: {source?: string}): 
 
 async function loadTriageBoard(companyId: string, source: string | null): Promise<TriageResult> {
   const supa = nichidoDb();
-  const all = (await fetchAllRows('uploads', (from, to) =>
-    supa
+  // Scope the read to one scan at the DB so opening a scan reads its own pages, not the
+  // whole company's classified pages. The pages are "<source> (page N of M).pdf", so a
+  // prefix LIKE pulls exactly this scan (plus, at worst, a name that shares the prefix —
+  // the exact uploadSource filter below still narrows it, so this only ever over-matches,
+  // never under-matches). LIKE metacharacters in the source are escaped.
+  const likePrefix = source ? `${source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%` : null;
+  const all = (await fetchAllRows('uploads', (from, to) => {
+    let q = supa
       .from('uploads')
       .select(UPLOAD_CLS_COLS)
       .eq('company_id', companyId)
       .eq('kind', 'inventory_pdf')
-      .not('classified_at', 'is', null)
-      .order('created_at', {ascending: false})
-      .range(from, to),
-  )) as unknown as UploadClsRow[];
+      .not('classified_at', 'is', null);
+    if (likePrefix) q = q.like('filename', likePrefix);
+    return q.order('created_at', {ascending: false}).range(from, to);
+  })) as unknown as UploadClsRow[];
   const rows = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
 
   const byId = new Map(rows.map((r) => [r.id, r]));
