@@ -491,6 +491,28 @@ export async function signedUploadUrl(companyId: string, uploadId: string, expir
   return res.data?.signedUrl ?? null;
 }
 
+/**
+ * The stored bytes for an upload (company-scoped), for re-reading a page without a fresh
+ * upload. Returns the file plus the batch it belongs to; null if it isn't this company's
+ * upload, has no stored file, or the download fails.
+ */
+export async function downloadUpload(
+  companyId: string,
+  uploadId: string,
+): Promise<{bytes: ArrayBuffer; filename: string; fileSize: number; batchId: string | null} | null> {
+  if (!goldlineConfigured()) return null;
+  const upload = await getUpload(companyId, uploadId); // company-scoped ownership check
+  if (!upload?.storage_path) return null;
+  const supa = db();
+  const res = await supa.storage.from(GOLDLINE_BUCKET).download(upload.storage_path);
+  if (res.error || !res.data) {
+    console.error('downloadUpload failed', res.error?.message);
+    return null;
+  }
+  const bytes = await res.data.arrayBuffer();
+  return {bytes, filename: upload.filename, fileSize: bytes.byteLength, batchId: upload.batch_id ?? null};
+}
+
 export type ExtractionRecord = {
   page: number;
   status: string;
