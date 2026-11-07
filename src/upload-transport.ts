@@ -45,15 +45,16 @@ export type WatsonsResult = {
   linkedUnits: number;
 };
 
-export function sendUpload(input: {
-  company: string;
-  file: File;
-  batchId?: string | null;
-  periodStart?: string;
-  periodEnd?: string;
-  onUploadProgress: (fraction: number) => void;
-  onStage: (stage: UploadStage) => void;
-}): {promise: Promise<UploadResult>; abort: () => void} {
+// The shared NDJSON stream reader for a POST to the upload route: forwards stage events,
+// resolves on the final {type:'result'} line, and turns a cut stream into a clear error.
+// The 12s server heartbeat keeps a long read's connection open so this resolves for real
+// rather than hanging — which is why both a fresh upload and a re-read use it.
+function streamUpload(
+  fd: FormData,
+  company: string,
+  onStage: (stage: UploadStage) => void,
+  onUploadProgress?: (fraction: number) => void,
+): {promise: Promise<UploadResult>; abort: () => void} {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<UploadResult>((resolve, reject) => {
     let seen = 0;
@@ -68,16 +69,18 @@ export function sendUpload(input: {
         try {
           const ev = JSON.parse(line) as UploadStage | (UploadResult & {type: 'result'});
           if (ev.type === 'result') result = ev;
-          else if (ev.type === 'stage') input.onStage(ev);
+          else if (ev.type === 'stage') onStage(ev);
         } catch {
           /* partial line — wait for the rest */
         }
       }
     };
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) input.onUploadProgress(e.loaded / e.total);
-    };
-    xhr.upload.onload = () => input.onUploadProgress(1);
+    if (onUploadProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onUploadProgress(e.loaded / e.total);
+      };
+      xhr.upload.onload = () => onUploadProgress(1);
+    }
     xhr.onprogress = flush;
     xhr.onload = () => {
       flush();
@@ -92,17 +95,43 @@ export function sendUpload(input: {
     };
     xhr.onerror = () => reject(new Error('Network error. Check your connection and try again.'));
     xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
-
-    const fd = new FormData();
-    fd.append('file', input.file);
-    if (input.batchId) fd.append('batch_id', input.batchId);
-    if (input.periodStart) fd.append('period_start', input.periodStart);
-    if (input.periodEnd) fd.append('period_end', input.periodEnd);
-    xhr.open('POST', `/api/goldline/upload?company=${encodeURIComponent(input.company)}`);
+    xhr.open('POST', `/api/goldline/upload?company=${encodeURIComponent(company)}`);
     xhr.setRequestHeader('Accept', 'application/x-ndjson');
     xhr.send(fd);
   });
   return {promise, abort: () => xhr.abort()};
+}
+
+export function sendUpload(input: {
+  company: string;
+  file: File;
+  batchId?: string | null;
+  periodStart?: string;
+  periodEnd?: string;
+  onUploadProgress: (fraction: number) => void;
+  onStage: (stage: UploadStage) => void;
+}): {promise: Promise<UploadResult>; abort: () => void} {
+  const fd = new FormData();
+  fd.append('file', input.file);
+  if (input.batchId) fd.append('batch_id', input.batchId);
+  if (input.periodStart) fd.append('period_start', input.periodStart);
+  if (input.periodEnd) fd.append('period_end', input.periodEnd);
+  return streamUpload(fd, input.company, input.onStage, input.onUploadProgress);
+}
+
+/**
+ * Re-read a stored page again (no new file): posts its upload id to the same route, which
+ * reads it through the shared pipeline and streams progress + the final result back — so a
+ * long re-read resolves in realtime instead of leaving the row spinning until a refresh.
+ */
+export function sendReread(input: {
+  company: string;
+  uploadId: string;
+  onStage?: (stage: UploadStage) => void;
+}): {promise: Promise<UploadResult>; abort: () => void} {
+  const fd = new FormData();
+  fd.append('reread_upload_id', input.uploadId);
+  return streamUpload(fd, input.company, input.onStage ?? (() => {}));
 }
 
 /**

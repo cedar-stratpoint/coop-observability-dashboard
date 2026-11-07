@@ -12,7 +12,8 @@ import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
-import {assignFormBaAction, rereadUploadAction} from '@/app/uploads/actions';
+import {assignFormBaAction} from '@/app/uploads/actions';
+import {sendReread} from '@/src/upload-transport';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
@@ -65,14 +66,18 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const [rereading, setRereading] = useState<Set<string>>(() => new Set());
   const reread = (id: string) => {
     setRereading((s) => new Set(s).add(id));
-    rereadUploadAction({company, uploadId: id}).finally(() => {
-      setRereading((s) => {
-        const n = new Set(s);
-        n.delete(id);
-        return n;
+    // Stream through the upload route (heartbeat-kept-alive) so a long read resolves here
+    // for real, rather than the row spinning until a manual refresh.
+    sendReread({company, uploadId: id})
+      .promise.catch(() => {})
+      .finally(() => {
+        setRereading((s) => {
+          const n = new Set(s);
+          n.delete(id);
+          return n;
+        });
+        router.refresh(); // picks up the new status / reason either way
       });
-      router.refresh(); // picks up the new status / reason either way
-    });
   };
   // Pages per view is a per-viewer convenience: remembered in this browser only.
   useEffect(() => {
