@@ -9,6 +9,7 @@ import {
   PAGE_DETECT_SCHEMA,
   PAGE_CLASSIFY_SCHEMA,
   EXTRACT_MODEL,
+  isTransientJsonMiss,
 } from './goldline-extract';
 import {sanitizeClassification, type PageClassification} from './goldline-segment';
 import {
@@ -155,6 +156,34 @@ function parseJsonContent(res: {content?: Array<{type: string; text?: string}>})
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// A couple of quick re-tries; the empty/invalid responses come back in seconds, so even
+// before a real read these stay far under the route's duration budget.
+const JSON_RETRY_BACKOFF_MS = [600, 1200];
+
+/**
+ * Call Vision (with key fallback) and JSON-parse its first text block, re-trying only a
+ * transient empty/invalid-JSON response a few times. Observed on live scans: the model
+ * occasionally returns a fast 200 with no usable text, failing a perfectly readable page
+ * (read_logs: pages 23/33/57/79 that read fine on another pass). Those misses come back
+ * in seconds, so retrying only them keeps a dense 150s read well within the route budget;
+ * a real error (key, content, timeout, bad shape) is raised on the spot.
+ */
+async function visionJson(params: unknown, opts: {timeout: number; tries?: number}): Promise<unknown> {
+  const tries = opts.tries ?? JSON_RETRY_BACKOFF_MS.length + 1;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      return parseJsonContent(await createMessageWithFallback(params, {timeout: opts.timeout}));
+    } catch (e) {
+      lastErr = e;
+      if (attempt === tries - 1 || !isTransientJsonMiss(e)) throw e;
+      await sleep(JSON_RETRY_BACKOFF_MS[attempt] ?? 1200);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Identify which page of the Nichido form a scan is, from its footer. Returns 1–6,
  * or 0 if it isn't a recognizable form page. A cheap, low-token call so the route can
@@ -173,8 +202,7 @@ export async function detectPage(pdfBase64: string): Promise<number> {
   };
   // Short timeout: detect runs BEFORE extract in the same request, so their timeouts
   // must sum under the route's maxDuration. 20s (detect) + 85s (extract) = 105s < 120s.
-  const res = await createMessageWithFallback(params, {timeout: 20_000});
-  const parsed = parseJsonContent(res) as {page?: unknown};
+  const parsed = (await visionJson(params, {timeout: 20_000})) as {page?: unknown};
   const n = typeof parsed.page === 'number' ? Math.trunc(parsed.page) : 0;
   return n >= 0 && n <= 6 ? n : 0;
 }
@@ -201,12 +229,12 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
   };
   // Same 20s budget as detectPage — it replaces detect in the Phase 0 path, so the
   // request timeout math (classify + extract < route maxDuration) is unchanged.
-  const res = await createMessageWithFallback(params, {timeout: 20_000});
-  // Degrade, don't throw: a malformed/truncated JSON response becomes an all-unknown
-  // classification (page 0, kind/version unknown, confidence 0), so ONE unreadable
-  // page is flagged for manual placement instead of sinking the whole bundle.
+  // Degrade, don't throw: after a couple of retries on a transient empty/invalid-JSON
+  // response, a still-malformed read becomes an all-unknown classification (page 0,
+  // kind/version unknown, confidence 0), so ONE unreadable page is flagged for manual
+  // placement instead of sinking the whole bundle.
   try {
-    return sanitizeClassification(parseJsonContent(res));
+    return sanitizeClassification(await visionJson(params, {timeout: 20_000}));
   } catch {
     return sanitizeClassification({});
   }
@@ -255,9 +283,7 @@ export async function extractInventoryPage(
   // read and were timing out at the old cap, so dense pages need more room. 20s (classify)
   // + 150s (extract) = 170s, under the route's 300s maxDuration, so a hung call throws here
   // and the route's catch marks the upload failed — never a hard platform kill.
-  const res = await createMessageWithFallback(params, {timeout: 150_000});
-
-  const parsed = parseJsonContent(res);
+  const parsed = await visionJson(params, {timeout: 150_000});
   if (parsed && typeof parsed === 'object' && 'error' in parsed) {
     throw new Error(`Extraction declined: ${String((parsed as {error: unknown}).error)}`);
   }

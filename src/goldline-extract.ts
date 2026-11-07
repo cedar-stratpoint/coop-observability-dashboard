@@ -457,6 +457,14 @@ export function humanizeExtractError(raw: unknown): string {
   return 'We couldn’t process this scan. It’s been saved. Please try again, or review it manually.';
 }
 
+/** A 200 with an empty or non-JSON text block — a transient model hiccup, not a real
+ *  failure (the same page reads fine on a re-try). The reader retries only these; key,
+ *  content, timeout and shape errors fail fast so they don't burn the time budget. */
+export function isTransientJsonMiss(e: unknown): boolean {
+  const s = e instanceof Error ? e.message : String(e);
+  return s.includes('returned no text content') || s.includes('did not return valid JSON');
+}
+
 /** The JSON schema the model must return (header + one object per item). */
 export const EXTRACTION_SCHEMA = {
   type: 'object',
