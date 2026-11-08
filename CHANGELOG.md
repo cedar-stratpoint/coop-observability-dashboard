@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-08 — Uploads: lead the page rows with "Page N of M", not the filename
+
+In the per-page lists (the uploader queue and the scan detail "All files" view) every row led with the full filename ("Scan…(page 1 of 98).pdf"), which repeats down the whole list and buries the one thing that differs: the page. Rows now lead with "Page N of M" (the page's place in the scan) and carry the source scan name as a quiet grey pill beside it. Pages that finished reading as an inventory page also show the detected form version (Legacy / V1 / V2) in the status sub-line, so "V2 · Form page 2 · nothing flagged" (the uploader queue) and "V2 · Inventory form · <when>" (scan detail). The queue's detected printed page is relabeled "Form page N" to keep it distinct from the scan position in the title. The form version was already produced by the read pipeline; it's now carried through `UploadResult` and `QueueItem` to the row (no backend change).
+
 ## 2026-11-08 — Uploads: confirm before starting a batch upload
 
 The "Upload N files" button sits directly under the staging tray, so a stray click could kick off reading a 100-page scan. It now opens a small confirmation modal first (the same dialog pattern as Delete scan) that names the file count and total size, notes a multi-page PDF is split into pages and read in the background, and offers Cancel or Upload. The staged selection is untouched on Cancel, so nothing is lost. The tray itself still lets the user add or remove files before they ever reach this step.
