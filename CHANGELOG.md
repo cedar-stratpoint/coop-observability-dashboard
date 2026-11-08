@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: filter by live progress (Processing / Waiting), shown only while reading
+
+The uploader queue's Show row can now filter by the two live states a page passes through, Processing and Waiting, in addition to the terminal outcomes (Read / Sales report / Blank page / Couldn't read). Applying Hick's Law, these chips appear only while the scan is still being read and disappear once every page is done, so a finished scan isn't cluttered with empty controls. "Done" is not a chip, it's just the terminal outcomes. If the active live filter catches up to zero mid-read, it falls back to All so the list never reads as empty. The chips sit first in the row (All, Processing, Waiting, then outcomes); Sales report and Blank page stay as separate chips.
+
 ## 2026-11-08 — Uploads: form-version filter + a calmer, roomier page list
 
 Added a **Version** filter (Legacy / V1 / V2) to both per-page lists (uploader queue and scan detail "All files"), on its own labeled chip row beneath "Show". Version is a sub-axis of "Read" (only read inventory pages carry one), so the two filters combine with AND. Each version chip carries a small dot in its form color.
