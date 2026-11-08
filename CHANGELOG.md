@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-08 — Uploads: confirm before starting a batch upload
+
+The "Upload N files" button sits directly under the staging tray, so a stray click could kick off reading a 100-page scan. It now opens a small confirmation modal first (the same dialog pattern as Delete scan) that names the file count and total size, notes a multi-page PDF is split into pages and read in the background, and offers Cancel or Upload. The staged selection is untouched on Cancel, so nothing is lost. The tray itself still lets the user add or remove files before they ever reach this step.
+
 ## 2026-11-08 — Uploads: scan tiles count pages, not upload rows (and dedupe the status pills)
 
 A scan tile showed its raw upload-row count ("114 files") when the scan was really 98 pages, the gap being re-uploads: the same page fed again after a read failure (page 23 of that scan was retried 6 times, all failing) each added a row. That reads as phantom pages and confused the page vs file count. Scan tiles now show the true distinct page count ("98 pages"): re-uploads of the same "(page N of M)" position collapse to one, and a lone file (CSV/XLSX/one-page PDF) still reads "1 file". Added `distinctPages()` and a `pages` field on `UploadGroup` (`groupUploads`), reused server-side in `ScanGroupSummary` so the delete confirmation and its toast report pages too.
