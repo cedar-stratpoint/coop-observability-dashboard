@@ -9,6 +9,9 @@ import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, 
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
+import {VersionPill} from '@/components/analyst/version-pill';
+import {VERSION_COLOR, VERSION_LABEL} from '@/src/goldline-triage-format';
+import type {FormVersion} from '@/src/goldline-extract';
 import {UploadIllustration} from '@/components/analyst/upload-illustration';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {Pagination} from '@/components/analyst/pagination';
@@ -427,6 +430,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 // How many per-page rows to show at once when a scan group is expanded — a 98-page
 // scan paginates instead of unrolling the whole list.
 const PAGES_PER_VIEW = 12;
+const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
 
 // A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
 // line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
@@ -436,6 +440,7 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<'all' | ItemCategory>('all');
+  const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
   // How many pages fall in each plain-language bucket, for the filter chips + counts.
   const counts = useMemo(() => {
     const c = {} as Record<ItemCategory, number>;
@@ -446,6 +451,14 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     return c;
   }, [g.items]);
   const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
+  // Read pages by form version, for the version filter. Only read inventory pages carry a
+  // version, so this is a sub-filter of "Read" (a sales/blank page has none).
+  const versionCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const i of g.items) if (itemCategory(i) === 'success' && i.formVersion && i.formVersion !== 'unknown') c[i.formVersion] = (c[i.formVersion] ?? 0) + 1;
+    return c;
+  }, [g.items]);
+  const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
   // Pages the user just hit retry on: keep them in view while they re-read (even under a
   // filter they no longer match) so the row shows "Retrying…" in place instead of popping
   // out the instant the icon is clicked.
@@ -454,15 +467,20 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     setRetrying((s) => new Set(s).add(id));
     api.retry(id);
   };
-  const filtered =
-    filter === 'all'
-      ? g.items
-      : g.items.filter((i) => itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working'));
+  // Status and version filters combine (AND): a page shows when it matches both. A page the
+  // user just retried stays in view while it re-reads, even if it no longer matches.
+  const matchStatus = (i: QueueItem) => filter === 'all' || itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working');
+  const matchVersion = (i: QueueItem) => versionFilter === 'all' || (itemCategory(i) === 'success' && i.formVersion === versionFilter);
+  const filtered = g.items.filter((i) => matchStatus(i) && matchVersion(i));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
   const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
   const choose = (f: 'all' | ItemCategory) => {
     setFilter(f);
+    setPage(1);
+  };
+  const chooseVersion = (v: 'all' | FormVersion) => {
+    setVersionFilter(v);
     setPage(1);
   };
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
@@ -498,20 +516,38 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
       </button>
       {open && (
         <div className="flex flex-col border-t border-border bg-muted/20">
-          {/* Filter chips — only when there's more than one bucket to sort between. A
-              "Show" label + a separator line make the row read as a control, and the
-              failures chip is tinted so it doesn't blend in. */}
-          {present.length >= 2 && (
-            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-3" role="group" aria-label="Filter pages">
-              <span className="mr-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
-              <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
-                All <span className="tabular-nums opacity-70">{g.items.length}</span>
-              </FilterChip>
-              {present.map((c) => (
-                <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
-                  {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
-                </FilterChip>
-              ))}
+          {/* Filter chips — status on one row, form version on a second (they combine). Each
+              row appears only when there's more than one thing to sort between. A labeled
+              column makes each row read as a control; failures are tinted, versions get a
+              colored dot that matches their pill. */}
+          {(present.length >= 2 || versionsPresent.length >= 2) && (
+            <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3.5">
+              {present.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
+                  <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
+                    All <span className="tabular-nums opacity-70">{g.items.length}</span>
+                  </FilterChip>
+                  {present.map((c) => (
+                    <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
+                      {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+              {versionsPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by form version">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Version</span>
+                  <FilterChip active={versionFilter === 'all'} onClick={() => chooseVersion('all')}>
+                    All <span className="tabular-nums opacity-70">{versionsPresent.reduce((a, v) => a + (versionCounts[v] ?? 0), 0)}</span>
+                  </FilterChip>
+                  {versionsPresent.map((v) => (
+                    <FilterChip key={v} active={versionFilter === v} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
+                      {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{versionCounts[v]}</span>
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
@@ -561,7 +597,7 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
   return (
     <li
       className={cn(
-        'relative flex items-center gap-3 px-3.5 py-2.5 transition-colors duration-300 ease-out',
+        'relative flex items-center gap-3.5 px-4 py-3.5 transition-colors duration-300 ease-out',
         i.state === 'cancelled' && 'opacity-50',
         isRetrying && 'bg-primary/5',
         href && 'hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
@@ -576,13 +612,13 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
         />
       )}
       <FileTypeBadge filename={i.name} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-baseline justify-between gap-3">
           <span className="flex min-w-0 items-baseline gap-2">
-            {/* The page's place in the scan leads; the source scan name sits beside it as a
-                quiet pill (it repeats down the list, so it shouldn't shout). A lone file
-                keeps its own name and shows no pill. */}
-            <span className="truncate text-sm font-medium" title={i.name}>
+            {/* The page's place in the scan leads (the one thing that differs per row, so it
+                carries the weight); the source scan name sits beside it as a quiet pill (it
+                repeats down the list). A lone file keeps its own name and shows no pill. */}
+            <span className="truncate text-[0.9375rem] font-semibold tracking-tight" title={i.name}>
               {scanPageLabel(i.name).title}
             </span>
             {scanPosition(i.name)?.source && (
@@ -609,13 +645,23 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <CategoryPill cat={cat} /> <span className="truncate">{i.error ?? 'Please try again.'}</span>
           </span>
-        ) : (
-          <span
-            className="truncate text-xs text-muted-foreground"
-            style={done && i.flagged ? {color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'} : undefined}
-          >
-            {itemLabel(i)}
+        ) : cat === 'success' && i.page ? (
+          // A read inventory page: version pill, then the quiet form-page meta, with amber
+          // reserved for the one thing that needs attention — "N to check".
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+            <VersionPill version={i.formVersion} />
+            <span className="text-muted-foreground">Form page {i.page}</span>
+            <span aria-hidden className="text-muted-foreground/50">·</span>
+            {i.flagged ? (
+              <span className="font-medium" style={{color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'}}>
+                {i.flagged} to check
+              </span>
+            ) : (
+              <span className="text-muted-foreground">nothing flagged</span>
+            )}
           </span>
+        ) : (
+          <span className="truncate text-xs text-muted-foreground">{itemLabel(i)}</span>
         )}
         {i.state === 'running' && (
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
@@ -648,15 +694,16 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
 }
 
 /** A toggle chip for the per-scan page filter (All / Read / Couldn't read / …). `crit`
- *  tints the failures chip red so it stands out from the calm set-aside buckets. */
-function FilterChip({active, onClick, tone = 'default', children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; children: React.ReactNode}) {
+ *  tints the failures chip red so it stands out from the calm set-aside buckets; `dotColor`
+ *  adds a small leading dot (used by the version chips to echo their pill color). */
+function FilterChip({active, onClick, tone = 'default', dotColor, children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
         tone === 'crit'
           ? active
             ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
@@ -666,6 +713,7 @@ function FilterChip({active, onClick, tone = 'default', children}: {active: bool
             : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
       )}
     >
+      {dotColor && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{background: dotColor}} />}
       {children}
     </button>
   );

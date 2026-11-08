@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-08 — Uploads: form-version filter + a calmer, roomier page list
+
+Added a **Version** filter (Legacy / V1 / V2) to both per-page lists (uploader queue and scan detail "All files"), on its own labeled chip row beneath "Show". Version is a sub-axis of "Read" (only read inventory pages carry one), so the two filters combine with AND. Each version chip carries a small dot in its form color.
+
+Restyled the rows for more air and clearer hierarchy, following the design skills: more row padding, the page number ("Page N of 98") now leads larger and semibold, the form version shows as a small colored pill (Legacy plum, V1 blue, V2 ochre) via a shared `VersionPill`, the rest of the meta reads quiet and muted, and amber is reserved for the one thing that needs attention, "N to check". New `components/analyst/version-pill.tsx`; the version text prefix was removed from `itemLabel` and the scan-detail meta line in favor of the pill.
+
 ## 2026-11-08 — Uploads: lead the page rows with "Page N of M", not the filename
 
 In the per-page lists (the uploader queue and the scan detail "All files" view) every row led with the full filename ("Scan…(page 1 of 98).pdf"), which repeats down the whole list and buries the one thing that differs: the page. Rows now lead with "Page N of M" (the page's place in the scan) and carry the source scan name as a quiet grey pill beside it. Pages that finished reading as an inventory page also show the detected form version (Legacy / V1 / V2) in the status sub-line, so "V2 · Form page 2 · nothing flagged" (the uploader queue) and "V2 · Inventory form · <when>" (scan detail). The queue's detected printed page is relabeled "Form page N" to keep it distinct from the scan position in the title. The form version was already produced by the read pipeline; it's now carried through `UploadResult` and `QueueItem` to the row (no backend change).
