@@ -7,7 +7,7 @@ import type {ExtractedPage} from './goldline-extract-run';
 import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
-import {uploadSource} from './goldline-upload-groups';
+import {uploadSource, distinctPages, pagesByStatus} from './goldline-upload-groups';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -343,32 +343,32 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
   return true;
 }
 
-export type ScanGroupSummary = {files: number; committed: number; needsReview: number; issues: number; stores: string[]; bas: string[]};
+export type ScanGroupSummary = {files: number; pages: number; committed: number; needsReview: number; issues: number; stores: string[]; bas: string[]};
 
 /** What deleting a whole scan drop will take with it — shown in the confirmation before
  *  the user commits to it. A scan = every upload whose filename shares this source. */
 export async function scanGroupSummary(companyId: string, source: string): Promise<ScanGroupSummary> {
-  if (!goldlineConfigured()) return {files: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  if (!goldlineConfigured()) return {files: 0, pages: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
   const rows = (await fetchAllRows('uploads', (from, to) =>
     db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).order('created_at', {ascending: false}).range(from, to),
   )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
   const scoped = rows.filter((r) => uploadSource(r.filename) === source);
   const stores = new Set<string>();
   const bas = new Set<string>();
-  let committed = 0;
-  let needsReview = 0;
-  let issues = 0;
+  // Counts are per page, not per row: a page re-fed after a failed read counts once, at its
+  // best outcome, so retries don't inflate "issues" (or any other count).
+  const byStatus = pagesByStatus(scoped);
+  const committed = byStatus.committed ?? 0;
+  const needsReview = byStatus.needs_review ?? 0;
+  const issues = (byStatus.failed ?? 0) + (byStatus.rejected ?? 0);
   for (const r of scoped) {
-    if (r.status === 'committed') committed++;
-    else if (r.status === 'needs_review') needsReview++;
-    else if (r.status === 'failed' || r.status === 'rejected') issues++;
     const c = (r.classification ?? {}) as Record<string, unknown>;
     const snap = (c.store_snap ?? {}) as Record<string, unknown>;
     const store = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
     if (store) stores.add(store);
     if (typeof c.consultant === 'string' && c.consultant.trim()) bas.add(c.consultant.trim());
   }
-  return {files: scoped.length, committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
+  return {files: scoped.length, pages: distinctPages(scoped.map((r) => r.filename)), committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
 }
 
 /** Delete a whole scan drop: every upload whose filename shares this source, with its
