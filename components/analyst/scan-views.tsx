@@ -9,8 +9,9 @@ import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
-import {fmtTriagePeriod, VERSION_LABEL} from '@/src/goldline-triage-format';
+import {fmtTriagePeriod, VERSION_LABEL, VERSION_COLOR} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
+import {VersionPill} from '@/components/analyst/version-pill';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {assignFormBaAction} from '@/app/uploads/actions';
@@ -41,6 +42,7 @@ const STATUS_RANK: Record<string, number> = {committed: 5, needs_review: 4, proc
 type FileCat = 'read' | 'failed' | 'sales' | 'blank' | 'other';
 const FILE_CAT_LABEL: Record<FileCat, string> = {read: 'Read', failed: "Couldn't read", sales: 'Sales report', blank: 'Blank page', other: 'Set aside'};
 const FILE_CAT_ORDER: FileCat[] = ['read', 'failed', 'sales', 'blank', 'other'];
+const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
 function fileCat(u: UploadRow): FileCat {
   if (u.status === 'committed' || u.status === 'needs_review') return 'read';
   if (u.status === 'failed') return 'failed';
@@ -59,6 +61,11 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
   const [filter, setFilter] = useState<FileCat | 'all'>('all');
+  const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
+  const chooseVersion = (v: 'all' | FormVersion) => {
+    setVersionFilter(v);
+    setPage(1);
+  };
   const choose = (c: FileCat | 'all') => {
     setFilter(c);
     setPage(1);
@@ -122,7 +129,20 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const setAside = counts.sales + counts.blank + counts.other;
   const present = FILE_CAT_ORDER.filter((c) => counts[c] > 0);
 
-  const shown = filter === 'all' ? groups : groups.filter((g) => fileCat(g.best) === filter);
+  // Read pages by form version — a sub-filter of "read" (only read pages carry a version),
+  // combined with the status filter (AND).
+  const versionCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const g of groups) if (fileCat(g.best) === 'read' && g.best.form_version && g.best.form_version !== 'unknown') c[g.best.form_version] = (c[g.best.form_version] ?? 0) + 1;
+    return c;
+  }, [groups]);
+  const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
+
+  const shown = groups.filter(
+    (g) =>
+      (filter === 'all' || fileCat(g.best) === filter) &&
+      (versionFilter === 'all' || (fileCat(g.best) === 'read' && g.best.form_version === versionFilter)),
+  );
   const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
@@ -156,14 +176,27 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           )}
         </p>
         {present.length >= 2 && (
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages">
-            <span className="mr-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
+            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
             <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
               All <span className="tabular-nums opacity-70">{groups.length}</span>
             </FilterChip>
             {present.map((c) => (
               <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
                 {FILE_CAT_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
+        {versionsPresent.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by form version">
+            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Version</span>
+            <FilterChip active={versionFilter === 'all'} onClick={() => chooseVersion('all')}>
+              All <span className="tabular-nums opacity-70">{versionsPresent.reduce((a, v) => a + (versionCounts[v] ?? 0), 0)}</span>
+            </FilterChip>
+            {versionsPresent.map((v) => (
+              <FilterChip key={v} active={versionFilter === v} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
+                {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{versionCounts[v]}</span>
               </FilterChip>
             ))}
           </div>
@@ -186,13 +219,13 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           const ver = fileCat(u) === 'read' && u.form_version && u.form_version !== 'unknown' ? VERSION_LABEL[u.form_version as FormVersion] : null;
           return (
             <li key={idx} className="flex flex-col">
-              <div className="relative flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40">
+              <div className="relative flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-muted/40">
                 <FileTypeBadge filename={u.filename} />
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   <span className="flex min-w-0 items-baseline gap-2">
                     <Link
                       href={`/uploads/${u.id}`}
-                      className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                      className="truncate text-[0.9375rem] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
                       {label.title}
@@ -227,8 +260,9 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                       </span>
                     )
                   )}
-                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    <span className="truncate">{ver ? `${ver} · ` : ''}{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+                    {ver && <VersionPill version={u.form_version} />}
+                    <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
                     {others.length > 0 && (
                       <button
                         type="button"
@@ -324,14 +358,14 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
 
 /** A rounded "Show" filter chip, matching the uploader's so the two scan views read alike;
  *  the failures chip is tinted so it never blends into the row. */
-function FilterChip({active, onClick, tone = 'default', children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; children: React.ReactNode}) {
+function FilterChip({active, onClick, tone = 'default', dotColor, children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
         tone === 'crit'
           ? active
             ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
@@ -341,6 +375,7 @@ function FilterChip({active, onClick, tone = 'default', children}: {active: bool
             : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
       )}
     >
+      {dotColor && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{background: dotColor}} />}
       {children}
     </button>
   );
