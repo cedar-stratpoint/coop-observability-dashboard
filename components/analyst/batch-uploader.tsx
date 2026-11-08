@@ -432,6 +432,15 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 const PAGES_PER_VIEW = 12;
 const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
 
+// The two live lifecycle states a page can be filtered by, shown only while a scan is still
+// reading. "Done" isn't here — it's just the terminal outcome chips (Read / Sales / …).
+type ProgressFilter = 'processing' | 'waiting';
+type StatusFilter = 'all' | ItemCategory | ProgressFilter;
+const PROGRESS_FILTER_ORDER: ProgressFilter[] = ['processing', 'waiting'];
+const PROGRESS_LABEL: Record<ProgressFilter, string> = {processing: 'Processing', waiting: 'Waiting'};
+const isProcessing = (i: QueueItem) => i.state === 'running';
+const isWaiting = (i: QueueItem) => i.state === 'queued' || i.state === 'waiting_period';
+
 // A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
 // line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
 // upload from flooding the list (plan §06 UX). Collapsed by default; the expanded
@@ -439,7 +448,7 @@ const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
 function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState<'all' | ItemCategory>('all');
+  const [filter, setFilter] = useState<StatusFilter>('all');
   const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
   // How many pages fall in each plain-language bucket, for the filter chips + counts.
   const counts = useMemo(() => {
@@ -451,6 +460,19 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     return c;
   }, [g.items]);
   const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
+  // Lifecycle chips — only the live states (waiting, processing). They appear only while the
+  // scan is still being read and vanish once every page is done, so they never clutter a
+  // finished scan (Hick's Law). "Done" is just the terminal buckets above, so it isn't a chip.
+  const progressCounts = {
+    processing: g.items.filter((i) => isProcessing(i)).length,
+    waiting: g.items.filter((i) => isWaiting(i)).length,
+  };
+  const progressPresent = PROGRESS_FILTER_ORDER.filter((p) => progressCounts[p] > 0);
+  // A live filter whose pages all finished (the scan caught up): fall back to All so the list
+  // doesn't read as empty.
+  useEffect(() => {
+    if ((filter === 'processing' || filter === 'waiting') && progressCounts[filter] === 0) setFilter('all');
+  }, [filter, progressCounts.processing, progressCounts.waiting]);
   // Read pages by form version, for the version filter. Only read inventory pages carry a
   // version, so this is a sub-filter of "Read" (a sales/blank page has none).
   const versionCounts = useMemo(() => {
@@ -469,13 +491,18 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
   };
   // Status and version filters combine (AND): a page shows when it matches both. A page the
   // user just retried stays in view while it re-reads, even if it no longer matches.
-  const matchStatus = (i: QueueItem) => filter === 'all' || itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working');
+  const matchStatus = (i: QueueItem) => {
+    if (filter === 'all') return true;
+    if (filter === 'processing') return isProcessing(i) || retrying.has(i.id);
+    if (filter === 'waiting') return isWaiting(i);
+    return itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working');
+  };
   const matchVersion = (i: QueueItem) => versionFilter === 'all' || (itemCategory(i) === 'success' && i.formVersion === versionFilter);
   const filtered = g.items.filter((i) => matchStatus(i) && matchVersion(i));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
   const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
-  const choose = (f: 'all' | ItemCategory) => {
+  const choose = (f: StatusFilter) => {
     setFilter(f);
     setPage(1);
   };
@@ -520,14 +547,20 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
               row appears only when there's more than one thing to sort between. A labeled
               column makes each row read as a control; failures are tinted, versions get a
               colored dot that matches their pill. */}
-          {(present.length >= 2 || versionsPresent.length >= 2) && (
+          {(present.length + progressPresent.length >= 2 || versionsPresent.length >= 2) && (
             <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3.5">
-              {present.length >= 2 && (
+              {present.length + progressPresent.length >= 2 && (
                 <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
                   <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
                   <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
                     All <span className="tabular-nums opacity-70">{g.items.length}</span>
                   </FilterChip>
+                  {/* Live states first (only while reading), then the terminal outcomes. */}
+                  {progressPresent.map((p) => (
+                    <FilterChip key={p} active={filter === p} onClick={() => choose(p)}>
+                      {PROGRESS_LABEL[p]} <span className="tabular-nums opacity-70">{progressCounts[p]}</span>
+                    </FilterChip>
+                  ))}
                   {present.map((c) => (
                     <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
                       {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
