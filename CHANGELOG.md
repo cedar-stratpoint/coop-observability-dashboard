@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-08 — Uploads: scan tiles count pages, not upload rows (and dedupe the status pills)
+
+A scan tile showed its raw upload-row count ("114 files") when the scan was really 98 pages, the gap being re-uploads: the same page fed again after a read failure (page 23 of that scan was retried 6 times, all failing) each added a row. That reads as phantom pages and confused the page vs file count. Scan tiles now show the true distinct page count ("98 pages"): re-uploads of the same "(page N of M)" position collapse to one, and a lone file (CSV/XLSX/one-page PDF) still reads "1 file". Added `distinctPages()` and a `pages` field on `UploadGroup` (`groupUploads`), reused server-side in `ScanGroupSummary` so the delete confirmation and its toast report pages too.
+
+The status pills ("to review", "committed", "issues", "reading") had the same inflation: they counted rows, so each failed retry added to "issues". They are now counted per page at the page's furthest-along outcome (`committed > needs_review > processing > rejected > failed`), via a new `pagesByStatus()` that `groupUploads` and `ScanGroupSummary` share. So a page that failed a read but succeeded on a retry counts once, under its good status, not as an issue; only a page whose every copy failed is an issue. `byStatus` now sums to `pages`. On the test scan this takes the badge from "46 issues" to the real "30 issues" (68 to review unchanged, 68 + 30 = 98 pages).
+
+The raw row count is kept internally for the actual delete, and the "All files" list view still shows every row (so a failed retry remains findable and deletable).
+
 ## 2026-11-07 — Scan board: read only the one scan's pages at the DB
 
 Follow-up to the caching work: `triageBoard` no longer reads the company's whole set of classified pages and filters to one scan in memory. On a cache miss it now scopes the query with a prefix `LIKE` on the filename ("<source> (page%"), so opening a scan reads just its own pages. It can only ever over-match (a name sharing the prefix), never under-match, and the exact `uploadSource` filter still narrows it, so the result is unchanged (verified: still 51 forms across 6 stores on the test scan). This keeps the read bounded as a company accumulates scans, instead of growing with every scan ever uploaded.

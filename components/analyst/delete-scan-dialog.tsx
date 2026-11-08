@@ -29,7 +29,7 @@ export function DeleteScanDialog({
   trigger?: ReactElement;
   /** Called once the scan is gone. When set, the dialog stays on the page (toast + refresh is
    *  the caller's job) instead of redirecting to the Uploads landing. */
-  onDeleted?: (info: {files: number; source: string}) => void;
+  onDeleted?: (info: {files: number; pages: number; source: string}) => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -87,7 +87,7 @@ export function DeleteScanDialog({
     await new Promise((r) => setTimeout(r, remain + 400));
     setOpen(false);
     if (onDeleted) {
-      onDeleted({files: s?.files ?? 0, source});
+      onDeleted({files: s?.files ?? 0, pages: s?.pages ?? 0, source});
     } else {
       router.push('/uploads');
       router.refresh();
@@ -120,7 +120,7 @@ export function DeleteScanDialog({
                   <AlertDialog.Title className="font-heading text-base font-semibold">{phase === 'done' ? 'Scan deleted' : 'Deleting the scan'}</AlertDialog.Title>
                   <p className="text-sm text-muted-foreground tabular-nums">
                     {step}
-                    {s ? ` · ${s.files} ${s.files === 1 ? 'page' : 'pages'}` : ''}
+                    {s ? ` · ${s.pages} ${s.pages === 1 ? 'page' : 'pages'}` : ''}
                   </p>
                 </div>
               </div>
@@ -150,7 +150,7 @@ export function DeleteScanDialog({
                 ) : (
                   <>
                     <span className="text-foreground">
-                      This removes all <strong className="tabular-nums">{s.files}</strong> {s.files === 1 ? 'page' : 'pages'} in this scan
+                      This removes all <strong className="tabular-nums">{s.pages}</strong> {s.pages === 1 ? 'page' : 'pages'} in this scan
                       {s.stores.length > 0 ? (
                         <>
                           {' '}across <strong className="tabular-nums">{s.stores.length}</strong> {s.stores.length === 1 ? 'store' : 'stores'}
@@ -187,8 +187,8 @@ export function DeleteScanDialog({
 
               <div className="flex flex-wrap justify-end gap-2">
                 <AlertDialog.Close render={<Button variant="ghost" />}>Cancel</AlertDialog.Close>
-                <Button variant="destructive" onClick={confirm} disabled={!s || s.files === 0}>
-                  <Trash2 className="size-4" /> Delete {s ? `${s.files} ${s.files === 1 ? 'page' : 'pages'}` : 'scan'}
+                <Button variant="destructive" onClick={confirm} disabled={!s || s.pages === 0}>
+                  <Trash2 className="size-4" /> Delete {s ? `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}` : 'scan'}
                 </Button>
               </div>
             </>
