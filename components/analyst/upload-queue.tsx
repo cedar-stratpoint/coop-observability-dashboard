@@ -45,6 +45,7 @@ export type QueueItem = {
   // lets the row show a calm pill ("Sales report", "Blank page") instead of an error.
   pageKind?: string;
   page?: number;
+  formVersion?: string; // inventory form layout detected (legacy/v1/v2), once read
   rows?: number;
   flagged?: number;
   rowsCommitted?: number;
@@ -242,6 +243,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
           uploadId: res.uploadId,
           serverStatus: res.status,
           page: res.page,
+          formVersion: res.formVersion,
           rows: res.rows,
           flagged: res.flagged,
           rowsCommitted: res.rowsCommitted,

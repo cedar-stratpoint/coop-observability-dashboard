@@ -31,6 +31,8 @@ export type UploadResult = {
   // What kind of page this was when it isn't an inventory page to read: 'sales'
   // (page 6 report), 'blank' (a back side), or 'unknown' — drives a friendly pill.
   pageKind?: string;
+  // The inventory form layout detected (legacy/v1/v2/unknown) for a read inventory page.
+  formVersion?: string;
 };
 
 export type WatsonsResult = {

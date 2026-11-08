@@ -6,7 +6,7 @@ import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, CATEGORY_LABEL, FILTER_ORDER, type ItemCategory, type QueueGroup} from '@/components/analyst/upload-queue-format';
-import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
+import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {UploadIllustration} from '@/components/analyst/upload-illustration';
@@ -578,8 +578,21 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
       <FileTypeBadge filename={i.name} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="truncate text-sm font-medium" title={i.name}>
-            {i.name}
+          <span className="flex min-w-0 items-baseline gap-2">
+            {/* The page's place in the scan leads; the source scan name sits beside it as a
+                quiet pill (it repeats down the list, so it shouldn't shout). A lone file
+                keeps its own name and shows no pill. */}
+            <span className="truncate text-sm font-medium" title={i.name}>
+              {scanPageLabel(i.name).title}
+            </span>
+            {scanPosition(i.name)?.source && (
+              <span
+                className="max-w-[12rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                title={i.name}
+              >
+                {scanPosition(i.name)!.source}
+              </span>
+            )}
           </span>
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(i.size)}</span>
         </div>
