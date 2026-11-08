@@ -7,9 +7,10 @@ import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, Check, ChevronDown, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
-import {scanPageLabel} from '@/src/upload-batch';
+import {scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
-import {fmtTriagePeriod} from '@/src/goldline-triage-format';
+import {fmtTriagePeriod, VERSION_LABEL} from '@/src/goldline-triage-format';
+import type {FormVersion} from '@/src/goldline-extract';
 import type {UploadRow} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {assignFormBaAction} from '@/app/uploads/actions';
@@ -179,19 +180,32 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
         {pageGroups.map(({idx, best: u, others}) => {
           const label = scanPageLabel(u.filename);
           const open = expanded.has(idx);
+          // The source scan name, shown as a quiet pill beside "Page N of M"; and, for a
+          // read inventory page, the detected form version (Legacy / V1 / V2).
+          const src = scanPosition(u.filename)?.source ?? null;
+          const ver = fileCat(u) === 'read' && u.form_version && u.form_version !== 'unknown' ? VERSION_LABEL[u.form_version as FormVersion] : null;
           return (
             <li key={idx} className="flex flex-col">
               <div className="relative flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40">
                 <FileTypeBadge filename={u.filename} />
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <Link
-                    href={`/uploads/${u.id}`}
-                    className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-                    title={u.filename}
-                  >
-                    {label.title}
-                  </Link>
-                  {label.sub && <span className="truncate font-mono text-[11px] text-muted-foreground">{label.sub}</span>}
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <Link
+                      href={`/uploads/${u.id}`}
+                      className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+                      title={u.filename}
+                    >
+                      {label.title}
+                    </Link>
+                    {src && (
+                      <span
+                        className="max-w-[14rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        title={u.filename}
+                      >
+                        {src}
+                      </span>
+                    )}
+                  </span>
                   {rereading.has(u.id) ? (
                     <span className="flex flex-col gap-1">
                       <span className="inline-flex items-center gap-1.5 text-xs text-[color:var(--primary)]">
@@ -214,7 +228,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                     )
                   )}
                   <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
+                    <span className="truncate">{ver ? `${ver} · ` : ''}{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
                     {others.length > 0 && (
                       <button
                         type="button"

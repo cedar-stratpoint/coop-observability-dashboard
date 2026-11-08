@@ -3,7 +3,14 @@
 
 import {progressFor} from '@/src/upload-progress';
 import {scanPosition} from '@/src/upload-batch';
+import {VERSION_LABEL} from '@/src/goldline-triage-format';
+import type {FormVersion} from '@/src/goldline-extract';
 import type {QueueItem} from '@/components/analyst/upload-queue';
+
+/** "V2 · " for a known form version, "" otherwise — a short prefix for the page's sub-line. */
+function versionPrefix(v: string | undefined): string {
+  return v && v !== 'unknown' ? `${VERSION_LABEL[v as FormVersion]} · ` : '';
+}
 
 export function itemPercent(i: QueueItem, now: number): number {
   if (i.state === 'done' || i.state === 'failed' || i.state === 'cancelled') return 100;
@@ -67,7 +74,7 @@ export function itemLabel(i: QueueItem): string {
       if (i.kind === 'csv') return `Saved ${i.rowsCommitted ?? 0} sales rows`;
       if (i.kind === 'xlsx') return watsonsLabel(i);
       return i.page
-        ? `Page ${i.page} · ${i.flagged ? `${i.flagged} to check` : 'nothing flagged'}`
+        ? `${versionPrefix(i.formVersion)}Form page ${i.page} · ${i.flagged ? `${i.flagged} to check` : 'nothing flagged'}`
         : 'Read — ready for review';
     case 'running':
       switch (i.phase) {
