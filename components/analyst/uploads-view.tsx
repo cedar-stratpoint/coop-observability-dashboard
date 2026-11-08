@@ -77,7 +77,7 @@ function GroupTile({
   g: UploadGroup;
   company: string;
   canEdit: boolean;
-  onDeleted: (info: {files: number; source: string}) => void;
+  onDeleted: (info: {files: number; pages: number; source: string}) => void;
 }) {
   const review = g.byStatus.needs_review ?? 0;
   const committed = g.byStatus.committed ?? 0;
@@ -98,7 +98,8 @@ function GroupTile({
             {g.source}
           </Link>
           <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-            {fmtDay(g.day)} · {g.files} {g.files === 1 ? 'file' : 'files'}
+            {fmtDay(g.day)} · {g.pages}{' '}
+            {g.isSplit ? (g.pages === 1 ? 'page' : 'pages') : g.pages === 1 ? 'file' : 'files'}
           </div>
         </div>
         {canEdit && (
@@ -425,8 +426,8 @@ export function UploadsView({
                     g={g}
                     company={company}
                     canEdit={canEdit}
-                    onDeleted={({files}) => {
-                      toast('ok', `Scan deleted · ${files} ${files === 1 ? 'page' : 'pages'} removed`);
+                    onDeleted={({pages}) => {
+                      toast('ok', `Scan deleted · ${pages} ${pages === 1 ? 'page' : 'pages'} removed`);
                       router.refresh();
                     }}
                   />
