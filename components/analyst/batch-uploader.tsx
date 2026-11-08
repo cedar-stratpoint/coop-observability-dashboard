@@ -2,6 +2,7 @@
 
 import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
+import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, CATEGORY_LABEL, FILTER_ORDER, type ItemCategory, type QueueGroup} from '@/components/analyst/upload-queue-format';
@@ -35,6 +36,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   // Files staged but not yet submitted — they show on screen and a scan starts reading
   // only once the user hits Upload. The user can keep adding or remove any first.
   const [pending, setPending] = useState<File[]>([]);
+  // Confirm before kicking off a read: the Upload button sits right under the tray, so an
+  // accidental click shouldn't start processing a 100-page scan.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const running = Boolean(q?.items.some((i) => i.state === 'running'));
   useEffect(() => {
@@ -365,9 +369,52 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               <span className="text-xs text-muted-foreground">Add more above, or remove any, then upload.</span>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setPending([])}>Clear</Button>
-                <Button size="sm" onClick={confirmPending} disabled={disabled}>
-                  <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
-                </Button>
+                <AlertDialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
+                  <AlertDialog.Trigger
+                    render={
+                      <Button size="sm" disabled={disabled}>
+                        <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
+                      </Button>
+                    }
+                  />
+                  <AlertDialog.Portal>
+                    <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+                    <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+                      <div className="flex items-start gap-3">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                          <Upload className="size-4" aria-hidden />
+                        </span>
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <AlertDialog.Title className="font-heading text-base font-semibold">
+                            Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}?
+                          </AlertDialog.Title>
+                          <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                            {fmtSize(pending.reduce((a, f) => a + f.size, 0))} total
+                          </span>
+                        </div>
+                      </div>
+                      <AlertDialog.Description className="text-sm text-muted-foreground">
+                        This starts reading {pending.length === 1 ? 'it' : 'them'} now.{' '}
+                        {pending.some((f) => f.name.toLowerCase().endsWith('.pdf'))
+                          ? 'A multi-page PDF is split into pages and read in the background. '
+                          : ''}
+                        You can keep working while it runs.
+                      </AlertDialog.Description>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <AlertDialog.Close render={<Button variant="ghost" size="sm" />}>Cancel</AlertDialog.Close>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            confirmPending();
+                            setConfirmOpen(false);
+                          }}
+                        >
+                          <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
+                        </Button>
+                      </div>
+                    </AlertDialog.Popup>
+                  </AlertDialog.Portal>
+                </AlertDialog.Root>
               </div>
             </div>
           </div>
