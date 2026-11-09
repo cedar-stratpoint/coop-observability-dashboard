@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage} from '../src/goldline-segment';
+import {assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle, type ClassifiedPage} from '../src/goldline-segment';
 
 // Real data from Nichido Staging batch e896d60b (Scan2026-10-30_171554) — the 61-sheet
 // pile a reviewer opened as "one store's form". Store codes are the values already snapped
@@ -69,5 +69,17 @@ describe('batch e896d60b segmentation (real-data characterization)', () => {
     expect(codes.size).toBeGreaterThanOrEqual(3); // 854, 173, 877, WATSON, Watsons 004, …
     const versions = new Set(forms.map((g) => g.version));
     expect(versions.size).toBeGreaterThanOrEqual(3); // v1, v2, legacy all present
+  });
+
+  // Defect #2: only a real form (>= 2 of its pages) is peeled into its own batch; the dozens
+  // of lone-page fragments stay together in the "needs sorting" lane instead of a batch each.
+  it('treats almost all of the pile as fragments, not one-sheet forms', () => {
+    const real = forms.filter(isRealForm);
+    expect(real.length).toBe(1); // only the 854 v2 group that has two pages (3 and 5)
+    expect(real[0].store_code).toBe('854');
+    expect(real[0].present.length).toBeGreaterThanOrEqual(2);
+    const fragments = forms.filter((g) => !isRealForm(g));
+    expect(fragments.length).toBeGreaterThanOrEqual(25); // everything else sorts by hand
+    expect(fragments.every((g) => g.present.length === 1)).toBe(true);
   });
 });

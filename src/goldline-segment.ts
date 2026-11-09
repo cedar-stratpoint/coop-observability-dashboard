@@ -381,6 +381,19 @@ export function segmentBundle(pages: ClassifiedPage[]): BundleSegmentation {
 }
 
 /**
+ * Whether a grouped form is solid enough to peel off into its own review batch, versus a
+ * fragment the splitter should leave in the shared "needs sorting" lane. Real = at least two
+ * of its template pages are present. A lone page in a shuffled scan is almost always a stray,
+ * not a committable form, and one batch per stray is the "30 tiny batches" problem, so lone
+ * pages stay together for a human to sort. Store confidence is deliberately NOT required: a
+ * multi-page form whose printed store couldn't be read is still a real form (the reviewer
+ * picks the store), so it belongs in its own review, not the sorting lane.
+ */
+export function isRealForm(g: FormGroup): boolean {
+  return g.present.length >= 2;
+}
+
+/**
  * Group INVENTORY pages into forms by {store · period · version}. Pass only item
  * pages (use segmentBundle to partition first). Each group reports present/missing
  * inventory pages, duplicates, and anomaly flags.

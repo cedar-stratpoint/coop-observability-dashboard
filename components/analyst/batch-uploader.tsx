@@ -114,7 +114,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
+            <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
               {hasItems ? (
                 busy ? (
@@ -774,14 +774,17 @@ const STORES_PER_PAGE = 6;
 function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null; splitting: boolean; busy: boolean; stores: StoreOption[]}) {
   const [page, setPage] = useState(1);
   const nameOf = useMemo(() => new Map(stores.map((s) => [s.code, s.name])), [stores]);
+  // Real forms are what the panel lists; the origin "needs sorting" lane is surfaced apart.
+  const realForms = useMemo(() => (forms ?? []).filter((f) => !f.unsorted), [forms]);
+  const unsorted = forms?.find((f) => f.unsorted) ?? null;
   const groups = useMemo<StoreGroup[]>(() => {
     if (!forms) return [];
     // One canonical BA spelling across the scan, so "LEONISA RAMOS" and "Leonisa Ramo"
     // read as one person (no registry here — cluster the written names among themselves).
-    const baCanon = reconcileBaNames(forms.map((f) => f.consultant));
+    const baCanon = reconcileBaNames(realForms.map((f) => f.consultant));
     const canonBa = (c: string | null) => (c?.trim() ? baCanon.get(c.trim()) ?? c.trim() : null);
     const by = new Map<string, StoreGroup>();
-    for (const f of forms) {
+    for (const f of realForms) {
       const key = f.storeCode ?? '__nostore__';
       const g =
         by.get(key) ??
@@ -791,7 +794,7 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
     }
     // Forms missing a store come first (they need one picked), then stores A→Z.
     return [...by.values()].sort((a, b) => (a.code === null ? -1 : b.code === null ? 1 : a.name.localeCompare(b.name)));
-  }, [forms, nameOf]);
+  }, [forms, nameOf, realForms]);
 
   if (!forms) {
     return (
@@ -804,7 +807,7 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
     );
   }
 
-  const blank = forms.filter((f) => !f.storeCode).length;
+  const blank = realForms.filter((f) => !f.storeCode).length;
   const pageCount = Math.max(1, Math.ceil(groups.length / STORES_PER_PAGE));
   const safePage = Math.min(page, pageCount);
   const shown = groups.slice((safePage - 1) * STORES_PER_PAGE, safePage * STORES_PER_PAGE);
@@ -814,6 +817,12 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
       <p className="text-xs text-muted-foreground">
         Each form is its own review, grouped by store. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
       </p>
+      {unsorted && unsorted.files > 0 && (
+        <p className="flex items-center gap-2 rounded-xl border border-dashed border-border px-3.5 py-2.5 text-xs text-muted-foreground">
+          <AlertTriangle className="size-3.5 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+          {unsorted.files} {unsorted.files === 1 ? 'page' : 'pages'} could not be placed into a form (lone or unreadable pages). They stay in the batch to sort by hand.
+        </p>
+      )}
 
       {shown.map((g) => (
         <section key={g.key} className="flex flex-col gap-1.5" aria-label={g.name}>

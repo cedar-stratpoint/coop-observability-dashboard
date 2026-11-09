@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: lone/unreadable pages go to a "needs sorting" lane, not a batch each
+
+Defect #2 from the batch-segmentation trace, paired with #1 below so a scan with a stuck page splits *and* splits usefully. The splitter gave every grouped "form" its own batch, so a shuffled pile produced dozens of one-page batches. Now it peels off only real forms and keeps the rest together to sort.
+
+- **`isRealForm` (`src/goldline-segment.ts`, tested on real data).** A grouped form is real, and worth its own review batch, when at least two of its template pages are present. A lone page is almost always a stray in a shuffled scan, so lone pages (and sales / blanks / unplaceable) stay together. Store confidence is deliberately not required: a multi-page form whose printed store couldn't be read is still a real form (the reviewer picks the store).
+- **`splitBatchIntoForms` (`src/goldline-data.ts`) peels real forms only.** Each real form gets its own pre-filled batch; everything else stays in the origin batch as the "needs sorting" lane (the origin is never re-stamped, so a reviewer's own store/period edit is never overwritten). On the real `e896d60b` pile, that is 1 real form (the two-page 854 group) peeled off and ~30 lone pages left to sort, instead of ~32 tiny batches.
+- **Uploader shows it honestly (`components/analyst/batch-uploader.tsx`).** The forms panel lists real forms only; the leftover is surfaced as "N pages could not be placed into a form (lone or unreadable pages). They stay in the batch to sort by hand." The "N forms in this scan" count excludes the sorting lane.
+
 ## 2026-11-09 — Uploads: a stuck "processing" page no longer freezes a whole batch from splitting
 
 Defect #1 from the batch-segmentation trace. The auto-split on opening a batch (`app/uploads/batch/[id]/page.tsx`) was gated on *no* page being `processing`, to avoid splitting mid-read. But an orphaned `processing` page (a reader that died without writing its status back) would then freeze the entire scan from ever separating into per-store forms. That is why batch `e896d60b` stayed a 61-sheet pile: one page (scan sheet 57) is stuck `processing`.
