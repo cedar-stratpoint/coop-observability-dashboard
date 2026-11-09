@@ -4,7 +4,7 @@ import {useMemo} from 'react';
 import {Check, ChevronLeft, ChevronRight, Crosshair, Search} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
-import {groupByFamily, type CatalogLite} from '@/src/review-workbench';
+import {groupByFamily, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
@@ -94,6 +94,13 @@ function reasonText(r: ExtractedRow): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
+/** 'Paper reads: "BB 04 Beige"' — shown when the name printed on the row disagrees with
+ *  the manifest name for its code, so a misread code or an out-of-date printed label is
+ *  visible to the reviewer instead of being silently resolved to the manifest name. */
+function printedNameHint(r: ExtractedRow, catalogName: string | undefined): string | null {
+  return printedNameConflict(r.printed_name, catalogName) ? `Paper reads: “${r.printed_name}”` : null;
+}
+
 export function ReviewRows({
   rows,
   productNames,
@@ -158,6 +165,9 @@ export function ReviewRows({
                 <span className="font-mono text-xs font-medium">{r.item_code}</span>
                 {productNames[r.item_code] && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code]}</span>}
               </div>
+              {printedNameHint(r, productNames[r.item_code]) && (
+                <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
+              )}
               {view === 'needs' && catalog[r.item_code]?.productLine && (
                 <span className="mt-0.5 block max-w-[16rem] truncate text-[11px] text-muted-foreground/70">{catalog[r.item_code]?.productLine}</span>
               )}
@@ -244,6 +254,9 @@ export function ReviewRows({
           <div className="min-w-0">
             <span className="font-mono text-xs font-medium">{r.item_code}</span>
             {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
+            {printedNameHint(r, productNames[r.item_code]) && (
+              <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
+            )}
             {reasonText(r) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r)}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>

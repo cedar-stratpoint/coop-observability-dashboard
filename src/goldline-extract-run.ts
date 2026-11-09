@@ -31,6 +31,12 @@ import type {WriterProfile} from './goldline-writer-data';
 
 export type ExtractedRow = {
   item_code: string;
+  // The product name as printed on this row of the paper (beside the code), transcribed
+  // for cross-checking only — the displayed/stored name still comes from the manifest by
+  // code. When it disagrees with the manifest name, the review shows a "Paper reads" hint
+  // so a possibly-misread code or an out-of-date printed label isn't silently resolved.
+  // Null/absent on scans read before this field existed.
+  printed_name?: string | null;
   stockroom: number | null;
   drawer: number | null;
   selling_area: number | null;
