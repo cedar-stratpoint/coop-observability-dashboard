@@ -50,7 +50,12 @@ export type CrmOrder = {
   // Shopify line items as the CRM sends them (a JSON string). Only the Overview's
   // custom date range reads it (units + top products) — see src/custom-range.ts.
   lineItems?: string | null;
+  // Line price and quantity from `/api/orders?lines=1` (Business Health Website GMV = Shopify gross sales). Only when the Worker sent a
+  // lines array; nothing about the buyer or the product.
+  lines?: CrmOrderLine[];
 };
+
+export type CrmOrderLine = {price: number | null; quantity: number | null};
 
 export type CrmCheckout = {
   shopifyCheckoutId: string;

@@ -8,6 +8,11 @@ describe('PLAN_HELP copy map', () => {
       expect(s.length).toBeGreaterThan(10);
     }
   });
+  it('says Website GMV is Shopify gross sales, every order', () => {
+    expect(PLAN_HELP.sources).toMatch(/Website from Shopify gross sales/);
+    expect(PLAN_HELP.sources).toMatch(/before discounts, shipping and tax/);
+    expect(PLAN_HELP.sources).not.toMatch(/other than cancelled/);
+  });
   it('fills in the dynamic parts', () => {
     expect(PLAN_HELP.grid(13)).toContain('Type the 13 lines');
     expect(PLAN_HELP.stockChart(1.84)).toContain('1.8 months of cover');
