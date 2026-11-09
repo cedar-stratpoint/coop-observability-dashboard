@@ -8,9 +8,19 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: review screen says "Sheet" vs "Page", and you pick the good copy in place
+
+A design critique of the batch-review screen (one store's inventory form, assembled from a shuffled 98-page scan) found three real frictions: the word "Page" named two different things, a duplicate pile of 50-ish scanned sheets was overwhelming, and the core job (keep one good copy per form page, drop the rest) had no affordance on the screen. Fixed all three, plus a commit confirmation. Additive only; no schema change (the drop reuses the existing `rejected` status).
+
+- **"Page" disambiguated (`src/upload-batch.ts`, `components/analyst/batch-review.tsx`).** `scanPageLabel` now reads "Sheet 50 of 98" for a scanned sheet's position in the raw bundle; "Page" is reserved for the form's template pages 1 to 5. The tab strip gained a "Form pages" heading, the sheet-count fallbacks read "sheets", and the "Unknown" bucket is now "No page number (N)".
+- **Pick the good copy, in place, with auto-nominate (`src/upload-batch.ts` `nominateKeeper`, `app/uploads/actions.ts` `setSheetDroppedAction`, `batch-review.tsx`).** A duplicated form page collapses to its auto-picked best copy (highest document confidence, then fewest flagged rows, then most rows read) plus a "N copies" opener and a one-click "Drop the others". Opening it reveals every copy and lets you override which to keep. Dropped sheets move to a reversible "Dropped (N)" strip with Restore. A "Pick the good copy: X of Y duplicated pages done" counter names the job. Dropping sets a sheet to `rejected` (reversible), which removes it from the commit set, so commit unblocks on this screen instead of sending you to Uploads. `coverage` now reads live sheets only, so the duplicate warning clears as you resolve.
+- **Commit confirmation (`batch-review.tsx`).** "Commit all" opens an AlertDialog summarizing the write (counts, pages, store, period) before the irreversible commit.
+- **Tests:** `nominateKeeper` and `scanPageLabel` covered in `test/upload-batch-forms.test.ts`. Design detector clean on the component; typecheck green. Unverified: on-device visual QA of the new controls (do this on staging). Pre-existing and unrelated: `src/goldline-triage-data.ts:154` still fails the pagination guard on develop (see below).
+
 ## 2026-11-09 — Uploads: Per store gets a store filter / jump pill bar
 
 The Per store view of a scan stacks a "Needs a store" section, one section per grouped store, and "One-off stores" vertically, so a scan with many stores made you scroll a long way with no sense of what was below. Added a wrapping pill bar above the board (shown when there is more than one section): "All" plus one pill per section in the order they appear, each with its form count, and the "Needs a store" pill tinted red. Tapping a pill shows only that store's forms right under the bar; tapping it again, or "All", clears. The filter is ephemeral client state (no URL change, so it does not touch Back), self-clears if the underlying data changes, and the "Set aside" list is unaffected. Verified on the staging DB against Scan2026-10-30_171554 (51 forms across 6 stores).
+
 ## 2026-11-09 — Load time, round 2: functions in Singapore, fewer repeat reads
 
 This follows the 2026-11-05 sales totals work. The plan and its measurements are in a Claude artifact: https://claude.ai/artifact/9fJHdqRKUjnr2rNC2EgBZZ

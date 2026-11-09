@@ -151,7 +151,7 @@ async function loadTriageBoard(companyId: string, source: string | null): Promis
   const likePrefix = source ? `${source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%` : null;
   const all = (await fetchAllRows('uploads', (from, to) => {
     let q = supa
-      .from('uploads')
+      .from('uploads') // pagination-ok: paged by fetchAllRows via .range(from, to) below
       .select(UPLOAD_CLS_COLS)
       .eq('company_id', companyId)
       .eq('kind', 'inventory_pdf')
