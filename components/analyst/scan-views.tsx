@@ -41,8 +41,9 @@ const TYPE_LABEL: Record<PageType, string> = {inventory: 'Inventory form', sales
 // shared with the one-page review's arrows so both read the same list.
 // The review workflow state, its own facet. "Set aside" is the one home for a parked page
 // (a rejected form, or any sales/blank sheet); "Failed" is the one home for an unread page.
-const STATUS_LABEL: Record<UploadStatus, string> = {needs_review: 'Needs review', processing: 'Processing', failed: 'Failed', rejected: 'Set aside', committed: 'Committed'};
+const STATUS_LABEL: Record<UploadStatus, string> = {queued: 'Queued', needs_review: 'Needs review', processing: 'Processing', failed: 'Failed', rejected: 'Set aside', committed: 'Committed'};
 const STATUS_DOT: Record<UploadStatus, string> = {
+  queued: 'var(--muted-foreground)',
   needs_review: 'var(--status-warn)',
   processing: 'var(--muted-foreground)',
   failed: 'var(--status-crit)',
