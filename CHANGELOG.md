@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: a stuck "processing" page no longer freezes a whole batch from splitting
+
+Defect #1 from the batch-segmentation trace. The auto-split on opening a batch (`app/uploads/batch/[id]/page.tsx`) was gated on *no* page being `processing`, to avoid splitting mid-read. But an orphaned `processing` page (a reader that died without writing its status back) would then freeze the entire scan from ever separating into per-store forms. That is why batch `e896d60b` stayed a 61-sheet pile: one page (scan sheet 57) is stuck `processing`.
+
+- **`isLiveProcessing` (`src/upload-batch.ts`, tested).** A page counts as actively reading only while it is `processing` *and* created within the last 30 minutes (the closest "processing since" signal the row carries; an unparseable timestamp is treated as live, so the gate is never relaxed by mistake). The split gate now waits only on live reads, so one stale/orphaned page no longer blocks the split.
+- **Consequence to expect:** once this is live, opening a pile like `e896d60b` will finally split, but into *many* small batches, because the grouping still manufactures one-sheet "forms" from unreadable data (defect #2, not fixed here). The "needs sorting" lane for unreadable/lone pages is the right next step so the split produces something useful rather than 30 tiny batches.
+
 ## 2026-11-09 — Uploads: a mixed batch stops calling itself "this store's form"
 
 Traced why one batch of `Scan2026-10-30_171554` opened as a confusing 61-sheet "store's form". It is a shuffled pile: 36 store names, 4 form versions, many periods, only a handful of real registry stores (854 Gaisano Davao, 473 SM San Pablo). Root cause, pinned by a real-data characterization test (`test/goldline-split-regression.test.ts`, fixture `test/fixtures/batch-e896d60b.json`): fed through the splitter's own grouping, these 61 sheets become 14 sales + 14 blanks + 33 inventory that shatter into ~32 one-sheet "forms" (printed stores mostly unreadable, versions and periods disagree), none a complete 1-to-5 form. Two backend reasons it never separated in the first place are noted below as follow-ups, not fixed here.

@@ -4,7 +4,7 @@ import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {catalogForCodes, getBatch, getBatchPages, listStores, splitBatchIntoForms} from '@/src/goldline-data';
 import {MANIFESTS} from '@/src/goldline-extract';
-import {orderPages} from '@/src/upload-batch';
+import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 
@@ -34,7 +34,9 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // split it now by the Phase 0 classification (store · period · version), then show
   // this batch's own form. The other forms are in Uploads. Only redirects when a split
   // actually moved pages, so there's no loop once the batch holds a single form.
-  if (batch.status === 'open' && canEditData(ctx.role) && !pdfPages.some((p) => p.upload.status === 'processing')) {
+  // Wait only on pages that are *actively* reading: a page stuck 'processing' (an orphaned
+  // extraction) must not freeze the whole scan from ever splitting (see isLiveProcessing).
+  if (batch.status === 'open' && canEditData(ctx.role) && !pdfPages.some((p) => isLiveProcessing(p.upload))) {
     const session = await auth();
     const forms = await splitBatchIntoForms(ctx.companyId, id, session?.user?.email ?? null);
     if (forms.length > 1) redirect(`/uploads/batch/${id}`);
