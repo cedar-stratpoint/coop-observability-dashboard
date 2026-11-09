@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.21.1 (2026-11-09): Business Health Report, Website GMV is Shopify gross sales (prod release)
+Ships #551 (staging #553) to prod as a Website-GMV-only change on top of `main` (staging and main have diverged). Every file it touches was identical on `main` and `develop`, so the commit cherry-picked cleanly.
+
+- **Decision: Website GMV = Shopify "Gross sales"** = the sum of line price × quantity of every order, before discounts, returns, shipping and tax (the CRM's `/api/sales/summary` `gross`). Before, it summed `totalPrice` (after discounts, plus shipping and tax) and left out refunded, voided and expired orders.
+- **Every order counts, like Shopify** (owner decision): refunded and cancelled orders stay in gross; Shopify takes returns out in net sales.
+- **Read:** the paged CRM `/api/orders` read adds `lines=1`; only each line's `price` and `quantity` are kept. No CRM change.
+- **Never silently low:** an order without usable lines makes its month partial (grey) with a note; if no order has lines at all, every month is a gap with a note.
+
+PROD steps: none new. `CRM_API_URL` and `CRM_API_READ_TOKEN` must be set on the PROD Vercel project (as for v1.21.0). Check: one closed month's Website GMV on `/health-report` equals Shopify Analytics → Sales over time → Gross sales.
+
 ## v1.21.0 (2026-11-06): Business Health Report (prod release)
 Ships the Business Health Report (`/health-report`) to prod, taken from `staging` as a health-report-only change on top of `main` (staging and main have diverged, so a full promotion would drop the prod-only releases; same pattern as v1.20.0). Staging PRs: #476 (BHR-01 to BHR-05), #487 (paged CRM read, BHR-06 sheet mirror), #497 (plan SQL as one file), #501 (BHR-07). The feature files are byte-identical to staging; shared files carry only the health-report hunks.
 
