@@ -1,5 +1,24 @@
 import {describe, expect, it} from 'vitest';
-import {batchReadiness, groupForms, scanOrder, scanPosition, scanPageLabel, scanPageNumber, storeConflict, type BatchPageInfo} from '../src/upload-batch';
+import {batchReadiness, groupForms, isLiveProcessing, scanOrder, scanPosition, scanPageLabel, scanPageNumber, STALE_PROCESSING_MS, storeConflict, type BatchPageInfo} from '../src/upload-batch';
+
+describe('isLiveProcessing', () => {
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  const at = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
+  it('is false for any non-processing status', () => {
+    expect(isLiveProcessing({status: 'needs_review', created_at: at(0)}, now)).toBe(false);
+    expect(isLiveProcessing({status: 'committed', created_at: at(999)}, now)).toBe(false);
+  });
+  it('is true for a recently-created processing page (still reading)', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: at(2)}, now)).toBe(true);
+  });
+  it('is false for a page stuck processing past the stale window (orphaned read)', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: at(STALE_PROCESSING_MS / 60_000 + 1)}, now)).toBe(false);
+    expect(isLiveProcessing({status: 'processing', created_at: at(24 * 60)}, now)).toBe(false); // a day old
+  });
+  it('treats an unparseable timestamp as live, so the gate is never relaxed by mistake', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: 'not-a-date'}, now)).toBe(true);
+  });
+});
 
 describe('scanPageLabel', () => {
   it('labels a split sheet by its scan position, not a form page', () => {

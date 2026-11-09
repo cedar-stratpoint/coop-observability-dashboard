@@ -109,6 +109,21 @@ export function scanPageNumber(filename: string): number | null {
   return n > 0 ? n : null;
 }
 
+/** A single page's read finishes in well under this; a page still 'processing' past it is an
+ *  orphaned extraction (its reader died without writing back), not a live one. Measured from
+ *  the upload's creation, the closest "processing since" signal the row carries. */
+export const STALE_PROCESSING_MS = 30 * 60 * 1000;
+
+/** Whether a page is still being actively read: 'processing' and recent. A page stuck in
+ *  'processing' past STALE_PROCESSING_MS is treated as orphaned so it no longer gates the
+ *  batch, letting a scan split (and later commit) instead of one dead read freezing it all.
+ *  An unparseable timestamp is treated as live, so an ambiguous case never relaxes the gate. */
+export function isLiveProcessing(p: {status: string; created_at: string}, now: number = Date.now()): boolean {
+  if (p.status !== 'processing') return false;
+  const started = Date.parse(p.created_at);
+  return Number.isFinite(started) ? now - started < STALE_PROCESSING_MS : true;
+}
+
 /**
  * Scan order for a batch's pages: pages split from the same PDF by their position in
  * it, files in the order they were uploaded otherwise.

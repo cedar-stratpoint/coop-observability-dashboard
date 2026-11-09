@@ -4,7 +4,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
-import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
 import {uploadSource, distinctPages, pagesByStatus} from './goldline-upload-groups';
@@ -817,18 +817,24 @@ export type SplitForm = {
   periodStart: string | null;
   periodEnd: string | null;
   consultant: string | null;
+  /** The origin batch kept as the "needs sorting" lane (fragments + sales/blanks), not a real
+   *  form. The UI counts and renders real forms only; this entry just signals a split ran. */
+  unsorted?: boolean;
 };
 
 /**
- * Many stores in one scan (Q25): after every page of a drop is read, split the batch
- * into one batch per FORM. Grouping uses the Phase 0 classification (store · period ·
- * version, with the store code snapped to the registry and the year reconciled) via
- * the same `segmentBundle` the triage board uses — so a shuffled multi-store scan is
- * separated correctly, where the old page-number heuristic lumped it into one pile.
- * The first form keeps this batch; each other form gets a new open batch. Each form's
- * batch is pre-filled with its detected store and period so review opens ready. Pages
- * with no form (sales / blank / unplaceable) stay in the original batch. Returns every
- * form; one (or none) means nothing moved.
+ * Many stores in one scan (Q25): after every page of a drop is read, split the batch into
+ * one batch per FORM. Grouping uses the Phase 0 classification (store · period · version,
+ * store code snapped to the registry, year reconciled) via the same `segmentBundle` the
+ * triage board uses, so a shuffled multi-store scan separates where the old page-number
+ * heuristic lumped it into one pile.
+ *
+ * Only a REAL form is peeled off (see isRealForm: a registry-matched store with at least
+ * two of its pages). Fragments (a lone page, or a page whose printed store couldn't be read)
+ * plus sales / blanks / unplaceable all stay together in the original batch — the "needs
+ * sorting" lane — instead of each spawning its own one-page batch. Each peeled form's new
+ * batch is pre-filled with its store and period so review opens ready. Returns the batches
+ * touched (origin first); length <= 1 means nothing moved.
  */
 export async function splitBatchIntoForms(companyId: string, batchId: string, createdBy: string | null): Promise<SplitForm[]> {
   const batch = await getBatch(companyId, batchId);
@@ -848,23 +854,30 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
   // blank-store form stays one physical form instead of merging several unreadable stores.
   const known = await knownStoreCodes(companyId);
   const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(applyStoreRegistry(uploads.map(toClassifiedPage), known))));
-  if (forms.length === 0) return []; // no inventory pages to group (all parked)
-  const split = forms.length > 1; // a genuine multi-store / multi-period scan
+  const realForms = forms.filter(isRealForm);
+  if (realForms.length === 0) return []; // nothing confidently a form — leave the pile to sort
+
+  // The origin hosts the "needs sorting" remainder (fragments + sales + blanks + unplaceable)
+  // when there is one; otherwise the first real form keeps it, so the origin is never empty.
+  const inRealForm = new Set(realForms.flatMap((g) => g.slots.flatMap((s) => s.ids)));
+  const originIsRemainder = uploads.some((u) => !inRealForm.has(u.id));
+
+  const toSplit = realForms.map((g, i) => ({g, ownBatch: originIsRemainder || i > 0}));
 
   const out: SplitForm[] = [];
-  for (let f = 0; f < forms.length; f++) {
-    const g = forms[f];
+  if (originIsRemainder) {
+    const remainder = uploads.filter((u) => !inRealForm.has(u.id));
+    out.push({batchId, pages: [], files: remainder.length, storeCode: null, periodStart: null, periodEnd: null, consultant: null, unsorted: true});
+  }
+  for (const {g, ownBatch} of toSplit) {
     const ids = g.slots.flatMap((s) => s.ids);
     let id = batchId;
-    if (f > 0) {
+    if (ownBatch) {
       id = await createBatch(companyId, createdBy);
       const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', ids);
       if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
-    }
-    // When a scan really held several forms, pre-fill each one's batch with its grouped
-    // store + period (the reviewer can still edit; an unmatched store stays blank for
-    // them to pick). A single-form batch is left as the uploader set it.
-    if (split) {
+      // Pre-fill each peeled form with its grouped store + period (the reviewer can still
+      // edit). The origin is never re-stamped, so a reviewer's own correction is never lost.
       await updateBatchInfo(companyId, id, {storeCode: g.store_code ?? null, periodStart: g.period_start ?? null, periodEnd: g.period_end ?? null});
     }
     out.push({
