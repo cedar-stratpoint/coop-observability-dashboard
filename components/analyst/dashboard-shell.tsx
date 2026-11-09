@@ -71,10 +71,13 @@ export function DashboardShell({
   digests,
   user,
   nav,
+  serverUpload = false,
   children,
 }: {
   digests: DigestArchiveRow[];
   usingMock?: boolean;
+  /** The active company is on the server-driven scan-upload path (P2). Computed server-side. */
+  serverUpload?: boolean;
   user?: {name?: string | null; email?: string | null; image?: string | null};
   /** Tenant chrome: active company + companies to switch between. Absent = the
    *  single-tenant (Zoomy) path, which renders exactly as before. */
@@ -271,7 +274,7 @@ export function DashboardShell({
   return (
     <PlaybookProvider>
     {/* Upload queue lives in the shell so uploads keep running across in-app navigation. */}
-    <UploadQueueProvider company={nav?.companyId ?? null}>
+    <UploadQueueProvider company={nav?.companyId ?? null} serverUpload={serverUpload}>
     <UploadQueueIndicator />
     <CoopChatProvider scopeLabel={scopeLabel || undefined}>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
