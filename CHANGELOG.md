@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: scan detail gains a Status filter (Needs review, Set aside, …)
+
+The scan-detail page (`components/analyst/scan-views.tsx`) could filter its pages by Show category and form Version. Added a third row, **Status**, that filters by each page's raw upload status, finer than Show (a "Read" page is either still **Needs review** or already **Committed**). Chips: Needs review, Processing, Failed, Set aside (rejected), Committed, each with a status-colored dot and a count, shown only when at least two statuses are present, and combined with the Show and Version filters (AND). Mirrors the existing filter rows exactly.
+
 ## 2026-11-09 — Uploads: lone/unreadable pages go to a "needs sorting" lane, not a batch each
 
 Defect #2 from the batch-segmentation trace, paired with #1 below so a scan with a stuck page splits *and* splits usefully. The splitter gave every grouped "form" its own batch, so a shuffled pile produced dozens of one-page batches. Now it peels off only real forms and keeps the rest together to sort.

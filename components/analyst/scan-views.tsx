@@ -12,7 +12,7 @@ import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod, VERSION_LABEL, VERSION_COLOR} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
 import {VersionPill} from '@/components/analyst/version-pill';
-import type {UploadRow} from '@/src/goldline-data';
+import type {UploadRow, UploadStatus} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {assignFormBaAction} from '@/app/uploads/actions';
 import {sendReread} from '@/src/upload-transport';
@@ -43,6 +43,17 @@ type FileCat = 'read' | 'failed' | 'sales' | 'blank' | 'other';
 const FILE_CAT_LABEL: Record<FileCat, string> = {read: 'Read', failed: "Couldn't read", sales: 'Sales report', blank: 'Blank page', other: 'Set aside'};
 const FILE_CAT_ORDER: FileCat[] = ['read', 'failed', 'sales', 'blank', 'other'];
 const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
+// The raw upload status, as its own filter (finer than "Show": a Read page is either
+// still Needs review or already Committed). Order reads worst-to-settled.
+const STATUS_FILTER_ORDER: UploadStatus[] = ['needs_review', 'processing', 'failed', 'rejected', 'committed'];
+const STATUS_LABEL: Record<UploadStatus, string> = {needs_review: 'Needs review', processing: 'Processing', failed: 'Failed', rejected: 'Set aside', committed: 'Committed'};
+const STATUS_DOT: Record<UploadStatus, string> = {
+  needs_review: 'var(--status-warn)',
+  processing: 'var(--muted-foreground)',
+  failed: 'var(--status-crit)',
+  rejected: 'var(--version-legacy, #6d4c9a)',
+  committed: 'var(--status-good)',
+};
 function fileCat(u: UploadRow): FileCat {
   if (u.status === 'committed' || u.status === 'needs_review') return 'read';
   if (u.status === 'failed') return 'failed';
@@ -64,6 +75,11 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
   const chooseVersion = (v: 'all' | FormVersion) => {
     setVersionFilter(v);
+    setPage(1);
+  };
+  const [statusFilter, setStatusFilter] = useState<'all' | UploadStatus>('all');
+  const chooseStatus = (s: 'all' | UploadStatus) => {
+    setStatusFilter(s);
     setPage(1);
   };
   const choose = (c: FileCat | 'all') => {
@@ -138,10 +154,19 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   }, [groups]);
   const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
 
+  // Pages by raw status (one per page, its best attempt), combined with the other filters (AND).
+  const statusCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const g of groups) c[g.best.status] = (c[g.best.status] ?? 0) + 1;
+    return c;
+  }, [groups]);
+  const statusesPresent = STATUS_FILTER_ORDER.filter((s) => (statusCounts[s] ?? 0) > 0);
+
   const shown = groups.filter(
     (g) =>
       (filter === 'all' || fileCat(g.best) === filter) &&
-      (versionFilter === 'all' || (fileCat(g.best) === 'read' && g.best.form_version === versionFilter)),
+      (versionFilter === 'all' || (fileCat(g.best) === 'read' && g.best.form_version === versionFilter)) &&
+      (statusFilter === 'all' || g.best.status === statusFilter),
   );
   const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
@@ -197,6 +222,19 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
             {versionsPresent.map((v) => (
               <FilterChip key={v} active={versionFilter === v} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
                 {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{versionCounts[v]}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
+        {statusesPresent.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by review status">
+            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Status</span>
+            <FilterChip active={statusFilter === 'all'} onClick={() => chooseStatus('all')}>
+              All <span className="tabular-nums opacity-70">{statusesPresent.reduce((a, s) => a + (statusCounts[s] ?? 0), 0)}</span>
+            </FilterChip>
+            {statusesPresent.map((s) => (
+              <FilterChip key={s} active={statusFilter === s} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
+                {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{statusCounts[s]}</span>
               </FilterChip>
             ))}
           </div>
