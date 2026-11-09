@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: Per store gets a store filter / jump pill bar
+
+The Per store view of a scan stacks a "Needs a store" section, one section per grouped store, and "One-off stores" vertically, so a scan with many stores made you scroll a long way with no sense of what was below. Added a wrapping pill bar above the board (shown when there is more than one section): "All" plus one pill per section in the order they appear, each with its form count, and the "Needs a store" pill tinted red. Tapping a pill shows only that store's forms right under the bar; tapping it again, or "All", clears. The filter is ephemeral client state (no URL change, so it does not touch Back), self-clears if the underlying data changes, and the "Set aside" list is unaffected. Verified on the staging DB against Scan2026-10-30_171554 (51 forms across 6 stores).
 ## 2026-11-09 — Load time, round 2: functions in Singapore, fewer repeat reads
 
 This follows the 2026-11-05 sales totals work. The plan and its measurements are in a Claude artifact: https://claude.ai/artifact/9fJHdqRKUjnr2rNC2EgBZZ
