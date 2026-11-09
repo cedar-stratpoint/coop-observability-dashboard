@@ -125,6 +125,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
               <Link
                 key={key}
                 href={href(key)}
+                replace
                 role="tab"
                 aria-selected={active}
                 className={
@@ -140,7 +141,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
         {ba && view === 'store' && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
             BA · {ba}
-            <Link href={href('store')} aria-label="Clear BA filter" className="text-muted-foreground hover:text-foreground">
+            <Link href={href('store')} replace aria-label="Clear BA filter" className="text-muted-foreground hover:text-foreground">
               <X className="size-3" />
             </Link>
           </span>
@@ -170,6 +171,7 @@ function VersionCard({href, label, count, color, active}: {href: string; label: 
   return (
     <Link
       href={href}
+      replace
       aria-pressed={active}
       className="group flex min-w-[108px] flex-col gap-0.5 rounded-xl border px-3.5 py-2.5 transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/35 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
       style={{

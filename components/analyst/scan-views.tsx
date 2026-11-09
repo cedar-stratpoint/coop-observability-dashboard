@@ -479,6 +479,7 @@ export function BaCards({
                 <div className="min-w-0">
                   <Link
                     href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}`}
+                    replace
                     className="block truncate font-heading text-[15px] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
                     title={g.name}
                   >
