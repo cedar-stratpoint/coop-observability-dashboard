@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Load time, round 2: functions in Singapore, fewer repeat reads
+
+This follows the 2026-11-05 sales totals work. The plan and its measurements are in a Claude artifact: https://claude.ai/artifact/9fJHdqRKUjnr2rNC2EgBZZ
+
+- **Functions pinned to Singapore** (`vercel.json`, `regions: ["sin1"]`). A preview deploy answered `x-vercel-id: sin1::iad1`: the request entered at Singapore and the page ran in US East, while Nichido is in Singapore and the archive (sign-in, memberships) in Mumbai. Every query a page awaited crossed the Pacific twice (about 200 ms or more each, several in sequence per page). Check after deploy: a dynamic route's `x-vercel-id` should read `sin1::sin1`.
+- **`sales_units` cached** (`src/goldline-sales-units.ts`). The inventory board, product page, audit and flags decrypted sales on every load. It now goes through `cachedSalesView` (under the committed sales files, expired by sales writes), stored gzipped. A result over 1.5 MB packed is read fresh instead, because the data cache caps entries at 2 MB. Staging, dev server, first → repeat load: inventory board 2.3 s → 0.42 s, product page 0.7 s → 0.23 s. Repeat loads made no `sales_units` calls.
+- **Sales version read once per request** (React `cache`). Each cached sales read looked up the committed sales files again, 2 to 4 times per page.
+- **One session read per request.** The root layout called `auth()` beside the nav's shared `sessionOnce`. On a request whose memberships were over 5 minutes old, that meant an extra membership fetch from Mumbai.
+- **Chat Markdown loads with the first answer.** `react-markdown` + `remark-gfm` (a 141 KB chunk, uncompressed) were in every page's bundle through the always-mounted chat drawer. They're now a `next/dynamic` import.
+
+Still to do (see the artifact): `s5` on Nichido prod (needs a go-ahead), then removing the `sales_rollup` workarounds; the waterfall and streaming items; and the "grows with history" reads before inventory scans scale up. Not changed here: `src/goldline-triage-data.ts:154` already fails the pagination guard on develop.
+
 ## 2026-11-09 — Uploads: Per store gets a store filter / jump pill bar
 
 The Per store view of a scan stacks a "Needs a store" section, one section per grouped store, and "One-off stores" vertically, so a scan with many stores made you scroll a long way with no sense of what was below. Added a wrapping pill bar above the board (shown when there is more than one section): "All" plus one pill per section in the order they appear, each with its form count, and the "Needs a store" pill tinted red. Tapping a pill shows only that store's forms right under the bar; tapping it again, or "All", clears. The filter is ephemeral client state (no URL change, so it does not touch Back), self-clears if the underlying data changes, and the "Set aside" list is unaffected. Verified on the staging DB against Scan2026-10-30_171554 (51 forms across 6 stores).

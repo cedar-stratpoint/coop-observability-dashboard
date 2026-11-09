@@ -2,18 +2,25 @@
 
 import {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
 import {useSearchParams, usePathname, useRouter} from 'next/navigation';
+import dynamic from 'next/dynamic';
 import {Sparkles, X, ArrowUp, Plus, Copy, Check, Square, RotateCcw, ArrowRight, AlertCircle, Maximize2, Minimize2} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {createLineDecoder} from '@/src/chat/stream-protocol';
 import {ChatBlocks} from './chat-blocks';
 import {interleave, redactForStorage, sanitizeBlocks, type PlacedBlock} from './chat-blocks-format';
-import {ChatMarkdown} from './chat-markdown';
 import {applyStreamEvents, closeStream, startStream, StreamSlot} from './chat-stream-state';
 import {describeFilters, reportBody, sanitizeReport} from './report-state';
 import {ReportSaveBar} from './reports-save-bar';
 import {lastUserPrompt, loadSavedRef, SAVED_KEY, serializeSavedRef} from './reports-helpers';
 import type {ReportSpec} from '@/src/chat/report-types';
 import type {SavedReportRef} from '@/src/reports-suggest';
+
+// react-markdown + remark-gfm are an async chunk: the drawer sits in the shell on every page and is usually closed, so the
+// Markdown stack loads with the first answer instead of with every page (same pattern as ChartView in chat-blocks.tsx).
+const ChatMarkdown = dynamic(() => import('./chat-markdown').then((m) => m.ChatMarkdown), {
+  ssr: false,
+  loading: () => <div className="h-4 w-2/3 animate-pulse rounded bg-muted/40" aria-hidden />,
+});
 
 // `blocks` (F7): stat tiles, charts and tables the server bound; `at` = length of the accumulated raw text when the block
 // arrived, so the answer reads caveat, headline, block, then whatever streamed after it. `content` stays plain text.

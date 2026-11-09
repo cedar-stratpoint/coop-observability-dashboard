@@ -4,10 +4,9 @@ import {Suspense} from 'react';
 import {Inter, Newsreader} from 'next/font/google';
 import {cn} from '@/lib/utils';
 import {getDigests, usingMock} from '@/src/data';
-import {getNavContext} from '@/src/active-context';
+import {getNavContext, getSession} from '@/src/active-context';
 import {DashboardShell} from '@/components/analyst/dashboard-shell';
 import {IntroSplash} from '@/components/analyst/intro-splash';
-import {auth} from '@/auth';
 import {devAuthEnabled, DEV_SESSION} from '@/src/dev-auth';
 import './globals.css';
 
@@ -39,7 +38,7 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({children}: {children: ReactNode}) {
   // Only authenticated views get the shell + data; the sign-in page renders bare.
-  const session = devAuthEnabled() ? DEV_SESSION : await auth();
+  const session = devAuthEnabled() ? DEV_SESSION : await getSession();
   const authed = Boolean(session?.user);
   // The shell (header + week sidebar + tab nav) is shared across all tab routes,
   // so it fetches the week list once here; getDigests() is React-cached so the
