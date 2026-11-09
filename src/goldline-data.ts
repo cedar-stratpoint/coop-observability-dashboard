@@ -139,6 +139,46 @@ export async function setUploadStatus(
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
 }
 
+// A read cannot outlive the upload route's maxDuration (300s), so an inventory page still
+// 'processing' well past that is an orphan: its function was hard-killed (a deploy mid-read,
+// or a platform timeout) before it could mark itself, and a dead function never will. 10 min
+// is comfortably dead with no risk of catching a live read.
+const STALE_READ_MIN = 10;
+
+/**
+ * Flip orphaned reads (stuck 'processing' past STALE_READ_MIN) to 'failed' with a re-read
+ * reason, so a page is never frozen and the reviewer can retry it. Scoped to one batch or one
+ * scan, so it is a cheap bounded write run when that page is opened (no background job needed).
+ * Returns how many it reset. Best-effort: a failure here never blocks the page load.
+ */
+export async function reconcileStaleReads(companyId: string, scope: {batchId: string} | {source: string}): Promise<number> {
+  if (!goldlineConfigured()) return 0;
+  const cutoff = new Date(Date.now() - STALE_READ_MIN * 60_000).toISOString();
+  let q = db()
+    .from('uploads')
+    .update({
+      status: 'failed' satisfies UploadStatus,
+      reject_reason: 'The read stalled and did not finish. Re-read this page to try again.',
+      error_detail: 'auto-reset: stuck in processing past the read window',
+    })
+    .eq('company_id', companyId)
+    .eq('kind', 'inventory_pdf')
+    .eq('status', 'processing')
+    .lt('created_at', cutoff);
+  if ('batchId' in scope) {
+    q = q.eq('batch_id', scope.batchId);
+  } else {
+    // LIKE metacharacters in the scan name are escaped so the prefix matches literally.
+    q = q.like('filename', `${scope.source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%`);
+  }
+  const res = await q.select('id');
+  if (res.error) {
+    console.error('reconcileStaleReads', res.error.message);
+    return 0;
+  }
+  return res.data?.length ?? 0;
+}
+
 /**
  * Phase 0 — persist a page's classifier output on its upload row (additive columns),
  * plus the semantic `page_key` used for duplicate / re-upload detection. Best-effort:
