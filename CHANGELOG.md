@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: tidy the scan-detail "Set aside" list, loosen the form-card grid
+
+Two small triage-board polish items on the scan-detail page (`/uploads/scan/[source]`):
+- **Set aside** no longer prints one near-identical filename per page. It groups the parked pages by reason (Sales reports · out of scope, Blank pages, Needs placing) and shows each as a row of compact page-number chips, so a 98-page scan's tail reads as "14 sales reports, 14 blanks" at a glance instead of a wall of `Scan… (page N of 98).pdf` rows (Hick's Law: fewer things to scan). Page numbers parsed from the filename; each chip is labelled "Page N" for screen readers.
+- **Form cards** get a little more room: the grid gap went from `gap-3` to `gap-x-4 gap-y-5` (a touch more between columns, a bit more between rows).
+
 ## 2026-11-10 — Uploads: a refresh-proof "still reading" indicator for server-driven scans (flagged off)
 
 While the server reads a scan (P0–P2), the browser now shows a live, refresh-surviving "still reading" status, so a store manager never loses track after a refresh or acts on a scan-detail page before its pages are all read. A new `ScanReadingProvider` (in the shell) polls DB state (`activeScanProgressAction` → `latestActiveScan`) for the company's most recent in-flight scan, so the indicator reappears on any page and after a refresh, unlike the in-memory upload queue it complements. One source, three surfaces:

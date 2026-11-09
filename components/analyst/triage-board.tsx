@@ -565,15 +565,35 @@ export function TriageBoard({
             <span className="text-xs text-muted-foreground tabular-nums">{data.parked.length}</span>
           </div>
           <Card>
-            <CardContent className="flex flex-col gap-1.5 py-3 text-sm">
-              {data.parked.map((p) => (
-                <div key={p.uploadId} className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{p.filename || 'Scanned page'}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {p.kind === 'sales' ? 'Sales report (out of scope)' : p.kind === 'blank' ? 'Blank page' : 'Needs placing'}
-                  </span>
-                </div>
-              ))}
+            <CardContent className="flex flex-col gap-4 py-4">
+              {PARKED_GROUPS.map(({kind, label, hint}) => {
+                const pages = data.parked
+                  .filter((p) => p.kind === kind)
+                  .map((p) => ({uploadId: p.uploadId, filename: p.filename, n: parkedPageNo(p.filename)}))
+                  .sort((a, b) => (a.n ?? Number.MAX_SAFE_INTEGER) - (b.n ?? Number.MAX_SAFE_INTEGER));
+                if (!pages.length) return null;
+                return (
+                  <div key={kind} className="flex flex-col gap-2">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-medium text-foreground">{label}</span>
+                      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+                      <span className="ml-auto text-xs text-muted-foreground tabular-nums">{pages.length}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5" aria-label={`${label} pages`}>
+                      {pages.map((p) => (
+                        <span
+                          key={p.uploadId}
+                          title={p.n ? `Page ${p.n}` : p.filename || 'Scanned page'}
+                          aria-label={p.n ? `Page ${p.n}` : p.filename || 'Scanned page'}
+                          className="inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums"
+                        >
+                          {p.n ?? '·'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         </section>
@@ -585,7 +605,24 @@ export function TriageBoard({
 }
 
 function FormGrid({children}: {children: React.ReactNode}) {
-  return <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{children}</div>;
+  // A touch more room between cards (and a little extra vertically between rows) so a dense
+  // 4-up grid breathes.
+  return <div className="grid grid-cols-1 items-start gap-x-4 gap-y-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{children}</div>;
+}
+
+// The set-aside page (sales sheet, blank back, or a page we couldn't place) grouped by reason,
+// so a 98-page scan's tail reads as "14 sales reports, 14 blanks" instead of a wall of near-
+// identical filenames (Hick's Law: fewer things to scan). Order is most-expected first.
+const PARKED_GROUPS: Array<{kind: 'sales' | 'blank' | 'unplaceable'; label: string; hint?: string}> = [
+  {kind: 'sales', label: 'Sales reports', hint: 'out of scope'},
+  {kind: 'blank', label: 'Blank pages'},
+  {kind: 'unplaceable', label: 'Needs placing'},
+];
+
+/** The page number from a split page's filename ("(page 7 of 98)" or "__page_7_of_98__"). */
+function parkedPageNo(filename: string): number | null {
+  const m = /page[\s_]+(\d+)[\s_]+of/i.exec(filename);
+  return m ? Number(m[1]) : null;
 }
 
 /** A store (or triage bucket) heading above its cards: the store name once, its code, and
