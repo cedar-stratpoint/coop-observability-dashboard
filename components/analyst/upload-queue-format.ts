@@ -41,6 +41,32 @@ export const CATEGORY_LABEL: Record<ItemCategory, string> = {
 };
 export const FILTER_ORDER: ItemCategory[] = ['success', 'failed', 'sales', 'blank', 'other'];
 
+// Two orthogonal facets for the scan file filter, the same shape as the scan-detail view:
+// a page's TYPE (what it is) and its STATUS (where it is in the lifecycle). The old single
+// bucket mixed the two, so "Sales report"/"Blank page" doubled as both a kind and an outcome.
+export type UploadType = 'inventory' | 'sales' | 'blank';
+/** What the page is, once known. A page still reading, or one that couldn't be classified,
+ *  has no type (it shows under Status), so it is never duplicated across both facets. */
+export function uploadType(i: QueueItem): UploadType | null {
+  if (i.pageKind === 'sales') return 'sales';
+  if (i.pageKind === 'blank') return 'blank';
+  if (i.pageKind === 'inventory') return 'inventory';
+  if (i.state === 'done') return 'inventory'; // read as an inventory page, kind not restated
+  return null;
+}
+
+export type UploadStatusFacet = 'waiting' | 'processing' | 'needs_review' | 'set_aside' | 'failed' | 'cancelled';
+/** Where the page is in the read/review lifecycle. A parked sales/blank/non-inventory page is
+ *  "set aside", distinct from a real read error ("failed"). */
+export function uploadStatus(i: QueueItem): UploadStatusFacet {
+  if (i.state === 'running') return 'processing';
+  if (i.state === 'queued' || i.state === 'waiting_period') return 'waiting';
+  if (i.state === 'done') return 'needs_review';
+  if (i.state === 'cancelled') return 'cancelled';
+  if (i.pageKind === 'sales' || i.pageKind === 'blank' || i.pageKind === 'unknown') return 'set_aside';
+  return 'failed';
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const n = (v: number) => v.toLocaleString('en-US');
 

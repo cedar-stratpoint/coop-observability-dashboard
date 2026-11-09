@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
-import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, CATEGORY_LABEL, FILTER_ORDER, type ItemCategory, type QueueGroup} from '@/components/analyst/upload-queue-format';
+import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, uploadStatus, uploadType, CATEGORY_LABEL, type ItemCategory, type QueueGroup, type UploadStatusFacet, type UploadType} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
@@ -432,14 +432,21 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 const PAGES_PER_VIEW = 12;
 const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
 
-// The two live lifecycle states a page can be filtered by, shown only while a scan is still
-// reading. "Done" isn't here — it's just the terminal outcome chips (Read / Sales / …).
-type ProgressFilter = 'processing' | 'waiting';
-type StatusFilter = 'all' | ItemCategory | ProgressFilter;
-const PROGRESS_FILTER_ORDER: ProgressFilter[] = ['processing', 'waiting'];
-const PROGRESS_LABEL: Record<ProgressFilter, string> = {processing: 'Processing', waiting: 'Waiting'};
-const isProcessing = (i: QueueItem) => i.state === 'running';
-const isWaiting = (i: QueueItem) => i.state === 'queued' || i.state === 'waiting_period';
+// Three orthogonal facets, the same as the scan-detail view (no chip means two things at
+// once): TYPE (what the page is), STATUS (where it is in the lifecycle), and form VERSION.
+const TYPE_FILTER_ORDER: UploadType[] = ['inventory', 'sales', 'blank'];
+const TYPE_LABEL: Record<UploadType, string> = {inventory: 'Inventory form', sales: 'Sales report', blank: 'Blank page'};
+// Live states (Waiting, Processing) sit first; they vanish once a scan finishes.
+const STATUS_FILTER_ORDER: UploadStatusFacet[] = ['waiting', 'processing', 'needs_review', 'failed', 'set_aside', 'cancelled'];
+const STATUS_LABEL: Record<UploadStatusFacet, string> = {waiting: 'Waiting', processing: 'Processing', needs_review: 'Needs review', failed: 'Couldn’t read', set_aside: 'Set aside', cancelled: 'Cancelled'};
+const STATUS_DOT: Record<UploadStatusFacet, string> = {
+  waiting: 'var(--muted-foreground)',
+  processing: 'var(--muted-foreground)',
+  needs_review: 'var(--status-warn)',
+  failed: 'var(--status-crit)',
+  set_aside: 'var(--version-legacy, #6d4c9a)',
+  cancelled: 'var(--muted-foreground)',
+};
 
 // A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
 // line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
@@ -448,39 +455,45 @@ const isWaiting = (i: QueueItem) => i.state === 'queued' || i.state === 'waiting
 function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState<StatusFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | UploadType>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | UploadStatusFacet>('all');
   const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
-  // How many pages fall in each plain-language bucket, for the filter chips + counts.
-  const counts = useMemo(() => {
-    const c = {} as Record<ItemCategory, number>;
+
+  // Facet 1 — TYPE (what the page is). A page still reading, or one that couldn't be read,
+  // has no type and no chip here; it is found under Status.
+  const typeCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
     for (const i of g.items) {
-      const k = itemCategory(i);
-      c[k] = (c[k] ?? 0) + 1;
+      const t = uploadType(i);
+      if (t) c[t] = (c[t] ?? 0) + 1;
     }
     return c;
   }, [g.items]);
-  const present = FILTER_ORDER.filter((c) => (counts[c] ?? 0) > 0);
-  // Lifecycle chips — only the live states (waiting, processing). They appear only while the
-  // scan is still being read and vanish once every page is done, so they never clutter a
-  // finished scan (Hick's Law). "Done" is just the terminal buckets above, so it isn't a chip.
-  const progressCounts = {
-    processing: g.items.filter((i) => isProcessing(i)).length,
-    waiting: g.items.filter((i) => isWaiting(i)).length,
-  };
-  const progressPresent = PROGRESS_FILTER_ORDER.filter((p) => progressCounts[p] > 0);
-  // A live filter whose pages all finished (the scan caught up): fall back to All so the list
-  // doesn't read as empty.
+  const typesPresent = TYPE_FILTER_ORDER.filter((t) => (typeCounts[t] ?? 0) > 0);
+
+  // Facet 2 — STATUS (lifecycle). Live states (Waiting, Processing) appear only while the
+  // scan is still reading and vanish once every page is done, so they never clutter a
+  // finished scan (Hick's Law).
+  const statusCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const i of g.items) c[uploadStatus(i)] = (c[uploadStatus(i)] ?? 0) + 1;
+    return c;
+  }, [g.items]);
+  const statusesPresent = STATUS_FILTER_ORDER.filter((s) => (statusCounts[s] ?? 0) > 0);
+  // A live status filter whose pages all finished (the scan caught up): fall back to All so
+  // the list doesn't read as empty.
   useEffect(() => {
-    if ((filter === 'processing' || filter === 'waiting') && progressCounts[filter] === 0) setFilter('all');
-  }, [filter, progressCounts.processing, progressCounts.waiting]);
-  // Read pages by form version, for the version filter. Only read inventory pages carry a
-  // version, so this is a sub-filter of "Read" (a sales/blank page has none).
+    if ((statusFilter === 'processing' || statusFilter === 'waiting') && (statusCounts[statusFilter] ?? 0) === 0) setStatusFilter('all');
+  }, [statusFilter, statusCounts.processing, statusCounts.waiting]);
+
+  // Facet 3 — form VERSION, a sub-filter of inventory forms (only they carry a version).
   const versionCounts = useMemo(() => {
     const c = {} as Record<string, number>;
-    for (const i of g.items) if (itemCategory(i) === 'success' && i.formVersion && i.formVersion !== 'unknown') c[i.formVersion] = (c[i.formVersion] ?? 0) + 1;
+    for (const i of g.items) if (uploadType(i) === 'inventory' && i.formVersion && i.formVersion !== 'unknown') c[i.formVersion] = (c[i.formVersion] ?? 0) + 1;
     return c;
   }, [g.items]);
   const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
+
   // Pages the user just hit retry on: keep them in view while they re-read (even under a
   // filter they no longer match) so the row shows "Retrying…" in place instead of popping
   // out the instant the icon is clicked.
@@ -489,21 +502,21 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
     setRetrying((s) => new Set(s).add(id));
     api.retry(id);
   };
-  // Status and version filters combine (AND): a page shows when it matches both. A page the
-  // user just retried stays in view while it re-reads, even if it no longer matches.
-  const matchStatus = (i: QueueItem) => {
-    if (filter === 'all') return true;
-    if (filter === 'processing') return isProcessing(i) || retrying.has(i.id);
-    if (filter === 'waiting') return isWaiting(i);
-    return itemCategory(i) === filter || (retrying.has(i.id) && itemCategory(i) === 'working');
-  };
-  const matchVersion = (i: QueueItem) => versionFilter === 'all' || (itemCategory(i) === 'success' && i.formVersion === versionFilter);
-  const filtered = g.items.filter((i) => matchStatus(i) && matchVersion(i));
+  // The three facets combine (AND). A page the user just retried stays in view while it
+  // re-reads, counted as Processing, even if it no longer matches the chosen filter.
+  const matchType = (i: QueueItem) => typeFilter === 'all' || uploadType(i) === typeFilter;
+  const matchStatus = (i: QueueItem) => statusFilter === 'all' || uploadStatus(i) === statusFilter || (retrying.has(i.id) && statusFilter === 'processing');
+  const matchVersion = (i: QueueItem) => versionFilter === 'all' || (uploadType(i) === 'inventory' && i.formVersion === versionFilter);
+  const filtered = g.items.filter((i) => matchType(i) && matchStatus(i) && matchVersion(i));
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
   const safePage = Math.min(page, pageCount);
   const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
-  const choose = (f: StatusFilter) => {
-    setFilter(f);
+  const chooseType = (t: 'all' | UploadType) => {
+    setTypeFilter(t);
+    setPage(1);
+  };
+  const chooseStatus = (s: 'all' | UploadStatusFacet) => {
+    setStatusFilter(s);
     setPage(1);
   };
   const chooseVersion = (v: 'all' | FormVersion) => {
@@ -543,27 +556,33 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
       </button>
       {open && (
         <div className="flex flex-col border-t border-border bg-muted/20">
-          {/* Filter chips — status on one row, form version on a second (they combine). Each
-              row appears only when there's more than one thing to sort between. A labeled
-              column makes each row read as a control; failures are tinted, versions get a
-              colored dot that matches their pill. */}
-          {(present.length + progressPresent.length >= 2 || versionsPresent.length >= 2) && (
+          {/* Filter chips — three orthogonal facets (Type, Status, Version), matching the
+              scan-detail view. Each row appears only when there's more than one value to sort
+              between; the rows combine with AND. Status values carry a colored dot. */}
+          {(typesPresent.length >= 2 || statusesPresent.length >= 2 || versionsPresent.length >= 2) && (
             <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3.5">
-              {present.length + progressPresent.length >= 2 && (
-                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
-                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
-                  <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
+              {typesPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by type">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Type</span>
+                  <FilterChip active={typeFilter === 'all'} onClick={() => chooseType('all')}>
                     All <span className="tabular-nums opacity-70">{g.items.length}</span>
                   </FilterChip>
-                  {/* Live states first (only while reading), then the terminal outcomes. */}
-                  {progressPresent.map((p) => (
-                    <FilterChip key={p} active={filter === p} onClick={() => choose(p)}>
-                      {PROGRESS_LABEL[p]} <span className="tabular-nums opacity-70">{progressCounts[p]}</span>
+                  {typesPresent.map((t) => (
+                    <FilterChip key={t} active={typeFilter === t} onClick={() => chooseType(t)}>
+                      {TYPE_LABEL[t]} <span className="tabular-nums opacity-70">{typeCounts[t]}</span>
                     </FilterChip>
                   ))}
-                  {present.map((c) => (
-                    <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
-                      {CATEGORY_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+                </div>
+              )}
+              {statusesPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Status</span>
+                  <FilterChip active={statusFilter === 'all'} onClick={() => chooseStatus('all')}>
+                    All <span className="tabular-nums opacity-70">{g.items.length}</span>
+                  </FilterChip>
+                  {statusesPresent.map((s) => (
+                    <FilterChip key={s} active={statusFilter === s} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
+                      {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{statusCounts[s]}</span>
                     </FilterChip>
                   ))}
                 </div>
