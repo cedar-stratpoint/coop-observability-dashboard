@@ -8,7 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-09 — Uploads: a stalled read is reset instead of stuck on the spinner forever
+## 2026-11-09 — Uploads: a set-aside page (blank back, sales sheet) gets a real view, not an empty workbench
+
+Opening a blank or sales page in the Per file review showed a broken layout: the full-height review scaffold with a tall, narrow scan column and a stray one-line message, since there were no rows to review. Gave the no-review case its own layout.
+
+- **`components/analyst/upload-review.tsx`.** A scanned page with no extraction (a blank back, a sales sheet, or one Coop couldn't read) now shows a modest scan preview beside a plain explainer: a status pill (Set aside / Couldn't read), a heading, and a line saying what it is and that it won't be committed (which is expected), plus a nudge to use the ‹ › arrows. The tall sticky preview is only used when there are rows to review.
+- Sales CSV / POS exports keep their own "commits straight to sales" summary. The preview still enlarges on click.
 
 A page read can't outlive the upload route's 300s `maxDuration`, but if its function is hard-killed (a deploy mid-read, or a platform timeout) before the in-code catch runs, the upload is frozen at `processing` with no one to mark it — a dead function can't. We found pages stuck on the spinner for 14 to 100+ hours, which also blocked their form from committing. Added a reaper so this self-heals.
 
