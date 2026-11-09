@@ -1,6 +1,6 @@
 # Server-driven scan upload — plan
 
-**Status:** proposed (2026-11-09). **Owner decisions locked:** orchestration = Supabase `pg_cron` + `pg_net`; rollout = hybrid behind a flag.
+**Status:** proposed (2026-11-09). **Owner decisions locked:** orchestration = Supabase `pg_cron` + `pg_net`; rollout = hybrid behind a **per-company** flag (pilot Nichido); throughput = **~8 min / 98 pages** (pump `K=6` every 30s); big-PDF upload = **re-PUT on drop for v1** (no resumable/tus yet).
 
 ## Problem
 
@@ -26,7 +26,7 @@ On the Nichido project (Staging first):
 - A Postgres function `goldline_pump_reads()` runs on a `pg_cron` schedule (every ~30s). Each tick:
   - **Claims** up to `K` `queued` inventory pages atomically — `UPDATE uploads SET status='processing', claimed_at=now() WHERE id IN (SELECT id FROM uploads WHERE status='queued' AND kind='inventory_pdf' ORDER BY created_at LIMIT K FOR UPDATE SKIP LOCKED) RETURNING id`. `SKIP LOCKED` + the status flip guarantees **no double-read** across overlapping ticks.
   - For each claimed id, fires an async HTTP call via `pg_net` to a new **read-next route** (`POST /api/goldline/read-page`), one page per call → real fan-out parallelism.
-- Parallelism is tuned by `K` (pages claimed per tick) and the cron interval, bounded by the Anthropic vision rate limit and Vercel function concurrency. Start conservative (e.g. K=6 every 30s ≈ 12/min ≈ ~8 min for 98 pages) and tune.
+- Parallelism is tuned by `K` (pages claimed per tick) and the cron interval, bounded by the Anthropic vision rate limit and Vercel function concurrency. **Chosen default: `K=6` every 30s ≈ 12/min ≈ ~8 min for 98 pages** (balanced; comfortable headroom under the vision rate limit). `K` and the interval are configurable so we can tune without a redeploy.
 - **Auth:** the read route is public, so `pg_net` must send a secret header (`CRON_SECRET` / `GOLDLINE_PUMP_SECRET`) that the route checks; it does company-scoped writes, so it is never callable unauthenticated.
 - **Durability:** a claimed page that never completes (function died) is caught by the existing reaper (stale `processing` → `failed`), then re-`queued` on retry; a tick that misses is retried next tick. No work is lost.
 
@@ -49,14 +49,14 @@ Alternatives considered: QStash (cleanest fan-out + retries, but a new vendor) a
 - `upload-queue.tsx`: for the server path, after the PUT + ingest, drop the in-memory per-page queue and **poll** the batch/scan for progress; keep the legacy client path behind the flag.
 - Progress UI: the uploader's live list polls DB status (the Type/Status/Version facets already read server state).
 
-**Flag:** `GOLDLINE_SERVER_UPLOAD` (env or company setting). On → PDF scans go server-driven; off → current client path. CSV / single-file uploads stay on the direct path either way.
+**Flag:** a **per-company** setting (not a global env flag), so we enable it for **Nichido only** first, prove it on real scans, then widen. On → that company's PDF scans go server-driven; off → current client path. CSV / single-file uploads stay on the direct path either way.
 
 ## Key risks / design notes
 
 - **No double-read:** the atomic claim (`FOR UPDATE SKIP LOCKED` + status flip) is the crux; without it two ticks could read one page twice (double inventory). Must be covered by a test against the claim SQL.
 - **Server-side split of a 114 MB PDF** within a 300s ingest function: `pdf-lib` split is fast, but watch memory. If a scan is too large, split in bounded chunks, or make splitting itself a queued job.
 - **Rate limits / cost:** cap concurrent vision reads via `K`; a runaway fan-out could hit Anthropic limits or spend. Make `K` and the interval configurable.
-- **Signed-upload size/time:** a 114 MB PUT on a slow line is itself long; show upload progress and allow resume of the single PUT (Supabase resumable/tus if needed). This upload is the one step still tied to the tab, but it is a single transfer, not 98.
+- **Signed-upload size/time:** a 114 MB PUT on a slow line is itself long and is the one step still tied to the tab. **v1: show upload progress, and if the single PUT drops the user re-uploads the file** (no resumable/tus in v1). It is one transfer, not 98, and the server reads — the main win — are already refresh-safe. Resumable (tus) is a fast-follow if interruptions prove common.
 - **Idempotency:** `page_key` dedup already prevents duplicate pages on re-ingest; re-running ingest is safe.
 - **Staging-first, additive** (workspace rule): all schema + `pg_cron`/`pg_net` land on Nichido Staging (`jcqlnrvplaapvcxyhcns`) via reviewed migration before any PROD promotion; never alter existing columns destructively.
 
@@ -74,8 +74,10 @@ Alternatives considered: QStash (cleanest fan-out + retries, but a new vendor) a
 - A killed read is reset and retried automatically (reaper); the scan still finishes.
 - CSV and single-file uploads unaffected.
 
-## Open questions for the team
+## Decisions (finalized 2026-11-09)
 
-1. **Target read throughput** (how fast must a 98-page scan finish?) — sets `K` and the cron interval.
-2. **Big-PDF upload resume** — is the single large PUT's own interruption (bad wifi) in scope for v1, or acceptable to re-PUT?
-3. **Flag granularity** — global env flag, or per-company (so we can pilot with Nichido only)?
+1. **Throughput:** balanced, **~8 min / 98 pages** — pump `K=6` every 30s (~12/min), configurable.
+2. **Big-PDF upload:** **re-PUT on drop for v1** — show progress; resumable/tus is a fast-follow, not v1.
+3. **Flag:** **per-company** setting, **pilot Nichido** first, then widen.
+
+Everything above is locked; P0 can start.
