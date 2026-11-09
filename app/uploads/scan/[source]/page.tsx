@@ -3,7 +3,7 @@ import {LayoutGrid, Users, List, X} from 'lucide-react';
 import {BackButton} from '@/components/analyst/back-button';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {listStores, listUploads} from '@/src/goldline-data';
+import {listStores, listUploads, reconcileStaleReads} from '@/src/goldline-data';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {withCanonicalBa} from '@/src/goldline-ba-reconcile';
 import {triageBoard} from '@/src/goldline-triage-data';
@@ -58,6 +58,10 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   }
   const companyId = ctx.companyId;
   const canEdit = canEditData(ctx.role);
+
+  // Reset this scan's orphaned reads (stuck 'processing' past the read window) to 'failed'
+  // before showing it, so a page is never frozen on the spinner and can be re-read.
+  if (canEdit) await reconcileStaleReads(companyId, {source});
 
   // The board is read in every view (not just store/BA) so the version summary can count
   // forms per layout even on the file view; stores/BAs are only needed off the file view.

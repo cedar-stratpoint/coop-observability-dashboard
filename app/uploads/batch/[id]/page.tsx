@@ -2,7 +2,7 @@ import {notFound, redirect} from 'next/navigation';
 import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {catalogForCodes, getBatch, getBatchPages, listStores, splitBatchIntoForms} from '@/src/goldline-data';
+import {catalogForCodes, getBatch, getBatchPages, listStores, reconcileStaleReads, splitBatchIntoForms} from '@/src/goldline-data';
 import {MANIFESTS} from '@/src/goldline-extract';
 import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
@@ -28,6 +28,9 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   const batch = await getBatch(ctx.companyId, id);
   if (!batch) notFound();
 
+  // An orphaned read (a function hard-killed mid-read) stays stuck 'processing' forever and
+  // would block this form's commit; reset the long-dead ones to 'failed' (retryable) first.
+  if (batch.status === 'open' && canEditData(ctx.role)) await reconcileStaleReads(ctx.companyId, {batchId: id});
   const raw = await getBatchPages(ctx.companyId, id);
   const pdfPages = raw.filter((p) => p.upload.kind === 'inventory_pdf');
   // A scan with several stores' forms whose split didn't run (the tab closed mid-upload):

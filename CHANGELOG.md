@@ -8,7 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-09 — Uploads: Per file reviews one page at a time (Coop suggests the store, ‹ › arrows)
+## 2026-11-09 — Uploads: a stalled read is reset instead of stuck on the spinner forever
+
+A page read can't outlive the upload route's 300s `maxDuration`, but if its function is hard-killed (a deploy mid-read, or a platform timeout) before the in-code catch runs, the upload is frozen at `processing` with no one to mark it — a dead function can't. We found pages stuck on the spinner for 14 to 100+ hours, which also blocked their form from committing. Added a reaper so this self-heals.
+
+- **`reconcileStaleReads(companyId, {batchId} | {source})` (`src/goldline-data.ts`).** Flips any inventory page still `processing` past a 10-minute window (comfortably beyond `maxDuration`, so it never catches a live read) to `failed` with a re-read reason. A cheap, bounded write, scoped to one batch or one scan.
+- **Runs when the page is opened** (`app/uploads/batch/[id]/page.tsx`, `app/uploads/scan/[source]/page.tsx`), for editors, before the pages render. No background job. So a stalled page shows up as "Couldn't read" with its re-read button, retryable, rather than a spinner that never resolves, and it no longer blocks its batch from splitting or committing.
+- Does not change why a read stalls (a slow vision call, a deploy mid-upload); it guarantees the page never stays stuck. A genuinely unreadable page (no text) still ends `failed` for manual review, as before.
 
 The batch review's "Form pages" chip grid (every sheet of a shuffled pile, grouped by form page) was too much for reviewers stepping through a scan, and on a mixed pile it couldn't commit at all. Decided with the user: **opening a file from a scan's Per file list now reviews that one page on its own**; Per store keeps the whole-form batch review for clean forms.
 
