@@ -7,6 +7,8 @@ import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
 import {isSettledStatus, type ServerBatchProgress, type ServerPageProgress} from '@/src/server-upload-progress';
+import {summarizeScanRows, type ScanReadingSummary} from '@/src/scan-reading';
+import {uploadSource} from '@/src/goldline-upload-groups';
 import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
@@ -22,6 +24,7 @@ import {
   getBatch,
   getBatchPages,
   getUpload,
+  latestActiveScan,
   listStores,
   scanGroupSummary,
   setUploadsBa,
@@ -418,6 +421,33 @@ export async function serverBatchProgressAction(input: {
   } catch (e) {
     console.error('serverBatchProgressAction', e);
     return {ok: false, error: 'Couldn’t read the scan’s progress.'};
+  }
+}
+
+/**
+ * Server-driven upload: the company's most recent scan still being read, for the refresh-
+ * surviving "reading" indicator (floating dock off Uploads, card on Uploads). Unlike
+ * serverBatchProgressAction it needs no batchId from the client — it discovers the active
+ * batch from DB state, so it works on any page and after a refresh. Company-scoped and
+ * flag-gated (off ⇒ always null, so no polling cost for other tenants). Returns null when
+ * nothing is in flight.
+ */
+export async function activeScanProgressAction(input: {
+  company: string | null;
+}): Promise<{ok: true; scan: ScanReadingSummary | null} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!serverUploadEnabled(ctx.companyId)) return {ok: true, scan: null};
+  try {
+    const found = await latestActiveScan(ctx.companyId);
+    if (!found) return {ok: true, scan: null};
+    // uploadSource keys the scan the same way the /uploads/scan/[source] page does, so its
+    // banner can match its own scan exactly.
+    const source = uploadSource(found.filename ?? found.batchId);
+    return {ok: true, scan: summarizeScanRows(found.statuses.map((status) => ({status})), found.batchId, source)};
+  } catch (e) {
+    console.error('activeScanProgressAction', e);
+    return {ok: false, error: 'Couldn’t check scan progress.'};
   }
 }
 

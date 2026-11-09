@@ -7,6 +7,7 @@ import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, 
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
+import {ScanReadingCard} from '@/components/analyst/scan-reading';
 import {DeleteUploadDialog} from '@/components/analyst/delete-upload-dialog';
 import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
@@ -259,6 +260,11 @@ export function UploadsView({
       </header>
 
       <BatchUploader canEdit={canEdit} configured={configured} stores={stores} />
+
+      {/* Refresh-surviving "reading on the server" status: reappears after a refresh while
+          the server reads a scan. Self-suppresses when the in-session uploader is showing
+          its own card, and when no scan is in flight. */}
+      <ScanReadingCard />
 
       {/* File list */}
       <Card>

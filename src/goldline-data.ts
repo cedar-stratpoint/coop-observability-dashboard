@@ -1036,6 +1036,48 @@ export type BatchPage = {
 };
 
 /** The batch's uploads with their staged readings, oldest first. Company-scoped. */
+/**
+ * The company's most recent scan still being read server-side (any inventory page still
+ * queued or processing), with every page's status. Feeds the refresh-surviving "reading"
+ * indicator (floating dock + Uploads card): it reads straight from the DB, so it is correct
+ * on any page and after a refresh, unlike the browser's in-memory upload queue. Returns null
+ * when nothing is in flight. A lighter, status-only read than getBatchPages (no extraction
+ * join), and it reads every page of the batch (up to 250) so progress never undercounts.
+ */
+export async function latestActiveScan(
+  companyId: string,
+): Promise<{batchId: string; filename: string | null; statuses: string[]} | null> {
+  if (!goldlineConfigured()) return null;
+  const supa = db();
+  // The newest batch with at least one page still waiting or being read.
+  const head = await supa
+    .from('uploads')
+    .select('batch_id')
+    .eq('company_id', companyId)
+    .eq('kind', 'inventory_pdf')
+    .in('status', ['queued', 'processing'])
+    .not('batch_id', 'is', null)
+    .order('created_at', {ascending: false})
+    .limit(1)
+    .maybeSingle();
+  if (head.error) throw new Error(`active scan head read failed: ${head.error.message}`);
+  const batchId = head.data?.batch_id ?? null;
+  if (!batchId) return null;
+  // Every page of that batch — the whole denominator, not just the in-flight ones.
+  const res = await supa
+    .from('uploads')
+    .select('status,filename,created_at')
+    .eq('company_id', companyId)
+    .eq('batch_id', batchId)
+    .eq('kind', 'inventory_pdf')
+    .order('created_at', {ascending: true})
+    .limit(300); // ingest caps a whole-scan batch at 250 pages; 300 stays under the 1000 row cap
+  if (res.error) throw new Error(`active scan rows read failed: ${res.error.message}`);
+  const data = (res.data ?? []) as Array<{status: string; filename: string | null}>;
+  if (!data.length) return null;
+  return {batchId, filename: data[0]?.filename ?? null, statuses: data.map((r) => r.status)};
+}
+
 export async function getBatchPages(companyId: string, batchId: string): Promise<BatchPage[]> {
   if (!goldlineConfigured()) return [];
   const supa = db();
@@ -1045,7 +1087,10 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})
-    .limit(50); // pagination-ok: a batch is capped at 20 files (UI) — 50 is a hard ceiling
+    // A client store-form batch is ≤20 files, but a server-driven whole-scan batch can hold
+    // up to 250 pages — cap above that so its progress/commit never silently undercounts.
+    // 300 stays under PostgREST's 1000-row ceiling.
+    .limit(300);
   if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
   const rawUploads = (ups.data ?? []) as Array<UploadRow & {classification?: Record<string, unknown> | null}>;
   if (!rawUploads.length) return [];
@@ -1059,14 +1104,22 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
     detectedStore.set(u.id, code);
   }
   const uploads = rawUploads.map(({classification: _c, ...u}) => u) as UploadRow[];
-  const ext = await supa
-    .from('extractions')
-    .select('upload_id,page,status,doc_confidence,rows')
-    .eq('company_id', companyId)
-    .in('upload_id', uploads.map((u) => u.id)); // pagination-ok: ≤ 50 ids, one row each
-  if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
+  // Chunk the id list (a whole-scan batch can be up to 250 pages) so the `.in(...)` request
+  // URL stays bounded; one chunk for an ordinary batch, same as before.
+  const ids = uploads.map((u) => u.id);
+  type ExtRow = {upload_id: string; page: number; status: string; doc_confidence: number | null; rows: ExtractedPage};
+  const extRows: ExtRow[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const ext = await supa
+      .from('extractions')
+      .select('upload_id,page,status,doc_confidence,rows')
+      .eq('company_id', companyId)
+      .in('upload_id', ids.slice(i, i + 100)); // pagination-ok: ≤100 ids per chunk, one extraction row each
+    if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
+    extRows.push(...((ext.data ?? []) as ExtRow[]));
+  }
   const byUpload = new Map(
-    ((ext.data ?? []) as Array<{upload_id: string; page: number; status: string; doc_confidence: number | null; rows: ExtractedPage}>).map((e) => [
+    extRows.map((e) => [
       e.upload_id,
       {page: e.page, status: e.status, docConfidence: e.doc_confidence, data: e.rows} as ExtractionRecord,
     ]),

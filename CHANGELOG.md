@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: a refresh-proof "still reading" indicator for server-driven scans (flagged off)
+
+While the server reads a scan (P0–P2), the browser now shows a live, refresh-surviving "still reading" status, so a store manager never loses track after a refresh or acts on a scan-detail page before its pages are all read. A new `ScanReadingProvider` (in the shell) polls DB state (`activeScanProgressAction` → `latestActiveScan`) for the company's most recent in-flight scan, so the indicator reappears on any page and after a refresh, unlike the in-memory upload queue it complements. One source, three surfaces:
+- the floating pill off the Uploads page (stands aside for the in-session uploader so only one ever shows);
+- a card on the Uploads inbox;
+- a scan-scoped banner on the scan-detail page (`/uploads/scan/[source]`), shown only for the scan actually being read (matched by `uploadSource`), so an old scan never shows a false "reading" state.
+
+Labor-illusion UI (same principles as P2): a live "Reading N of M" count, the ochre `gl-progress-fill` sheen bar, and honest rotating stage labels (Reading handwriting · Checking the store · Matching SKUs · Saving counts). Idle-polls slowly (15s), speeds to 3s only while a scan is in flight, parks on a hidden tab, and is inert for tenants off the flag (the action returns null). Pure core unit-tested (`src/scan-reading.ts`). Flagged off with the rest of the server-driven path.
+
+Also fixed here: `getBatchPages` capped at 50 rows (built for ≤20-file batches), which undercounted a ~98-page whole-scan batch and could make the in-session P2 poll (`serverBatchProgressAction`, which reuses it) report "settled" after only the first 50 pages. Raised the page cap to 300 and chunked the extractions lookup (100 ids per request) so a 250-page batch reads completely; `latestActiveScan` stays a lighter status-only read.
+
 ## 2026-11-09 — Uploads: server-driven ingest, P2 — client upload + live polling (flagged off)
 
 Third slice (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`): the client side, so a flagged company uploads a whole scan once and watches the pages read in place without the in-memory queue that today dies on refresh. Behind the same per-company flag, so nothing changes for anyone off it. The existing client-driven path is untouched (byte-identical when the flag is off): server mode is a gated parallel path in the same provider.

@@ -14,6 +14,7 @@ import {GL_PAGE} from '@/src/goldline-ui';
 import {TriageBoard} from '@/components/analyst/triage-board';
 import {BaCards, ScanFileList} from '@/components/analyst/scan-views';
 import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
+import {ScanReadingCard} from '@/components/analyst/scan-reading';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,6 +103,11 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate font-medium text-foreground" title={source}>{source}</span>
       </nav>
+
+      {/* Still reading on the server: appears (and survives a refresh) while this scan's pages
+          are being read, so a store manager knows more forms are coming and there is nothing
+          to act on yet. Scoped to this scan; self-hides once it settles. */}
+      <ScanReadingCard scan={source} />
 
       {/* Form-version summary: how many forms of each layout, and a one-click filter. */}
       {totalForms > 0 && (
