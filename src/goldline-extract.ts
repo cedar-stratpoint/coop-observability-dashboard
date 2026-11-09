@@ -263,6 +263,9 @@ export function buildSystemPrompt(): string {
     '  set confidence below 0.6, and say so in "alt". Never silently drop it.',
     '- Match a printed code to the reference list when it clearly is the same item (a misread',
     '  character); keep the reference code then. When unsure, keep what is printed.',
+    '- In "printed_name", transcribe the product name exactly as printed beside the code on',
+    '  that row, even when it disagrees with the reference list (e.g. an older printed label).',
+    '  This is only a cross-check for the code; never change the code or counts because of it.',
     '- Counts are whole numbers. An empty cell is null; only a written "0" is zero.',
     '- A mark belongs to the column it sits under; if it straddles two, pick the nearer,',
     '  lower the confidence, and add a "straddle" mark for that cell.',
@@ -484,6 +487,9 @@ export const EXTRACTION_SCHEMA = {
         additionalProperties: false,
         properties: {
           item_code: {type: 'string'},
+          // The product name printed on the row, transcribed verbatim for cross-checking
+          // the code — never used to change the code or counts.
+          printed_name: {type: ['string', 'null']},
           stockroom: {type: ['integer', 'null']},
           drawer: {type: ['integer', 'null']},
           selling_area: {type: ['integer', 'null']},
