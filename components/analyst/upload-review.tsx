@@ -252,8 +252,21 @@ export function UploadReview({
           : `Suggested from this scan’s batch (Store ${storeCode}). Check it against the page.`
         : 'Committed into this store and period. Pages with the same store and period add up to one Inventory count.';
 
-  // Two-column only when there's a scan to show beside the workbench (inventory PDF).
-  const twoCol = Boolean(scanUrl && extraction);
+  // Two-column whenever there's a scan beside the content: the workbench when a page was
+  // read, or the "set aside" explainer when it wasn't (a blank back or a sales sheet).
+  const twoCol = Boolean(scanUrl);
+
+  // A scanned page with nothing to review: a blank back, a sales sheet, or an unread page.
+  // Give it a plain explainer instead of the empty review workbench.
+  const isCsv = upload.kind === 'pos_csv' || upload.kind === 'pos_xlsx';
+  const setAside =
+    upload.page_kind === 'sales'
+      ? {pill: 'Sales report', title: 'Sales report, set aside', body: upload.reject_reason ?? 'This page is a sales report, not an inventory form. Sales are handled on their own, so it was set aside.', tone: 'var(--muted-foreground)'}
+      : upload.page_kind === 'blank'
+        ? {pill: 'Blank page', title: 'Blank page, set aside', body: upload.reject_reason ?? 'This looks like a blank page (a back side with no form), so it was set aside.', tone: 'var(--muted-foreground)'}
+        : upload.status === 'failed'
+          ? {pill: 'Couldn’t read', title: 'Coop couldn’t read this page', body: upload.reject_reason ?? 'Coop couldn’t read this scan reliably. Re-read it, or review it by hand.', tone: 'var(--status-crit)'}
+          : {pill: 'Set aside', title: 'Set aside', body: upload.reject_reason ?? 'This page was set aside, so there is nothing to review or commit here.', tone: 'var(--muted-foreground)'};
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6">
@@ -379,7 +392,7 @@ export function UploadReview({
         {/* Left: scan preview, pinned under the app header while the rows scroll (desktop);
             sized to the viewport so it's always fully in view. Click to enlarge. */}
         {scanUrl && (
-          <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[28%] lg:shrink-0">
+          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[28%]' : 'lg:w-[17rem]')}>
             <Card>
               <CardHeader className="gap-0">
                 <div className="flex items-center justify-between gap-2">
@@ -420,7 +433,7 @@ export function UploadReview({
                     src={scanUrl}
                     title="Scanned inventory form"
                     tabIndex={-1}
-                    className="pointer-events-none h-[360px] w-full lg:h-[min(640px,calc(100dvh-12rem))]"
+                    className={cn('pointer-events-none w-full', extraction ? 'h-[360px] lg:h-[min(640px,calc(100dvh-12rem))]' : 'h-[20rem]')}
                   />
                   <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
                     <span className="inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
@@ -436,22 +449,41 @@ export function UploadReview({
         {/* Right: the review content (~72% when two-column). */}
         <div className="flex min-w-0 flex-1 flex-col gap-5">
 
-      {/* CSV / no-extraction summary */}
-      {!extraction && (
+      {/* A sales CSV / POS export: commits straight to sales, nothing to review. */}
+      {!extraction && isCsv && (
         <Card>
           <CardHeader>
-            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : upload.kind === 'pos_xlsx' ? 'POS Sales Data' : 'Upload'}</CardTitle>
+            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : 'POS Sales Data'}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            <p className="text-muted-foreground">
-              {upload.kind === 'pos_csv' || upload.kind === 'pos_xlsx'
-                ? 'Sales files commit directly to the sales table, so there is nothing to review here.'
-                : 'No extraction is staged for this file.'}
-            </p>
+            <p className="text-muted-foreground">Sales files commit directly to the sales table, so there is nothing to review here.</p>
             <p>
               Status: <span className="font-medium">{upload.status}</span>
             </p>
             {upload.reject_reason && <p className="text-destructive">{upload.reject_reason}</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* A scanned page that was set aside (blank back, sales sheet) or couldn't be read:
+          a plain explainer beside its modest preview, not the empty review workbench. */}
+      {!extraction && !isCsv && (
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3 py-6">
+            <span
+              className="inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium"
+              style={{color: toneText(setAside.tone), background: `color-mix(in oklab, ${setAside.tone} 14%, transparent)`}}
+            >
+              {setAside.pill}
+            </span>
+            <h2 className="font-heading text-lg font-semibold tracking-tight">{setAside.title}</h2>
+            <p className="max-w-prose text-sm text-muted-foreground">{setAside.body}</p>
+            <p className="text-xs text-muted-foreground">
+              {upload.status === 'failed'
+                ? 'It won’t be committed until it reads. '
+                : 'It won’t be committed, which is expected. '}
+              {nav?.nextHref && 'Use the arrows above, or ← and →, to move to the next page.'}
+            </p>
           </CardContent>
         </Card>
       )}
