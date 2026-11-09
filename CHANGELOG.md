@@ -28,7 +28,6 @@ Owner ask: the Website row was not Shopify's gross sales. It summed each order's
 - Not verified: the line keys (`price`, `quantity`) on a stored order (zoomy-crm marks them UNCONFIRMED), and a live month against Shopify Analytics → Sales over time → Gross sales (owner check after staging). Plan: `knowledge/tasks/2026-11-09-bhr-website-gmv-gross-sales.md`.
 
 ## 2026-11-09 — Uploads: Per file reviews one page at a time (Coop suggests the store, ‹ › arrows)
->>>>>>> origin/staging
 
 The batch review's "Form pages" chip grid (every sheet of a shuffled pile, grouped by form page) was too much for reviewers stepping through a scan, and on a mixed pile it couldn't commit at all. Decided with the user: **opening a file from a scan's Per file list now reviews that one page on its own**; Per store keeps the whole-form batch review for clean forms.
 
