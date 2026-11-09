@@ -8,6 +8,7 @@ import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, seg
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
 import {uploadSource, distinctPages, pagesByStatus} from './goldline-upload-groups';
+import {splitName} from './upload-batch';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -43,7 +44,10 @@ export function safeObjectName(filename: string): string {
 export type UploadKind = 'pos_csv' | 'pos_xlsx' | 'inventory_pdf';
 
 const SALES_CHUNK = 2000;
-export type UploadStatus = 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
+// 'queued' is the server-driven path's pre-read state: the page is split + stored, waiting for
+// the pump to read it. The pump claims it (→ 'processing') before calling the reader, so a
+// 'queued' row is never mid-read (and the stale-processing reaper only ever sees 'processing').
+export type UploadStatus = 'queued' | 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
 export type UploadRow = {
@@ -83,6 +87,9 @@ export async function createUpload(input: {
   contentType: string;
   uploadedBy: string | null;
   batchId?: string | null;
+  /** The row's starting status. Default 'processing' (the client path reads synchronously);
+   *  the server-driven ingest passes 'queued' so the pump reads it later. */
+  status?: UploadStatus;
 }): Promise<{id: string; reused: boolean}> {
   const supa = db();
   if (input.batchId) {
@@ -114,7 +121,7 @@ export async function createUpload(input: {
       kind: input.kind,
       filename: input.filename,
       storage_path: path,
-      status: 'processing' satisfies UploadStatus,
+      status: input.status ?? ('processing' satisfies UploadStatus),
       uploaded_by: input.uploadedBy,
       batch_id: input.batchId ?? null,
     })
@@ -529,6 +536,64 @@ export async function signedUploadUrl(companyId: string, uploadId: string, expir
     return null;
   }
   return res.data?.signedUrl ?? null;
+}
+
+/**
+ * Server-driven upload (plan 2026-11-09): a one-time signed URL the browser uses to PUT the
+ * WHOLE scan PDF straight to the private bucket, bypassing the Next.js request-body limit.
+ * Returns the storage path (handed back to the ingest route) + the token/url the client gives
+ * `uploadToSignedUrl`. The path is under the company prefix so one tenant can't write elsewhere.
+ */
+export async function createScanUploadUrl(companyId: string, filename: string): Promise<{path: string; token: string; signedUrl: string} | null> {
+  if (!goldlineConfigured()) return null;
+  const path = `${companyId}/incoming/${Date.now()}-${safeObjectName(filename)}`;
+  const res = await db().storage.from(GOLDLINE_BUCKET).createSignedUploadUrl(path);
+  if (res.error || !res.data) {
+    console.error('createScanUploadUrl failed', res.error?.message);
+    return null;
+  }
+  return {path, token: res.data.token, signedUrl: res.data.signedUrl};
+}
+
+/**
+ * Server-driven ingest: given a whole scan PDF already in the bucket (from createScanUploadUrl),
+ * split it into one PDF per page on the SERVER (pdf-lib), store each page, and open a `queued`
+ * uploads row per page under one new batch — then the pump reads them. Mirrors the client
+ * splitter's `(page N of M)` naming so everything downstream (grouping, dedup, the scan views)
+ * is unchanged. Removes the temporary whole-PDF object once the per-page files exist. Returns
+ * the new batch id and page count. maxDuration on the caller must cover the split + N stores.
+ */
+export async function ingestScanPdf(input: {companyId: string; storagePath: string; filename: string; uploadedBy: string | null}): Promise<{batchId: string; pages: number}> {
+  const supa = db();
+  const dl = await supa.storage.from(GOLDLINE_BUCKET).download(input.storagePath);
+  if (dl.error || !dl.data) throw new Error(`ingest download failed: ${dl.error?.message ?? 'no data'}`);
+  const srcBytes = await dl.data.arrayBuffer();
+  const {PDFDocument} = await import('pdf-lib');
+  const src = await PDFDocument.load(srcBytes, {ignoreEncryption: true, updateMetadata: false});
+  const total = src.getPageCount();
+  if (total < 1) throw new Error('ingest: the PDF has no pages');
+  const batchId = await createBatch(input.companyId, input.uploadedBy);
+  for (let i = 0; i < total; i++) {
+    const doc = await PDFDocument.create();
+    const [pg] = await doc.copyPages(src, [i]);
+    doc.addPage(pg);
+    const u8 = await doc.save();
+    await createUpload({
+      companyId: input.companyId,
+      kind: 'inventory_pdf',
+      filename: splitName(input.filename, i, total),
+      // A fresh, exactly-sized ArrayBuffer so no unrelated bytes ride along with the page.
+      bytes: u8.slice().buffer,
+      contentType: 'application/pdf',
+      uploadedBy: input.uploadedBy,
+      batchId,
+      status: 'queued',
+    });
+  }
+  // The per-page files are the source of truth now; drop the temporary whole-PDF object.
+  const rm = await supa.storage.from(GOLDLINE_BUCKET).remove([input.storagePath]);
+  if (rm.error) console.error('ingestScanPdf: temp PDF remove failed', rm.error.message);
+  return {batchId, pages: total};
 }
 
 /**

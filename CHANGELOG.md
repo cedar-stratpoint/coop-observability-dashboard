@@ -8,7 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-09 — Uploads: the live scan list filter matches the scan detail (Type · Status · Version)
+## 2026-11-09 — Uploads: server-driven ingest, P0 (flagged off, no behavior change)
+
+First slice of the server-driven upload (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`) — the foundation so a scan is read server-side and a browser refresh can't cut it. Entirely behind a per-company flag that is off for everyone, so nothing changes yet.
+
+- **Per-company flag (`src/goldline-server-upload.ts`, tested).** `serverUploadEnabled(companyId)` reads an allow-list from `GOLDLINE_SERVER_UPLOAD_COMPANIES` (comma-separated company ids). Fail-closed: unset = no one. Lets us pilot Nichido before widening.
+- **New `queued` upload status.** The server-driven path's pre-read state; the pump (P1) claims it to `processing` before reading, so a `queued` row is never mid-read and the stale-processing reaper is unaffected. Plain text column, no migration.
+- **`POST /api/goldline/upload/sign`** returns a Supabase signed upload URL so the browser can PUT the whole PDF straight to the private bucket (bypassing the Next.js body limit). Company-scoped + flag-gated.
+- **`POST /api/goldline/ingest`** downloads that PDF, splits it into one PDF per page on the server (`pdf-lib`, same `(page N of M)` naming), and opens a `queued` row per page under one batch (`ingestScanPdf`). Tenant-isolated: refuses a storage path outside the caller's company prefix. `maxDuration=300`.
+- Reuses `createUpload` (new optional `status`) and `createBatch`; the pump + client polling land in P1/P2. CSV / single-file uploads are untouched.
 
 The uploader's per-scan file filter still used the old single "Show" row that mixed page kind with lifecycle (Read, Couldn't read, Waiting, Processing, Sales report, Blank page all in one line), while the scan-detail view had already moved to three clean facets. Made them consistent.
 
