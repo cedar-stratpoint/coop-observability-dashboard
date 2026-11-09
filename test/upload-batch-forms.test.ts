@@ -1,5 +1,32 @@
 import {describe, expect, it} from 'vitest';
-import {batchReadiness, groupForms, scanOrder, scanPosition, storeConflict, type BatchPageInfo} from '../src/upload-batch';
+import {batchReadiness, groupForms, nominateKeeper, scanOrder, scanPosition, scanPageLabel, storeConflict, type BatchPageInfo, type SheetCopy} from '../src/upload-batch';
+
+describe('scanPageLabel', () => {
+  it('labels a split sheet by its scan position, not a form page', () => {
+    expect(scanPageLabel('Scan2026-10-30_171554 (page 50 of 98).pdf').title).toBe('Sheet 50 of 98');
+    expect(scanPageLabel('whole-form.pdf')).toEqual({title: 'whole-form.pdf', sub: null, index: 0});
+  });
+});
+
+describe('nominateKeeper', () => {
+  const c = (id: string, docConfidence: number | null, flagged: number, rows: number): SheetCopy => ({id, docConfidence, flagged, rows});
+  it('returns null with no copies', () => {
+    expect(nominateKeeper([])).toBeNull();
+  });
+  it('keeps the highest document confidence', () => {
+    expect(nominateKeeper([c('a', 0.7, 0, 20), c('b', 0.95, 2, 20), c('c', 0.8, 0, 20)])).toBe('b');
+  });
+  it('breaks a confidence tie by fewest flagged rows', () => {
+    expect(nominateKeeper([c('a', 0.9, 5, 20), c('b', 0.9, 1, 20)])).toBe('b');
+  });
+  it('then prefers the copy with more rows read', () => {
+    expect(nominateKeeper([c('a', 0.9, 1, 12), c('b', 0.9, 1, 20)])).toBe('b');
+  });
+  it('treats a missing confidence as worst, and stays stable by id on a full tie', () => {
+    expect(nominateKeeper([c('b', null, 1, 20), c('a', null, 1, 20)])).toBe('a');
+    expect(nominateKeeper([c('x', null, 0, 20), c('y', 0.5, 0, 20)])).toBe('y');
+  });
+});
 
 describe('scanPosition', () => {
   it('reads where a split page sat in its scan', () => {

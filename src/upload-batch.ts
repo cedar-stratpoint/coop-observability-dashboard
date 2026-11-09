@@ -91,13 +91,32 @@ export function scanPosition(filename: string): {source: string; index: number} 
   return m ? {source: m[1], index: Number(m[2])} : null;
 }
 
-/** A human label for a file: a page split from a scan reads "Page 10 of 98" (with the raw
+/** A human label for a file: a sheet split from a scan reads "Sheet 10 of 98" (with the raw
  *  filename kept as a sub-line); a whole form or sales export keeps its own already-human
- *  name and has no sub-line. `index` is the page's position for sorting (0 when not a split
- *  page, so whole-file uploads sort first). */
+ *  name and has no sub-line. "Sheet" is deliberate: it names a physical scanned page in the
+ *  raw bundle, kept distinct from a form's template "Page 1 to 5". `index` is the sheet's
+ *  position for sorting (0 when not a split sheet, so whole-file uploads sort first). */
 export function scanPageLabel(filename: string): {title: string; sub: string | null; index: number} {
   const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
-  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
+  return m ? {title: `Sheet ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
+}
+
+/** One scanned copy of the same form page, scored for auto-nomination. */
+export type SheetCopy = {id: string; docConfidence: number | null; flagged: number; rows: number};
+
+/** When a form page came through more than once, the copy worth keeping: highest document
+ *  confidence, then fewest rows still flagged, then most rows read, then a stable id so the
+ *  pick never flickers. Returns the id to keep, or null when there are no copies. The reviewer
+ *  can always override; this only sets the sensible default so the pile isn't a blind choice. */
+export function nominateKeeper(copies: SheetCopy[]): string | null {
+  if (copies.length === 0) return null;
+  return [...copies].sort(
+    (a, b) =>
+      (b.docConfidence ?? -1) - (a.docConfidence ?? -1) ||
+      a.flagged - b.flagged ||
+      b.rows - a.rows ||
+      a.id.localeCompare(b.id),
+  )[0].id;
 }
 
 /**
