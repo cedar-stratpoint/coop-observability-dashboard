@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: scan-detail filters become three clean facets (Type · Status · Version)
+
+The scan-detail page (`components/analyst/scan-views.tsx`) filtered by a "Show" row that mixed page kind with workflow status, so "Set aside" and "Couldn't read" each appeared as both a kind and a status. Reworked into three orthogonal facets, each chip meaning exactly one thing, no overlap:
+
+- **Type** (what the page is): Inventory form · Sales report · Blank page. A page Coop couldn't read has no settled type, so it has no Type chip (found under Status), never duplicated.
+- **Status** (where it sits in review): Needs review · Processing · Failed · Set aside · Committed, each with a status-colored dot. "Set aside" is now the single home for every parked page (a rejected form, or any sales/blank sheet), which also matches the "N set aside" summary line.
+- **Version** (inventory layout): Legacy · V1 · V2, a sub-filter of inventory forms.
+
+Each row shows only when it has two or more values, and the three combine with AND (e.g. Type: Inventory + Status: Needs review = forms still awaiting review). Same `FilterChip`, same warm ochre + semantic-status palette. The outcome summary ("67 of 98 read · 31 set aside") now reads straight from review status.
+
 ## 2026-11-09 — Uploads: lone/unreadable pages go to a "needs sorting" lane, not a batch each
 
 Defect #2 from the batch-segmentation trace, paired with #1 below so a scan with a stuck page splits *and* splits usefully. The splitter gave every grouped "form" its own batch, so a shuffled pile produced dozens of one-page batches. Now it peels off only real forms and keeps the rest together to sort.

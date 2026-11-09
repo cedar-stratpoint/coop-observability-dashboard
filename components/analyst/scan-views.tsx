@@ -12,7 +12,7 @@ import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod, VERSION_LABEL, VERSION_COLOR} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
 import {VersionPill} from '@/components/analyst/version-pill';
-import type {UploadRow} from '@/src/goldline-data';
+import type {UploadRow, UploadStatus} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {assignFormBaAction} from '@/app/uploads/actions';
 import {sendReread} from '@/src/upload-transport';
@@ -36,20 +36,33 @@ function tint(t: keyof typeof TONE) {
 // breaks a tie. Retries and re-uploads each make a fresh row, so a page can have many.
 const STATUS_RANK: Record<string, number> = {committed: 5, needs_review: 4, processing: 3, rejected: 2, failed: 1};
 
-// What a page turned into, for the "Show" filter — mirrors the uploader's buckets so the
-// persistent scan view reads the same way: a read inventory page, one Coop couldn't read,
-// a sales sheet or blank page set aside, or anything else parked.
-type FileCat = 'read' | 'failed' | 'sales' | 'blank' | 'other';
-const FILE_CAT_LABEL: Record<FileCat, string> = {read: 'Read', failed: "Couldn't read", sales: 'Sales report', blank: 'Blank page', other: 'Set aside'};
-const FILE_CAT_ORDER: FileCat[] = ['read', 'failed', 'sales', 'blank', 'other'];
-const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
-function fileCat(u: UploadRow): FileCat {
-  if (u.status === 'committed' || u.status === 'needs_review') return 'read';
-  if (u.status === 'failed') return 'failed';
+// Each page carries two independent facets, filtered on their own rows so they never share a
+// chip: its TYPE (what the page is) and its STATUS (where it sits in review). Keeping them
+// apart is what fixes the old "Show" row, which mixed the two and repeated "Set aside" and
+// "Couldn't read" as both a kind and a status.
+type PageType = 'inventory' | 'sales' | 'blank';
+const TYPE_LABEL: Record<PageType, string> = {inventory: 'Inventory form', sales: 'Sales report', blank: 'Blank page'};
+const TYPE_ORDER: PageType[] = ['inventory', 'sales', 'blank'];
+// A page Coop couldn't read (or is still reading) has no settled type, so it has no Type chip;
+// it is found under Status instead, never duplicated across both rows.
+function pageType(u: UploadRow): PageType | null {
   if (u.page_kind === 'sales') return 'sales';
   if (u.page_kind === 'blank') return 'blank';
-  return 'other';
+  if (u.page_kind === 'inventory') return 'inventory';
+  return null;
 }
+const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
+// The review workflow state, its own facet. "Set aside" is the one home for a parked page
+// (a rejected form, or any sales/blank sheet); "Failed" is the one home for an unread page.
+const STATUS_FILTER_ORDER: UploadStatus[] = ['needs_review', 'processing', 'failed', 'rejected', 'committed'];
+const STATUS_LABEL: Record<UploadStatus, string> = {needs_review: 'Needs review', processing: 'Processing', failed: 'Failed', rejected: 'Set aside', committed: 'Committed'};
+const STATUS_DOT: Record<UploadStatus, string> = {
+  needs_review: 'var(--status-warn)',
+  processing: 'var(--muted-foreground)',
+  failed: 'var(--status-crit)',
+  rejected: 'var(--version-legacy, #6d4c9a)',
+  committed: 'var(--status-good)',
+};
 
 /** The scan's pages as a plain list — "Page 10 of 98", in page order, each opening its
  *  review. One row per page: the current (best) attempt, with the older tries folded
@@ -60,14 +73,19 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(1);
   const [size, setSize] = useState<PageSize>(20);
-  const [filter, setFilter] = useState<FileCat | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<PageType | 'all'>('all');
+  const chooseType = (t: PageType | 'all') => {
+    setTypeFilter(t);
+    setPage(1);
+  };
   const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
   const chooseVersion = (v: 'all' | FormVersion) => {
     setVersionFilter(v);
     setPage(1);
   };
-  const choose = (c: FileCat | 'all') => {
-    setFilter(c);
+  const [statusFilter, setStatusFilter] = useState<'all' | UploadStatus>('all');
+  const chooseStatus = (s: 'all' | UploadStatus) => {
+    setStatusFilter(s);
     setPage(1);
   };
   // Pages being read again from the stored file (a failed page, retried in place).
@@ -119,29 +137,55 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
       });
   }, [files]);
 
-  // One category per page (its best attempt), so the summary and chips read the scan the
-  // way the uploader did: how many were read, set aside, or couldn't be read.
-  const counts = useMemo(() => {
-    const c: Record<FileCat, number> = {read: 0, failed: 0, sales: 0, blank: 0, other: 0};
-    for (const g of groups) c[fileCat(g.best)]++;
+  // Scan outcome recap (one per page, its best attempt), read straight from review status:
+  // "read" = a form in review or committed; "set aside" = a parked page (rejected form, or a
+  // sales/blank sheet); "failed" = couldn't be read. A sentence, not a filter.
+  const summary = useMemo(() => {
+    const c = {read: 0, setAside: 0, failed: 0, processing: 0};
+    for (const g of groups) {
+      const s = g.best.status;
+      if (s === 'needs_review' || s === 'committed') c.read++;
+      else if (s === 'rejected') c.setAside++;
+      else if (s === 'failed') c.failed++;
+      else if (s === 'processing') c.processing++;
+    }
     return c;
   }, [groups]);
-  const setAside = counts.sales + counts.blank + counts.other;
-  const present = FILE_CAT_ORDER.filter((c) => counts[c] > 0);
 
-  // Read pages by form version — a sub-filter of "read" (only read pages carry a version),
-  // combined with the status filter (AND).
+  // Facet 1 — page TYPE (what the page is). A page Coop couldn't read has no type and no chip
+  // here; it is found under Status. So these counts are a subset of the total, not a partition.
+  const typeCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const g of groups) {
+      const t = pageType(g.best);
+      if (t) c[t] = (c[t] ?? 0) + 1;
+    }
+    return c;
+  }, [groups]);
+  const typesPresent = TYPE_ORDER.filter((t) => (typeCounts[t] ?? 0) > 0);
+
+  // Facet 2 — review STATUS.
+  const statusCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const g of groups) c[g.best.status] = (c[g.best.status] ?? 0) + 1;
+    return c;
+  }, [groups]);
+  const statusesPresent = STATUS_FILTER_ORDER.filter((s) => (statusCounts[s] ?? 0) > 0);
+
+  // Facet 3 — form VERSION, a sub-filter of inventory forms (only they carry a version).
   const versionCounts = useMemo(() => {
     const c = {} as Record<string, number>;
-    for (const g of groups) if (fileCat(g.best) === 'read' && g.best.form_version && g.best.form_version !== 'unknown') c[g.best.form_version] = (c[g.best.form_version] ?? 0) + 1;
+    for (const g of groups) if (pageType(g.best) === 'inventory' && g.best.form_version && g.best.form_version !== 'unknown') c[g.best.form_version] = (c[g.best.form_version] ?? 0) + 1;
     return c;
   }, [groups]);
   const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
 
+  // The three facets combine with AND; Version applies only to inventory forms.
   const shown = groups.filter(
     (g) =>
-      (filter === 'all' || fileCat(g.best) === filter) &&
-      (versionFilter === 'all' || (fileCat(g.best) === 'read' && g.best.form_version === versionFilter)),
+      (typeFilter === 'all' || pageType(g.best) === typeFilter) &&
+      (statusFilter === 'all' || g.best.status === statusFilter) &&
+      (versionFilter === 'all' || (pageType(g.best) === 'inventory' && g.best.form_version === versionFilter)),
   );
   const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
@@ -166,24 +210,38 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           come back to a scan and see what read, what was set aside, and what failed. */}
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground tabular-nums">
-          <span className="font-medium text-foreground">{counts.read}</span> of {groups.length} read
-          {setAside > 0 && <> · {setAside} set aside</>}
-          {counts.failed > 0 && (
+          <span className="font-medium text-foreground">{summary.read}</span> of {groups.length} read
+          {summary.setAside > 0 && <> · {summary.setAside} set aside</>}
+          {summary.processing > 0 && <> · {summary.processing} reading</>}
+          {summary.failed > 0 && (
             <>
               {' · '}
-              <span className="font-medium text-[color:var(--status-crit)]">{counts.failed}</span> failed
+              <span className="font-medium text-[color:var(--status-crit)]">{summary.failed}</span> failed
             </>
           )}
         </p>
-        {present.length >= 2 && (
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
-            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Show</span>
-            <FilterChip active={filter === 'all'} onClick={() => choose('all')}>
+        {typesPresent.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by type">
+            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Type</span>
+            <FilterChip active={typeFilter === 'all'} onClick={() => chooseType('all')}>
               All <span className="tabular-nums opacity-70">{groups.length}</span>
             </FilterChip>
-            {present.map((c) => (
-              <FilterChip key={c} active={filter === c} tone={c === 'failed' ? 'crit' : 'default'} onClick={() => choose(c)}>
-                {FILE_CAT_LABEL[c]} <span className="tabular-nums opacity-70">{counts[c]}</span>
+            {typesPresent.map((t) => (
+              <FilterChip key={t} active={typeFilter === t} onClick={() => chooseType(t)}>
+                {TYPE_LABEL[t]} <span className="tabular-nums opacity-70">{typeCounts[t]}</span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
+        {statusesPresent.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by review status">
+            <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Status</span>
+            <FilterChip active={statusFilter === 'all'} onClick={() => chooseStatus('all')}>
+              All <span className="tabular-nums opacity-70">{statusesPresent.reduce((a, s) => a + (statusCounts[s] ?? 0), 0)}</span>
+            </FilterChip>
+            {statusesPresent.map((s) => (
+              <FilterChip key={s} active={statusFilter === s} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
+                {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{statusCounts[s]}</span>
               </FilterChip>
             ))}
           </div>
@@ -216,7 +274,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
           // The source scan name, shown as a quiet pill beside "Page N of M"; and, for a
           // read inventory page, the detected form version (Legacy / V1 / V2).
           const src = scanPosition(u.filename)?.source ?? null;
-          const ver = fileCat(u) === 'read' && u.form_version && u.form_version !== 'unknown' ? VERSION_LABEL[u.form_version as FormVersion] : null;
+          const ver = pageType(u) === 'inventory' && u.form_version && u.form_version !== 'unknown' ? VERSION_LABEL[u.form_version as FormVersion] : null;
           return (
             <li key={idx} className="flex flex-col">
               <div className="relative flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-muted/40">
@@ -253,7 +311,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                       </span>
                     </span>
                   ) : (
-                    fileCat(u) === 'failed' &&
+                    u.status === 'failed' &&
                     u.reject_reason && (
                       <span className="truncate text-xs text-[color:var(--status-crit)]" title={u.reject_reason}>
                         {u.reject_reason}
@@ -277,7 +335,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                   </span>
                 </div>
                 <StatusPill status={u.status} />
-                {canEdit && fileCat(u) === 'failed' && (
+                {canEdit && u.status === 'failed' && (
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -356,8 +414,8 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   );
 }
 
-/** A rounded "Show" filter chip, matching the uploader's so the two scan views read alike;
- *  the failures chip is tinted so it never blends into the row. */
+/** A rounded filter chip used across the Type, Status, and Version rows. A leading dot colors
+ *  a facet value (version or status); the crit tone tints a chip that must never blend in. */
 function FilterChip({active, onClick, tone = 'default', dotColor, children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
   return (
     <button
