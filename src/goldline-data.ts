@@ -171,7 +171,11 @@ export async function reconcileStaleReads(companyId: string, scope: {batchId: st
     .eq('company_id', companyId)
     .eq('kind', 'inventory_pdf')
     .eq('status', 'processing')
-    .lt('created_at', cutoff);
+    // The staleness clock starts when the READ started: claimed_at for a server-driven (pumped)
+    // page, else created_at for a client-driven one. A page enqueued long ago but only just
+    // claimed is not stale; a 'queued' page (never 'processing') is never matched here, so a
+    // page waiting in the pump queue is left alone instead of being failed.
+    .or(`claimed_at.lt.${cutoff},and(claimed_at.is.null,created_at.lt.${cutoff})`);
   if ('batchId' in scope) {
     q = q.eq('batch_id', scope.batchId);
   } else {
