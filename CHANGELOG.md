@@ -20,6 +20,9 @@ A design critique of the batch-review screen (one store's inventory form, assemb
 ## 2026-11-09 — Uploads: Per store gets a store filter / jump pill bar
 
 The Per store view of a scan stacks a "Needs a store" section, one section per grouped store, and "One-off stores" vertically, so a scan with many stores made you scroll a long way with no sense of what was below. Added a wrapping pill bar above the board (shown when there is more than one section): "All" plus one pill per section in the order they appear, each with its form count, and the "Needs a store" pill tinted red. Tapping a pill shows only that store's forms right under the bar; tapping it again, or "All", clears. The filter is ephemeral client state (no URL change, so it does not touch Back), self-clears if the underlying data changes, and the "Set aside" list is unaffected. Verified on the staging DB against Scan2026-10-30_171554 (51 forms across 6 stores).
+## 2026-11-09 — Uploads: batch review Back returns to the scan again
+
+The Back chevron on a store's batch review ("‹ Scan... · Page N of M") stopped returning to the scan once you clicked between the form's pages. The page switcher updates the address with `window.history.replaceState` (so a shared link or refresh reopens the same page), and Next's `router.back()` misbehaves after that: instead of popping to the scan it stayed on the batch and grew the history stack. Switched the Back button to `window.history.back()`, which pops correctly to the scan; the deep-link fallback (push the scan URL when there is no history to pop) is unchanged. Reproduced and confirmed against Scan2026-10-30_171554 on the staging DB. Also added `replace` to the single-page review's "Pages in this count" strip, so paging through a form there no longer stacks a browser-history entry per page.
 
 ## 2026-11-09 — Load time, round 2: functions in Singapore, fewer repeat reads
 
