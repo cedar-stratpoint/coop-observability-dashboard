@@ -417,6 +417,20 @@ export function TriageBoard({
   const storeByCode = useMemo(() => new Map(stores.map((s) => [s.code, s.name])), [stores]);
   const [editGroup, setEditGroup] = useState<{code: string; name: string | null; forms: TriageForm[]} | null>(null);
 
+  // One jump-and-filter pill per section, in the same order they appear below, so the whole
+  // scan's stores read at a glance and a deep-down store is one tap away instead of a long
+  // scroll. Keys: 'needs-store', a store code, or 'singles'.
+  const [storeFilter, setStoreFilter] = useState<string | null>(null);
+  const sections = useMemo(() => {
+    const list: Array<{key: string; label: string; count: number; tone?: Tone}> = [];
+    if (needsStore.length > 0) list.push({key: 'needs-store', label: 'Needs a store', count: needsStore.length, tone: 'crit'});
+    for (const g of groups) list.push({key: g.code, label: storeByCode.get(g.code) ?? g.name ?? `Store ${g.code}`, count: g.forms.length});
+    if (singles.length > 0) list.push({key: 'singles', label: 'One-off stores', count: singles.length});
+    return list;
+  }, [needsStore, groups, singles, storeByCode]);
+  // Ignore a filter whose section no longer exists (data changed under it) so nothing blanks out.
+  const activeFilter = storeFilter && sections.some((s) => s.key === storeFilter) ? storeFilter : null;
+
   const t = data.totals;
 
   const summaryLine =
@@ -484,7 +498,21 @@ export function TriageBoard({
         </Card>
       ) : (
         <div className="flex flex-col gap-7">
-          {needsStore.length > 0 && (
+          {sections.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter forms by store">
+              <StorePill active={!activeFilter} onClick={() => setStoreFilter(null)}>
+                All <span className="tabular-nums opacity-70">{n}</span>
+              </StorePill>
+              {sections.map((s) => (
+                <StorePill key={s.key} active={activeFilter === s.key} tone={s.tone} onClick={() => setStoreFilter(activeFilter === s.key ? null : s.key)}>
+                  <span className="max-w-[12rem] truncate">{s.label}</span>
+                  <span className="tabular-nums opacity-70">{s.count}</span>
+                </StorePill>
+              ))}
+            </div>
+          )}
+
+          {needsStore.length > 0 && (!activeFilter || activeFilter === 'needs-store') && (
             <section className="flex flex-col gap-3">
               <GroupHeading title="Needs a store" count={needsStore.length} tone="crit" />
               <FormGrid>
@@ -496,6 +524,7 @@ export function TriageBoard({
           )}
 
           {groups.map((g) => {
+            if (activeFilter && activeFilter !== g.code) return null;
             const registryName = storeByCode.get(g.code);
             return (
               <section key={g.code} className="flex flex-col gap-3">
@@ -516,9 +545,9 @@ export function TriageBoard({
             );
           })}
 
-          {singles.length > 0 && (
+          {singles.length > 0 && (!activeFilter || activeFilter === 'singles') && (
             <section className="flex flex-col gap-3">
-              {(needsStore.length > 0 || groups.length > 0) && <GroupHeading title="One-off stores" count={singles.length} />}
+              {(activeFilter === 'singles' || needsStore.length > 0 || groups.length > 0) && <GroupHeading title="One-off stores" count={singles.length} />}
               <FormGrid>
                 {singles.map((f) => (
                   <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
@@ -597,6 +626,31 @@ function GroupHeading({title, code, count, countLabel = 'form', tone, onEditStor
           ))}
       </div>
     </div>
+  );
+}
+
+/** A jump-and-filter pill for one store section above the board: tapping it shows only that
+ *  store's forms, tapping again (or "All") clears. Mirrors the uploader's Show chips so the
+ *  two scan views read alike; the "Needs a store" pill is tinted so it reads as urgent. */
+function StorePill({active, tone, onClick, children}: {active: boolean; tone?: Tone; onClick: () => void; children: React.ReactNode}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        tone === 'crit'
+          ? active
+            ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
+            : 'border-[color:var(--status-crit)]/40 bg-[color:var(--status-crit)]/5 text-[color:var(--status-crit)] hover:bg-[color:var(--status-crit)]/12'
+          : active
+            ? 'border-primary bg-primary/15 text-foreground'
+            : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
