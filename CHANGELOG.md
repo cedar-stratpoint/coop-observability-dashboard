@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: surface when the paper's product name disagrees with the catalog
+
+The review name is resolved from the item code via the reference manifest, so a row whose printed name differed from the catalog name for that code (e.g. code BB03B printed as "BB 04 Beige", shown as the catalog's "BB 03 Beige") was silently resolved with no signal, at the OCR's own confidence and no flag. The resolved/stored identity stays correct (the code is the key, and the odd printed label is usually a stale template, not a real product), but the discrepancy is now visible. The extractor transcribes the printed product name into a new `printed_name` field (cross-check only, never changes the code or counts), and when it disagrees with the manifest name the review row shows a soft "Paper reads: ..." hint. It is advisory, not a blocking flag, so the common stale-label case doesn't add noise; it only shows on pages extracted after this (older scans have no `printed_name`, so they stay quiet). `printedNameConflict` (case/space/punctuation-insensitive) is unit-tested.
+
 ## 2026-11-09 — Uploads: batch review Back returns to the scan again
 
 The Back chevron on a store's batch review ("‹ Scan... · Page N of M") stopped returning to the scan once you clicked between the form's pages. The page switcher updates the address with `window.history.replaceState` (so a shared link or refresh reopens the same page), and Next's `router.back()` misbehaves after that: instead of popping to the scan it stayed on the batch and grew the history stack. Switched the Back button to `window.history.back()`, which pops correctly to the scan; the deep-link fallback (push the scan URL when there is no history to pop) is unchanged. Reproduced and confirmed against Scan2026-10-30_171554 on the staging DB. Also added `replace` to the single-page review's "Pages in this count" strip, so paging through a form there no longer stacks a browser-history entry per page.

@@ -6,6 +6,24 @@ import {onHandOf, type InventoryRowIn} from './goldline-inventory';
 
 export type CatalogLite = {productLine: string | null; unitPrice: number | null};
 
+/** Case-, space- and punctuation-insensitive key for comparing product names, so
+ *  "BB 03  Beige", "bb03 beige" and "BB-03-BEIGE" all match. */
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** True when the name printed on the paper for a row disagrees with the catalog/manifest
+ *  name for its (matched) code — a soft signal the code may have been misread, or the
+ *  printed form is out of date. Both must be present; a blank on either side never
+ *  conflicts, so old scans with no printed_name stay quiet. */
+export function printedNameConflict(printed: string | null | undefined, catalog: string | null | undefined): boolean {
+  if (!printed || !catalog) return false;
+  const a = normName(printed);
+  const b = normName(catalog);
+  if (!a || !b) return false;
+  return a !== b;
+}
+
 export type FamilyGroup<T> = {family: string; price: number | null; items: T[]};
 
 /**
