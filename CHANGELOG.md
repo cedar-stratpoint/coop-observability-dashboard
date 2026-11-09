@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: Per store gets a store filter / jump pill bar
+
+The Per store view of a scan stacks a "Needs a store" section, one section per grouped store, and "One-off stores" vertically, so a scan with many stores made you scroll a long way with no sense of what was below. Added a wrapping pill bar above the board (shown when there is more than one section): "All" plus one pill per section in the order they appear, each with its form count, and the "Needs a store" pill tinted red. Tapping a pill shows only that store's forms right under the bar; tapping it again, or "All", clears. The filter is ephemeral client state (no URL change, so it does not touch Back), self-clears if the underlying data changes, and the "Set aside" list is unaffected. Verified on the staging DB against Scan2026-10-30_171554 (51 forms across 6 stores).
+
 ## 2026-11-09 — Uploads: scan-detail Back returns to Uploads, not through the filters
 
 Fixed the scan-detail back chevron ("< Uploads · Scan…"). The page keeps its version filter, view toggle, and BA filter in the URL, and each of those controls was a `next/link` that pushed a new history entry. The Back button calls `router.back()`, so choosing Legacy then V1 made Back walk the filter history (V1 → Legacy → All versions) before reaching Uploads. The whole scan-detail view is meant to be one history stop, so the same-route controls (version cards, view toggle, Clear BA, and the BA-card drill-in) now navigate with `replace` instead of pushing. Changing a filter no longer stacks history, so Back returns straight to the Uploads list. Genuine forward links (a page row opening `/uploads/[id]`) still push as before.
