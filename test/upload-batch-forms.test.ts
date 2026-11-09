@@ -22,7 +22,7 @@ describe('isLiveProcessing', () => {
 
 describe('scanPageLabel', () => {
   it('labels a split sheet by its scan position, not a form page', () => {
-    expect(scanPageLabel('Scan2026-10-30_171554 (page 50 of 98).pdf').title).toBe('Sheet 50 of 98');
+    expect(scanPageLabel('Scan2026-10-30_171554 (page 50 of 98).pdf').title).toBe('Page 50 of 98');
     expect(scanPageLabel('whole-form.pdf')).toEqual({title: 'whole-form.pdf', sub: null, index: 0});
   });
 });

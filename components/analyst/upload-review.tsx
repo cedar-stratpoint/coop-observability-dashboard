@@ -1,9 +1,9 @@
 'use client';
 
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -26,6 +26,36 @@ const peso = (n: number) => `₱${n.toLocaleString('en-US', {maximumFractionDigi
 
 type EditRow = ExtractedRow;
 
+/** The one-page view's place in the scan (from the Per file list): its label, the ‹ ›
+ *  neighbours in that same filtered list, and the list itself for a fresh-tab Back. */
+export type PageNav = {source: string; label: string; prevHref: string | null; nextHref: string | null; backHref: string};
+/** Coop's suggestion for this page's header. `storeFrom` says where the store came from. */
+export type PageSuggestionView = {storeCode: string | null; storeFrom: 'page' | 'batch' | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+
+// What the last committed page of a scan used, so the next page (pages 2 to 5 rarely print a
+// store) can start from it, plus a one-line "committed" note to show after moving on. Kept
+// per tab in sessionStorage: a convenience, never the source of truth.
+type Carry = {storeCode: string; periodStart: string; periodEnd: string; ba: string; done?: string};
+const carryKey = (source: string) => `coop.perfile.carry.${source}`;
+function readCarry(source: string): Carry | null {
+  try {
+    const v = JSON.parse(window.sessionStorage.getItem(carryKey(source)) ?? 'null');
+    return v && typeof v.storeCode === 'string' ? (v as Carry) : null;
+  } catch {
+    return null;
+  }
+}
+function writeCarry(source: string, c: Carry) {
+  try {
+    window.sessionStorage.setItem(carryKey(source), JSON.stringify(c));
+  } catch {
+    /* storage blocked: the next page just starts from its own suggestion */
+  }
+}
+
+const navBtn =
+  'inline-flex size-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-[transform,border-color,color] duration-150 ease-out hover:border-foreground/30 hover:text-foreground active:scale-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none';
+
 function toIntOrNull(s: string): number | null {
   const t = s.trim();
   if (t === '') return null;
@@ -44,6 +74,9 @@ export function UploadReview({
   catalog = {},
   pageStrip = null,
   stores = [],
+  nav = null,
+  suggestion = null,
+  bas,
 }: {
   company: string;
   canEdit: boolean;
@@ -61,6 +94,12 @@ export function UploadReview({
   pageStrip?: FormPageStrip | null;
   /** The company's stores, for the store picker. */
   stores?: StoreOption[];
+  /** Set when opened from a scan's Per file list: the one-page view with ‹ › arrows. */
+  nav?: PageNav | null;
+  /** Coop's prefill for store / period / BA in the one-page view. */
+  suggestion?: PageSuggestionView | null;
+  /** The BA list (each store's current BA and every name), for the BA field. */
+  bas?: {byStore: Record<string, string>; names: string[]};
 }) {
   const router = useRouter();
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
@@ -68,9 +107,56 @@ export function UploadReview({
 
   const head = extraction?.data;
   const [rows, setRows] = useState<EditRow[]>(() => (head?.rows ?? []).map((r) => ({...r})));
-  const [storeCode, setStoreCode] = useState(head?.store_code ?? '');
-  const [periodStart, setPeriodStart] = useState(head?.period_start ?? '');
-  const [periodEnd, setPeriodEnd] = useState(head?.period_end ?? '');
+  const [storeCode, setStoreCode] = useState(suggestion?.storeCode ?? head?.store_code ?? '');
+  const [periodStart, setPeriodStart] = useState(suggestion?.periodStart ?? head?.period_start ?? '');
+  const [periodEnd, setPeriodEnd] = useState(suggestion?.periodEnd ?? head?.period_end ?? '');
+  // The BA written on the form. Blank saves under the store's BA from earlier forms.
+  const [ba, setBa] = useState(suggestion?.consultant ?? head?.consultant ?? '');
+  const storeBa = bas?.byStore[storeCode] ?? null;
+  // Which header fields were carried over from the page committed just before this one.
+  const [carried, setCarried] = useState(false);
+  const [justDone, setJustDone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!nav) return;
+    const c = readCarry(nav.source);
+    if (!c) return;
+    // The note shows once, on the page the reviewer moved to after committing.
+    if (c.done) {
+      setJustDone(c.done);
+      writeCarry(nav.source, {...c, done: undefined});
+    }
+    if (committed || !canEdit) return;
+    // Only fill what this page's own reading left empty: its own read always wins.
+    const fill = (mine: string | null | undefined, theirs: string, set: (v: string) => void) => {
+      if (mine || !theirs) return false;
+      set(theirs);
+      return true;
+    };
+    const used = [
+      fill(suggestion?.storeCode, c.storeCode, setStoreCode),
+      fill(suggestion?.periodStart, c.periodStart, setPeriodStart),
+      fill(suggestion?.periodEnd, c.periodEnd, setPeriodEnd),
+      fill(suggestion?.consultant, c.ba, setBa),
+    ].some(Boolean);
+    setCarried(used);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page (the route keys this component by upload id)
+  }, []);
+
+  // ← / → step pages, unless the reviewer is typing in a field (where arrows move the caret).
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || lightboxOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const href = e.key === 'ArrowLeft' ? nav.prevHref : e.key === 'ArrowRight' ? nav.nextHref : null;
+      if (!href) return;
+      e.preventDefault();
+      router.replace(href);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nav, router, lightboxOpen]);
   // Flags = rows under the threshold, fixed at load (editing a value doesn't change
   // the reader's confidence). A flag is resolved by editing its row or "Looks right".
   const flagged = useMemo(
@@ -126,7 +212,7 @@ export function UploadReview({
       storeCode,
       periodStart,
       periodEnd,
-      consultant: head?.consultant ?? null,
+      consultant: nav ? ba.trim() || null : head?.consultant ?? null,
       rows: rows.map((r) => ({
         item_code: r.item_code,
         stockroom: r.stockroom,
@@ -138,6 +224,16 @@ export function UploadReview({
     });
     setBusy(false);
     if (res.ok) {
+      if (nav) {
+        // One page at a time: remember this header for the next page, then move on to it.
+        const done = `${nav.label} committed: ${res.committed} ${res.committed === 1 ? 'row' : 'rows'} into Store ${storeCode.trim()}.`;
+        writeCarry(nav.source, {storeCode: storeCode.trim(), periodStart, periodEnd, ba: ba.trim(), done: nav.nextHref ? done : undefined});
+        if (nav.nextHref) {
+          setBusy(true); // stays disabled while the next page loads, so it can't commit twice
+          router.replace(nav.nextHref);
+          return;
+        }
+      }
       setNotice({kind: 'ok', text: `Committed ${res.committed} inventory rows.`});
       router.refresh();
     } else {
@@ -145,11 +241,74 @@ export function UploadReview({
     }
   }
 
+  // Where the prefilled store came from, said plainly, so a wrong guess is easy to spot.
+  const suggestionNote = !storeCode.trim()
+    ? 'Coop couldn’t read a store on this page. Pick it from the form; the next pages start from it.'
+    : carried && !suggestion?.storeCode
+      ? `Store ${storeCode} carried over from the page you committed before. Change it if this page is another store’s.`
+      : suggestion?.storeCode && storeCode === suggestion.storeCode
+        ? suggestion.storeFrom === 'page'
+          ? `Coop read Store ${storeCode} on this page. Change it if that’s wrong.`
+          : `Suggested from this scan’s batch (Store ${storeCode}). Check it against the page.`
+        : 'Committed into this store and period. Pages with the same store and period add up to one Inventory count.';
+
   // Two-column only when there's a scan to show beside the workbench (inventory PDF).
   const twoCol = Boolean(scanUrl && extraction);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6">
+      {nav ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                // Browser-style Back: the arrows replace history rather than add to it, so
+                // one step back is the screen that opened this review (the Per file list,
+                // with its filter and list page restored from the URL). A fresh tab with
+                // nothing to step back to opens that list instead.
+                if (window.history.length > 1) router.back();
+                else router.push(nav.backHref);
+              }}
+              className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5 shrink-0" /> <span className="max-w-[16rem] truncate">{nav.source}</span>
+            </button>
+            {/* Page stepper, upper right. An arrow shows only when there is a page that way;
+                the empty slot keeps the other arrow from jumping under the cursor. Switching
+                pages is instant (no slide): it is repeated many times in a session. */}
+            <nav aria-label="Pages in this scan" className="flex shrink-0 items-center gap-1.5">
+              {nav.prevHref ? (
+                <Link href={nav.prevHref} replace aria-label="Previous page" title="Previous page (←)" className={navBtn}>
+                  <ChevronLeft className="size-4" />
+                </Link>
+              ) : (
+                <span aria-hidden className="size-8" />
+              )}
+              <span
+                aria-current="page"
+                className="inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold tabular-nums"
+                style={{color: toneText('var(--primary)'), background: 'color-mix(in oklab, var(--primary) 14%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)'}}
+              >
+                {nav.label}
+              </span>
+              {nav.nextHref ? (
+                <Link href={nav.nextHref} replace aria-label="Next page" title="Next page (→)" className={navBtn}>
+                  <ChevronRight className="size-4" />
+                </Link>
+              ) : (
+                <span aria-hidden className="size-8" />
+              )}
+            </nav>
+          </div>
+          <h1 className="font-heading text-xl font-semibold tracking-tight">{committed ? 'This page is committed' : extraction ? 'Review this page' : 'This page'}</h1>
+          {justDone && (
+            <p aria-live="polite" className="inline-flex items-center gap-1.5 text-xs" style={{color: toneText('var(--status-good)')}}>
+              <CheckCircle2 className="size-3.5" /> {justDone}
+            </p>
+          )}
+        </div>
+      ) : (
       <div className="flex flex-col gap-1">
         <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" /> Back to uploads
@@ -201,6 +360,7 @@ export function UploadReview({
           </nav>
         )}
       </div>
+      )}
 
       {committed && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
@@ -319,7 +479,9 @@ export function UploadReview({
               />
 
               <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 text-xs font-medium text-muted-foreground">Which store and period is this count for?</legend>
+                <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                  {nav ? 'Store, period and BA for this page' : 'Which store and period is this count for?'}
+                </legend>
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-medium">Store</span>
@@ -346,8 +508,29 @@ export function UploadReview({
                       className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
                     />
                   </label>
+                  {nav && (
+                    <label className="flex min-w-48 flex-1 flex-col gap-1">
+                      <span className="text-xs font-medium">BA on the form</span>
+                      <input
+                        value={ba}
+                        onChange={(e) => setBa(e.target.value)}
+                        list="ba-names"
+                        maxLength={80}
+                        placeholder={storeBa ?? 'Full name'}
+                        autoComplete="off"
+                        disabled={committed || !canEdit}
+                        className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
+                      />
+                      <datalist id="ba-names">
+                        {(bas?.names ?? []).map((n) => (
+                          <option key={n} value={n} />
+                        ))}
+                      </datalist>
+                    </label>
+                  )}
                 </div>
-                {(extraction.page ?? 1) > 1 && !committed && (
+                {nav && !committed && <p className="text-xs text-muted-foreground">{suggestionNote}</p>}
+                {!nav && (extraction.page ?? 1) > 1 && !committed && (
                   <p className="text-xs text-muted-foreground">
                     Pages 2 to 5 don&apos;t print the store or period. Use the same ones as this store&apos;s page 1 so all pages land in
                     one Inventory count.
@@ -420,7 +603,7 @@ export function UploadReview({
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={commit} disabled={busy || rows.length === 0 || open.length > 0}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                {busy ? 'Committing…' : 'Confirm & commit'}
+                {busy ? 'Committing…' : nav ? (nav.nextHref ? 'Commit and go to next page' : 'Commit this page') : 'Confirm & commit'}
               </Button>
               {open.length > 0 && !notice && (
                 <button type="button" onClick={() => goToFlag(open[0])} className="text-xs text-muted-foreground underline-offset-4 hover:underline">

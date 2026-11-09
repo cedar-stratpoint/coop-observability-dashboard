@@ -91,14 +91,14 @@ export function scanPosition(filename: string): {source: string; index: number} 
   return m ? {source: m[1], index: Number(m[2])} : null;
 }
 
-/** A human label for a file: a sheet split from a scan reads "Sheet 10 of 98" (with the raw
+/** A human label for a file: a page split from a scan reads "Page 10 of 98" (with the raw
  *  filename kept as a sub-line); a whole form or sales export keeps its own already-human
- *  name and has no sub-line. "Sheet" is deliberate: it names a physical scanned page in the
- *  raw bundle, kept distinct from a form's template "Page 1 to 5". `index` is the sheet's
- *  position for sorting (0 when not a split sheet, so whole-file uploads sort first). */
+ *  name and has no sub-line. Named "Page" (not "Sheet"): reviewers think of the scan as
+ *  pages, and the form's template page is shown separately ("Inventory form · page 2 of 5").
+ *  `index` is the position for sorting (0 when not a split page, so whole files sort first). */
 export function scanPageLabel(filename: string): {title: string; sub: string | null; index: number} {
   const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
-  return m ? {title: `Sheet ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
+  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
 }
 
 /** The scanned sheet's position in its source scan ("… (page 52 of 98).pdf" → 52), or null

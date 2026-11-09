@@ -154,7 +154,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       </div>
 
       {view === 'file' ? (
-        <ScanFileList files={files} canEdit={canEdit} company={companyId} />
+        <ScanFileList files={files} canEdit={canEdit} company={companyId} version={version} />
       ) : view === 'ba' ? (
         board && <BaCards data={board} source={source} knownBas={baReg.names} canEdit={canEdit} company={companyId} />
       ) : (

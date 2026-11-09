@@ -602,6 +602,32 @@ export async function commitInventory(input: {
   return payload.length;
 }
 
+/** What Coop read about ONE page, to prefill its review: the store (the registry-snapped
+ *  code the classifier settled on), period and BA from that page's own classification.
+ *  Null fields when the page didn't show them (pages 2 to 5 rarely print a store). */
+export type PageSuggestion = {storeCode: string | null; storeName: string | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+
+export async function getPageSuggestion(companyId: string, uploadId: string): Promise<PageSuggestion> {
+  const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null};
+  if (!goldlineConfigured()) return none;
+  const res = await db().from('uploads').select('classification').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
+  const c = ((res.data as {classification?: Record<string, unknown> | null} | null)?.classification ?? {}) as Record<string, unknown>;
+  const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  const iso = (v: unknown): string | null => {
+    const t = str(v);
+    return t && /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+  };
+  return {
+    storeCode: str(snap.code) ?? str(c.store_code),
+    storeName: str(c.store_name),
+    periodStart: iso(c.period_start),
+    periodEnd: iso(c.period_end),
+    consultant: str(c.consultant),
+  };
+}
+
 /** List a company's uploads, newest first (paginated — never silently capped). Cached
  *  across requests (the /uploads home re-reads the whole table on every load); the
  *  upload / commit / reject writes expire gl-uploads so a change shows on the next load. */

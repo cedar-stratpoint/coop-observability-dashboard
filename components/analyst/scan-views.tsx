@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
-import {useRouter} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, Check, ChevronDown, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel, scanPosition} from '@/src/upload-batch';
+import {STATUS_FILTER_ORDER, TYPE_ORDER, VERSION_FILTER_ORDER, fileReviewQuery, groupFiles, matchesFilter, pageType, parseFileFilter, type PageType} from '@/src/scan-file-nav';
 import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod, VERSION_LABEL, VERSION_COLOR} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
@@ -31,30 +32,15 @@ function tint(t: keyof typeof TONE) {
   return {color: toneText(TONE[t]), background: `color-mix(in oklab, ${TONE[t]} 14%, transparent)`};
 }
 
-// The best outcome wins when a page was tried several times: a committed or read page
-// beats one still processing, which beats a set-aside, which beats a failure; newest
-// breaks a tie. Retries and re-uploads each make a fresh row, so a page can have many.
-const STATUS_RANK: Record<string, number> = {committed: 5, needs_review: 4, processing: 3, rejected: 2, failed: 1};
-
 // Each page carries two independent facets, filtered on their own rows so they never share a
 // chip: its TYPE (what the page is) and its STATUS (where it sits in review). Keeping them
 // apart is what fixes the old "Show" row, which mixed the two and repeated "Set aside" and
 // "Couldn't read" as both a kind and a status.
-type PageType = 'inventory' | 'sales' | 'blank';
 const TYPE_LABEL: Record<PageType, string> = {inventory: 'Inventory form', sales: 'Sales report', blank: 'Blank page'};
-const TYPE_ORDER: PageType[] = ['inventory', 'sales', 'blank'];
-// A page Coop couldn't read (or is still reading) has no settled type, so it has no Type chip;
-// it is found under Status instead, never duplicated across both rows.
-function pageType(u: UploadRow): PageType | null {
-  if (u.page_kind === 'sales') return 'sales';
-  if (u.page_kind === 'blank') return 'blank';
-  if (u.page_kind === 'inventory') return 'inventory';
-  return null;
-}
-const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
+// Ordering, best attempt, pageType and the filter predicate live in src/scan-file-nav.ts,
+// shared with the one-page review's arrows so both read the same list.
 // The review workflow state, its own facet. "Set aside" is the one home for a parked page
 // (a rejected form, or any sales/blank sheet); "Failed" is the one home for an unread page.
-const STATUS_FILTER_ORDER: UploadStatus[] = ['needs_review', 'processing', 'failed', 'rejected', 'committed'];
 const STATUS_LABEL: Record<UploadStatus, string> = {needs_review: 'Needs review', processing: 'Processing', failed: 'Failed', rejected: 'Set aside', committed: 'Committed'};
 const STATUS_DOT: Record<UploadStatus, string> = {
   needs_review: 'var(--status-warn)',
@@ -67,27 +53,32 @@ const STATUS_DOT: Record<UploadStatus, string> = {
 /** The scan's pages as a plain list — "Page 10 of 98", in page order, each opening its
  *  review. One row per page: the current (best) attempt, with the older tries folded
  *  behind an "N earlier attempts" toggle so repeated retries/re-uploads don't pile up. */
-export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; canEdit: boolean; company: string}) {
+export function ScanFileList({files, canEdit, company, version = null}: {files: UploadRow[]; canEdit: boolean; company: string; version?: FormVersion | null}) {
   const router = useRouter();
+  const params = useSearchParams();
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
-  const [page, setPage] = useState(1);
+  // The filters and list page live in the URL (type / status / fv / lp), so browser Back from
+  // a page review lands on exactly the list the reviewer left, not a reset one.
+  const filters = parseFileFilter({type: params.get('type'), status: params.get('status'), fv: params.get('fv')});
+  const {type: typeFilter, status: statusFilter, fv: versionFilter} = filters;
+  const page = Math.max(1, Number(params.get('lp')) || 1);
   const [size, setSize] = useState<PageSize>(20);
-  const [typeFilter, setTypeFilter] = useState<PageType | 'all'>('all');
-  const chooseType = (t: PageType | 'all') => {
-    setTypeFilter(t);
-    setPage(1);
+  // replaceState (Next syncs it into useSearchParams): a filter change is not a step to go
+  // Back through, and it needs no server round trip.
+  const setQuery = (next: Record<string, string | null>) => {
+    const qs = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null) qs.delete(k);
+      else qs.set(k, v);
+    }
+    window.history.replaceState(null, '', `?${qs.toString()}`);
   };
-  const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
-  const chooseVersion = (v: 'all' | FormVersion) => {
-    setVersionFilter(v);
-    setPage(1);
-  };
-  const [statusFilter, setStatusFilter] = useState<'all' | UploadStatus>('all');
-  const chooseStatus = (s: 'all' | UploadStatus) => {
-    setStatusFilter(s);
-    setPage(1);
-  };
+  const setPage = (n: number) => setQuery({lp: n > 1 ? String(n) : null});
+  const chooseType = (t: PageType | 'all') => setQuery({type: t === 'all' ? null : t, lp: null});
+  const chooseVersion = (v: 'all' | FormVersion) => setQuery({fv: v === 'all' ? null : v, lp: null});
+  const chooseStatus = (s: 'all' | UploadStatus) => setQuery({status: s === 'all' ? null : s, lp: null});
+  const reviewQuery = fileReviewQuery(filters, version);
   // Pages being read again from the stored file (a failed page, retried in place).
   const [rereading, setRereading] = useState<Set<string>>(() => new Set());
   const reread = (id: string) => {
@@ -119,23 +110,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
       localStorage.setItem(SIZE_KEY, String(v));
     } catch {}
   };
-  const groups = useMemo(() => {
-    const byPage = new Map<number, UploadRow[]>();
-    for (const f of files) {
-      const idx = scanPageLabel(f.filename).index;
-      const arr = byPage.get(idx) ?? [];
-      arr.push(f);
-      byPage.set(idx, arr);
-    }
-    return [...byPage.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([idx, rows]) => {
-        const sorted = [...rows].sort(
-          (a, b) => (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0) || b.created_at.localeCompare(a.created_at),
-        );
-        return {idx, best: sorted[0], others: sorted.slice(1)};
-      });
-  }, [files]);
+  const groups = useMemo(() => groupFiles(files), [files]);
 
   // Scan outcome recap (one per page, its best attempt), read straight from review status:
   // "read" = a form in review or committed; "set aside" = a parked page (rejected form, or a
@@ -181,12 +156,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
   const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
 
   // The three facets combine with AND; Version applies only to inventory forms.
-  const shown = groups.filter(
-    (g) =>
-      (typeFilter === 'all' || pageType(g.best) === typeFilter) &&
-      (statusFilter === 'all' || g.best.status === statusFilter) &&
-      (versionFilter === 'all' || (pageType(g.best) === 'inventory' && g.best.form_version === versionFilter)),
-  );
+  const shown = groups.filter((g) => matchesFilter(g.best, filters));
   const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
@@ -282,7 +252,7 @@ export function ScanFileList({files, canEdit, company}: {files: UploadRow[]; can
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   <span className="flex min-w-0 items-baseline gap-2">
                     <Link
-                      href={`/uploads/${u.id}`}
+                      href={`/uploads/${u.id}?${reviewQuery}`}
                       className="truncate text-[0.9375rem] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
