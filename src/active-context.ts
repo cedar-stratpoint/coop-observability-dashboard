@@ -52,6 +52,11 @@ async function cookieView(session: ViewSession | null): Promise<string | null> {
 // (Local dev only: DEV_AUTH_AS can stand in a session with memberships — see dev-auth.)
 const sessionOnce = cache(async () => devSessionWithMemberships() ?? (await auth()));
 
+/** The request's session, read once and shared with the nav and the page. Each auth()
+ *  call decrypts the JWT and, when its memberships are over 5 minutes old, refetches
+ *  them from the archive (auth.ts jwt callback), so the layout uses this, not auth(). */
+export const getSession = sessionOnce;
+
 export async function getActiveContext(requested?: string | null): Promise<ActiveContext | null> {
   const session = await sessionOnce();
   if (!session) return null;
