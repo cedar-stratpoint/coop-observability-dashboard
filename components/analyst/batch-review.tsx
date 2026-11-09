@@ -517,7 +517,7 @@ export function BatchReview({
                   role="tab"
                   type="button"
                   aria-selected={tab === k}
-                  aria-label={`${sheetNo ? `Sheet ${sheetNo}` : p.upload.filename}, form page ${p.page ?? 'unknown'}`}
+                  aria-label={`${sheetNo ? `Scan page ${sheetNo}` : p.upload.filename}, form page ${p.page ?? 'unknown'}`}
                   onClick={() => setTab(k)}
                   className={cn(
                     'inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
