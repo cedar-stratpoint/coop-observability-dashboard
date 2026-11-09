@@ -64,12 +64,12 @@ describe.skipIf(!local)('GMV actuals against the local pos_* tables', () => {
     const rows = (['shopee', 'lazada'] as const).flatMap((channel) => days.map((day) => ({day, channel, revenue: 1000, orders: 1, units: 1, ...win})));
     const buckets = rollupChannels({fromDay: '2026-08-01', toDay: '2026-11-05', channels: ['shopee', 'lazada'], granularity: 'month', digests: dailyRowsToDigests(rows), website: null, offline: null});
     const marketplace = marketplaceCells(MONTHS, NOW, buckets);
-    const website = websiteCells(MONTHS, NOW, {truncated: false, orders: [{createdAt: '2026-08-05T04:00:00Z', totalPrice: '4000', financialStatus: 'paid'}, {createdAt: '2026-08-06T04:00:00Z', totalPrice: '9000', financialStatus: 'refunded'}]});
+    const website = websiteCells(MONTHS, NOW, {truncated: false, orders: [{createdAt: '2026-08-05T04:00:00Z', lines: [{price: 2000, quantity: 2}]}, {createdAt: '2026-08-06T04:00:00Z', lines: [{price: 1000, quantity: 1}]}]});
     expect(marketplace[0]).toMatchObject({value: 62000, state: 'ok'});
     expect(marketplace[2]).toMatchObject({value: null, state: 'gap'});
-    expect(website[0]).toMatchObject({value: 4000, state: 'ok'});
+    expect(website[0]).toMatchObject({value: 5000, state: 'ok'}); // Shopify gross sales of every order: price x quantity of the lines
     const events = eventsCells(MONTHS, NOW, await readPos());
-    expect(totalCells([events, website, marketplace])[0]).toMatchObject({value: 96000, state: 'ok'});
+    expect(totalCells([events, website, marketplace])[0]).toMatchObject({value: 97000, state: 'ok'});
     expect(totalCells([events, website, marketplace])[2]).toMatchObject({state: 'partial'}); // marketplace is a gap in October
   });
 
