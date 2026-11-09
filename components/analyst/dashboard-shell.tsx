@@ -13,6 +13,7 @@ import {ViewSwitcher} from './company-switcher';
 import {EnvStrip, EnvSwitcher} from './env-switcher';
 import {UploadQueueProvider} from './upload-queue';
 import {UploadQueueIndicator} from './upload-queue-indicator';
+import {ScanReadingProvider, ScanReadingDock} from './scan-reading';
 import {BrandMark} from './brand-mark';
 import {brandFor} from '@/src/brands';
 import {shouldRedirectFromZoomy} from '@/src/company-nav';
@@ -294,7 +295,11 @@ export function DashboardShell({
     <PlaybookProvider>
     {/* Upload queue lives in the shell so uploads keep running across in-app navigation. */}
     <UploadQueueProvider company={nav?.companyId ?? null} serverUpload={serverUpload}>
+    {/* Refresh-surviving "still reading" awareness: polls DB state so the dock (here) and the
+        Uploads-page card reappear after a refresh while the server reads a scan. */}
+    <ScanReadingProvider company={nav?.companyId ?? null} serverUpload={serverUpload}>
     <UploadQueueIndicator />
+    <ScanReadingDock />
     <CoopChatProvider scopeLabel={scopeLabel || undefined}>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
@@ -936,6 +941,7 @@ export function DashboardShell({
       </div>
     )}
     </CoopChatProvider>
+    </ScanReadingProvider>
     </UploadQueueProvider>
     </PlaybookProvider>
   );
