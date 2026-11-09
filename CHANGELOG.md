@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: review sheets are not copies; label each by its scan page (P.52)
+
+Corrects the "pick the good copy / drop the others" model added earlier the same day. That model was wrong: when a form page shows several sheets, they are **not interchangeable copies** to thin down to one. They are distinct, valuable inventory pages (often different stores' page 1, which the store-change guard already flags), and "Drop the others" risked discarding real data. Reverted the keeper/collapse/drop UI and the `setSheetDroppedAction` server action.
+
+- **Each chip names its real scan page.** A chip now leads with "P.52" (its position in the source scan, via new `scanPageNumber`) instead of a meaningless local 1/2/3 ordinal, so every sheet stays identifiable back to the physical page. The "Form pages" rows show every sheet again, no collapsing.
+- **Removed:** auto-nomination (`nominateKeeper`), the keep/override radios, "Drop the N others", the reversible "Dropped" strip, and `setSheetDroppedAction`. No sheet can be set aside from this screen anymore.
+- **Duplicate note reworded:** when a form page has more than one sheet, the warning now says to split the batch by store or remove extras from Uploads, rather than "pick the good copy". Commit still requires one sheet per page (unchanged gating).
+- Kept from the earlier change: "Sheet N of 98" vs form "Page 1 to 5" wording, the "Form pages" heading, "No page number (N)", and the commit confirmation dialog.
+- Tests updated (`scanPageNumber`); typecheck green; design detector clean.
+
 ## 2026-11-09 — Uploads: review screen says "Sheet" vs "Page", and you pick the good copy in place
 
 A design critique of the batch-review screen (one store's inventory form, assembled from a shuffled 98-page scan) found three real frictions: the word "Page" named two different things, a duplicate pile of 50-ish scanned sheets was overwhelming, and the core job (keep one good copy per form page, drop the rest) had no affordance on the screen. Fixed all three, plus a commit confirmation. Additive only; no schema change (the drop reuses the existing `rejected` status).

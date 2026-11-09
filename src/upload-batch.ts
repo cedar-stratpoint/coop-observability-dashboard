@@ -101,22 +101,12 @@ export function scanPageLabel(filename: string): {title: string; sub: string | n
   return m ? {title: `Sheet ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
 }
 
-/** One scanned copy of the same form page, scored for auto-nomination. */
-export type SheetCopy = {id: string; docConfidence: number | null; flagged: number; rows: number};
-
-/** When a form page came through more than once, the copy worth keeping: highest document
- *  confidence, then fewest rows still flagged, then most rows read, then a stable id so the
- *  pick never flickers. Returns the id to keep, or null when there are no copies. The reviewer
- *  can always override; this only sets the sensible default so the pile isn't a blind choice. */
-export function nominateKeeper(copies: SheetCopy[]): string | null {
-  if (copies.length === 0) return null;
-  return [...copies].sort(
-    (a, b) =>
-      (b.docConfidence ?? -1) - (a.docConfidence ?? -1) ||
-      a.flagged - b.flagged ||
-      b.rows - a.rows ||
-      a.id.localeCompare(b.id),
-  )[0].id;
+/** The scanned sheet's position in its source scan ("… (page 52 of 98).pdf" → 52), or null
+ *  for a whole-file upload. Lets a chip name the physical page it is (e.g. "P.52") so every
+ *  sheet stays identifiable back to the scan, not reduced to a local 1/2/3 ordinal. */
+export function scanPageNumber(filename: string): number | null {
+  const n = scanPageLabel(filename).index;
+  return n > 0 ? n : null;
 }
 
 /**
