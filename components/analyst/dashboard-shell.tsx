@@ -4,7 +4,7 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useSearchParams} from 'next/navigation';
 import {signOut} from 'next-auth/react';
-import {Activity, BarChart3, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Contact, FileBarChart, Flag, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
+import {Activity, BarChart3, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Contact, FileBarChart, Flag, Gauge, HeartPulse, Home, Link2, ListChecks, LogOut, Mail, Menu, MoreHorizontal, Package, Receipt, ReceiptText, Settings, Store, Tag, Upload, Users} from 'lucide-react';
 import type {DigestArchiveRow} from '../../src/types';
 import {cn} from '@/lib/utils';
 import {fmtRange, hasNoSalesData, periodKind} from '../../src/week';
@@ -170,8 +170,12 @@ export function DashboardShell({
       if (localStorage.getItem('coop-nav-expanded') === '1') setNavExpanded(true);
     } catch {}
   }, []);
-  // Flyout submenu for the collapsed rail's Overview group.
+  // Flyout submenus for the collapsed rail's groups (Overview on Zoomy, "More" on a
+  // company view). `moreOpen` is the expanded-rail accordion for the "More" group, which
+  // defaults closed so the rail stays a short, scannable list (Hick's Law).
   const [overviewFlyout, setOverviewFlyout] = useState(false);
+  const [moreFlyout, setMoreFlyout] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const toggleNav = () =>
     setNavExpanded((v) => {
       const next = !v;
@@ -179,6 +183,7 @@ export function DashboardShell({
         localStorage.setItem('coop-nav-expanded', next ? '1' : '0');
       } catch {}
       setOverviewFlyout(false); // don't carry a collapsed-rail popover across modes
+      setMoreFlyout(false);
       return next;
     });
 
@@ -225,11 +230,25 @@ export function DashboardShell({
   const healthReportTab: NavItem = {href: '/health-report', label: 'Business Health Report', icon: ClipboardList};
 
   const overviewChildren = isZoomy ? OVERVIEW_CHILDREN : [];
+  // A company (Goldline) view. Its rail is ordered by the daily scan→inventory loop and,
+  // for Hick's Law, keeps only the frequent tabs visible; the rest live under one "More".
+  const isCompanyView = !isZoomy && !isCoopAdminView;
   const flatTabs = isZoomy
     ? FLAT_TABS
     : isCoopAdminView
       ? [usersTab, healthReportTab, ...(multiView ? [settingsTab] : [])]
-      : [overviewTab, storesTab, stockTab, restockTab, ordersTab, skuLinksTab, flagsTab, auditTab, basTab, actionsTab, healthTab, uploadsTab, ...(multiView ? [settingsTab] : [])];
+      : [overviewTab, uploadsTab, stockTab, restockTab, ordersTab, skuLinksTab, basTab];
+  // The less-used company tabs, collapsed under a single "More" disclosure in the rail.
+  const moreTabs: NavItem[] = isCompanyView ? [storesTab, auditTab, flagsTab, actionsTab, healthTab] : [];
+  // Settings sits below the More group (pinned to the bottom) for the company view; Zoomy
+  // and the Coop Admin console keep it inside flatTabs as before.
+  const moreTail: NavItem[] = isCompanyView && multiView ? [settingsTab] : [];
+  // Whether the current page lives under "More" — highlights the group and auto-opens the
+  // accordion so the active tab is never hidden behind a collapsed section.
+  const moreGroupActive = moreTabs.some((t) => leafActive(t.href, pathname, channel));
+  useEffect(() => {
+    if (moreGroupActive) setMoreOpen(true);
+  }, [moreGroupActive]);
 
   // ── Mobile nav model (below md only) ──────────────────────────────────────
   // The left rail is hidden under md; these drive a bottom tab bar + a "More" sheet.
@@ -247,9 +266,9 @@ export function DashboardShell({
         ]
       : [
           {href: '/overview', label: 'Overview', icon: BarChart3, active: leafActive('/overview', pathname, channel)},
-          {href: '/stock', label: 'Inventory', icon: Package, active: leafActive('/stock', pathname, channel)},
-          {href: '/action-feed', label: 'Actions', icon: ListChecks, active: leafActive('/action-feed', pathname, channel)},
           {href: '/uploads', label: 'Uploads', icon: Upload, active: leafActive('/uploads', pathname, channel)},
+          {href: '/stock', label: 'Inventory', icon: Package, active: leafActive('/stock', pathname, channel)},
+          {href: '/stock/restock', label: 'Restock', icon: CalendarRange, active: leafActive('/stock/restock', pathname, channel)},
         ];
   const moreItems: NavItem[] = isZoomy
     ? [
@@ -265,7 +284,7 @@ export function DashboardShell({
       ]
     : isCoopAdminView
       ? [healthReportTab, ...(multiView ? [settingsTab] : [])]
-      : [restockTab, ordersTab, storesTab, skuLinksTab, flagsTab, basTab, healthTab, ...(multiView ? [settingsTab] : [])];
+      : [ordersTab, skuLinksTab, basTab, storesTab, auditTab, flagsTab, actionsTab, healthTab, ...(multiView ? [settingsTab] : [])];
   const moreActive = moreItems.some((i) => leafActive(i.href, pathname, channel));
 
   return (
@@ -618,6 +637,127 @@ export function DashboardShell({
                   active
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                )}
+              >
+                {active && <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" aria-hidden />}
+                <t.icon className="size-[18px] shrink-0" />
+                {navExpanded && <span className="truncate text-[13px] font-medium">{t.label}</span>}
+              </Link>
+            );
+          })}
+
+          {/* "More" group — the less-used company tabs behind one disclosure (Hick's Law).
+              Expanded rail: an accordion. Collapsed rail: an icon that opens a flyout, the
+              same pattern as Zoomy's Overview group. Nav is frequent, so no entrance motion —
+              only the chevron rotates and colors transition. */}
+          {moreTabs.length > 0 && (navExpanded ? (
+            <div className="flex flex-col">
+              <button
+                type="button"
+                onClick={() => setMoreOpen((o) => !o)}
+                aria-expanded={moreOpen}
+                aria-label={moreOpen ? 'Collapse More section' : 'Expand More section'}
+                className={cn(
+                  'relative flex h-10 w-full items-center gap-3 rounded-xl px-3 transition-colors',
+                  moreGroupActive ? 'text-primary' : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                )}
+              >
+                {moreGroupActive && <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" aria-hidden />}
+                <MoreHorizontal className="size-[18px] shrink-0" />
+                <span className="truncate text-[13px] font-medium">More</span>
+                <ChevronDown className={cn('ml-auto size-4 transition-transform', moreOpen ? '' : '-rotate-90')} />
+              </button>
+              {moreOpen && (
+                <div className="ml-3 mt-1 flex flex-col gap-1 border-l border-sidebar-border pl-3">
+                  {moreTabs.map((c) => {
+                    const active = leafActive(c.href, pathname, channel);
+                    return (
+                      <Link
+                        key={c.href}
+                        href={withWeek(c.href)}
+                        aria-current={active ? 'page' : undefined}
+                        className={cn(
+                          'flex h-9 items-center gap-3 rounded-lg px-3 transition-colors',
+                          active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                        )}
+                      >
+                        <c.icon className="size-4 shrink-0" />
+                        <span className="truncate text-[13px] font-medium">{c.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMoreFlyout((o) => !o)}
+                title="More"
+                aria-label="More"
+                aria-haspopup="menu"
+                aria-expanded={moreFlyout}
+                aria-current={moreGroupActive ? 'page' : undefined}
+                className={cn(
+                  'relative flex size-10 items-center justify-center rounded-xl transition-colors',
+                  moreGroupActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                )}
+              >
+                {moreGroupActive && <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" aria-hidden />}
+                <MoreHorizontal className="size-[18px] shrink-0" />
+                <ChevronRight
+                  aria-hidden
+                  className={cn(
+                    'absolute bottom-0.5 right-0.5 size-2.5 transition-transform',
+                    moreFlyout ? 'rotate-90' : '',
+                    moreGroupActive ? 'text-primary/70' : 'text-muted-foreground/60',
+                  )}
+                />
+              </button>
+              {moreFlyout && (
+                <>
+                  <button className="fixed inset-0 z-20 cursor-default" aria-hidden onClick={() => setMoreFlyout(false)} />
+                  <div role="menu" className="absolute left-full top-0 z-30 ml-2 w-52 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg">
+                    {moreTabs.map((item) => {
+                      const active = leafActive(item.href, pathname, channel);
+                      return (
+                        <Link
+                          key={item.href}
+                          href={withWeek(item.href)}
+                          role="menuitem"
+                          onClick={() => setMoreFlyout(false)}
+                          aria-current={active ? 'page' : undefined}
+                          className={cn(
+                            'flex h-9 items-center gap-2.5 rounded-lg px-2.5 transition-colors',
+                            active ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
+                          )}
+                        >
+                          <item.icon className="size-4 shrink-0" />
+                          <span className="truncate text-[13px] font-medium">{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+
+          {/* Settings, pinned below the More group for the company view. */}
+          {moreTail.map((t) => {
+            const active = leafActive(t.href, pathname, channel);
+            return (
+              <Link
+                key={t.href}
+                href={withWeek(t.href)}
+                title={navExpanded ? undefined : t.label}
+                aria-label={t.label}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'relative flex h-10 items-center rounded-xl transition-colors',
+                  navExpanded ? 'w-full gap-3 px-3' : 'size-10 justify-center',
+                  active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
                 )}
               >
                 {active && <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" aria-hidden />}
