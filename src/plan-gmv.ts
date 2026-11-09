@@ -57,24 +57,6 @@ export function eventsCells(months: readonly string[], nowKey: string, pos: {ord
 
 /* ---------- Website ---------- */
 
-/**
- * Which Shopify financial_status values count as Website GMV. The CRM Worker stores Shopify's REST value as is (lower case).
- * Owner rule (2026-11-05): Website GMV excludes only cancelled, voided and refunded orders.
- * - paid, pending (cash on delivery), authorized, partially_paid: count at the order total.
- * - partially_refunded: counts at the FULL order total (the sale happened and the Worker does not expose the refunded amount), so the
- *   month can overstate by the refund; the cell carries a "may overstate" note (PARTIAL_REFUND_NOTE).
- * - refunded, voided: excluded. expired never happened (a checkout that timed out), so it stays excluded too.
- * Anything not listed (including null) is excluded, never guessed in. A cancelled order reaches us as voided or refunded; the CRM
- * projection carries no separate cancel flag. The Sales page should adopt this one helper.
- */
-export const WEBSITE_STATUS_RULES: Readonly<Record<string, boolean>> = {
-  paid: true, pending: true, authorized: true, partially_paid: true, partially_refunded: true,
-  refunded: false, voided: false, expired: false,
-};
-export const PARTIAL_REFUND_NOTE = 'Includes partially refunded orders at their full total, so this may overstate.';
-const isPartiallyRefunded = (status: string | null | undefined): boolean => (status ?? '').trim().toLowerCase() === 'partially_refunded';
-export const websiteOrderCounts = (status: string | null | undefined): boolean => WEBSITE_STATUS_RULES[(status ?? '').trim().toLowerCase()] === true;
-
 /** The Worker's /api/orders is `ORDER BY created_at DESC LIMIT 1000` and ignores limit/offset (zoomy-crm src/routes/api.ts). */
 export const CRM_ORDERS_CAP = 1000;
 
@@ -108,24 +90,60 @@ export async function collectOrderPages<T>(
   return {orders, complete: false, legacy: false};
 }
 
-export interface WebsiteOrderLike {createdAt: string | null; totalPrice: string | null; financialStatus: string | null}
+/** A line as read from the Worker's `/api/orders?lines=1` (price and quantity only). Either may arrive as a string or a number. */
+export interface WebsiteLineLike {price: unknown; quantity: unknown}
+export interface WebsiteOrderLike {createdAt: string | null; lines?: readonly WebsiteLineLike[] | null}
 
-/** `crm` is null when the CRM is not configured or the read failed. A truncated read only covers months after the oldest order we hold. */
+const readNum = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '' || typeof v === 'boolean') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Shopify "Gross sales" of one order: the sum of line price x quantity, before discounts, returns, shipping and tax (the same definition
+ * as the CRM's /api/sales/summary `gross`). null = unknown: no lines array, an empty one (a Shopify order always has a line), or a line
+ * without a usable price (>= 0) or quantity (> 0; the Worker sends 0 for a missing quantity). Never a silently low number.
+ */
+export function orderGross(order: {lines?: readonly WebsiteLineLike[] | null}): number | null {
+  const lines = order.lines;
+  if (!Array.isArray(lines) || lines.length === 0) return null;
+  let sum = 0;
+  for (const l of lines) {
+    const price = readNum(l?.price);
+    const qty = readNum(l?.quantity);
+    if (price === null || price < 0 || qty === null || qty <= 0) return null;
+    sum += price * qty;
+  }
+  return sum;
+}
+
+export const MISSING_LINES_NOTE = 'Some orders this month came without readable line items, so this is understated.';
+export const NO_LINES_NOTE = 'The CRM sent no line items, so Shopify gross sales cannot be worked out yet.';
+
+/**
+ * Website GMV = Shopify gross sales by Manila month. Owner decision (2026-11-09): match Shopify, so EVERY order counts whatever its
+ * financial status (refunded, voided and cancelled included; Shopify subtracts returns later, in net sales).
+ * `crm` is null when the CRM is not configured or the read failed. A truncated read only covers months after the oldest order we hold.
+ * An order whose gross is unknown makes its month partial (grey, understated). No line items on ANY order (an old Worker that ignores
+ * `lines=1`) is a gap with a note: there is no gross figure at all, and a gap is never shown as PHP 0.
+ */
 export function websiteCells(months: readonly string[], nowKey: string, crm: {orders: readonly WebsiteOrderLike[]; truncated: boolean} | null): ActualCell[] {
   if (!crm || crm.orders.length === 0) return months.map(() => GAP);
+  if (!crm.orders.some((o) => Array.isArray(o.lines))) return months.map(() => ({...GAP, note: NO_LINES_NOTE}));
   const sums = new Map<string, number>();
-  const overstated = new Set<string>();
+  const unknown = new Set<string>();
   for (const o of crm.orders) {
     const m = phMonthKey(o.createdAt);
-    const price = Number(o.totalPrice);
-    if (m === null || !websiteOrderCounts(o.financialStatus) || !Number.isFinite(price)) continue;
-    sums.set(m, (sums.get(m) ?? 0) + price);
-    if (isPartiallyRefunded(o.financialStatus)) overstated.add(m);
+    if (m === null) continue;
+    const gross = orderGross(o);
+    if (gross === null) unknown.add(m);
+    else sums.set(m, (sums.get(m) ?? 0) + gross);
   }
   const oldest = minKey(crm.orders.map((o) => phMonthKey(o.createdAt)));
   // Truncated: the oldest month we hold is only partly there, so coverage starts the month after it.
   const first = oldest !== null && crm.truncated ? nextKey(oldest) : oldest;
-  return covered(months, nowKey, first, (k) => sums.get(k) ?? 0).map((c, i) => (c.state === 'ok' && overstated.has(key(months[i])) ? {...c, note: PARTIAL_REFUND_NOTE} : c));
+  return covered(months, nowKey, first, (k) => sums.get(k) ?? 0).map((c, i) => (c.state === 'ok' && unknown.has(key(months[i])) ? {...c, state: 'partial', note: MISSING_LINES_NOTE} : c));
 }
 
 function nextKey(k: string): string {

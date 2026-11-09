@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
-  CRM_ORDERS_CAP, collectOrderPages, crmCoverage, eventsCells, marketplaceCells, phMonthKey, totalCells, websiteCells, websiteOrderCounts, WEBSITE_STATUS_RULES, PARTIAL_REFUND_NOTE,
+  CRM_ORDERS_CAP, collectOrderPages, crmCoverage, eventsCells, marketplaceCells, phMonthKey, totalCells, websiteCells, orderGross, MISSING_LINES_NOTE, NO_LINES_NOTE,
 } from '../src/plan-gmv';
 import {dailyRowsToDigests} from '../src/daily-sales-digests';
 import {rollupChannels} from '../src/period-rollup';
@@ -87,49 +87,68 @@ describe('Events GMV', () => {
   });
 });
 
-describe('Website GMV status table', () => {
-  it('lists every Shopify status explicitly', () => {
-    expect(WEBSITE_STATUS_RULES).toEqual({
-      paid: true, pending: true, authorized: true, partially_paid: true, partially_refunded: true,
-      refunded: false, voided: false, expired: false,
-    });
+describe('orderGross (Shopify "Gross sales": line price x quantity, before discounts, returns, shipping and tax)', () => {
+  it('sums price x quantity over the lines', () => {
+    expect(orderGross({lines: [{price: 250, quantity: 2}, {price: 99.5, quantity: 1}]})).toBe(599.5);
+  });
+  it('reads a string price or quantity (the Worker may send either)', () => {
+    expect(orderGross({lines: [{price: '250.00', quantity: '2'}, {price: 99.5, quantity: 1}]})).toBe(599.5);
+  });
+  it('a free line (price 0) is a real zero', () => {
+    expect(orderGross({lines: [{price: 0, quantity: 1}, {price: '100', quantity: 1}]})).toBe(100);
   });
   it.each([
-    ['paid', true], ['PAID', true], [' paid ', true], ['partially_refunded', true],
-    ['pending', true], ['authorized', true], ['partially_paid', true],
-    ['refunded', false], ['voided', false], ['expired', false],
-    ['something_new', false], ['', false], [null, false],
-  ])('%s -> counts: %s', (status, counts) => {
-    expect(websiteOrderCounts(status as string | null)).toBe(counts);
+    ['no lines field', {}],
+    ['lines null', {lines: null}],
+    ['an empty lines array (a Shopify order always has a line)', {lines: []}],
+    ['a line with no price', {lines: [{price: 100, quantity: 1}, {price: null, quantity: 1}]}],
+    ['a line with an unreadable price', {lines: [{price: 'abc', quantity: 1}]}],
+    ['a line with no quantity (the Worker sends 0 for a missing one)', {lines: [{price: 100, quantity: 0}]}],
+    ['a line with an unreadable quantity', {lines: [{price: 100, quantity: 'x'}]}],
+  ])('%s -> null (unknown, never a low number)', (_label, order) => {
+    expect(orderGross(order as never)).toBeNull();
   });
 });
 
-describe('Website GMV by month', () => {
-  const o = (id: string, createdAt: string, totalPrice: string | null, financialStatus: string | null) => ({shopifyOrderId: id, createdAt, totalPrice, financialStatus});
+describe('Website GMV by month (Shopify gross sales, every order)', () => {
+  const line = (price: number | string, quantity: number | string = 1) => ({price, quantity});
+  const o = (id: string, createdAt: string, lines: unknown, financialStatus: string | null = 'paid', totalPrice: string | null = '999999') =>
+    ({shopifyOrderId: id, createdAt, totalPrice, financialStatus, lines}) as never;
   const orders = [
-    o('1', '2026-08-05T04:00:00Z', '1000.50', 'paid'),
-    o('2', '2026-08-31T23:59:00+08:00', '200', 'paid'),
-    o('3', '2026-09-01T00:00:00+08:00', '300', 'paid'),
-    o('4', '2026-09-02T04:00:00Z', '9999', 'refunded'),
-    o('5', '2026-09-03T04:00:00Z', '9999', 'voided'),
-    o('6', '2026-09-04T04:00:00Z', '50', 'partially_refunded'),
-    o('7', '2026-09-05T04:00:00Z', 'abc', 'paid'), // unreadable price adds nothing and never NaN
+    o('1', '2026-08-05T04:00:00Z', [line(500.25, 2)]),
+    o('2', '2026-08-31T23:59:00+08:00', [line('200')]),
+    o('3', '2026-09-01T00:00:00+08:00', [line(300)]),
+    o('4', '2026-09-02T04:00:00Z', [line(40)], 'refunded'),
+    o('5', '2026-09-03T04:00:00Z', [line(5)], 'voided'),
+    o('6', '2026-09-04T04:00:00Z', [line(50)], 'partially_refunded'),
+    o('7', '2026-09-05T04:00:00Z', [line(1)], 'expired'),
+    o('8', '2026-09-06T04:00:00Z', [line(2)], null),
   ];
-  it('sums paid-like totals into the PH month, and excludes refunded and voided', () => {
+  it('sums line gross into the PH month, never the order total', () => {
     const cells = websiteCells(MONTHS, NOW, {orders, truncated: false});
     expect(cells[0]).toMatchObject({value: 1200.5, state: 'ok'});
-    expect(cells[1]).toMatchObject({value: 350, state: 'ok'});
   });
-  it('counts pending, authorized and partially_paid orders (owner rule: only cancelled, voided and refunded are out)', () => {
-    const cells = websiteCells(['2026-09-01'], '2026-10', {orders: [o('p', '2026-09-02T04:00:00Z', '100', 'pending'), o('q', '2026-09-02T04:00:00Z', '10', 'authorized'), o('r', '2026-09-02T04:00:00Z', '1', 'partially_paid'), o('s', '2026-09-02T04:00:00Z', '9999', 'refunded')], truncated: false});
-    expect(cells[0]).toMatchObject({value: 111, state: 'ok'});
-    expect(cells[0].note).toBeUndefined();
+  it('discounts, shipping and tax are not in it: an order whose total is lower (discount) or higher (shipping + tax) still counts its line gross', () => {
+    const discounted = o('d', '2026-09-02T04:00:00Z', [line(1000)], 'paid', '800.00');
+    const shipped = o('s', '2026-09-02T04:00:00Z', [line(1000)], 'paid', '1250.00');
+    expect(websiteCells(['2026-09-01'], '2026-10', {orders: [discounted, shipped], truncated: false})[0]).toMatchObject({value: 2000, state: 'ok'});
   });
-  it('a month with a partially refunded order keeps its full total and says it may overstate; a month without does not', () => {
+  it('counts every order like Shopify: refunded, voided, expired, partially refunded and unknown status all count, with no overstate note', () => {
     const cells = websiteCells(MONTHS, NOW, {orders, truncated: false});
-    expect(cells[1].note).toBe(PARTIAL_REFUND_NOTE);
-    expect(PARTIAL_REFUND_NOTE).toMatch(/may overstate/);
-    expect(cells[0].note).toBeUndefined();
+    expect(cells[1]).toMatchObject({value: 398, state: 'ok'});
+    expect(cells[1].note).toBeUndefined();
+  });
+  it('an order with no usable lines makes its month partial (grey) with a note; other months stay ok', () => {
+    const withHole = [...orders, o('9', '2026-09-07T04:00:00Z', [{price: null, quantity: 1}]), o('10', '2026-09-08T04:00:00Z', undefined)];
+    const cells = websiteCells(MONTHS, NOW, {orders: withHole, truncated: false});
+    expect(cells[1]).toMatchObject({value: 398, state: 'partial', note: MISSING_LINES_NOTE});
+    expect(cells[0]).toMatchObject({value: 1200.5, state: 'ok'});
+    expect(MISSING_LINES_NOTE).toMatch(/line items/);
+  });
+  it('a legacy Worker that ignores lines=1 (no order has lines): every month is a gap with a note, never PHP 0', () => {
+    const legacy = [o('a', '2026-08-05T04:00:00Z', undefined), o('b', '2026-09-05T04:00:00Z', undefined)];
+    for (const c of websiteCells(MONTHS, NOW, {orders: legacy, truncated: false})) expect(c).toMatchObject({value: null, state: 'gap', note: NO_LINES_NOTE});
+    expect(NO_LINES_NOTE).toMatch(/line items/);
   });
   it('a month after the first CRM order with no orders is a real zero; before it a gap', () => {
     const cells = websiteCells(['2026-07-01', ...MONTHS], NOW, {orders, truncated: false});
@@ -143,7 +162,7 @@ describe('Website GMV by month', () => {
     for (const c of websiteCells(MONTHS, NOW, {orders: [], truncated: false})) expect(c.state).toBe('gap');
   });
   it('a truncated read: months at or before the oldest returned order are gaps, later months are real', () => {
-    const cut = [o('a', '2026-09-10T04:00:00Z', '100', 'paid'), o('b', '2026-10-10T04:00:00Z', '40', 'paid')];
+    const cut = [o('a', '2026-09-10T04:00:00Z', [line(100)]), o('b', '2026-10-10T04:00:00Z', [line(40)])];
     const cells = websiteCells(MONTHS, NOW, {orders: cut, truncated: true});
     expect(cells[0]).toMatchObject({value: null, state: 'gap'});
     expect(cells[1]).toMatchObject({value: null, state: 'gap'}); // September started before the oldest row we hold
