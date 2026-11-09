@@ -6,6 +6,9 @@ const rpc = vi.hoisted(() => vi.fn(async () => ({data: 0, error: null as {messag
 const from = vi.hoisted(() => vi.fn());
 
 vi.mock('server-only', () => ({}));
+// goldline-data pulls in goldline-ref-data, whose salesVersion uses React's cache (Next's
+// server React; the repo's react 18 has none).
+vi.mock('react', async (orig) => ({...(await orig<typeof import('react')>()), cache: (fn: unknown) => fn}));
 vi.mock('../src/nichido-client', () => ({
   nichidoConfigured: () => true,
   nichidoDb: () => ({rpc, from}),
