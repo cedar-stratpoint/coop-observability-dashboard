@@ -17,7 +17,7 @@ While the server reads a scan (P0–P2), the browser now shows a live, refresh-s
 
 Labor-illusion UI (same principles as P2): a live "Reading N of M" count, the ochre `gl-progress-fill` sheen bar, and honest rotating stage labels (Reading handwriting · Checking the store · Matching SKUs · Saving counts). Idle-polls slowly (15s), speeds to 3s only while a scan is in flight, parks on a hidden tab, and is inert for tenants off the flag (the action returns null). Pure core unit-tested (`src/scan-reading.ts`). Flagged off with the rest of the server-driven path.
 
-Found along the way: `getBatchPages` caps at 50 rows (built for ≤20-file batches), which undercounts a ~98-page whole-scan batch. `latestActiveScan` deliberately avoids it; the in-session P2 progress poll (`serverBatchProgressAction`, which reuses `getBatchPages`) should be widened the same way in a follow-up so its completion detection is correct on large scans.
+Also fixed here: `getBatchPages` capped at 50 rows (built for ≤20-file batches), which undercounted a ~98-page whole-scan batch and could make the in-session P2 poll (`serverBatchProgressAction`, which reuses it) report "settled" after only the first 50 pages. Raised the page cap to 300 and chunked the extractions lookup (100 ids per request) so a 250-page batch reads completely; `latestActiveScan` stays a lighter status-only read.
 
 ## 2026-11-09 — Uploads: server-driven ingest, P2 — client upload + live polling (flagged off)
 
