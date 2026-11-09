@@ -36,6 +36,16 @@ describe('CRM field contract (spec 4.4): an allowlist, so hidden and future fiel
     expect(JSON.stringify(o)).not.toMatch(/SECRET/);
   });
 
+  it('an order keeps /api/orders lines=1 line items as price and quantity only (no titles, SKUs or buyer data); string prices are read', () => {
+    const o = projectOrder({shopifyOrderId: 2, createdAt: '2026-09-30T15:59:00Z', lines: [{sku: 'SKU-SECRET', title: 'Treats', price: '250.00', quantity: 2, discount: 10}, {price: null, quantity: 0}, 'junk']});
+    expect(o.lines).toEqual([{price: 250, quantity: 2}, {price: null, quantity: 0}, {price: null, quantity: null}]);
+    expect(JSON.stringify(o)).not.toMatch(/SECRET|Treats/);
+  });
+  it('an order without a lines array has no lines key (a legacy Worker, or a read that did not ask)', () => {
+    expect(projectOrder({shopifyOrderId: 3}).lines).toBeUndefined();
+    expect(projectOrder({shopifyOrderId: 3, lines: 'x'}).lines).toBeUndefined();
+  });
+
   it('metrics: ten numbers, junk is 0, extra keys dropped; membership falls back field by field', () => {
     const m = projectMetrics({customers: '3', orders: 3, totalRevenue: 'x', ordersLast7Days: 1, revenueLast7Days: 700.5, abandonedActive: 2, recovered: 1, reminded: 3, revenueRecovered: 400, recoveryRate: 33.3, token: 'SECRET'});
     expect(m).toEqual({customers: 3, orders: 3, totalRevenue: 0, ordersLast7Days: 1, revenueLast7Days: 700.5, abandonedActive: 2, recovered: 1, reminded: 3, revenueRecovered: 400, recoveryRate: 33.3});

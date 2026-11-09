@@ -23,7 +23,7 @@ describe('actualSource: one source per actual line', () => {
   });
   it('rows 48-51 are auto, each naming its source', () => {
     expect([48, 49, 50, 51].map((r) => actualSource(r))).toEqual([
-      {kind: 'auto', from: 'Shopee + Lazada'}, {kind: 'auto', from: 'Website (CRM)'}, {kind: 'auto', from: 'POS events'}, {kind: 'auto', from: 'Marketplace GMV + Website GMV + Events GMV'},
+      {kind: 'auto', from: 'Shopee + Lazada'}, {kind: 'auto', from: 'Shopify gross sales (CRM): price × quantity, before discounts, shipping and tax'}, {kind: 'auto', from: 'POS events'}, {kind: 'auto', from: 'Marketplace GMV + Website GMV + Events GMV'},
     ]);
   });
   it('every other actual row is calc', () => {
