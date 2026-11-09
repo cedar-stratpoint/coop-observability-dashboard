@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: server-driven ingest, P2 — client upload + live polling (flagged off)
+
+Third slice (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`): the client side, so a flagged company uploads a whole scan once and watches the pages read in place without the in-memory queue that today dies on refresh. Behind the same per-company flag, so nothing changes for anyone off it. The existing client-driven path is untouched (byte-identical when the flag is off): server mode is a gated parallel path in the same provider.
+
+- **`signAndIngestScan` (`src/upload-transport.ts`)** asks for a signed upload URL, PUTs the whole scan PDF to the bucket (real byte progress), then POSTs one ingest request. No in-browser split.
+- **`serverBatchProgressAction` (`app/uploads/actions.ts`)** returns a batch's live per-page progress (status, page, version, flagged). Flag-gated, reads straight from the DB so each poll is fresh.
+- **`src/server-upload-progress.ts`** — pure status to item-state mapping (`rejected` = set aside, a calm done), unit-tested.
+- **Upload queue provider server mode.** A lone scan PDF on a flagged company uploads once and is read server-side; the per-page rows are **synthesized from polling** so the existing uploader list renders them exactly like client-driven ones (progress bands, pills, review link). The client scheduler / form-split / `beforeunload` warning stand down in server mode (leaving is safe now). Retry = a server re-read; cancel / remove are no-ops (the server owns the lifecycle).
+- **Uploader UI.** `ServerUploadStatus` shows the upload then split progress with the "you can leave or refresh" reassurance; server rows hide cancel/remove; the multi-store split UI is suppressed (the batch page handles splitting). The flag is threaded `layout → DashboardShell → UploadQueueProvider` via `serverUploadEnabled`.
+- Not yet browser-verified end to end (needs the flag + the pump's vault secrets wired on staging). Next: **P3** (cutover / widen the flag).
+
 ## 2026-11-09 — Uploads: server-driven ingest, P1 — the pump + read-page (flagged off)
 
 Second slice of the server-driven upload (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`): the part that actually reads the queued pages server-side, so a refresh / navigation / slow page can't interrupt the work. Still inert until the P0 flag and the pump's two vault secrets are set, so nothing changes yet.

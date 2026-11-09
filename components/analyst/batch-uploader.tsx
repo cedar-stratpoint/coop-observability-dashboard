@@ -4,7 +4,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
-import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
+import {useUploadQueue, type QueueItem, type ServerBatchState} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, uploadStatus, uploadType, CATEGORY_LABEL, type ItemCategory, type QueueGroup, type UploadStatusFacet, type UploadType} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
@@ -55,6 +55,12 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const s = summarize(q.items, now);
   const busy = s.running + s.waiting > 0;
   const hasItems = q.items.length > 0;
+  // Server-driven path (P2): the whole scan is uploaded once and read server-side. While the
+  // PDF is uploading / being split (before the first page rows arrive) show a dedicated
+  // status; once rows arrive they render in the normal list, polled live.
+  const serverMode = q.serverMode;
+  const sb = q.serverBatch;
+  const serverUploading = serverMode && Boolean(sb) && (sb!.phase === 'uploading' || sb!.phase === 'ingesting' || (sb!.phase === 'reading' && !hasItems));
   const pdfItems = q.items.filter((i) => i.kind === 'pdf' && i.state !== 'cancelled');
   const coverage = batchCoverage(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null})));
   const startedAt = Math.min(...q.items.map((i) => i.startedAt ?? Infinity));
@@ -62,7 +68,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const canReview = !busy && Boolean(q.batch.id) && s.readyForReview > 0;
   // Page numbers restarting (…5, 1…) mean the scan holds several stores' forms; they're
   // split into one batch each once every page is read (q.forms).
-  const manyForms = Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1;
+  // Several stores in one scan: on the server path the batch page splits by form, so the
+  // uploader just shows the single live list and routes to review — no client-side split UI.
+  const manyForms = !serverMode && (Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1);
 
   // Stage the chosen files (append + de-dupe) instead of reading them straight away — a
   // 98-page scan shouldn't start processing the instant a file is picked, and the user
@@ -114,9 +122,15 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
+            <h2 className="font-heading text-base font-semibold">{serverUploading ? 'Uploading scan' : !hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
-              {hasItems ? (
+              {serverUploading ? (
+                sb!.phase === 'uploading'
+                  ? `Uploading the whole scan (${Math.round(sb!.uploadFrac * 100)}%). It reads on the server, so you can leave this page or refresh.`
+                  : sb!.phase === 'ingesting'
+                    ? 'Uploaded. Splitting it into pages…'
+                    : 'Uploaded. Reading starts in a moment…'
+              ) : hasItems ? (
                 busy ? (
                   `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
                 ) : (
@@ -172,7 +186,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
           </p>
         )}
 
-        {!hasItems ? (
+        {serverUploading ? (
+          <ServerUploadStatus sb={sb!} />
+        ) : !hasItems ? (
           <div
             role="button"
             tabIndex={disabled ? -1 : 0}
@@ -313,9 +329,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Files in this batch">
               {groupQueueItems(q.items, now).map((g) =>
                 g.isSplit ? (
-                  <GroupRow key={g.key} g={g} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} api={q} />
+                  <GroupRow key={g.key} g={g} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} api={q} serverMode={serverMode} />
                 ) : (
-                  <FileRow key={g.items[0].id} i={g.items[0]} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} onRetry={() => q.retry(g.items[0].id)} onCancel={() => q.cancel(g.items[0].id)} onRemove={() => q.remove(g.items[0].id)} />
+                  <FileRow key={g.items[0].id} i={g.items[0]} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} serverMode={serverMode} onRetry={() => q.retry(g.items[0].id)} onCancel={() => q.cancel(g.items[0].id)} onRemove={() => q.remove(g.items[0].id)} />
                 ),
               )}
             </ul>
@@ -427,6 +443,42 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   );
 }
 
+// Server-driven upload (P2): the whole scan is going to storage / being split, before the
+// per-page rows arrive. A calm status with real upload progress, and the key reassurance —
+// it reads on the server, so leaving or refreshing is safe.
+function ServerUploadStatus({sb}: {sb: ServerBatchState}) {
+  const pct = sb.phase === 'uploading' ? Math.round(sb.uploadFrac * 100) : 100;
+  const label =
+    sb.phase === 'uploading' ? 'Uploading scan' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-4 py-5">
+      <div className="flex items-center gap-2.5">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-xs text-muted-foreground">Reads on the server. You can leave this page or refresh, it won&apos;t stop.</span>
+        </div>
+        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{pct}%</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="Upload progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        className="h-2 w-full overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn('h-full min-w-[0.5rem] rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none', sb.phase !== 'uploading' && 'gl-progress-fill')}
+          style={{width: `${pct}%`}}
+        />
+      </div>
+    </div>
+  );
+}
+
 // How many per-page rows to show at once when a scan group is expanded — a 98-page
 // scan paginates instead of unrolling the whole list.
 const PAGES_PER_VIEW = 12;
@@ -452,7 +504,7 @@ const STATUS_DOT: Record<UploadStatusFacet, string> = {
 // line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
 // upload from flooding the list (plan §06 UX). Collapsed by default; the expanded
 // per-page rows are paged so even a 98-page scan stays navigable.
-function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>}) {
+function GroupRow({g, batchId, now, api, serverMode = false}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>; serverMode?: boolean}) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<'all' | UploadType>('all');
@@ -604,7 +656,7 @@ function GroupRow({g, batchId, now, api}: {g: QueueGroup; batchId: string | null
           )}
           <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
             {shown.map((i) => (
-              <FileRow key={i.id} i={i} batchId={batchId} now={now} retrying={retrying.has(i.id)} onRetry={() => handleRetry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+              <FileRow key={i.id} i={i} batchId={batchId} now={now} serverMode={serverMode} retrying={retrying.has(i.id)} onRetry={() => handleRetry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
             ))}
           </ul>
           {pageCount > 1 && (
@@ -634,7 +686,7 @@ function CategoryPill({cat}: {cat: ItemCategory}) {
   );
 }
 
-function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void; retrying?: boolean}) {
+function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false, serverMode = false}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void; retrying?: boolean; serverMode?: boolean}) {
   const pct = itemPercent(i, now);
   const failed = i.state === 'failed';
   const done = i.state === 'done';
@@ -730,12 +782,12 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
             <RotateCcw className="size-3.5" />
           </Button>
         )}
-        {(i.state === 'running' || i.state === 'queued' || i.state === 'waiting_period') && (
+        {!serverMode && (i.state === 'running' || i.state === 'queued' || i.state === 'waiting_period') && (
           <Button variant="ghost" size="icon-sm" aria-label={`Cancel ${i.name}`} onClick={onCancel}>
             <X className="size-3.5" />
           </Button>
         )}
-        {(failed || i.state === 'cancelled') && (
+        {!serverMode && (failed || i.state === 'cancelled') && (
           <Button variant="ghost" size="icon-sm" aria-label={`Remove ${i.name} from the list`} onClick={onRemove}>
             <Trash2 className="size-3.5" />
           </Button>

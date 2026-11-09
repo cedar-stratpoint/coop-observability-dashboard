@@ -5,6 +5,7 @@ import {Inter, Newsreader} from 'next/font/google';
 import {cn} from '@/lib/utils';
 import {getDigests, usingMock} from '@/src/data';
 import {getNavContext, getSession} from '@/src/active-context';
+import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {DashboardShell} from '@/components/analyst/dashboard-shell';
 import {IntroSplash} from '@/components/analyst/intro-splash';
 import {devAuthEnabled, DEV_SESSION} from '@/src/dev-auth';
@@ -70,7 +71,7 @@ export default async function RootLayout({children}: {children: ReactNode}) {
           <>
             <IntroSplash />
             <Suspense>
-              <DashboardShell digests={digests} usingMock={usingMock()} nav={nav ?? undefined} user={{name: session!.user?.name, email: session!.user?.email, image: session!.user?.image}}>
+              <DashboardShell digests={digests} usingMock={usingMock()} nav={nav ?? undefined} serverUpload={serverUploadEnabled(nav?.companyId ?? '')} user={{name: session!.user?.name, email: session!.user?.email, image: session!.user?.image}}>
                 {children}
               </DashboardShell>
             </Suspense>

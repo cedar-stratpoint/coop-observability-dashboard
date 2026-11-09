@@ -6,6 +6,8 @@ import {runChecks} from '@/src/goldline-checks-data';
 import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
+import {isSettledStatus, type ServerBatchProgress, type ServerPageProgress} from '@/src/server-upload-progress';
+import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
 import {
@@ -378,6 +380,44 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
   } catch (e) {
     console.error('splitFormsAction', e);
     return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
+  }
+}
+
+/**
+ * Server-driven upload (P2): the browser polls this for a batch's live page progress while
+ * the pump reads it, so the uploader shows each page land in place without the in-memory
+ * queue. Company-scoped + flag-gated (off = no server batches exist, so it returns empty).
+ * Reads straight from the DB (not cached) so each poll is fresh. Inventory pages only.
+ */
+export async function serverBatchProgressAction(input: {
+  company: string | null;
+  batchId: string;
+}): Promise<{ok: true; progress: ServerBatchProgress} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!serverUploadEnabled(ctx.companyId)) return {ok: false, error: 'Server-driven upload is not enabled for this company.'};
+  if (!/^[0-9a-f-]{36}$/i.test(input.batchId ?? '')) return {ok: false, error: 'Upload batch not found.'};
+  try {
+    const rows = await getBatchPages(ctx.companyId, input.batchId);
+    const pages: ServerPageProgress[] = rows
+      .filter((p) => p.upload.kind === 'inventory_pdf')
+      .map((p) => {
+        const rows = p.extraction?.data?.rows ?? null;
+        return {
+          uploadId: p.upload.id,
+          filename: p.upload.filename,
+          status: p.upload.status,
+          page: p.extraction?.page ?? null,
+          formVersion: p.upload.form_version ?? null,
+          pageKind: p.upload.page_kind ?? null,
+          flagged: rows ? rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length : null,
+          rows: rows ? rows.length : null,
+        };
+      });
+    return {ok: true, progress: {batchId: input.batchId, pages, settled: pages.every((p) => isSettledStatus(p.status))}};
+  } catch (e) {
+    console.error('serverBatchProgressAction', e);
+    return {ok: false, error: 'Couldn’t read the scan’s progress.'};
   }
 }
 
