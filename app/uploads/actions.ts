@@ -24,7 +24,6 @@ import {
   scanGroupSummary,
   setUploadsBa,
   setUploadsStore,
-  setUploadStatus,
   splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
@@ -132,32 +131,6 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
     // deleteUpload drops the sales rows first, so a later step failing can still change them.
     expireSalesTotals(ctx.companyId);
     return {ok: false, error: 'Could not delete the upload. Please try again.'};
-  }
-}
-
-/** Drop a duplicate scanned sheet (set it aside as 'rejected'), or restore a dropped one
- *  to review. Reversible and non-destructive: the sheet and its extraction stay put, the
- *  sheet just leaves the commit set so a form can commit one clean copy per page. Same
- *  company + role + store scoping as a delete; guards the state transition both ways. */
-export async function setSheetDroppedAction(input: {company: string | null; uploadId: string; batchId: string; dropped: boolean}): Promise<CommitResult> {
-  const ctx = await getDataContext(input.company);
-  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized.'};
-  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
-  try {
-    const out = await outOfScopeFor(ctx, input.uploadId);
-    if (out) return {ok: false, error: out};
-    const upload = await getUpload(ctx.companyId, input.uploadId);
-    if (!upload) return {ok: false, error: 'Sheet not found.'};
-    if (upload.kind !== 'inventory_pdf') return {ok: false, error: 'Only a scanned form sheet can be dropped.'};
-    if (input.dropped && upload.status !== 'needs_review') return {ok: false, error: 'Only a sheet awaiting review can be dropped.'};
-    if (!input.dropped && upload.status !== 'rejected') return {ok: false, error: 'Only a dropped sheet can be restored.'};
-    await setUploadStatus(input.uploadId, input.dropped ? 'rejected' : 'needs_review', {rejectReason: input.dropped ? 'duplicate' : ''});
-    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
-    revalidatePath(`/uploads/batch/${input.batchId}`);
-    return {ok: true, committed: 0};
-  } catch (e) {
-    console.error('setSheetDroppedAction', e);
-    return {ok: false, error: 'Could not update the sheet. Please try again.'};
   }
 }
 

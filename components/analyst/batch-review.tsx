@@ -10,8 +10,8 @@ import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {rowBandFor} from '@/src/goldline-extract';
-import {commitBatchAction, setSheetDroppedAction, updateBatchInfoAction} from '@/app/uploads/actions';
-import {batchCoverage, batchReadiness, nominateKeeper, storeConflict, scanPageLabel, FORM_PAGES, type SheetCopy} from '@/src/upload-batch';
+import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
@@ -128,11 +128,6 @@ export function BatchReview({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
   const [committing, startCommit] = useTransition();
-  // Pick-the-good-copy: a per-form-page override of which copy to keep (defaults to the
-  // auto-nominated one), plus the in-flight drop/restore state for its controls.
-  const [keeperOverride, setKeeperOverride] = useState<Record<number, string>>({});
-  const [dropError, setDropError] = useState<string | null>(null);
-  const [pendingDrop, startDrop] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Flags per page come from the reader (editing a value doesn't change its confidence).
@@ -157,10 +152,7 @@ export function BatchReview({
   }
 
   const reviewable = pages.filter((p) => p.upload.status === 'needs_review');
-  // Coverage reads the live sheets only (not dropped ones), so once the extra copies of a
-  // page are set aside the "here twice" warning and its duplicate ring clear in place.
-  const coverage = batchCoverage(reviewable.map((p) => ({page: p.page})));
-  const dropped = pages.filter((p) => p.upload.status === 'rejected');
+  const coverage = batchCoverage(pages.map((p) => ({page: p.page})));
   const pageInfo = pages.map((p) => {
     const flags = flaggedById[p.upload.id] ?? [];
     return {
@@ -176,59 +168,8 @@ export function BatchReview({
   // Store-change guard: which pages read which store, so a mixed-store batch is flagged.
   const storeGuard = storeConflict(pageInfo.filter((p) => p.status === 'needs_review'));
 
-  // Pick-the-good-copy: for each form page, its live copies, the auto-nominated keeper, and
-  // whether a duplicated page is now down to one copy. `nominated` is the system's pick;
-  // `keeper` honors a reviewer override when they chose a different copy.
-  const sheetCopy = (p: BatchReviewPage): SheetCopy => ({
-    id: p.upload.id,
-    docConfidence: p.extraction?.docConfidence ?? null,
-    flagged: (flaggedById[p.upload.id] ?? []).length,
-    rows: state[p.upload.id]?.rows.length ?? p.extraction?.data?.rows?.length ?? 0,
-  });
-  const dupResolution = FORM_PAGES.map((n) => {
-    const live = reviewable.filter((p) => p.page === n);
-    const droppedHere = dropped.filter((p) => p.page === n);
-    const everDuplicated = live.length + droppedHere.length > 1;
-    const nominated = nominateKeeper(live.map(sheetCopy));
-    const overridden = keeperOverride[n] && live.some((p) => p.upload.id === keeperOverride[n]) ? keeperOverride[n] : null;
-    return {page: n, live, everDuplicated, nominated, keeper: overridden ?? nominated, resolved: everDuplicated && live.length <= 1};
-  });
-  const toResolve = dupResolution.filter((d) => d.everDuplicated);
-  const resolvedCount = toResolve.filter((d) => d.resolved).length;
-  // Rows the commit will actually write (live sheets only), for the confirm summary.
+  // Rows the commit will actually write, for the confirm summary.
   const reviewableRows = reviewable.reduce((n, p) => n + (state[p.upload.id]?.rows.length ?? p.extraction?.data?.rows?.length ?? 0), 0);
-
-  // Set a sheet aside (dropped = 'rejected', reversible) or restore it. Non-destructive:
-  // the sheet and its reading stay; it just leaves the commit set so one clean copy per
-  // page can commit. A refresh re-reads the batch so the strip and gating update together.
-  const runDrop = (uploadId: string, dropIt: boolean) => {
-    if (!editable) return;
-    setDropError(null);
-    startDrop(async () => {
-      const res = await setSheetDroppedAction({company, uploadId, batchId: batch.id, dropped: dropIt});
-      if (!res.ok) {
-        setDropError(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  };
-  const dropOthers = (page: number, keeperId: string | null) => {
-    if (!editable || !keeperId) return;
-    const others = reviewable.filter((p) => p.page === page && p.upload.id !== keeperId);
-    if (!others.length) return;
-    setDropError(null);
-    startDrop(async () => {
-      for (const p of others) {
-        const res = await setSheetDroppedAction({company, uploadId: p.upload.id, batchId: batch.id, dropped: true});
-        if (!res.ok) {
-          setDropError(res.error);
-          break;
-        }
-      }
-      router.refresh();
-    });
-  };
 
   const tab = Math.max(0, pages.findIndex((p) => p.upload.id === tabId));
   const setTab = (k: number) => {
@@ -488,7 +429,7 @@ export function BatchReview({
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               {coverage.duplicates.length > 0 && (
                 <span className="inline-flex items-center gap-1" style={{color: toneText('var(--status-warn)')}}>
-                  <AlertTriangle className="size-3.5" aria-hidden /> Page {coverage.duplicates.join(', ')} came through more than once. Pick the good copy in Form pages below, and the rest set aside.
+                  <AlertTriangle className="size-3.5" aria-hidden /> Page {coverage.duplicates.join(', ')} has more than one sheet here. A form commits one sheet per page, so split this batch by store, or remove extras from Uploads, before you commit.
                 </span>
               )}
               {coverage.missing.length > 0 && (
@@ -541,33 +482,34 @@ export function BatchReview({
               Law). A copy chip shows only its status; the group header carries the
               number. Unknown pages collapse behind a disclosure. */}
           {(() => {
-            // index-keyed copies per page number (1-5), plus the 'unknown' bucket. Dropped
-            // sheets are left out here — they live in the "Dropped" strip below, not the pile.
+            // index-keyed sheets per form-page number (1-5), plus the 'unknown' bucket.
             const byPage = new Map<string, number[]>();
             pages.forEach((p, k) => {
-              if (p.upload.status === 'rejected') return;
               const key = p.page ? String(p.page) : 'unknown';
               (byPage.get(key) ?? byPage.set(key, []).get(key)!).push(k);
             });
-            const chip = (k: number, n: number, idxInGroup: number, groupSize: number) => {
+            // Each chip is one scanned sheet. It leads with the sheet's real page in the scan
+            // ("P.52") so every sheet stays identifiable — they are not interchangeable copies.
+            const chip = (k: number) => {
               const p = pages[k];
               const info = pageInfo[k];
               const open = Math.max(0, info.flagged - info.resolved);
-              const dup = p.page != null && coverage.duplicates.includes(p.page);
+              const multi = p.page != null && coverage.duplicates.includes(p.page);
+              const sheetNo = scanPageNumber(p.upload.filename);
               return (
                 <button
                   key={p.upload.id}
                   role="tab"
                   type="button"
                   aria-selected={tab === k}
-                  aria-label={`Page ${p.page ?? '?'}${groupSize > 1 ? ` copy ${idxInGroup + 1}` : ''}`}
+                  aria-label={`${sheetNo ? `Sheet ${sheetNo}` : p.upload.filename}, form page ${p.page ?? 'unknown'}`}
                   onClick={() => setTab(k)}
                   className={cn(
                     'inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
                     tab === k ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/30',
                   )}
                 >
-                  {groupSize > 1 && <span className="text-xs text-muted-foreground tabular-nums">{idxInGroup + 1}</span>}
+                  {sheetNo && <span className="font-mono text-[11px] text-muted-foreground tabular-nums">P.{sheetNo}</span>}
                   {p.upload.status === 'committed' ? (
                     <CheckCircle2 className="size-3.5" style={{color: 'var(--status-good)'}} aria-label="committed" />
                   ) : open ? (
@@ -577,7 +519,7 @@ export function BatchReview({
                   ) : (
                     <CheckCircle2 className="size-3.5 text-muted-foreground" aria-label="nothing to check" />
                   )}
-                  {dup && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="duplicate page" />}
+                  {multi && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="more than one sheet for this page" />}
                 </button>
               );
             };
@@ -586,18 +528,7 @@ export function BatchReview({
               <div className="flex flex-col gap-2">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-xs font-medium text-muted-foreground">Form pages</span>
-                {toResolve.length > 0 ? (
-                  <span
-                    className="text-[11px] font-medium"
-                    style={{color: resolvedCount === toResolve.length ? toneText('var(--status-good)') : toneText('var(--status-warn)')}}
-                  >
-                    {resolvedCount === toResolve.length
-                      ? 'Good copy picked for every duplicated page'
-                      : `Pick the good copy: ${resolvedCount} of ${toResolve.length} duplicated ${toResolve.length === 1 ? 'page' : 'pages'} done`}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground/70">one row per template page, 1 to 5</span>
-                )}
+                <span className="text-[11px] text-muted-foreground/70">each chip is a scanned sheet (P. = its page in the scan)</span>
               </div>
               <div role="tablist" aria-label="Form pages" className="flex flex-col gap-1.5">
                 {FORM_PAGES.map((n) => {
@@ -610,84 +541,10 @@ export function BatchReview({
                       </div>
                     ) : null;
                   }
-                  const d = dupResolution.find((x) => x.page === n)!;
-                  const dupRow = d.live.length > 1;
-                  const expanded = Boolean(openGroups[`p${n}`]);
-                  // A duplicated page collapses to its auto-picked keeper + a "N copies" opener,
-                  // so the clean 5-page skeleton reads first; opening it reveals every copy and
-                  // the override controls. The one-click drop acts on the nominated keeper.
-                  const keeperK = copies.find((k) => pages[k].upload.id === d.keeper) ?? copies[0];
-                  const dropBtn = editable && dupRow && (
-                    <button
-                      type="button"
-                      onClick={() => dropOthers(n, d.keeper)}
-                      disabled={pendingDrop || !d.keeper}
-                      className={cn(buttonVariants({size: 'sm', variant: 'outline'}), 'h-7 gap-1 text-xs')}
-                    >
-                      {pendingDrop ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-                      Drop the {d.live.length - 1} other{d.live.length - 1 === 1 ? '' : 's'}
-                    </button>
-                  );
                   return (
-                    <div key={n} className="flex flex-col gap-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="w-14 shrink-0 text-xs font-medium">Page {n}</span>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {dupRow && !expanded ? (
-                            <>
-                              {chip(keeperK, n, copies.indexOf(keeperK), 1)}
-                              <button
-                                type="button"
-                                onClick={() => setOpenGroups((g) => ({...g, [`p${n}`]: true}))}
-                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                              >
-                                {copies.length} copies <ChevronDown className="size-3.5" />
-                              </button>
-                              {dropBtn}
-                            </>
-                          ) : (
-                            <>
-                              {copies.map((k, i) => chip(k, n, i, copies.length))}
-                              {dupRow && (
-                                <button
-                                  type="button"
-                                  onClick={() => setOpenGroups((g) => ({...g, [`p${n}`]: false}))}
-                                  className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                                >
-                                  <ChevronDown className="size-3.5 rotate-180" /> collapse
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      {editable && dupRow && expanded && (
-                        <div className="flex flex-wrap items-center gap-1.5 pl-[3.75rem] text-xs">
-                          <span className="text-muted-foreground">Keep</span>
-                          {copies.map((k, i) => {
-                            const id = pages[k].upload.id;
-                            const isKeeper = id === d.keeper;
-                            return (
-                              <button
-                                key={id}
-                                type="button"
-                                aria-pressed={isKeeper}
-                                onClick={() => setKeeperOverride((o) => ({...o, [n]: id}))}
-                                className={cn(
-                                  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 tabular-nums transition-colors',
-                                  isKeeper ? 'border-primary text-foreground' : 'border-border text-muted-foreground hover:border-foreground/30',
-                                )}
-                                style={isKeeper ? {background: 'color-mix(in oklab, var(--primary) 12%, transparent)'} : undefined}
-                              >
-                                {isKeeper && <CheckCircle2 className="size-3" style={{color: 'var(--primary)'}} />}
-                                copy {i + 1}
-                                {id === d.nominated ? ' · best' : ''}
-                              </button>
-                            );
-                          })}
-                          {dropBtn}
-                        </div>
-                      )}
+                    <div key={n} className="flex flex-wrap items-center gap-2">
+                      <span className="w-14 shrink-0 text-xs font-medium">Page {n}</span>
+                      <div className="flex flex-wrap items-center gap-1.5">{copies.map((k) => chip(k))}</div>
                     </div>
                   );
                 })}
@@ -703,52 +560,11 @@ export function BatchReview({
                       No page number ({unknown.length})
                     </button>
                     {openGroups.unknown && (
-                      <div className="flex flex-wrap gap-1.5">{unknown.map((k, i) => chip(k, 0, i, unknown.length))}</div>
+                      <div className="flex flex-wrap gap-1.5">{unknown.map((k) => chip(k))}</div>
                     )}
                   </div>
                 )}
               </div>
-              {dropError && (
-                <p className="text-xs" style={{color: toneText('var(--status-crit)')}}>
-                  {dropError}
-                </p>
-              )}
-              {dropped.length > 0 && (
-                <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-border/70 p-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setOpenGroups((g) => ({...g, dropped: !g.dropped}))}
-                    aria-expanded={Boolean(openGroups.dropped)}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <ChevronDown className={cn('size-3.5 transition-transform', openGroups.dropped && 'rotate-180')} />
-                    Dropped ({dropped.length})
-                    <span className="font-normal text-muted-foreground/70">set aside, not committed</span>
-                  </button>
-                  {openGroups.dropped && (
-                    <ul className="flex flex-col gap-1 pl-5">
-                      {dropped.map((p) => (
-                        <li key={p.upload.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="min-w-0 truncate text-muted-foreground">
-                            {scanPageLabel(p.upload.filename).title}
-                            {p.page ? ` · was page ${p.page}` : ''}
-                          </span>
-                          {editable && (
-                            <button
-                              type="button"
-                              onClick={() => runDrop(p.upload.id, false)}
-                              disabled={pendingDrop}
-                              className="inline-flex shrink-0 items-center font-medium text-[color:var(--primary)] underline-offset-4 transition-colors hover:underline disabled:opacity-60"
-                            >
-                              Restore
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
               </div>
             );
           })()}
