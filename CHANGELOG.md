@@ -10,7 +10,7 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 ## 2026-11-09 — Uploads: batch review Back returns to the scan again
 
-The Back chevron on a store's batch review ("‹ Scan... · Page N of M") stopped returning to the scan once you clicked between the form's pages. The page switcher updates the address with `window.history.replaceState` (so a shared link or refresh reopens the same page), and Next's `router.back()` misbehaves after that: instead of popping to the scan it stayed on the batch and grew the history stack. Switched the Back button to `window.history.back()`, which pops correctly to the scan; the deep-link fallback (push the scan URL when there is no history to pop) is unchanged. Reproduced and confirmed against Scan2026-10-30_171554 on the staging DB.
+The Back chevron on a store's batch review ("‹ Scan... · Page N of M") stopped returning to the scan once you clicked between the form's pages. The page switcher updates the address with `window.history.replaceState` (so a shared link or refresh reopens the same page), and Next's `router.back()` misbehaves after that: instead of popping to the scan it stayed on the batch and grew the history stack. Switched the Back button to `window.history.back()`, which pops correctly to the scan; the deep-link fallback (push the scan URL when there is no history to pop) is unchanged. Reproduced and confirmed against Scan2026-10-30_171554 on the staging DB. Also added `replace` to the single-page review's "Pages in this count" strip, so paging through a form there no longer stacks a browser-history entry per page.
 
 ## 2026-11-09 — Load time, round 2: functions in Singapore, fewer repeat reads
 

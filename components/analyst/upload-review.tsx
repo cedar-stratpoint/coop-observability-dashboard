@@ -187,7 +187,7 @@ export function UploadReview({
                   </span>
                 );
               return (
-                <Link key={p.page} href={`/uploads/${p.uploadId}`} className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
+                <Link key={p.page} href={`/uploads/${p.uploadId}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
                   {inner}
                 </Link>
               );
