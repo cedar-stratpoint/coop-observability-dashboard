@@ -5,7 +5,7 @@
 // crm-data.ts), the birthday voucher `code` (there is no voucher projection). Ask Coop sees none of them.
 import {checkoutStage} from './crm-compute';
 import {parseLineItems} from './custom-range';
-import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
+import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder, CrmOrderLine} from './crm-types';
 
 export type CrmCheckoutSafe = Omit<CrmCheckout, 'abandonedCheckoutUrl'>;
 type Rec = Record<string, unknown>;
@@ -94,8 +94,12 @@ export function projectOrder(o: Rec): CrmOrder {
     // ponytail: raw Shopify JSON (~2.3KB/order); past ~850 orders the pages' cache entry nears Next's 2MB limit, so slim it to
     // title/quantity/price/discounts then.
     lineItems: typeof o.lineItems === 'string' ? o.lineItems : o.lineItems === null || o.lineItems === undefined ? null : JSON.stringify(o.lineItems),
+    ...(Array.isArray(o.lines) ? {lines: o.lines.map(projectLine)} : {}),
   };
 }
+
+/** One `/api/orders?lines=1` line: price and quantity only (string or number on the wire), junk is null. */
+const projectLine = (l: unknown): CrmOrderLine => ({price: numOrNull(rec(l).price), quantity: numOrNull(rec(l).quantity)});
 
 /** What Ask Coop may know of a line item: numbers and the product title. No properties, SKU, vendor or any other free text. */
 export type CrmLineItemSafe = {title: string; quantity: number; price: number; discount: number};
