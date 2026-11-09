@@ -112,7 +112,8 @@ const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<{ord
   try {
     const fields = 'shopifyOrderId,createdAt,financialStatus,totalPrice';
     const read = await collectOrderPages<CrmOrder>(async (cursor) => {
-      const qs = `from=${encodeURIComponent(fromDay)}&limit=500&fields=${fields}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      // lines=1: each order's line price and quantity, for Shopify gross sales (src/plan-gmv.ts orderGross).
+      const qs = `from=${encodeURIComponent(fromDay)}&limit=500&fields=${fields}&lines=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
       const body = await crmGet<{next_cursor?: string | null}>(`/api/orders?${qs}`);
       return {orders: (envelope(body, 'orders') ?? []).map(projectOrder), nextCursor: body.next_cursor};
     });
