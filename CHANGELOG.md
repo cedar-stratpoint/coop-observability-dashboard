@@ -8,7 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-09 — Uploads: a set-aside page (blank back, sales sheet) gets a real view, not an empty workbench
+## 2026-11-09 — Uploads: the live scan list filter matches the scan detail (Type · Status · Version)
+
+The uploader's per-scan file filter still used the old single "Show" row that mixed page kind with lifecycle (Read, Couldn't read, Waiting, Processing, Sales report, Blank page all in one line), while the scan-detail view had already moved to three clean facets. Made them consistent.
+
+- **`components/analyst/batch-uploader.tsx` + `upload-queue-format.ts`.** The filter is now three orthogonal rows: **Type** (Inventory form / Sales report / Blank page), **Status** (Waiting / Processing / Needs review / Couldn't read / Set aside / Cancelled, with status-colored dots; the live Waiting/Processing appear only while a scan is still reading), and **Version** (Legacy / V1 / V2). Each row shows only when it has two or more values, and the three combine with AND.
+- New pure mappers `uploadType` / `uploadStatus` carry the split; "Set aside" is the one home for a parked sales/blank/non-inventory page, distinct from a real "Couldn't read". Same `FilterChip` and palette as the scan-detail filter.
 
 Opening a blank or sales page in the Per file review showed a broken layout: the full-height review scaffold with a tall, narrow scan column and a stray one-line message, since there were no rows to review. Gave the no-review case its own layout.
 
