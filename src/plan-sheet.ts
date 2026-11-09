@@ -231,7 +231,7 @@ const CALC: Readonly<Record<number, ActualSource>> = {
   121: calc('= last month + 122', CUST), 122: calc('= 124 ÷ 119', CUST), 123: calc('= 121 × 118 × 119', CUST), 124: calc('= 48 + 49 − 123, never below zero', CUST),
   125: calc('= 123 within 48 + 49', CUST),
 };
-const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Website (CRM)', 50: 'POS events', 51: 'Marketplace GMV + Website GMV + Events GMV'};
+const AUTO: Readonly<Record<number, string>> = {48: 'Shopee + Lazada', 49: 'Shopify gross sales (CRM): price × quantity, before discounts, shipping and tax', 50: 'POS events', 51: 'Marketplace GMV + Website GMV + Events GMV'};
 const ONCE = new Set(['opening_inventory', 'opening_customers', 'opening_cash']);
 /** The source of a sheet row's actual line (or the opening-cash line typed under row 90). Null = the row has no actual line. */
 export function actualSource(row: number | 'opening_cash'): ActualSource | null {

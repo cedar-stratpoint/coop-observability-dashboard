@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Business Health Report: Website GMV is Shopify gross sales
+
+Owner ask: the Website row was not Shopify's gross sales. It summed each order's `totalPrice` (Shopify `total_price`: after discounts, plus shipping and tax) and left out refunded, voided and expired orders, which matches neither Shopify "Gross sales" nor "Net sales".
+
+- **Decision: Website GMV = Shopify "Gross sales"** = the sum of line price × quantity, before discounts, returns, shipping and tax (the same definition as the CRM's `/api/sales/summary` `gross`). Pure `orderGross` in `src/plan-gmv.ts`; `websiteCells` sums it instead of `totalPrice`.
+- **Owner decision: every order counts, like Shopify**, whatever its financial status (refunded, voided and cancelled included). Shopify takes returns out later, in net sales, not out of gross. `WEBSITE_STATUS_RULES`, `websiteOrderCounts` and the partial-refund "may overstate" note are removed (nothing else used them). Supersedes the 2026-11-05 status rule below.
+- **Read:** `getCrmOrdersForPlan` adds `lines=1` to the paged `/api/orders` read (paging, legacy and failure rules unchanged). `projectOrder` keeps only each line's `price` and `quantity` (string or number on the wire), never titles, SKUs or buyer data. No CRM change.
+- **Never silently low:** an order with no lines, or a line without a usable price or quantity (the Worker sends quantity 0 when missing), makes its month partial (grey) with a note. An old Worker that ignores `lines=1` (no order has lines) makes every month a gap with a note, since there is no gross figure at all and a gap is never PHP 0.
+- Labels: the sheet's row 49 source tip and the page help now say Shopify gross sales (price × quantity, before discounts, shipping and tax).
+- Not verified: the line keys (`price`, `quantity`) on a stored order (zoomy-crm marks them UNCONFIRMED), and a live month against Shopify Analytics → Sales over time → Gross sales (owner check after staging). Plan: `knowledge/tasks/2026-11-09-bhr-website-gmv-gross-sales.md`.
+
 ## 2026-11-09 — Uploads: Per file reviews one page at a time (Coop suggests the store, ‹ › arrows)
 
 The batch review's "Form pages" chip grid (every sheet of a shuffled pile, grouped by form page) was too much for reviewers stepping through a scan, and on a mixed pile it couldn't commit at all. Decided with the user: **opening a file from a scan's Per file list now reviews that one page on its own**; Per store keeps the whole-form batch review for clean forms.
