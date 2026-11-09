@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: surface when the paper's product name disagrees with the catalog
+
+The review name is resolved from the item code via the reference manifest, so a row whose printed name differed from the catalog name for that code (e.g. code BB03B printed as "BB 04 Beige", shown as the catalog's "BB 03 Beige") was silently resolved with no signal, at the OCR's own confidence and no flag. The resolved/stored identity stays correct (the code is the key, and the odd printed label is usually a stale template, not a real product), but the discrepancy is now visible. The extractor transcribes the printed product name into a new `printed_name` field (cross-check only, never changes the code or counts), and when it disagrees with the manifest name the review row shows a soft "Paper reads: ..." hint. It is advisory, not a blocking flag, so the common stale-label case doesn't add noise; it only shows on pages extracted after this (older scans have no `printed_name`, so they stay quiet). `printedNameConflict` (case/space/punctuation-insensitive) is unit-tested.
 ## 2026-11-09 — Business Health Report: Website GMV is Shopify gross sales
 
 Owner ask: the Website row was not Shopify's gross sales. It summed each order's `totalPrice` (Shopify `total_price`: after discounts, plus shipping and tax) and left out refunded, voided and expired orders, which matches neither Shopify "Gross sales" nor "Net sales".
