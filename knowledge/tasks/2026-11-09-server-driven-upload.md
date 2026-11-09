@@ -1,6 +1,8 @@
 # Server-driven scan upload — plan
 
-**Status:** proposed (2026-11-09). **Owner decisions locked:** orchestration = Supabase `pg_cron` + `pg_net`; rollout = hybrid behind a **per-company** flag (pilot Nichido); throughput = **~8 min / 98 pages** (pump `K=6` every 30s); big-PDF upload = **re-PUT on drop for v1** (no resumable/tus yet).
+**Status:** P0 + P1 built, flagged off (2026-11-09). **Owner decisions locked:** orchestration = Supabase `pg_cron` + `pg_net`; rollout = hybrid behind a **per-company** flag (pilot Nichido); throughput = **~8 min / 98 pages** (pump `K=6` every 30s); big-PDF upload = **re-PUT on drop for v1** (no resumable/tus yet).
+
+**Progress:** P0 = flag + `queued` status + `/upload/sign` + `/ingest` (PR #561, on staging). P1 = `/api/goldline/read-page` + the `pg_cron`/`pg_net` pump (`goldline_pump_reads`, `claimed_at`, applied to Nichido Staging via `supabase/nichido/server_upload_p1_pump.sql`) + reaper clocks from `claimed_at`. Both inert until the pump's two vault secrets and the per-company flag are set. **Next: P2** (client signed-URL upload + progress polling replacing the in-memory queue), then **P3** (cutover).
 
 ## Problem
 

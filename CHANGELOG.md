@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: server-driven ingest, P1 — the pump + read-page (flagged off)
+
+Second slice of the server-driven upload (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`): the part that actually reads the queued pages server-side, so a refresh / navigation / slow page can't interrupt the work. Still inert until the P0 flag and the pump's two vault secrets are set, so nothing changes yet.
+
+- **`POST /api/goldline/read-page`** reads one already-claimed page through the same `runInventoryRead` pipeline a fresh upload and a re-read use (so the three can't drift). No user session: the pump is the sole caller, so a shared secret (`GOLDLINE_PUMP_SECRET`, constant-time `pumpSecretOk`) guards it. Idempotent: it only reads a row still in the claimed `processing` state, so a duplicate dispatch can't double-count stock. `maxDuration=300`.
+- **The pump (`supabase/nichido/server_upload_p1_pump.sql`, applied to Staging).** A `pg_cron` job (every 30s) calls `goldline_pump_reads()`: it CLAIMS up to 6 queued inventory pages (flip `queued` → `processing` + stamp a new `claimed_at`, atomically with `for update skip locked`) and fires one async `pg_net` POST per page to read-page. The status flip *is* the claim, so no page is ever dispatched twice; a `max_inflight` ceiling caps concurrent Vision calls. Idles (returns 0) until the two vault secrets (`goldline_read_page_url`, `goldline_pump_secret`) are set.
+- **Reaper now clocks from `claimed_at`.** `reconcileStaleReads` measures staleness from when a read *started* (`claimed_at` for a pumped page, else `created_at`), and never touches a `queued` page, so a page waiting in the queue isn't mistaken for a stuck one.
+- **Wiring (once read-page is deployed on staging):** set `GOLDLINE_PUMP_SECRET` on Vercel, the two matching vault secrets on Nichido Staging, and `GOLDLINE_SERVER_UPLOAD_COMPANIES` to Nichido's id. Client signed-URL upload + progress polling are P2.
+
 ## 2026-11-09 — Uploads: server-driven ingest, P0 (flagged off, no behavior change)
 
 First slice of the server-driven upload (plan: `knowledge/tasks/2026-11-09-server-driven-upload.md`) — the foundation so a scan is read server-side and a browser refresh can't cut it. Entirely behind a per-company flag that is off for everyone, so nothing changes yet.
