@@ -167,6 +167,10 @@ export function BatchReview({
   const readiness = batchReadiness({storeCode, periodStart, periodEnd, pages: pageInfo});
   // Store-change guard: which pages read which store, so a mixed-store batch is flagged.
   const storeGuard = storeConflict(pageInfo.filter((p) => p.status === 'needs_review'));
+  // This batch isn't one store's form when several stores were read, or when most form
+  // pages carry more than one sheet (a shuffled pile the splitter couldn't separate). Then
+  // the screen stops calling it "this store's form" and points at sorting, not committing.
+  const notOneForm = !committed && (storeGuard.conflict || coverage.duplicates.length >= 3);
 
   // Rows the commit will actually write, for the confirm summary.
   const reviewableRows = reviewable.reduce((n, p) => n + (state[p.upload.id]?.rows.length ?? p.extraction?.data?.rows?.length ?? 0), 0);
@@ -332,10 +336,16 @@ export function BatchReview({
           )}
         </nav>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-xl font-semibold tracking-tight">Review this store&apos;s form</h1>
+          <h1 className="font-heading text-xl font-semibold tracking-tight">{notOneForm ? 'This batch is not one store’s form' : 'Review this store’s form'}</h1>
           {committed ? (
             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium" style={{color: toneText('var(--status-good)'), background: 'color-mix(in oklab, var(--status-good) 14%, transparent)'}}>
               <CheckCircle2 className="size-3.5" /> Committed
+            </span>
+          ) : notOneForm ? (
+            <span className="text-sm text-muted-foreground">
+              {storeGuard.conflict
+                ? 'Several stores are mixed here. Sort it into one form per store in Uploads before committing.'
+                : 'Most pages have more than one sheet, so this is not one form yet. Sort them in Uploads before committing.'}
             </span>
           ) : totalRows > 0 ? (
             <span className="text-sm text-muted-foreground">

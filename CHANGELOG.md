@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-09 — Uploads: a mixed batch stops calling itself "this store's form"
+
+Traced why one batch of `Scan2026-10-30_171554` opened as a confusing 61-sheet "store's form". It is a shuffled pile: 36 store names, 4 form versions, many periods, only a handful of real registry stores (854 Gaisano Davao, 473 SM San Pablo). Root cause, pinned by a real-data characterization test (`test/goldline-split-regression.test.ts`, fixture `test/fixtures/batch-e896d60b.json`): fed through the splitter's own grouping, these 61 sheets become 14 sales + 14 blanks + 33 inventory that shatter into ~32 one-sheet "forms" (printed stores mostly unreadable, versions and periods disagree), none a complete 1-to-5 form. Two backend reasons it never separated in the first place are noted below as follow-ups, not fixed here.
+
+- **Review screen reframes a non-single-form batch (`components/analyst/batch-review.tsx`).** When several stores were read (store-change guard) or most form pages carry more than one sheet, the heading now reads "This batch is not one store's form" with a line pointing at sorting in Uploads, instead of "Review this store's form" and a confident read count. Commit was already blocked in this state; the screen now says so honestly instead of implying it's one commitable form. A clean single-store batch is unchanged.
+- **Not fixed here (needs the segmentation owner):** (1) the auto-split is gated on no page being `processing`, so one stuck/orphaned `processing` sheet freezes a whole batch from ever splitting; (2) even when it runs, the grouping manufactures dozens of one-sheet "forms" from unreadable data rather than routing them to a "needs sorting" lane; (3) `reconcileYears` collapsed these periods to 2020, though the data starts in 2025. Each is a segmentation-policy change with real blast radius, left for a scoped follow-up.
+
 ## 2026-11-09 — Uploads: review sheets are not copies; label each by its scan page (P.52)
 
 Corrects the "pick the good copy / drop the others" model added earlier the same day. That model was wrong: when a form page shows several sheets, they are **not interchangeable copies** to thin down to one. They are distinct, valuable inventory pages (often different stores' page 1, which the store-change guard already flags), and "Drop the others" risked discarding real data. Reverted the keeper/collapse/drop UI and the `setSheetDroppedAction` server action.
