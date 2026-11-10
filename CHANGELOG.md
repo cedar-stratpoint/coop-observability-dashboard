@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Review page: the "locate on scan" crosshair now works on the single-page review
+
+The per-row Crosshair ("show this item on the scan") existed only in the batch "commit all pages" review. The single-page review (`upload-review.tsx`) now wires it too: each row's crosshair opens the scan in the lightbox, rendered to a **canvas** (`ScanPageViewer`) with the item's approximate row band drawn in the page's own coordinate space, exact box when the reader captured one, else the page template's band via `rowBandFor`, labelled with the item and "approximate". The plain-iframe lightbox was swapped for the canvas viewer so the band stays locked on while zooming/panning (same mechanism the batch review uses).
+
 ## 2026-11-10 — Review page: full-width layout, breathable Document block, sticky confidence bar
 
 Per-page review (`upload-review.tsx`) polish, on feedback:
