@@ -47,6 +47,10 @@ export type CrmOrder = {
   fulfilledAt: string | null;
   reviewRequestSentAt: string | null;
   reviewSubmittedAt: string | null;
+  // Shopify's test-order flag (raw.test); projectOrder always sets it, hand-built orders may leave it out (= not a test order).
+  test?: boolean;
+  // RET-06: the order's discount codes (raw.discount_codes), upper-cased, a BDAY- voucher cut to "BDAY-"; projectOrder always sets it, hand-built orders may leave it out (= no code).
+  discountCodes?: string[];
   // Shopify line items as the CRM sends them (a JSON string). Only the Overview's
   // custom date range reads it (units + top products) — see src/custom-range.ts.
   lineItems?: string | null;
