@@ -6,7 +6,7 @@ import {ASK_ABOUT} from './clarify';
 import {CHANNELS, CONTACT_KINDS, LEAD_LIMITS, MATCH_SCOPES, MATCH_TIERS, MAX_PER_LEAD, MAX_QUERY, MAX_TEMPLATE_CHARS, MAX_TEXT_CHARS} from './contacts/leads';
 import {SOURCES} from './contacts/people';
 import {PLACEHOLDERS} from './contacts/draft';
-import {CHECKOUT_GROUPS, CHECKOUT_STAGES, CHECKOUT_STATUSES, CRM_LIMIT_VALUES, CUSTOMER_BUYERS, CUSTOMER_GROUPS, CUSTOMER_SORTS, CUSTOMER_TIERS, ORDER_GROUPS, ORDER_STATUSES} from './crm/tools';
+import {AUDIENCE_TEXT, CHECKOUT_GROUPS, CHECKOUT_STAGES, CHECKOUT_STATUSES, CRM_LIMIT_VALUES, CUSTOMER_AUDIENCES, CUSTOMER_BUYERS, CUSTOMER_GROUPS, CUSTOMER_MIN_ORDERS, CUSTOMER_RULES, CUSTOMER_SORTS, CUSTOMER_TIERS, ORDER_GROUPS, ORDER_STATUSES, REPEAT_TARGET_PCT} from './crm/tools';
 import {DIGEST_SECTIONS, DIGEST_WINDOWS, PRODUCT_SHOWS} from './digest-lookup';
 import {METRICS, METRIC_IDS} from './metrics-registry';
 import type {ToolDefinition} from './stream-types';
@@ -194,8 +194,13 @@ const listCrmOrders: ToolDefinition = {
 const listCrmCustomers: ToolDefinition = {
   name: 'list_crm_customers',
   description:
-    'Website customers from the live website CRM: name, email, phone, membership tier, orders and spend computed from the CRM\'s captured orders (paid orders for spend, plus spend this membership year for the Platinum threshold), pet name and birthday, email marketing state and the PH day they joined. ' +
-    'Filter by tier, buyers or join dates ("" and "" for any date); group_by gives counts per tier, join month or email marketing state. Show contact details only when the owner asks for a list of customers. ' + UNTRUSTED,
+    'Website customers from the live website CRM: name, email, phone, membership tier, orders and spend computed from the CRM\'s captured orders (plus spend this membership year for the Platinum threshold), first and last order (PH day), days since the last order, pet name and birthday, email marketing state and the PH day they joined. ' +
+    `Rules: ${CUSTOMER_RULES} ` +
+    'USE THIS TOOL (not crm_query) for repeat buyers (min_orders 2), orders per customer (group_by orders_bucket), new or acquired customers per first-order month (group_by first_order_month), first or last order (sort last_order_asc or last_order_desc). ' +
+    `Repeat promo, win-back or "who do we contact again": set audience (${AUDIENCE_TEXT.repeat_promo}; ${AUDIENCE_TEXT.win_back}); the list then adds emails_sent and each automated email source already sent (cart reminders, win-back, review requests, birthday vouchers), plus manual_contacts (logged by hand) and times_contacted (both) and shows consent without filtering on it. Nothing can be sent from here: the owner copies the table or downloads its CSV. ` +
+    `Repeat buyer rate, retention or the ${REPEAT_TARGET_PCT}% repeat target: group_by orders_bucket and quote its repeat_rate check word for word (the ${REPEAT_TARGET_PCT}% is a plan target, never an actual). Both groupings are drawn as a chart by default. ` +
+    'Cohorts, "which promo or code brings repeat buyers", event promos: group_by first_order_code (buyers, repeat buyers and repeat rate per code on the first counted order; birthday codes read "birthday voucher", bundle codes "BUNDLE (auto)"; flag small groups). Which code was which event: ask the owner, never guess. ' +
+    'Filter by tier, buyers, min_orders or join dates ("" and "" for any date); group_by gives counts per tier, join month, email marketing state, first-order month, orders bucket or first-order code. Show contact details only when the owner asks for a list of customers. ' + UNTRUSTED,
   strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
     type: 'object',
@@ -204,12 +209,14 @@ const listCrmCustomers: ToolDefinition = {
       joined_to: {type: 'string', description: 'Last join day, inclusive, or "" for any date (both "" or both set).'},
       tier: {type: 'string', enum: [...CUSTOMER_TIERS], description: 'Membership tier; "guest" = no membership.'},
       buyers: {type: 'string', enum: [...CUSTOMER_BUYERS], description: '"buyers" = at least one website order; "non_buyers" = none.'},
-      group_by: {type: 'string', enum: [...CUSTOMER_GROUPS], description: '"none" for a list of customers; otherwise counts per group.'},
-      sort: {type: 'string', enum: [...CUSTOMER_SORTS], description: 'List order: newest join first, biggest spend first, or most orders first.'},
+      group_by: {type: 'string', enum: [...CUSTOMER_GROUPS], description: '"none" for a list of customers; otherwise counts per group. first_order_month = the PH month of the first counted order ("no orders" for non-buyers); orders_bucket = 0, 1, 2, 3 or 4+ counted orders, all time; first_order_code = cohorts by the discount code on the first counted order.'},
+      sort: {type: 'string', enum: [...CUSTOMER_SORTS], description: 'List order: newest join first, biggest spend first, most orders first, or by last order (newest or oldest first; customers with no order last).'},
+      audience: {type: 'string', enum: [...CUSTOMER_AUDIENCES], description: 'Outreach audience: "all" = no audience rule; repeat_promo or win_back apply the owner\'s rule and list the longest-lapsed customer first, with emails already sent.'},
+      min_orders: {type: 'integer', enum: [...CUSTOMER_MIN_ORDERS], description: 'Only customers with at least this many counted orders, all time (test orders excluded). 0 = everyone; 2 = repeat buyers.'},
       limit: CRM_LIMIT,
       offset: CRM_OFFSET,
     },
-    required: ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'limit', 'offset'],
+    required: ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'limit', 'offset'],
     additionalProperties: false,
   },
 };
@@ -242,8 +249,8 @@ const NAME_ITEM = {type: 'string', description: 'A column name from describe.'};
 const crmQuery: ToolDefinition = {
   name: 'crm_query',
   description:
-    'Ask the live website CRM any read-only question over its whitelisted tables (orders, order_lines, order_discount_codes, checkouts, checkout_lines, customers and a few more): rows, counts, sums, averages, ranks, per-day/week/month series, repeat buyers, discount codes, SKUs, refunds, abandoned carts. ' +
-    'WHEN TO USE: list_crm_orders, list_crm_customers, list_crm_checkouts and get_crm_metrics keep their fixed views (a plain order list, the CRM snapshot); use crm_query for anything else, e.g. per-SKU, discount codes, repeat buyers, refund rate, customer detail, or any grouping or filter those tools lack. get_channel_report stays the choice for comparing channels. ' +
+    'Ask the live website CRM any read-only question over its whitelisted tables (orders, order_lines, order_discount_codes, checkouts, checkout_lines, customers and a few more): rows, counts, sums, averages, ranks, per-day/week/month series, discount codes, SKUs, refunds, abandoned carts. ' +
+    'WHEN TO USE: list_crm_orders, list_crm_customers, list_crm_checkouts and get_crm_metrics keep their fixed views (a plain order list, the CRM snapshot); use crm_query for anything else, e.g. per-SKU, discount codes, refund rate, customer detail, or any grouping or filter those tools lack. Repeat buyers, orders per customer, first/last order, new customers per first-order month and cohorts by first-order code come from list_crm_customers, NOT crm_query (its customer order counts still include test orders). get_channel_report stays the choice for comparing channels. ' +
     'FIRST call it with describe true (and a table) if you do not know the columns; never guess a column. Tables with a date column need a window: filters on that column with gte and lte (YYYY-MM-DD, Philippine time; ask the owner if no dates were given). ' +
     'Aggregates (select {agg, column, as}) and group_by (a column or {column, bucket day|week|month}) are computed by the CRM: never add or average rows yourself, state the formula for a rate and take its parts from aggregates. ' +
     'detail "identity" on customers returns names, email, phone, pet and orders (at most 50 rows to you); it is refused for people who are not allowed. deliver "all" gives the OWNER the full table with Copy and CSV (drawn by the app: do NOT call render_table and do NOT retype rows) while you see a sample of 50 and the count; use it when the owner asks for everything or a long list. ' +
@@ -279,7 +286,7 @@ const shopifyQuery: ToolDefinition = {
   name: 'shopify_query',
   description:
     'Read live from Shopify (through the website CRM, read-only) what crm_query cannot: full order history beyond the CRM, live inventory, collections, product metafields, discount code and refund detail, shop metafields. ' +
-    'SLOWER than crm_query and limited by Shopify query cost: crm_query stays the fast path for common analytics (sales, SKUs, repeat buyers, abandoned carts); use this only for what the CRM tables do not hold. ' +
+    'SLOWER than crm_query and limited by Shopify query cost: crm_query stays the fast path for common analytics (sales, SKUs, abandoned carts; repeat buyers via list_crm_customers); use this only for what the CRM tables do not hold. ' +
     'Send ONE GraphQL query (no mutation, no subscription, no introspection, no second operation). Every list needs first or last, 1 to 100; page with pageInfo { hasNextPage endCursor } and an after variable. Filter orders and customers with the query: argument (Shopify search, e.g. "created_at:>=2026-09-01 financial_status:paid"). ' +
     'Allowed fields. QueryRoot: shop, orders, order, ordersCount, products, product, productsCount, productVariants, productVariant, collections, collection, customers, customer, customersCount, discountNodes, inventoryItems, inventoryItem. ' +
     'Order: id name createdAt processedAt cancelledAt displayFinancialStatus displayFulfillmentStatus currencyCode tags totalPriceSet subtotalPriceSet totalDiscountsSet totalRefundedSet totalShippingPriceSet totalTaxSet (each { shopMoney { amount currencyCode } }) discountCodes discountApplications lineItems refunds customer. ' +

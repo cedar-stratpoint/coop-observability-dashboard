@@ -286,7 +286,7 @@ Every table and view in the database is readable by its own name, except secrets
 - pos-prizes-sampling (POS prizes and sampling): pos_order_prizes, pos_free_tastes
 - stock (Stock and inventory): pos_inventory, pos_inventory_by_location, pos_inventory_lots, pos_stock_movements, pos_locations, boxme_products, boxme_warehouses, boxme_stock, boxme_stock_daily, boxme_stock_lots, boxme_sync_runs
 - forecast-settings (Forecast, settings and alerts): pos_settings, pos_stock_alert_log
-- booth-leads (Booth leads): spin_wheel_leads
+- booth-leads (Booth leads and the manual contact log): spin_wheel_leads, customer_contacts
 - lazada-uploads (Lazada manual uploads): lazada_orders, lazada_uploads
 - digest (Stored digests): digest_archive, import_runs, marketplace_daily_observations, marketplace_daily_sales, marketplace_ads_week_observations, marketplace_sku_week_observations, marketplace_traffic_day_observations, marketplace_funnel_day_observations, marketplace_ads_weekly, marketplace_sku_weekly, marketplace_traffic_daily, marketplace_funnel_daily
 - business-health (Business health): business_health, plan_versions, plan_targets, plan_actuals, plan_month_closes, plan_actuals_log

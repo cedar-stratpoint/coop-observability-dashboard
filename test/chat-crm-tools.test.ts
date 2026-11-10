@@ -86,7 +86,7 @@ describe('the list tools are not strict, so a missing key takes its default', ()
 describe('list_crm_customers', () => {
   it('orders and spend come from captured orders (paid only), never Shopify counters; contacts are present (owner decision)', async () => {
     const r = await crmCustomersResult(req(readCustomersInput(CUS)), get(), NOW);
-    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
+    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, first_order: '2026-09-28', last_order: '2026-09-30', days_since_last_order: 7, pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
     expect(r.rows.find((x) => x.name === 'Ben')).toMatchObject({tier: 'guest', orders: 1, spent: 0});
     expect(JSON.stringify(r)).not.toMatch(/SECRET|apiKey|99999/);
     expect(checks(r)).toMatch(/membership year starts 2026-07-01/);

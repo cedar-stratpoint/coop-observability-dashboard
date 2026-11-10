@@ -15,7 +15,7 @@ const crm = (over: Partial<EnrichedCustomer> = {}): EnrichedCustomer => ({
   shopifyCustomerId: '1', email: 'buyer@x.com', firstName: 'Ana', lastName: 'Cruz', phone: null,
   ordersCount: null, totalSpent: null, membershipTier: 'gold', petName: null, petBirthday: null,
   emailMarketingState: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-06-01T00:00:00Z',
-  orderCount: 2, spent: 1000, spendYtd: 1000, ...over,
+  orderCount: 2, spent: 1000, spendYtd: 1000, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, ...over,
 });
 const lead = (over: Partial<SpinLead> = {}): SpinLead => ({
   email: 'buyer@x.com', instagram: null, pet: null, name: null, picky: null, mobile: '09171234567', prize: '35% Off', campaign: 'modern-market-sept2026',

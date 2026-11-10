@@ -68,7 +68,8 @@ export type CheckCode =
   | 'partial_coverage'
   | 'sudden_change'
   | 'mock_source'
-  | 'values_hidden';
+  | 'values_hidden'
+  | 'repeat_rate';
 
 export interface Check {
   code: CheckCode;
@@ -130,6 +131,12 @@ export interface ResultMeta {
   totals?: ChannelTotal[];
   /** Set only on an Explore (run_query) result: the label the block shows, the SQL for the disclosure (never given to the model), a code-written coverage note and lint warnings. */
   exploratory?: {label: string; sql: string; coverage_note: string; warnings: string[]};
+  /**
+   * Set by a tool whose category rows already read in their own order (list_crm_customers by first-order month or by orders bucket).
+   * It asks for a chart by default (the loop's backstop draws it when the model did not), and the bar keeps the row order and never folds
+   * into "Other". Rows whose `key` value is in `omit` are left out of the chart only (the table twin keeps every row), and `note` says so.
+   */
+  chart_view?: {key: string; omit: string[]; note: string | null};
 }
 
 export interface MetricResult {
