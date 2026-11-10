@@ -320,13 +320,15 @@ function decideChart(f: Facts, mixed: boolean): BlockDecision[] {
   const slim = (r: MetricRow): MetricRow => Object.fromEntries(keys.map((k) => [k, r[k] ?? null]));
   const primary = parts[0];
   // One category column, several measures, a short list (an Explore weekday + orders + revenue result): the SQL chose the order (a calendar order), so it is kept.
-  const keepOrder = result.meta.exploratory !== undefined && !isTime && parts.length === 1 && rows.length <= TABLE_MIN_CLASSES && result.columns.filter((c) => c.role === 'measure').length >= 2 && result.columns.filter((c) => c.role === 'category').length === 1;
+  // A tool that marked its rows as already ordered (months, order-count buckets: meta.chart_view) keeps that order too, never folded into "Other".
+  const ownOrder = result.meta.chart_view !== undefined && !isTime;
+  const keepOrder = ownOrder || result.meta.exploratory !== undefined && !isTime && parts.length === 1 && rows.length <= TABLE_MIN_CLASSES && result.columns.filter((c) => c.role === 'measure').length >= 2 && result.columns.filter((c) => c.role === 'category').length === 1;
   const ordered = isTime ? sortAsc(rows, x.key) : keepOrder ? rows : form === 'diverging_bar' || parts.length === 1 ? sortDesc(rows, primary.key) : [...rows].sort((a, b) => parts.reduce((s, p) => s + (num(b[p.key]) ?? 0), 0) - parts.reduce((s, p) => s + (num(a[p.key]) ?? 0), 0));
 
   const out: BlockDecision[] = [];
   let drawn = ordered;
   let folded: {count: number; into: string} | null = null;
-  if (autoChoice && job === 'magnitude' && ordered.length > TABLE_MIN_CLASSES) {
+  if (autoChoice && job === 'magnitude' && ordered.length > TABLE_MIN_CLASSES && !ownOrder) {
     const f2 = foldTail(ordered, x.key, parts, TABLE_MIN_CLASSES, additive);
     drawn = f2.rows;
     folded = f2.folded;
@@ -340,10 +342,10 @@ function decideChart(f: Facts, mixed: boolean): BlockDecision[] {
   const series: Series[] = wide
     ? seriesFor(parts, (c) => c.key)
     : [{key: primary.key, label: primary.label, unit: primary.unit, entity: primary.label, color: 'chart-1'}];
-  const orientation = orient(isTime ? [] : labels);
+  const orientation = orient(isTime || ownOrder ? [] : labels);
   const emphasis = form === 'bar' && !isTime && !wide ? emphasisOf(drawn, x.key, primary.key) : null;
   out.push(done({form, orientation, x: {key: x.key, label: x.label, unit: x.unit}, series, rows: drawn.map(slim), folded}, emphasis));
-  if (autoChoice && job === 'magnitude' && ordered.length > TABLE_MIN_CLASSES) {
+  if (autoChoice && job === 'magnitude' && ordered.length > TABLE_MIN_CLASSES && !ownOrder) {
     out.push(tableDecision(result, request, `The full list of ${ordered.length} rows, so no value lives only in the chart.`));
   }
   return out;
@@ -564,6 +566,20 @@ function autoY(result: MetricResult, title = ''): ResultColumn[] {
  * pie of negatives or of non-parts, a chart of one number, mixed units).
  */
 export function recommendView(result: MetricResult, request: ViewRequest, pick: {x?: string; y?: string[]; /** the block title, only used to choose between several measures */ title?: string} = {}): ViewDecision {
+  // meta.chart_view.omit: those rows are drawn in no chart or tile, but every twin (and a table decision) keeps all rows.
+  const hint = result.meta.chart_view;
+  const kept = hint && hint.omit.length ? result.rows.filter((r) => !hint.omit.includes(cell(r, hint.key))) : result.rows;
+  if (!hint || kept.length === result.rows.length || kept.length === 0) return decideView(result, request, pick);
+  const full = twinOf(result);
+  const notes = hint.note ? [hint.note] : [];
+  return {
+    decisions: decideView({...result, rows: kept}, request, pick).decisions.map((d): BlockDecision =>
+      d.block === 'table' ? {...d, columns: full.columns, rows: full.rows, twin: full} : {...d, twin: full, chosen: {...d.chosen, notes: [...(d.chosen.notes ?? []), ...notes]}},
+    ),
+  };
+}
+
+function decideView(result: MetricResult, request: ViewRequest, pick: {x?: string; y?: string[]; title?: string}): ViewDecision {
   const {columns, rows} = result;
   const col = (key: string): ResultColumn | undefined => columns.find((c) => c.key === key);
   if (rows.length === 0) return {decisions: [tableDecision(result, request, 'The result has no rows.')]};

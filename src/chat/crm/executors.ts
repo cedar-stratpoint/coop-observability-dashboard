@@ -11,7 +11,7 @@ import {runQuery} from './query-run';
 import {describeCatalog} from './query-shape';
 import {isErr, readQueryInput} from './query-spec';
 import {isIdentityDenied, readShopifyInput, shopifyResult} from './shopify-query';
-import {crmCheckoutsResult, crmCustomersResult, crmMetricsResult, crmOrdersResult, crmRangeOrders, isMetricError, readCheckoutsInput, readCustomersInput, readMetricsInput, readOrdersInput, type CrmGet} from './tools';
+import {crmCheckoutsResult, crmCustomersResult, crmMetricsResult, crmOrdersResult, crmRangeOrders, isMetricError, readCheckoutsInput, readCustomersInput, readMetricsInput, readOrdersInput, type CrmGet, type ManualContactsRead} from './tools';
 
 export const CRM_TOOL_NAMES = ['get_crm_metrics', 'crm_query', 'shopify_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts'] as const;
 export type CrmToolName = (typeof CRM_TOOL_NAMES)[number];
@@ -88,6 +88,8 @@ export interface CrmExecutorDeps extends CrmDeps {
   allowIdentity?: boolean;
   /** Draws a table for the owner (the "all" strategy); absent: no table is drawn and the model is told so. */
   emitBlock?: (block: ChatBlock) => void;
+  /** The manual contact log for the audience lists (RET-05), from the route's server seam; absent: manual_contacts reads unknown, never 0. */
+  manualContacts?: ManualContactsRead;
 }
 
 export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (input: unknown) => Promise<unknown>> {
@@ -200,7 +202,7 @@ export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (
       return deps.keep(out.result);
     },
     list_crm_orders: tool('list_crm_orders', readOrdersInput, crmOrdersResult),
-    list_crm_customers: tool('list_crm_customers', readCustomersInput, (req, get) => crmCustomersResult(req, get, deps.now)),
+    list_crm_customers: tool('list_crm_customers', readCustomersInput, (req, get) => crmCustomersResult(req, get, deps.now, deps.manualContacts)),
     list_crm_checkouts: tool('list_crm_checkouts', readCheckoutsInput, crmCheckoutsResult),
   };
 }
