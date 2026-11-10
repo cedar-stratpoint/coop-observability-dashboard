@@ -331,7 +331,15 @@ function GroupStoreDialog({company, group, stores, onClose}: {company: string; g
 function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: StoreOption[]; canEdit: boolean; company: string}) {
   const s = statusOf(form);
   const needsStore = s.rank === 0;
-  const href = form.batchId ? `/uploads/batch/${form.batchId}` : form.uploadIds[0] ? `/uploads/${form.uploadIds[0]}` : '#';
+  // A single store's form batch opens in batch-review (store, period, every page, commit all).
+  // A scan's pages (one big multi-store batch) are never "one store's form", so open the first
+  // page in the per-file review instead; the scan is worked from this triage board.
+  const href =
+    form.batchId && form.batchKind !== 'scan'
+      ? `/uploads/batch/${form.batchId}`
+      : form.uploadIds[0]
+        ? `/uploads/${form.uploadIds[0]}?from=file`
+        : '#';
 
   // A "needs a store" form the user can fix gets the inline picker (not a link), so the
   // whole form is filed with one tap instead of opening the batch to type a store.

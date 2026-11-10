@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Uploads: scans no longer open the whole-batch review
+
+A server-ingested scan is **one open batch** of many pages across many stores, so opening any of its pages used to funnel into `batch-review` (`/uploads/batch/[id]`), which then declared "this batch is not one store's form" and showed an overwhelming `P.X` sheet grid. That whole-batch screen was built for the old model (one batch = one store's form) and is superseded for scans by the triage board + the per-file review.
+
+Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one store's multi-page form). New additive `upload_batches.kind` column (Nichido Staging; existing scans backfilled by page count). Routing:
+
+- `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
+- Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
+- Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
+
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
+
 ## 2026-11-10 — Uploads: name a group upload
 
 A group (whole-PDF) upload can now carry an **optional name** the user types before uploading ("Name this upload", e.g. "October Watsons batch"). It's stored on **every split page** (new additive `uploads.batch_name` column on Nichido Staging), so it survives the server-side split and the source-grouped views read it directly. Where it shows: the **scan tile** on Uploads and the **scan-detail header** both lead with the name, with the file name kept as a quiet mono subtitle. Blank name falls back to the file name exactly as before. The field only appears on the **server-driven path** (the only path that persists it) and is capped at 120 chars. Touches `createUpload` / `ingestScanPdf` / the ingest route / `signAndIngestScan` / the upload-queue provider / `batch-uploader`, and `groupUploads` + the two views.

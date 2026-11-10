@@ -6,6 +6,7 @@ import {catalogForCodes, getBatch, getBatchPages, listStores, reconcileStaleRead
 import {MANIFESTS} from '@/src/goldline-extract';
 import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
+import {uploadSource} from '@/src/goldline-upload-groups';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,13 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // would block this form's commit; reset the long-dead ones to 'failed' (retryable) first.
   if (batch.status === 'open' && canEditData(ctx.role)) await reconcileStaleReads(ctx.companyId, {batchId: id});
   const raw = await getBatchPages(ctx.companyId, id);
+  // A server-ingested scan is never one store's form: it spans many pages across many stores,
+  // so it is worked from the triage board and reviewed one page at a time, never committed here.
+  // Bounce any direct hit (an old link or bookmark) to its scan board.
+  if (batch.kind === 'scan') {
+    const src = raw[0] ? uploadSource(raw[0].upload.filename) : null;
+    redirect(src ? `/uploads/scan/${encodeURIComponent(src)}` : '/uploads');
+  }
   const pdfPages = raw.filter((p) => p.upload.kind === 'inventory_pdf');
   // A scan with several stores' forms whose split didn't run (the tab closed mid-upload):
   // split it now by the Phase 0 classification (store · period · version), then show

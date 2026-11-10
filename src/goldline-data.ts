@@ -581,7 +581,7 @@ export async function ingestScanPdf(input: {companyId: string; storagePath: stri
   const src = await PDFDocument.load(srcBytes, {ignoreEncryption: true, updateMetadata: false});
   const total = src.getPageCount();
   if (total < 1) throw new Error('ingest: the PDF has no pages');
-  const batchId = await createBatch(input.companyId, input.uploadedBy);
+  const batchId = await createBatch(input.companyId, input.uploadedBy, {kind: 'scan'});
   for (let i = 0; i < total; i++) {
     const doc = await PDFDocument.create();
     const [pg] = await doc.copyPages(src, [i]);
@@ -913,15 +913,30 @@ export type BatchRow = {
   period_start: string | null;
   period_end: string | null;
   status: 'open' | 'committed';
+  // 'form' = one store's multi-page form (manual upload), reviewed + committed together in
+  // batch-review. 'scan' = a server-ingested whole-scan batch (many pages / stores); its
+  // pages are reviewed one at a time in the per-file review + worked from the triage board,
+  // never routed into batch-review.
+  kind: 'form' | 'scan';
   created_by: string | null;
   created_at: string;
   committed_at: string | null;
 };
 
-const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,created_by,created_at,committed_at';
+const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,kind,created_by,created_at,committed_at';
 
-export async function createBatch(companyId: string, createdBy: string | null): Promise<string> {
-  const res = await db().from('upload_batches').insert({company_id: companyId, created_by: createdBy}).select('id').single();
+export async function createBatch(
+  companyId: string,
+  createdBy: string | null,
+  // 'scan' for a server-ingested whole-scan batch; defaults to 'form' (one store's form) so
+  // the manual upload / split paths are unchanged.
+  opts?: {kind?: 'form' | 'scan'},
+): Promise<string> {
+  const res = await db()
+    .from('upload_batches')
+    .insert({company_id: companyId, created_by: createdBy, kind: opts?.kind ?? 'form'})
+    .select('id')
+    .single();
   if (res.error) throw new Error(`upload_batches insert failed: ${res.error.message}`);
   return (res.data as {id: string}).id;
 }

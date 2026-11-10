@@ -182,6 +182,15 @@ create table if not exists public.upload_batches (
 );
 create index if not exists upload_batches_company_idx on public.upload_batches (company_id, created_at desc);
 
+-- 'form' = one store's multi-page form (manual upload): reviewed and committed together in
+-- batch-review. 'scan' = a server-ingested whole-scan batch spanning many pages / stores: its
+-- pages are reviewed one at a time in the per-file review and worked from the triage board,
+-- never routed into batch-review. Prod cutover: after adding the column, backfill existing
+-- scans with  update public.upload_batches set kind='scan' where id in
+--   (select batch_id from public.uploads where batch_id is not null group by batch_id having count(*) > 8);
+alter table public.upload_batches add column if not exists kind text not null default 'form'
+  check (kind in ('form','scan'));
+
 alter table public.uploads add column if not exists batch_id uuid references public.upload_batches(id) on delete set null;
 create index if not exists uploads_batch_idx on public.uploads (batch_id);
 
