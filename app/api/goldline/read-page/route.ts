@@ -15,8 +15,11 @@ import {pumpSecretOk, serverUploadEnabled} from '@/src/goldline-server-upload';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// One classify (~20s) + one extract (~85-150s) Vision call, same budget as the upload route.
-export const maxDuration = 300;
+// One classify (~20s) + one extract Vision call. A dense V1 page can run well past the old
+// 300s budget, so give the read a 600s window (matched by the pump's per-call timeout; the
+// stall reapers sit ABOVE it, so a still-running read is never re-queued). See
+// supabase/nichido/server_upload_resilience.sql.
+export const maxDuration = 600;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json'}});

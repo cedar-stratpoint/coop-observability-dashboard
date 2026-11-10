@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: widen the read window for dense pages (300s → 600s)
+
+On the reuploads, a subset of dense V1 pages read for ~250-300s and some tipped over the 300s function limit, stalling (then auto-retrying, then failing). They need more time, not more retries. Raised the read window to 600s, moving the coupled timeouts up together to keep the safety invariant `maxDuration (600s/10m) ≤ pump per-call timeout (600s) < DB stall reaper (12m) < app backstop reaper (15m)`, so a still-running read is never re-queued (no double-read). App: `read-page` and `upload` route `maxDuration` 300 → 600, `STALE_READ_MIN` 10 → 15. DB (`supabase/nichido/server_upload_read_window.sql`, applied via MCP): pump per-call timeout 300s → 600s, `goldline_reap_stalls` window 7 → 12 min. (Note: a single vision read taking ~250-300s is unusually long; raising the window lets them finish, but a deeper look at read-page's Vercel function logs is the follow-up if it persists.)
+
 ## 2026-11-10 — Uploads: hide the single-form "Form pages 1-5" coverage on multi-store scans
 
 The uploader's "Form pages" coverage (and its "Page X uploaded twice. Remove one." warning) tallied pages 1 to 5 across the whole batch, which assumes a batch is one store's 5-page form (the old per-store upload model). A whole multi-store scan on the server-driven path holds ~50 forms, so the tally counted ~50 of each page and false-flagged "Page 1, 2, 3, 4, 5 uploaded twice." The widget now shows only when the batch is a single form (`groupForms` yields one group); a multi-store scan hides it, and per-form coverage on the scan's forms board is the right place for those. Single-store duplicate detection is unchanged.
