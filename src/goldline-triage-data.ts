@@ -32,6 +32,10 @@ export type TriageForm = {
   flags: string[];
   uploadIds: string[];
   batchId: string | null;
+  // 'form' = a single store's batch (opens in batch-review to commit together). 'scan' = part
+  // of a server-ingested scan (open each page in the per-file review, never batch-review).
+  // null when the form's pages don't all share one batch.
+  batchKind: 'form' | 'scan' | null;
   needsReview: number; // pages awaiting human review
   committed: number; // pages already committed
 };
@@ -99,11 +103,12 @@ export function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
   };
 }
 
-function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>): TriageForm {
+function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds: Map<string, 'form' | 'scan'>): TriageForm {
   const ids = g.slots.flatMap((s) => s.ids);
   const rows = ids.map((id) => byId.get(id)).filter((r): r is UploadClsRow => Boolean(r));
   const first = rows[0]?.classification as Record<string, unknown> | undefined;
   const batchIds = new Set(rows.map((r) => r.batch_id).filter(Boolean));
+  const batchId = batchIds.size === 1 ? [...batchIds][0] : null;
   return {
     key: g.key,
     storeCode: g.store_code,
@@ -117,7 +122,8 @@ function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>): TriageForm
     duplicates: g.duplicates.map((d) => ({page: d.page, count: d.ids.length})),
     flags: g.flags,
     uploadIds: ids,
-    batchId: batchIds.size === 1 ? [...batchIds][0] : null,
+    batchId,
+    batchKind: batchId ? batchKinds.get(batchId) ?? 'form' : null,
     needsReview: rows.filter((r) => r.status === 'needs_review').length,
     committed: rows.filter((r) => r.status === 'committed').length,
   };
@@ -139,6 +145,28 @@ export async function triageBoard(companyId: string, opts?: {source?: string}): 
     ['gl-triage', companyId, source ?? 'all'],
     {tags: [glTags.uploads(companyId)], revalidate: 30},
   )();
+}
+
+/** Map each batch id the rows touch to its kind ('form' | 'scan'), so a form card can link to
+ *  batch-review (a store's form) or the per-file review (a scan's page). Chunked by id so a big
+ *  inbox never over-long a single `in()`. */
+async function loadBatchKinds(
+  supa: ReturnType<typeof nichidoDb>,
+  companyId: string,
+  rows: Array<{batch_id: string | null}>,
+): Promise<Map<string, 'form' | 'scan'>> {
+  const ids = [...new Set(rows.map((r) => r.batch_id).filter((b): b is string => Boolean(b)))];
+  const out = new Map<string, 'form' | 'scan'>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    // pagination-ok: bounded to <=200 explicit ids per chunk.
+    const res = await supa.from('upload_batches').select('id,kind').eq('company_id', companyId).in('id', chunk);
+    if (res.error) throw new Error(`upload_batches kind read failed: ${res.error.message}`);
+    for (const b of (res.data ?? []) as Array<{id: string; kind: string}>) {
+      out.set(b.id, b.kind === 'scan' ? 'scan' : 'form');
+    }
+  }
+  return out;
 }
 
 async function loadTriageBoard(companyId: string, source: string | null): Promise<TriageResult> {
@@ -179,9 +207,13 @@ async function loadTriageBoard(companyId: string, source: string | null): Promis
   ];
   const inventoryPages = forms.reduce((n, g) => n + g.slots.reduce((m, s) => m + s.ids.length, 0), 0);
 
+  // Each batch's kind ('form' vs server-ingested 'scan') so a form card links to the right
+  // place: batch-review for a single store's form, the per-file review for a scan's page.
+  const batchKinds = await loadBatchKinds(supa, companyId, rows);
+
   return {
     configured: true,
-    forms: forms.map((g) => toTriageForm(g, byId)),
+    forms: forms.map((g) => toTriageForm(g, byId, batchKinds)),
     parked,
     totals: {forms: forms.length, inventoryPages, sales: sales.length, blank: blanks.length, unplaceable: unplaceable.length},
     mock: false,
@@ -270,6 +302,7 @@ function mockTriage(): TriageResult {
     flags: [],
     uploadIds: [],
     batchId: null,
+    batchKind: null,
     needsReview: 5,
     committed: 0,
     ...p,

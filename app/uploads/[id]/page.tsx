@@ -41,14 +41,16 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   }
   const upload = await getUpload(ctx.companyId, id);
   if (!upload) notFound();
-  // A page waiting for review inside an open batch is reviewed WITH its batch: one
-  // place for the store, period, every page and the commit, whichever way you got here
-  // (a file in the batch, the Files list, a page link). Committed, failed and
-  // single-file uploads keep this page.
-  // The Per file list opts out: there a page is reviewed and committed on its own.
+  // A page of a single store's FORM batch is reviewed WITH its batch: one place for the
+  // store, period, every page and the commit, whichever way you got here (a file in the
+  // batch, the Files list, a page link). A server-ingested SCAN batch is different, it spans
+  // many pages across many stores, so it is never "one store's form": its pages are reviewed
+  // one at a time here and sorted from the triage board, never funnelled into batch-review.
+  // Committed, failed and single-file uploads keep this page too.
+  // The Per file list opts out as well: there a page is reviewed and committed on its own.
   if (!fromFile && upload.kind === 'inventory_pdf' && upload.status === 'needs_review' && upload.batch_id) {
     const batch = await getBatch(ctx.companyId, upload.batch_id);
-    if (batch?.status === 'open') redirect(`/uploads/batch/${batch.id}?page=${upload.id}`);
+    if (batch?.status === 'open' && batch.kind !== 'scan') redirect(`/uploads/batch/${batch.id}?page=${upload.id}`);
   }
   const extraction = upload.kind === 'inventory_pdf' ? await getExtraction(ctx.companyId, id) : null;
   // Same-origin proxy (streams the private file) so the browser can embed it in an
