@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: preview what each form version looks like
+
+On the scan-detail page, each version summary card (Legacy / V1 / V2) now has a small **Preview** (eye) button that opens a full-screen modal showing that version's **reference form, all five pages labeled** with their product sections, each clickable to enlarge (arrow-key paging). The images are the clean reference examples from the form-audit artifact (`docs/form-audit-hq.html`), extracted to `public/form-versions/` and served locally, so there's no remote image and the CSP stays tight (rendered via `background-image` to keep the no-`<img>` security tripwire green). New `src/goldline-form-versions.ts` manifest + `components/analyst/version-preview.tsx`.
+
 ## 2026-11-10 — Uploads: the "re-reading" bar is now a full bar
 
 Follow-up: the first re-reading bar used a semi-transparent gradient sweep, so only its bright middle showed and it read as a partial sliver. `.gl-reading-bar` is now a **full ochre track** with a soft highlight gliding across it (transform-only sheen, like the determinate progress bars), so an in-progress read shows a filled, working bar end to end. Reduced motion keeps the full fill and drops the sheen.
