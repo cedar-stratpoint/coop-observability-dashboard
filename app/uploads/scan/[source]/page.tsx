@@ -8,6 +8,8 @@ import {getCurrentBas} from '@/src/goldline-ba-data';
 import {withCanonicalBa} from '@/src/goldline-ba-reconcile';
 import {triageBoard} from '@/src/goldline-triage-data';
 import {VERSION_COLOR, VERSION_LABEL} from '@/src/goldline-triage-format';
+import {VersionPreviewButton} from '@/components/analyst/version-preview';
+import {formVersionPreview} from '@/src/goldline-form-versions';
 import type {FormVersion} from '@/src/goldline-extract';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {GL_PAGE} from '@/src/goldline-ui';
@@ -121,6 +123,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
               count={versionCounts[v] ?? 0}
               color={VERSION_COLOR[v]}
               active={version === v}
+              previewVersion={v}
             />
           ))}
         </div>
@@ -176,9 +179,10 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
 /** A form-version summary card above the view toggle: the layout, its form count, and a
  *  one-click filter for the view below. The active card wears the version's own colour. */
-function VersionCard({href, label, count, color, active}: {href: string; label: string; count: number; color: string | null; active: boolean}) {
+function VersionCard({href, label, count, color, active, previewVersion}: {href: string; label: string; count: number; color: string | null; active: boolean; previewVersion?: string}) {
   const accent = color ?? 'var(--foreground)';
-  return (
+  const preview = previewVersion ? formVersionPreview(previewVersion) : null;
+  const link = (
     <Link
       href={href}
       replace
@@ -198,5 +202,14 @@ function VersionCard({href, label, count, color, active}: {href: string; label: 
       </span>
       <span className="text-[11px] text-muted-foreground">{count === 1 ? 'form' : 'forms'}</span>
     </Link>
+  );
+  if (!preview) return link;
+  // A small Preview affordance on the card (sibling to the filter Link, not nested), opening a
+  // modal with that version's reference form pages.
+  return (
+    <div className="relative">
+      {link}
+      <VersionPreviewButton version={previewVersion!} className="absolute right-1.5 top-1.5 z-10" />
+    </div>
   );
 }
