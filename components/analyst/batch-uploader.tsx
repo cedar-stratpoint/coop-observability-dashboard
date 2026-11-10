@@ -62,7 +62,20 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const sb = q.serverBatch;
   const serverUploading = serverMode && Boolean(sb) && (sb!.phase === 'uploading' || sb!.phase === 'ingesting' || (sb!.phase === 'reading' && !hasItems));
   const pdfItems = q.items.filter((i) => i.kind === 'pdf' && i.state !== 'cancelled');
-  const coverage = batchCoverage(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null})));
+  const donePdf = pdfItems.filter((i) => i.state === 'done');
+  const coverage = batchCoverage(donePdf.map((i) => ({page: i.page ?? null})));
+  // The Form-pages (1 to 5) coverage + "uploaded twice" guard assume a batch is ONE store's
+  // form. A whole multi-store scan (the server-driven path) holds ~50 forms, so a 1-to-5 tally
+  // across it false-flags every page as a duplicate. Only show the widget for a single form; the
+  // scan's forms board handles per-form coverage. groupForms starts a new form at each page-
+  // number drop, so >1 group means a multi-store scan. Order by scan position first so the drops
+  // reflect the physical page sequence.
+  const singleForm =
+    groupForms(
+      [...donePdf]
+        .sort((a, b) => (scanPosition(a.name)?.index ?? 0) - (scanPosition(b.name)?.index ?? 0))
+        .map((i) => ({page: i.page ?? null})),
+    ).length <= 1;
   const startedAt = Math.min(...q.items.map((i) => i.startedAt ?? Infinity));
   const left = busy ? eta(Number.isFinite(startedAt) ? startedAt : null, s.percent, now) : null;
   const canReview = !busy && Boolean(q.batch.id) && s.readyForReview > 0;
@@ -290,8 +303,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               )}
             </fieldset>
 
-            {/* Form pages coverage. */}
-            {pdfItems.length > 0 && (
+            {/* Form pages coverage — single-form batches only (a multi-store scan has ~50 forms,
+                where a whole-batch 1-to-5 tally is meaningless; the forms board covers those). */}
+            {pdfItems.length > 0 && singleForm && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Form pages">
                 <span className="mr-1 text-muted-foreground">Form pages</span>
                 {FORM_PAGES.map((n) => {
