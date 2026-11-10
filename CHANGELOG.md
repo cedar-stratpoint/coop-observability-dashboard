@@ -10,6 +10,19 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.22.0 (2026-11-10): Business Health Report, GMV cards lead with this month so far (prod release)
+Ships #571 (staging #572) to prod as a health-report-only change on top of `main` (staging and main have diverged). Every code file it touches was identical on `main` and `staging`, so the commit cherry-picked cleanly; only this CHANGELOG entry was rewritten.
+
+Syl's feedback, backed by the owner: the report should also work as a tracking tool. Every key card led with the last finished month (October on 10 Nov), so the month in progress only showed as the MTD column deep in the grid.
+
+- **Decision (owner, option B): the Total, Events, Website and Marketplace GMV cards lead with the current month so far**: `₱172k so far`, chip `29% of target`, sub `Nov 1–10 · target ₱600k for the month` (+ `· partial`). The Aug/Sep/Oct boxes are unchanged, so October keeps its final result (and its Why?) there. The Cash card is unchanged: cash is typed at month end, so it still leads with the last ended month.
+- **Decision (owner): plain progress, no pace marker.** A bar of actual ÷ the full month's target (primary fill, capped at 100% wide), with `₱172k of ₱600k` and `₱428k to go · 20 days left` or `Target reached`. No "expected by today" tick and no ahead/behind call ("progress bar lang talaga ng overall target"). `role="progressbar"` with value, min, max and a text value.
+- **The current month is never red or green** (the existing `metricStatus` rule): neutral chip, muted top rule, primary bar. Gap → `—`, `waiting`, no bar; no target → `no target`, no bar; partial → value and bar with `partial`, and the tip names what is missing (Total names the channels).
+- **Chart:** a vertical bar per month for the actual, from 0 so lengths are honest, tinted by status (green/red at low opacity, grey when not judged), under the dashed target line and the solid actual line. The current month is a dashed outline bar and a hollow grey point joined by a dotted segment; its tooltip says "so far". Red dots (keyboard) and red bars (pointer) still open Why?. The Cash and Rough runway cards keep their old line-only chart (`bars={false}`).
+- Pure `monthProgress()` in `src/plan-compute.ts` (PH day; today counts as done, so Nov 10 leaves 20 days), tested for day 1, last day, 28/30/31-day months, over target, no target, no actual. Copy in `src/plan-help.ts`. Plan: `knowledge/tasks/2026-11-10-bhr-current-month-progress.md`.
+
+PROD steps: none (no env, no SQL). Check: on `/health-report`, the four GMV cards show this month so far with the progress bar, and Cash still leads with the last ended month.
+
 ## v1.21.1 (2026-11-09): Business Health Report, Website GMV is Shopify gross sales (prod release)
 Ships #551 (staging #553) to prod as a Website-GMV-only change on top of `main` (staging and main have diverged). Every file it touches was identical on `main` and `develop`, so the commit cherry-picked cleanly.
 
