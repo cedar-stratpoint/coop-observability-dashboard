@@ -10,7 +10,8 @@ const make = (respond: () => Response = () => new Response(JSON.stringify({data:
     calls.push({url: String(input), init});
     return respond();
   }) as typeof globalThis.fetch;
-  return createCrmClient({baseUrl: 'https://crm.example/worker', token: 'tok-SECRET', fetch});
+  // every endpoint once: the allowlist (9 entries since RET-03's birthday vouchers) is longer than a real turn's GET cap
+  return createCrmClient({baseUrl: 'https://crm.example/worker', token: 'tok-SECRET', fetch, limits: {maxGetsPerTurn: Object.keys(CRM_ENDPOINTS).length}});
 };
 const Q = '{ shop { name } }';
 

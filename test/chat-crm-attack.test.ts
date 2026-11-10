@@ -11,7 +11,8 @@ function harness(respond: (url: string, init: RequestInit) => Response | Promise
     calls.push({url: String(input), init});
     return respond(String(input), init);
   }) as typeof globalThis.fetch;
-  return {c: createCrmClient({baseUrl: 'https://crm.example/w', token: TOKEN, fetch}), calls};
+  // every endpoint once: the allowlist (9 entries since RET-03's birthday vouchers) is longer than a real turn's GET cap
+  return {c: createCrmClient({baseUrl: 'https://crm.example/w', token: TOKEN, fetch, limits: {maxGetsPerTurn: Object.keys(CRM_ENDPOINTS).length}}), calls};
 }
 
 describe('no POST, no other method', () => {

@@ -2,10 +2,10 @@ import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
-import {envelope, MEMBERSHIP_FALLBACK, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder} from './crm-project';
+import {envelope, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder, type CrmBirthdayVoucherSafe} from './crm-project';
 import {collectOrderPages, crmCoverage} from './plan-gmv';
 import type {RemoteSpinLead} from './spin-leads-sync';
-import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
+import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
 
 /**
  * Reader for the Zoomy CRM engine — a Cloudflare Worker over its own D1
@@ -54,7 +54,9 @@ export async function fetchCrmSpinLeads(): Promise<RemoteSpinLead[]> {
   return Array.isArray(leads) ? leads : [];
 }
 
-/* ---------- readers ---------- */
+/* ---------- readers ----------
+ * The list readers return null when the CRM is not configured or the read failed (RET-04 audit finding): a page shows
+ * "unavailable", never 0, and callers that only want a best-effort list write `?? []` themselves. */
 
 export const getCrmMetrics = cache((): Promise<CrmMetrics | null> =>
   crmConfigured() ? metricsCached() : Promise.resolve(null),
@@ -72,29 +74,29 @@ const metricsCached = unstable_cache(async (): Promise<CrmMetrics | null> => {
   }
 }, ['crm-metrics'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
-export const getCrmCustomers = cache((): Promise<CrmCustomer[]> =>
-  crmConfigured() ? customersCached() : Promise.resolve([]),
+export const getCrmCustomers = cache((): Promise<CrmCustomer[] | null> =>
+  crmConfigured() ? customersCached() : Promise.resolve(null),
 );
 
-const customersCached = unstable_cache(async (): Promise<CrmCustomer[]> => {
+const customersCached = unstable_cache(async (): Promise<CrmCustomer[] | null> => {
   try {
     return (envelope(await crmGet<unknown>('/api/customers'), 'customers') ?? []).map(projectCustomer);
   } catch (err) {
     console.warn(`CRM customers read failed: ${(err as Error).message}`);
-    return [];
+    return null;
   }
 }, ['crm-customers'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
-export const getCrmOrders = cache((): Promise<CrmOrder[]> =>
-  crmConfigured() ? ordersCached() : Promise.resolve([]),
+export const getCrmOrders = cache((): Promise<CrmOrder[] | null> =>
+  crmConfigured() ? ordersCached() : Promise.resolve(null),
 );
 
-const ordersCached = unstable_cache(async (): Promise<CrmOrder[]> => {
+const ordersCached = unstable_cache(async (): Promise<CrmOrder[] | null> => {
   try {
     return (envelope(await crmGet<unknown>('/api/orders'), 'orders') ?? []).map(projectOrder);
   } catch (err) {
     console.warn(`CRM orders read failed: ${(err as Error).message}`);
-    return [];
+    return null;
   }
 }, ['crm-orders'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
@@ -126,11 +128,11 @@ const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<{ord
   }
 }, ['crm-orders-plan'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
-export const getCrmCheckouts = cache((): Promise<CrmCheckout[]> =>
-  crmConfigured() ? checkoutsCached() : Promise.resolve([]),
+export const getCrmCheckouts = cache((): Promise<CrmCheckout[] | null> =>
+  crmConfigured() ? checkoutsCached() : Promise.resolve(null),
 );
 
-const checkoutsCached = unstable_cache(async (): Promise<CrmCheckout[]> => {
+const checkoutsCached = unstable_cache(async (): Promise<CrmCheckout[] | null> => {
   try {
     // `raw` is the original Shopify payload. The progress stage is derived from
     // it HERE, on the server, and the blob itself is then dropped — the browser
@@ -141,25 +143,23 @@ const checkoutsCached = unstable_cache(async (): Promise<CrmCheckout[]> => {
     );
   } catch (err) {
     console.warn(`CRM checkouts read failed: ${(err as Error).message}`);
-    return [];
+    return null;
   }
 }, ['crm-checkouts'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
-export const getCrmBirthdayVouchers = cache((): Promise<CrmBirthdayVoucher[]> =>
-  crmConfigured() ? birthdaysCached() : Promise.resolve([]),
+/** The voucher ledger, projected on the server (projectBirthdayVoucher keeps email, year, tier, sentAt): no voucher code reaches the page. */
+export const getCrmBirthdayVouchers = cache((): Promise<CrmBirthdayVoucherSafe[] | null> =>
+  crmConfigured() ? birthdaysCached() : Promise.resolve(null),
 );
 
-const birthdaysCached = unstable_cache(async (): Promise<CrmBirthdayVoucher[]> => {
+const birthdaysCached = unstable_cache(async (): Promise<CrmBirthdayVoucherSafe[] | null> => {
   try {
-    const {birthdayVouchers} = await crmGet<{birthdayVouchers: CrmBirthdayVoucher[]}>(
-      '/api/birthday-vouchers',
-    );
-    return birthdayVouchers ?? [];
+    return (envelope(await crmGet<unknown>('/api/birthday-vouchers'), 'birthdayVouchers') ?? []).map(projectBirthdayVoucher);
   } catch (err) {
     console.warn(`CRM birthday vouchers read failed: ${(err as Error).message}`);
-    return [];
+    return null;
   }
-}, ['crm-birthday-vouchers'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
+}, ['crm-birthday-vouchers-safe'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
 /**
  * Membership settings. Served by the Worker from the same Shopify metafield the
