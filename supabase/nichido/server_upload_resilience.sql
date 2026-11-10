@@ -9,14 +9,16 @@
 -- reaper reset it to 'failed', stranding real inventory pages until a manual re-read.
 --
 -- Two changes:
---   1. Turn the pump burst down (max_inflight 36 -> 12, k 6 -> 4, timeout 300s -> 180s) so there
---      are far fewer simultaneous DNS lookups and a stuck slot frees sooner.
+--   1. Turn the pump burst down (max_inflight 36 -> 12, k 6 -> 4) so there are far fewer
+--      simultaneous DNS lookups. The per-call timeout stays 300s (== read-page maxDuration):
+--      a shorter timeout made pg_net disconnect before a slow dense-page read finished, and
+--      Vercel Fluid Compute can cancel a function on client disconnect, so the read was lost.
 --   2. Auto-retry a stalled read (new pg_cron reaper) up to a bounded number of times before
 --      failing, so a transient DNS timeout self-heals instead of silently dropping a page.
 -- To pause: select cron.unschedule('goldline-reap-stalls'); (and 'goldline-pump-reads').
 
 -- 1 ── Pump re-tuned. Body is identical to P1 (server_upload_p1_pump.sql) apart from the lower
---      defaults and the shorter per-call timeout.
+--      concurrency defaults (the per-call timeout stays 300s == read-page maxDuration).
 create or replace function public.goldline_pump_reads(k int default 4, max_inflight int default 12)
 returns int
 language plpgsql
@@ -63,7 +65,7 @@ begin
       url := v_url,
       body := jsonb_build_object('uploadId', r.id::text, 'company', r.company_id),
       headers := jsonb_build_object('Content-Type', 'application/json', 'x-goldline-pump-secret', v_secret),
-      timeout_milliseconds := 180000
+      timeout_milliseconds := 300000
     );
     v_sent := v_sent + 1;
   end loop;
