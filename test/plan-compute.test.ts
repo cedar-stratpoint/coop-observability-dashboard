@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {assemblePlan, cardMonths, cmLadder, currentMonthKey, fmtPlan, METRICS, metricStatus, monthPhase, runwayMonths, stepWindow, windowStart} from '../src/plan-compute';
+import {assemblePlan, cardMonths, cmLadder, currentMonthKey, fmtPlan, METRICS, metricStatus, monthPhase, monthProgress, runwayMonths, stepWindow, windowStart} from '../src/plan-compute';
 
 const MONTHS = Array.from({length: 17}, (_, i) => `${2026 + Math.floor((7 + i) / 12)}-${String(((7 + i) % 12) + 1).padStart(2, '0')}-01`);
 
@@ -140,5 +140,35 @@ describe('assemblePlan', () => {
     expect(p.targets.cash).toEqual([-169000, null]);
     expect(p.targets.mystery).toBeUndefined();
     expect(p.source).toBe('db');
+  });
+});
+
+describe('monthProgress (BHR-08: this month so far against the full-month target, PH day)', () => {
+  const nov = {month: '2026-11-01', target: 600_000};
+  it('mid month: share of the target, what is left, days left counting today as done', () => {
+    expect(monthProgress({...nov, actual: 172_000, today: '2026-11-10'})).toEqual({pct: (172 / 600) * 100, toGo: 428_000, dayOfMonth: 10, daysInMonth: 30, daysLeft: 20, reached: false});
+  });
+  it('day 1 and the last day', () => {
+    expect(monthProgress({...nov, actual: 0, today: '2026-11-01'})).toMatchObject({pct: 0, toGo: 600_000, dayOfMonth: 1, daysLeft: 29});
+    expect(monthProgress({...nov, actual: 500_000, today: '2026-11-30'})).toMatchObject({dayOfMonth: 30, daysLeft: 0, reached: false});
+  });
+  it('knows 31, 30 and 28 day months', () => {
+    expect(monthProgress({...nov, month: '2026-12-01', actual: 1, today: '2026-12-05'})).toMatchObject({daysInMonth: 31, daysLeft: 26});
+    expect(monthProgress({...nov, actual: 1, today: '2026-11-05'})).toMatchObject({daysInMonth: 30, daysLeft: 25});
+    expect(monthProgress({...nov, month: '2027-02-01', actual: 1, today: '2027-02-05'})).toMatchObject({daysInMonth: 28, daysLeft: 23});
+  });
+  it('over target: reached, nothing to go, pct above 100 (the bar caps its own width)', () => {
+    expect(monthProgress({...nov, actual: 660_000, today: '2026-11-20'})).toMatchObject({pct: expect.closeTo(110, 9), toGo: 0, reached: true});
+    expect(monthProgress({...nov, actual: 600_000, today: '2026-11-20'})).toMatchObject({pct: 100, toGo: 0, reached: true});
+  });
+  it('no target (null or 0): no share, no to-go, never reached', () => {
+    for (const target of [null, 0]) expect(monthProgress({...nov, target, actual: 100, today: '2026-11-10'})).toMatchObject({pct: null, toGo: null, reached: false, daysLeft: 20});
+  });
+  it('no actual yet: no share, never reached, never 0', () => {
+    expect(monthProgress({...nov, actual: null, today: '2026-11-10'})).toMatchObject({pct: null, toGo: null, reached: false});
+  });
+  it('clamps a today outside the month', () => {
+    expect(monthProgress({...nov, actual: 1, today: '2026-12-02'})).toMatchObject({dayOfMonth: 30, daysLeft: 0});
+    expect(monthProgress({...nov, actual: 1, today: '2026-10-31'})).toMatchObject({dayOfMonth: 0, daysLeft: 30});
   });
 });

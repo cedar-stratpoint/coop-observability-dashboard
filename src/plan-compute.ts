@@ -343,6 +343,16 @@ export function lastDayOf(month: string): string {
   return `${month.slice(0, 7)}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
 }
 /** True once the month is OVER: Manila `today` ('YYYY-MM-DD') is after its last day. The last day itself is still the month. */
+export interface MonthProgress {pct: number | null; toGo: number | null; dayOfMonth: number; daysInMonth: number; daysLeft: number; reached: boolean}
+/** BHR-08: the month in progress against its FULL-month target (plain progress, no expected-by-today pace). `today` is the PH day (YYYY-MM-DD)
+ * and counts as done, so Nov 10 leaves 20 days. No target (null or 0) or no actual → no share and never reached; a missing actual is never 0. */
+export function monthProgress({actual, target, month, today}: {actual: number | null; target: number | null; month: string; today: string}): MonthProgress {
+  const daysInMonth = +lastDayOf(month).slice(8, 10);
+  const ym = month.slice(0, 7), tm = today.slice(0, 7);
+  const dayOfMonth = tm < ym ? 0 : tm > ym ? daysInMonth : Math.min(daysInMonth, +today.slice(8, 10));
+  const judged = actual !== null && target !== null && target > 0;
+  return {pct: judged ? (actual / target) * 100 : null, toGo: judged ? Math.max(0, target - actual) : null, dayOfMonth, daysInMonth, daysLeft: daysInMonth - dayOfMonth, reached: judged && actual >= target};
+}
 export const monthEnded = (month: string, today: string): boolean => today > lastDayOf(month);
 /** "Oct'26" for '2026-10-01' (the label the close messages use). */
 export const monthTag = (month: string): string => `${'JanFebMarAprMayJunJulAugSepOctNovDec'.slice((+month.slice(5, 7) - 1) * 3, +month.slice(5, 7) * 3)}'${month.slice(2, 4)}`;
