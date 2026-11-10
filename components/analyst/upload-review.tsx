@@ -1,6 +1,6 @@
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
@@ -12,6 +12,7 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
+import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
@@ -104,6 +105,9 @@ export function UploadReview({
   const router = useRouter();
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // Sentinel at the end of the full confidence summary; the sticky condensed bar shows once it
+  // scrolls above the app header.
+  const confEnd = useRef<HTMLDivElement>(null);
 
   const head = extraction?.data;
   const [rows, setRows] = useState<EditRow[]>(() => (head?.rows ?? []).map((r) => ({...r})));
@@ -269,7 +273,7 @@ export function UploadReview({
           : {pill: 'Set aside', title: 'Set aside', body: upload.reject_reason ?? 'This page was set aside, so there is nothing to review or commit here.', tone: 'var(--muted-foreground)'};
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6">
+    <div className="mx-auto flex max-w-[108rem] flex-col gap-5 px-4 py-6 xl:px-6">
       {nav ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3">
@@ -491,6 +495,16 @@ export function UploadReview({
       {/* PDF review workbench */}
       {extraction && (
         <>
+          <ConfidenceSticky
+            watch={confEnd}
+            docConfidence={docConfidence}
+            rowConfidences={rows.map((r) => r.confidence)}
+            page={extraction.page}
+            onReviewFlagged={() => {
+              setView('needs');
+              goToFlag(open[0] ?? flagged[0] ?? null);
+            }}
+          />
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -500,7 +514,7 @@ export function UploadReview({
                 ) : null}
               </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-5">
+            <CardContent className="flex flex-col gap-7">
               <DocumentConfidence
                 docConfidence={docConfidence}
                 rowConfidences={rows.map((r) => r.confidence)}
@@ -509,12 +523,13 @@ export function UploadReview({
                   goToFlag(open[0] ?? flagged[0] ?? null);
                 }}
               />
+              <div ref={confEnd} aria-hidden className="h-0" />
 
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 text-xs font-medium text-muted-foreground">
+              <fieldset className="flex flex-col gap-3">
+                <legend className="mb-3 text-xs font-medium text-muted-foreground">
                   {nav ? 'Store, period and BA for this page' : 'Which store and period is this count for?'}
                 </legend>
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-wrap items-end gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-medium">Store</span>
                     <StoreCodeField value={storeCode} onChange={setStoreCode} stores={stores} disabled={committed || !canEdit} />

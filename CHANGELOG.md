@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Review page: full-width layout, breathable Document block, sticky confidence bar
+
+Per-page review (`upload-review.tsx`) polish, on feedback:
+- **Uses the whole screen.** The page cap went from `max-w-6xl` (1152px) to `max-w-[108rem]` (with a wider xl gutter), so the scan preview + review columns use the available width, the rows table especially.
+- **Breathable, modern Document block.** More padding and whitespace in the confidence summary (`p-4`→`p-5`, `rounded-xl`→`rounded-2xl`, bigger score, roomier gaps), the store/period/BA fieldset, and the Document card content gap.
+- **Sticky condensed confidence bar.** Once the full confidence summary scrolls up under the header, a compact echo (score % · verdict · guidance · page · "N flagged") pins at the top so the headline stays in view down a long rows table (new `ConfidenceSticky`, IntersectionObserver-driven, hidden until it would pin, reduced-motion safe).
+
+Not changed here: the row "locate on scan" crosshair (`onLocate`) is wired only in the batch "commit all pages" review; the single-page review's scan is a non-annotatable PDF iframe, so a true locator here is a separate feature (noted for follow-up).
+
 ## 2026-11-10 — Uploads: form cards show the full store name; modern store picker
 
 Triage forms board polish, on feedback:
