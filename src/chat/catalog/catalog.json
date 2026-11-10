@@ -51,9 +51,10 @@
   },
   {
    "id": "booth-leads",
-   "title": "Booth leads",
+   "title": "Booth leads and the manual contact log",
    "tables": [
-    "spin_wheel_leads"
+    "spin_wheel_leads",
+    "customer_contacts"
    ]
   },
   {
@@ -343,6 +344,14 @@
    "domain": "booth-leads",
    "about": "Spin-the-wheel sign-ups collected at booths. Imported by hand from CSV; no key to orders or events.",
    "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (first sign-up consent time, never updated), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
+   "prefer": null,
+   "testOrders": null
+  },
+  "customer_contacts": {
+   "name": "customer_contacts",
+   "domain": "booth-leads",
+   "about": "The manual contact log (RET-05, 2026-11-10): a DM, SMS, call, hand-sent email or other contact a team member logged against a website customer, so \"times contacted\" counts more than the automated CRM emails. It records a contact; nothing sends one.",
+   "columns": "id, customer_email (the website customer's email, lower-cased), channel, note (free text, nullable), contacted_at (default now), created_by (the signed-in Coop email that logged it), created_at.",
    "prefer": null,
    "testOrders": null
   },
@@ -1252,13 +1261,14 @@
   {
    "route": "/customers/website-crm",
    "title": "Website CRM",
-   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership",
+   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership; Customers tab (RET-04) with orders (test excluded), first/last order, PH days since last order, emails sent, manual contacts (RET-05: a Log contact dialog per row records a DM, SMS, call, email by hand or other; only its author can delete it; the log not applied reads Unavailable), email consent, a repeat buyer rate tile (25% shown as a target, never an actual), new buyers per first-order month and buyers by orders charts, Repeat promo / Win-back presets and CSV of the visible rows. A list the CRM could not read shows Unavailable, never 0",
    "data": "website CRM (API)",
    "domains": [
-    "crm-api"
+    "crm-api",
+    "booth-leads (customer_contacts)"
    ],
    "fenced": false,
-   "access": "partial: CRM tools (metrics, customers, orders, checkouts); vouchers and checkout links withheld",
+   "access": "partial: CRM tools (metrics, customers incl. audiences, repeat rate, emails sent, manual contacts and times contacted, orders, checkouts); voucher codes and checkout links withheld",
    "redirectTo": null
   },
   {
