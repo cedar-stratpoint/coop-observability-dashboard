@@ -338,32 +338,34 @@ html.coop-splash-seen .coop-splash { display: none; }
   animation: gl-progress-slide 1.4s ease-in-out infinite;
 }
 
-/* A calmer, modern "reading" bar: a soft ochre gradient glides across the whole track (not a
-   hard chunk sliding over an empty rail), so an in-progress read reads as a gentle shimmer
-   rather than a jumpy loader. Background-position only (cheap, no layout). Parked as a steady
-   partial tint under reduced motion. */
-@keyframes gl-reading-sweep {
-  0%   { background-position: 180% 0; }
-  100% { background-position: -80% 0; }
+/* The "reading" bar: a FULL ochre track with a soft highlight gliding across it, so an
+   in-progress read reads as a filled, working bar (not a partial sliver). Transform-only
+   sheen (cheap, no layout). Under reduced motion the full fill stays and the sheen is dropped. */
+@keyframes gl-reading-sheen {
+  0%   { transform: translateX(-130%) skewX(-16deg); }
+  100% { transform: translateX(320%) skewX(-16deg); }
 }
 .gl-reading-bar {
+  position: relative;
+  overflow: hidden;
   background-image: linear-gradient(
     90deg,
-    color-mix(in oklab, var(--primary) 10%, transparent) 0%,
-    color-mix(in oklab, var(--primary) 22%, transparent) 32%,
-    color-mix(in oklab, var(--primary) 72%, transparent) 50%,
-    color-mix(in oklab, var(--primary) 22%, transparent) 68%,
-    color-mix(in oklab, var(--primary) 10%, transparent) 100%
+    color-mix(in oklab, var(--primary) 60%, black 6%),
+    var(--primary) 50%,
+    color-mix(in oklab, var(--primary) 64%, white 22%)
   );
-  background-size: 220% 100%;
-  animation: gl-reading-sweep 1.5s linear infinite;
+}
+.gl-reading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, white 42%, transparent), transparent);
+  transform: translateX(-130%) skewX(-16deg);
+  animation: gl-reading-sheen 1.5s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .gl-reading-bar {
-    animation: none;
-    background-image: none;
-    background-color: color-mix(in oklab, var(--primary) 35%, transparent);
-  }
+  .gl-reading-bar::after { animation: none; display: none; }
 }
 
 /* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
