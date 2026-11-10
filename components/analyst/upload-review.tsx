@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -13,6 +13,8 @@ import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
+import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
+import {rowBandFor} from '@/src/goldline-extract';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
@@ -105,6 +107,8 @@ export function UploadReview({
   const router = useRouter();
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // When the lightbox was opened from a row's "locate on scan", the approximate band to draw.
+  const [lightboxHighlight, setLightboxHighlight] = useState<ScanHighlight | undefined>(undefined);
   // Sentinel at the end of the full confidence summary; the sticky condensed bar shows once it
   // scrolls above the app header.
   const confEnd = useRef<HTMLDivElement>(null);
@@ -429,7 +433,10 @@ export function UploadReview({
                 </a>
                 <button
                   type="button"
-                  onClick={() => setLightboxOpen(true)}
+                  onClick={() => {
+                    setLightboxHighlight(undefined);
+                    setLightboxOpen(true);
+                  }}
                   className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
                   aria-label="Enlarge scan"
                 >
@@ -626,6 +633,22 @@ export function UploadReview({
             query={query}
             onQuery={setQuery}
             productNames={productNames}
+            onLocate={
+              scanUrl && extraction.page
+                ? (itemCode) => {
+                    const label = `${itemCode}${productNames[itemCode] ? ` · ${productNames[itemCode]}` : ''} · page ${extraction.page}`;
+                    // Exact box the reader captured for this row, else the page template's band.
+                    const box = rows.find((r) => r.item_code === itemCode)?.box;
+                    if (box && typeof box.y_top === 'number' && typeof box.y_bottom === 'number' && box.y_bottom > box.y_top) {
+                      setLightboxHighlight({top: box.y_top, height: box.y_bottom - box.y_top, label});
+                    } else {
+                      const band = rowBandFor(itemCode, extraction.page!);
+                      setLightboxHighlight(band ? {...band, label, approximate: true} : undefined);
+                    }
+                    setLightboxOpen(true);
+                  }
+                : undefined
+            }
             catalog={catalog}
             flagged={flagged}
             resolved={resolved}
@@ -683,17 +706,31 @@ export function UploadReview({
             if (e.key === 'Escape') setLightboxOpen(false);
           }}
         >
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <a href={scanUrl} target="_blank" rel="noopener noreferrer">
-              <Button variant="secondary" size="sm">
-                <ExternalLink className="size-3.5" /> Open in new tab
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {lightboxHighlight ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-background/90 px-2.5 py-1 text-xs font-medium">
+                <Crosshair className="size-3.5" style={{color: 'var(--primary)'}} /> {lightboxHighlight.label}
+                {lightboxHighlight.approximate && <span className="text-muted-foreground">· approximate</span>}
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <a href={scanUrl} target="_blank" rel="noopener noreferrer">
+                <Button variant="secondary" size="sm">
+                  <ExternalLink className="size-3.5" /> Open in new tab
+                </Button>
+              </a>
+              <Button variant="secondary" size="sm" autoFocus onClick={() => setLightboxOpen(false)}>
+                <X className="size-4" /> Close
               </Button>
-            </a>
-            <Button variant="secondary" size="sm" autoFocus onClick={() => setLightboxOpen(false)}>
-              <X className="size-4" /> Close
-            </Button>
+            </div>
           </div>
-          <iframe src={scanUrl} title="Scanned inventory form (enlarged)" className="min-h-0 w-full flex-1 rounded-md bg-white" />
+          {/* The page rendered to a canvas with the approximate row band drawn in the page's own
+              coordinate space (same viewer the batch review uses), so the band stays locked on. */}
+          <div className="min-h-0 w-full flex-1">
+            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} className="h-full" />
+          </div>
           <button
             type="button"
             aria-label="Close"
