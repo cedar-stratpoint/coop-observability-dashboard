@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Business Health Report: GMV cards lead with this month so far (BHR-08)
+
+Syl's feedback, backed by the owner: the report should also work as a tracking tool. Every key card led with the last finished month (October on 10 Nov), so the month in progress only showed as the MTD column deep in the grid.
+
+- **Decision (owner, option B): the Total, Events, Website and Marketplace GMV cards lead with the current month so far**: `₱172k so far`, chip `29% of target`, sub `Nov 1–10 · target ₱600k for the month` (+ `· partial`). The Aug/Sep/Oct boxes are unchanged, so October keeps its final result (and its Why?) there. The Cash card is unchanged: cash is typed at month end, so it still leads with the last ended month.
+- **Decision (owner): plain progress, no pace marker.** A bar of actual ÷ the full month's target (primary fill, capped at 100% wide), with `₱172k of ₱600k` and `₱428k to go · 20 days left` or `Target reached`. No "expected by today" tick and no ahead/behind call ("progress bar lang talaga ng overall target"). `role="progressbar"` with value, min, max and a text value.
+- **The current month is never red or green** (the existing `metricStatus` rule): neutral chip, muted top rule, primary bar. Gap → `—`, `waiting`, no bar; no target → `no target`, no bar; partial → value and bar with `partial`, and the tip names what is missing (Total names the channels).
+- **Chart:** a vertical bar per month for the actual, from 0 so lengths are honest, tinted by status (green/red at low opacity, grey when not judged), under the dashed target line and the solid actual line. The current month is a dashed outline bar and a hollow grey point joined by a dotted segment; its tooltip says "so far". Red dots (keyboard) and red bars (pointer) still open Why?. The Cash and Rough runway cards keep their old line-only chart (`bars={false}`).
+- Pure `monthProgress()` in `src/plan-compute.ts` (PH day; today counts as done, so Nov 10 leaves 20 days), tested for day 1, last day, 28/30/31-day months, over target, no target, no actual. Copy in `src/plan-help.ts`. Plan: `knowledge/tasks/2026-11-10-bhr-current-month-progress.md`.
+
 ## 2026-11-10 — Uploads: hide the single-form "Form pages 1-5" coverage on multi-store scans
 
 The uploader's "Form pages" coverage (and its "Page X uploaded twice. Remove one." warning) tallied pages 1 to 5 across the whole batch, which assumes a batch is one store's 5-page form (the old per-store upload model). A whole multi-store scan on the server-driven path holds ~50 forms, so the tally counted ~50 of each page and false-flagged "Page 1, 2, 3, 4, 5 uploaded twice." The widget now shows only when the batch is a single form (`groupForms` yields one group); a multi-store scan hides it, and per-form coverage on the scan's forms board is the right place for those. Single-store duplicate detection is unchanged.
