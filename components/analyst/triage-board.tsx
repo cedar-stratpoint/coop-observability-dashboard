@@ -49,11 +49,11 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={cn('truncate font-heading text-[15px] font-semibold tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
+          <div className={cn('font-heading text-[15px] font-semibold leading-snug tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
             {form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'Store not readable')}
             {form.storeName && form.storeCode ? <span className="font-mono text-xs font-normal text-muted-foreground"> · {form.storeCode}</span> : null}
           </div>
-          <div className="mt-1 truncate font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
+          <div className="mt-1.5 font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={tint(s.tone)}>
           <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE_VAR[s.tone]}} />
@@ -140,21 +140,21 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
     );
   }
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-2.5">
-      <div className="flex items-center gap-2 rounded-md border border-border px-2">
-        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3 shadow-sm">
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 transition-[border-color,box-shadow] focus-within:border-foreground/25 focus-within:ring-2 focus-within:ring-ring/25">
+        <Search className="size-4 shrink-0 text-muted-foreground" />
         {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
         <input
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search store by name or code…"
-          className="h-8 w-full bg-transparent text-sm outline-none"
+          className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
         />
       </div>
-      <div className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
+      <div className="flex max-h-60 flex-col gap-0.5 overflow-y-auto">
         {matches.length === 0 ? (
-          <span className="px-2 py-1.5 text-xs text-muted-foreground">No store matches that.</span>
+          <span className="px-2 py-3 text-center text-xs text-muted-foreground">No store matches that.</span>
         ) : (
           matches.map((st) => (
             <button
@@ -162,18 +162,22 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
               type="button"
               disabled={pending}
               onClick={() => pick(st.code)}
-              className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:opacity-60"
+              className="group/opt flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-60"
             >
-              <span className="min-w-0 truncate">
-                {st.name} <span className="font-mono text-xs text-muted-foreground">· {st.code}</span>
-              </span>
-              {pending ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" /> : <Check className="size-3.5 shrink-0 text-muted-foreground opacity-0" />}
+              <MapPin aria-hidden className="size-3.5 shrink-0 text-muted-foreground/55 transition-colors group-hover/opt:text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate font-medium">{st.name}</span>
+              <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{st.code}</span>
+              {pending && <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />}
             </button>
           ))
         )}
       </div>
-      {err && <span className="px-1 text-xs text-[color:var(--status-crit)]">{err}</span>}
-      <button type="button" onClick={() => setOpen(false)} className="self-start px-1 text-xs text-muted-foreground hover:text-foreground">
+      {err && <span className="px-1.5 text-xs text-[color:var(--status-crit)]">{err}</span>}
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="self-start rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
         Cancel
       </button>
     </div>
@@ -333,7 +337,7 @@ function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: S
   // whole form is filed with one tap instead of opening the batch to type a store.
   if (needsStore && canEdit && stores.length > 0) {
     return (
-      <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
         <CardBody form={form} s={s} />
         <StorePicker company={company} form={form} stores={stores} />
       </div>
@@ -342,7 +346,7 @@ function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: S
   return (
     <Link
       href={href}
-      className="group flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+      className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
     >
       <CardBody form={form} s={s} />
       <span className="self-end whitespace-nowrap text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">Review →</span>
@@ -605,9 +609,9 @@ export function TriageBoard({
 }
 
 function FormGrid({children}: {children: React.ReactNode}) {
-  // A touch more room between cards (and a little extra vertically between rows) so a dense
-  // 4-up grid breathes.
-  return <div className="grid grid-cols-1 items-start gap-x-4 gap-y-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{children}</div>;
+  // Max 3 across (not 4) so each card is wide enough to show the full store name without
+  // truncating, with generous whitespace between.
+  return <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
 }
 
 // The set-aside page (sales sheet, blank back, or a page we couldn't place) grouped by reason,

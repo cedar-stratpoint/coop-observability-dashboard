@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: form cards show the full store name; modern store picker
+
+Triage forms board polish, on feedback:
+- **Store name no longer truncates.** The card title (and its period) wrapped/cut off at the old 4-up width (`SM STA ROSA D…`). The grid is now **max 3 cards across** (`sm:2`, `xl:3`) with more gap, the title wraps instead of truncating, and cards get more padding (`p-4` → `p-5`, `rounded-xl` → `rounded-2xl`, `gap-4`). The full read store name is always visible.
+- **Store picker modernized.** The inline "Confirm store" search dropdown gets a larger search field with a focus ring, roomier rounded rows each led by a `MapPin`, the store name in medium weight with the code right-aligned in mono, a clear hover highlight, a taller list, and a tidier Cancel.
+
+No logic change; presentational only.
+
 ## 2026-11-10 — SKU linking: 24 Watsons SKUs linked from the September form scan (Nichido Staging)
 
 The 98-page Sept 2026 inventory scan (`Scan2026-10-30_171554`) showed the legacy form still prints items that were never in our catalog (mostly O/S or crossed out), yet Watsons sold most of them all year. Matched by item code in the Watsons name, printed name and price (Watsons' average price equals the form price for most), and confirmed by eye on the scan pages.
