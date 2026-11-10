@@ -34,16 +34,16 @@ export function DocumentConfidence({
   return (
     <section
       aria-label="Reading confidence"
-      className="flex flex-col gap-4 rounded-xl border p-4"
+      className="flex flex-col gap-5 rounded-2xl border p-5"
       style={
         tone
           ? {borderColor: `color-mix(in oklab, ${tone} 35%, transparent)`, background: `color-mix(in oklab, ${tone} 6%, transparent)`}
           : undefined
       }
     >
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
         <div className="flex items-baseline gap-1" style={tone ? {color: tone} : undefined}>
-          <span className={cn(metricValueClass, 'text-5xl')}>{s.score == null ? '—' : Math.round(s.score * 100)}</span>
+          <span className={cn(metricValueClass, 'text-6xl')}>{s.score == null ? '—' : Math.round(s.score * 100)}</span>
           {s.score != null && <span className="text-2xl font-medium">%</span>}
         </div>
         <div className="flex min-w-[14rem] flex-1 flex-col gap-1">
