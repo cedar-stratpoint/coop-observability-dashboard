@@ -82,19 +82,47 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
   const reviewQuery = fileReviewQuery(filters, version);
   // Pages being read again from the stored file (a failed page, retried in place).
   const [rereading, setRereading] = useState<Set<string>>(() => new Set());
+  // Per-page read progress (0..100), driven by the real read stages streamed back from the
+  // upload route (detect → read → save) plus the 12s heartbeat that ticks while the long read
+  // runs — so the bar tracks the actual process, not a fixed animation.
+  const [rereadPct, setRereadPct] = useState<Map<string, number>>(() => new Map());
+  const bumpPct = (id: string, to: (prev: number) => number) =>
+    setRereadPct((m) => {
+      const n = new Map(m);
+      n.set(id, Math.max(0, Math.min(100, to(n.get(id) ?? 0))));
+      return n;
+    });
   const reread = (id: string) => {
     setRereading((s) => new Set(s).add(id));
-    // Stream through the upload route (heartbeat-kept-alive) so a long read resolves here
-    // for real, rather than the row spinning until a manual refresh.
-    sendReread({company, uploadId: id})
-      .promise.catch(() => {})
+    bumpPct(id, () => 6);
+    // Stream through the upload route (heartbeat-kept-alive) so a long read resolves here for
+    // real; map each stage to a share of the bar and creep on each heartbeat while reading.
+    sendReread({
+      company,
+      uploadId: id,
+      onStage: (s) => {
+        if (s.stage === 'detecting') bumpPct(id, (p) => Math.max(p, 24));
+        else if (s.stage === 'reading') bumpPct(id, (p) => (p < 52 ? 52 : Math.min(92, p + 6)));
+        else if (s.stage === 'saving') bumpPct(id, (p) => Math.max(p, 96));
+      },
+    })
+      .promise.then(() => bumpPct(id, () => 100)) // finished → fill the bar
+      .catch(() => {}) // failed / stalled → leave the bar where it got to
       .finally(() => {
-        setRereading((s) => {
-          const n = new Set(s);
-          n.delete(id);
-          return n;
-        });
-        router.refresh(); // picks up the new status / reason either way
+        // Hold the final width a beat, then clear and refresh to the new status.
+        setTimeout(() => {
+          setRereading((s) => {
+            const n = new Set(s);
+            n.delete(id);
+            return n;
+          });
+          setRereadPct((m) => {
+            const n = new Map(m);
+            n.delete(id);
+            return n;
+          });
+          router.refresh();
+        }, 400);
       });
   };
   // Pages per view is a per-viewer convenience: remembered in this browser only.
@@ -276,8 +304,16 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
                       <span
                         role="progressbar"
                         aria-label="Re-reading the page"
-                        className="gl-reading-bar block h-1.5 w-full max-w-[260px] overflow-hidden rounded-full"
-                      />
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(rereadPct.get(u.id) ?? 0)}
+                        className="block h-1.5 w-full max-w-[260px] overflow-hidden rounded-full bg-primary/15"
+                      >
+                        <span
+                          className="gl-progress-fill block h-full min-w-[0.375rem] rounded-full transition-[width] duration-500 ease-out"
+                          style={{width: `${rereadPct.get(u.id) ?? 0}%`}}
+                        />
+                      </span>
                     </span>
                   ) : (
                     u.status === 'failed' &&
