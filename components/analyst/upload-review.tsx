@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, RefreshCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -15,6 +15,7 @@ import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
 import {rowBandFor} from '@/src/goldline-extract';
+import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
@@ -106,6 +107,18 @@ export function UploadReview({
 }) {
   const router = useRouter();
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
+  // Re-read a failed page in place (synchronous, heartbeat-kept-alive), then refresh to pick up
+  // the new status/reason — so a "couldn't read" page is retried without leaving this screen.
+  const [rereading, setRereading] = useState(false);
+  const rereadPage = () => {
+    setRereading(true);
+    sendReread({company, uploadId: upload.id})
+      .promise.catch(() => {})
+      .finally(() => {
+        setRereading(false);
+        router.refresh();
+      });
+  };
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // When the lightbox was opened from a row's "locate on scan", the approximate band to draw.
   const [lightboxHighlight, setLightboxHighlight] = useState<ScanHighlight | undefined>(undefined);
@@ -495,6 +508,12 @@ export function UploadReview({
                 : 'It won’t be committed, which is expected. '}
               {nav?.nextHref && 'Use the arrows above, or ← and →, to move to the next page.'}
             </p>
+            {upload.status === 'failed' && canEdit && (
+              <Button onClick={rereadPage} disabled={rereading} className="mt-1">
+                {rereading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                {rereading ? 'Re-reading…' : 'Re-read this page'}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
