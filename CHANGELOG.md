@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: dense-page 600s read window DEFERRED to the Vercel Pro migration
+
+Some dense V1 pages read for ~250-300s and a few tip over the read-page function's 300s limit and stall. The fix is a longer read window (300s → 600s), but the pilot's Vercel project (`coop-brand-os`) caps functions at 300s on its current plan, so a 600s build fails there (`coop-observability-dashboard`, a different plan, builds it fine). Holding the change until that project moves to **Vercel Pro + Fluid Compute** (functions up to 800s), expected soon. The full recipe is captured in `supabase/nichido/server_upload_read_window.sql` (apply the two functions) plus app `maxDuration` 300 → 600 and `STALE_READ_MIN` 10 → 15, keeping the invariant `maxDuration (600s) < reaper (12m) < backstop (15m)`. Staging stays on the 300s config (`server_upload_resilience.sql`) for now. Separate follow-up worth doing regardless: a single ~250-300s vision read is abnormal, so fixing the slowness itself may remove the need for 600s.
+
 ## 2026-11-10 — Business Health Report: GMV cards lead with this month so far (BHR-08)
 
 Syl's feedback, backed by the owner: the report should also work as a tracking tool. Every key card led with the last finished month (October on 10 Nov), so the month in progress only showed as the MTD column deep in the grid.

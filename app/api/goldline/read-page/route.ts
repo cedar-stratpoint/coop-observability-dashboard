@@ -16,6 +16,8 @@ import {pumpSecretOk, serverUploadEnabled} from '@/src/goldline-server-upload';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // One classify (~20s) + one extract (~85-150s) Vision call, same budget as the upload route.
+// NOTE: a 600s window for dense pages is planned but DEFERRED until coop-brand-os is on Vercel
+// Pro + Fluid (its plan caps functions at 300s). See supabase/nichido/server_upload_read_window.sql.
 export const maxDuration = 300;
 
 function json(body: unknown, status = 200): Response {
