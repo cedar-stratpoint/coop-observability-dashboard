@@ -8,9 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
-## 2026-11-10 — Uploads: widen the read window for dense pages (300s → 600s)
+## 2026-11-10 — Uploads: dense-page 600s read window DEFERRED to the Vercel Pro migration
 
-On the reuploads, a subset of dense V1 pages read for ~250-300s and some tipped over the 300s function limit, stalling (then auto-retrying, then failing). They need more time, not more retries. Raised the read window to 600s, moving the coupled timeouts up together to keep the safety invariant `maxDuration (600s/10m) ≤ pump per-call timeout (600s) < DB stall reaper (12m) < app backstop reaper (15m)`, so a still-running read is never re-queued (no double-read). App: `read-page` and `upload` route `maxDuration` 300 → 600, `STALE_READ_MIN` 10 → 15. DB (`supabase/nichido/server_upload_read_window.sql`, applied via MCP): pump per-call timeout 300s → 600s, `goldline_reap_stalls` window 7 → 12 min. (Note: a single vision read taking ~250-300s is unusually long; raising the window lets them finish, but a deeper look at read-page's Vercel function logs is the follow-up if it persists.)
+Some dense V1 pages read for ~250-300s and a few tip over the read-page function's 300s limit and stall. The fix is a longer read window (300s → 600s), but the pilot's Vercel project (`coop-brand-os`) caps functions at 300s on its current plan, so a 600s build fails there (`coop-observability-dashboard`, a different plan, builds it fine). Holding the change until that project moves to **Vercel Pro + Fluid Compute** (functions up to 800s), expected soon. The full recipe is captured in `supabase/nichido/server_upload_read_window.sql` (apply the two functions) plus app `maxDuration` 300 → 600 and `STALE_READ_MIN` 10 → 15, keeping the invariant `maxDuration (600s) < reaper (12m) < backstop (15m)`. Staging stays on the 300s config (`server_upload_resilience.sql`) for now. Separate follow-up worth doing regardless: a single ~250-300s vision read is abnormal, so fixing the slowness itself may remove the need for 600s.
 
 ## 2026-11-10 — Uploads: hide the single-form "Form pages 1-5" coverage on multi-store scans
 

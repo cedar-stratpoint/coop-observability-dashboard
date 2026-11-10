@@ -146,12 +146,11 @@ export async function setUploadStatus(
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
 }
 
-// A read cannot outlive the read routes' maxDuration (600s), so an inventory page still
+// A read cannot outlive the upload route's maxDuration (300s), so an inventory page still
 // 'processing' well past that is an orphan: its function was hard-killed (a deploy mid-read,
-// or a platform timeout) before it could mark itself, and a dead function never will. 15 min
-// stays above the 600s window AND above the DB stall reaper (12 min), so neither ever catches
-// a live read.
-const STALE_READ_MIN = 15;
+// or a platform timeout) before it could mark itself, and a dead function never will. 10 min
+// is comfortably dead with no risk of catching a live read.
+const STALE_READ_MIN = 10;
 
 /**
  * Flip orphaned reads (stuck 'processing' past STALE_READ_MIN) to 'failed' with a re-read
