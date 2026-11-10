@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: name a group upload
+
+A group (whole-PDF) upload can now carry an **optional name** the user types before uploading ("Name this upload", e.g. "October Watsons batch"). It's stored on **every split page** (new additive `uploads.batch_name` column on Nichido Staging), so it survives the server-side split and the source-grouped views read it directly. Where it shows: the **scan tile** on Uploads and the **scan-detail header** both lead with the name, with the file name kept as a quiet mono subtitle. Blank name falls back to the file name exactly as before. The field only appears on the **server-driven path** (the only path that persists it) and is capped at 120 chars. Touches `createUpload` / `ingestScanPdf` / the ingest route / `signAndIngestScan` / the upload-queue provider / `batch-uploader`, and `groupUploads` + the two views.
+
 ## 2026-11-10 — Uploads: the re-reading bar is a real progress bar, synced to the read
 
 The re-reading bar was a fixed, always-full animation. It's now a **determinate bar that fills 0 → 100**, driven by the read's **actual stages** streamed back from the upload route (detect → read → save) plus the **12s heartbeat** that ticks while the long read runs. So it creeps forward as the read progresses, fills to 100% on success, and **freezes where it stalled** on a failed read (then the row flips to its status). Per-page progress, so several re-reads track independently.

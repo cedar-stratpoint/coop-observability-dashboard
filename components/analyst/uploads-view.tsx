@@ -94,11 +94,16 @@ function GroupTile({
         <div className="min-w-0 flex-1">
           <Link
             href={`/uploads/scan/${encodeURIComponent(g.source)}`}
-            title={g.source}
+            title={g.name ?? g.source}
             className="block truncate text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
           >
-            {g.source}
+            {g.name ?? g.source}
           </Link>
+          {g.name && (
+            <div className="truncate font-mono text-[11px] text-muted-foreground/80" title={g.source}>
+              {g.source}
+            </div>
+          )}
           <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
             {fmtDay(g.day)} · {g.pages}{' '}
             {g.isSplit ? (g.pages === 1 ? 'page' : 'pages') : g.pages === 1 ? 'file' : 'files'}

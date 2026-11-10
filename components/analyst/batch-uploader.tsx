@@ -199,6 +199,28 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
           </p>
         )}
 
+        {/* Optional name for the drop: on the server-driven path it's stored on every page, so
+            the scan tile and header read it instead of the file name. Hidden once files are in. */}
+        {q.serverUpload && !serverUploading && !hasItems && configured && canEdit && (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              Name this upload <span className="font-normal text-muted-foreground/70">(optional)</span>
+            </span>
+            <input
+              type="text"
+              value={q.uploadName}
+              onChange={(e) => q.setUploadName(e.target.value)}
+              disabled={disabled}
+              maxLength={120}
+              placeholder="e.g. October Watsons batch"
+              className={fieldCls}
+            />
+            <span className="text-[11px] text-muted-foreground">
+              Shown on the scan tile and header. Leave blank to use the file name.
+            </span>
+          </label>
+        )}
+
         {serverUploading ? (
           <ServerUploadStatus sb={sb!} />
         ) : !hasItems ? (

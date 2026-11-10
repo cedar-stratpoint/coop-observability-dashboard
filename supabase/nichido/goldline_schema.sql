@@ -185,6 +185,11 @@ create index if not exists upload_batches_company_idx on public.upload_batches (
 alter table public.uploads add column if not exists batch_id uuid references public.upload_batches(id) on delete set null;
 create index if not exists uploads_batch_idx on public.uploads (batch_id);
 
+-- Optional human name the user typed for a group upload at drop time (e.g. "October Watsons
+-- batch"). Copied onto every split page so source-grouped views can show it as the title with
+-- the filename as a quiet subtitle. Null when the user named nothing (we fall back to filename).
+alter table public.uploads add column if not exists batch_name text;
+
 alter table public.upload_batches enable row level security;
 revoke all on public.upload_batches from anon, authenticated;
 

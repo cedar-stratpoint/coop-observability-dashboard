@@ -7,13 +7,16 @@
 
 import {scanPosition} from './upload-batch';
 
-export type GroupableUpload = {filename: string; created_at: string; status: string};
+export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null};
 
 export type UploadGroup = {
   key: string;
   /** The source scan name (filename without the "(page N of M)" suffix), or the whole
    *  filename for a file that wasn't split. */
   source: string;
+  /** Optional name the user gave this upload at drop time. Shown as the tile/header title
+   *  with `source` (the file name) as a quiet subtitle. Null when they named nothing. */
+  name: string | null;
   /** Upload day, YYYY-MM-DD. */
   day: string;
   /** Raw upload rows in the group (a re-uploaded page counts each time). Use for delete
@@ -108,6 +111,7 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
       g = {
         key,
         source: uploadSource(u.filename),
+        name: u.batch_name?.trim() || null,
         day: at.slice(0, 10),
         firstAt: at,
         lastAt: at,
@@ -118,6 +122,7 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
       map.set(key, g);
     }
     g._files++;
+    if (!g.name && u.batch_name?.trim()) g.name = u.batch_name.trim();
     const id = pageIdentity(u.filename);
     const prev = g._pageStatus.get(id);
     g._pageStatus.set(id, prev === undefined ? u.status : betterStatus(prev, u.status));

@@ -72,9 +72,15 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const [rawBoard, stores, uploads, baReg] = await Promise.all([
     triageBoard(companyId, {source}),
     view === 'file' ? Promise.resolve([]) : listStores(companyId),
-    view === 'file' ? listUploads(companyId) : Promise.resolve([]),
+    // Always listed (cached, shared with the Uploads page) so every view can read the
+    // optional upload name the user gave this scan; `files` below still only uses it on the file view.
+    listUploads(companyId),
     needBas ? getCurrentBas(companyId) : Promise.resolve({byStore: {}, names: [] as string[]}),
   ]);
+
+  // The name the user typed for this drop (same on every page of the batch), shown as the
+  // scan's title with the file name as a quiet subtitle. Null when they named nothing.
+  const scanName = uploads.find((u) => uploadSource(u.filename) === source && u.batch_name?.trim())?.batch_name?.trim() ?? null;
 
   // How many forms of each layout are in this scan — the summary cards, and a filter.
   const versionCounts = rawBoard.forms.reduce((m, f) => ((m[f.version] = (m[f.version] ?? 0) + 1), m), {} as Partial<Record<FormVersion, number>>);
@@ -103,8 +109,13 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       <nav className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" aria-label="Breadcrumb">
         <BackButton fallback="/uploads" label="Uploads" />
         <span aria-hidden>·</span>
-        <span className="min-w-0 truncate font-medium text-foreground" title={source}>{source}</span>
+        <span className="min-w-0 truncate font-medium text-foreground" title={scanName ?? source}>{scanName ?? source}</span>
       </nav>
+      {scanName && (
+        <p className="-mt-1 truncate font-mono text-xs text-muted-foreground/80" title={source}>
+          {source}
+        </p>
+      )}
 
       {/* Still reading on the server: appears (and survives a refresh) while this scan's pages
           are being read, so a store manager knows more forms are coming and there is nothing

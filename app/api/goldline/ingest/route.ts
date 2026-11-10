@@ -29,9 +29,12 @@ export async function POST(req: Request): Promise<Response> {
   if (!canEditData(ctx.role)) return json({error: 'Your role cannot upload.'}, 403);
   if (!serverUploadEnabled(ctx.companyId)) return json({error: 'Server-driven upload is not enabled for this company.'}, 404);
 
-  const body = (await req.json().catch(() => null)) as {storagePath?: unknown; filename?: unknown} | null;
+  const body = (await req.json().catch(() => null)) as {storagePath?: unknown; filename?: unknown; name?: unknown} | null;
   const storagePath = typeof body?.storagePath === 'string' ? body.storagePath : '';
   const filename = typeof body?.filename === 'string' ? body.filename : '';
+  // Optional display name the user typed for this drop; trimmed + length-capped so a stray
+  // paste can't bloat every page row. Null (no name) falls back to the filename everywhere.
+  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 120) || null : null;
   if (!storagePath || !filename) return json({error: 'storagePath and filename are required.'}, 400);
   // Tenant isolation: the signed path was minted under this company's prefix, so refuse any
   // path that isn't — a caller can never point ingest at another tenant's stored object.
@@ -39,7 +42,7 @@ export async function POST(req: Request): Promise<Response> {
 
   try {
     const session = await auth();
-    const {batchId, pages} = await ingestScanPdf({companyId: ctx.companyId, storagePath, filename, uploadedBy: session?.user?.email ?? null});
+    const {batchId, pages} = await ingestScanPdf({companyId: ctx.companyId, storagePath, filename, uploadedBy: session?.user?.email ?? null, name});
     revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     return json({batchId, pages});
   } catch (e) {
