@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: the "re-reading" bar is now a full bar
+
+Follow-up: the first re-reading bar used a semi-transparent gradient sweep, so only its bright middle showed and it read as a partial sliver. `.gl-reading-bar` is now a **full ochre track** with a soft highlight gliding across it (transform-only sheen, like the determinate progress bars), so an in-progress read shows a filled, working bar end to end. Reduced motion keeps the full fill and drops the sheen.
+
 ## 2026-11-10 — Uploads: a calmer, modern "re-reading" bar in the Per-file list
 
 The in-place re-read loading bar (Per-file list) used a hard 40% chunk sliding across an empty rail, which read as jumpy. Replaced it with a soft ochre gradient that glides smoothly across the whole track (new `.gl-reading-bar`, a background-position sweep, so no layout work; reduced-motion parks it as a steady tint), a touch taller, and gave the "Re-reading the page…" label a little more weight.
