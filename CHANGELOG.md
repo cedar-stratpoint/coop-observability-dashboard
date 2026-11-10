@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: hide the single-form "Form pages 1-5" coverage on multi-store scans
+
+The uploader's "Form pages" coverage (and its "Page X uploaded twice. Remove one." warning) tallied pages 1 to 5 across the whole batch, which assumes a batch is one store's 5-page form (the old per-store upload model). A whole multi-store scan on the server-driven path holds ~50 forms, so the tally counted ~50 of each page and false-flagged "Page 1, 2, 3, 4, 5 uploaded twice." The widget now shows only when the batch is a single form (`groupForms` yields one group); a multi-store scan hides it, and per-form coverage on the scan's forms board is the right place for those. Single-store duplicate detection is unchanged.
+
 ## 2026-11-10 — Uploads: server-read reliability (pump burst down + auto-retry stalls)
 
 After the first real 98-page server run, 5 reads stalled. `pg_net`'s HTTP log showed the full 300s budget spent on DNS resolution (DNS time == timeout) under the 36-wide burst, so those requests never reached the read-page function and the pages sat in `processing` until the reaper failed them, stranding real inventory until a manual re-read. Two Nichido-Staging DB changes (`supabase/nichido/server_upload_resilience.sql`, applied via MCP):
