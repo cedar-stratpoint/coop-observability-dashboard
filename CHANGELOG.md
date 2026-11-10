@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: server-read reliability (pump burst down + auto-retry stalls)
+
+After the first real 98-page server run, 5 reads stalled. `pg_net`'s HTTP log showed the full 300s budget spent on DNS resolution (DNS time == timeout) under the 36-wide burst, so those requests never reached the read-page function and the pages sat in `processing` until the reaper failed them, stranding real inventory until a manual re-read. Two Nichido-Staging DB changes (`supabase/nichido/server_upload_resilience.sql`, applied via MCP):
+- **Pump burst turned down:** `max_inflight 36 → 12`, `k 6 → 4`. Far fewer simultaneous DNS lookups (throughput still ~5-6 min for 98 pages). The per-call timeout stays 300s (== read-page `maxDuration`): a shorter timeout made `pg_net` disconnect before a slow dense-page read finished, and Vercel Fluid Compute can cancel a function on client disconnect, so the read was lost.
+- **Auto-retry stalls:** a new `pg_cron` reaper (`goldline_reap_stalls`, every minute) re-queues a read stuck past the 5-minute function window up to 2 times (counted in a new additive `uploads.read_attempts`) before failing, so a transient DNS timeout self-heals instead of silently dropping a page. The 7-minute stall threshold stays above the function's max duration, so a still-running read is never re-queued (no double-read).
+
+The app's on-page-load reaper (`reconcileStaleReads`) is unchanged: it clocks from `claimed_at` (which each retry resets), so it never prematurely fails a retrying page, it is now a 10-minute backstop behind the DB reaper. Manual re-read is synchronous and unaffected. No app code change.
+
 ## 2026-11-10 — Uploads: tidy the scan-detail "Set aside" list, loosen the form-card grid
 
 Two small triage-board polish items on the scan-detail page (`/uploads/scan/[source]`):
