@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-10 — Uploads: a calmer, modern "re-reading" bar in the Per-file list
+
+The in-place re-read loading bar (Per-file list) used a hard 40% chunk sliding across an empty rail, which read as jumpy. Replaced it with a soft ochre gradient that glides smoothly across the whole track (new `.gl-reading-bar`, a background-position sweep, so no layout work; reduced-motion parks it as a steady tint), a touch taller, and gave the "Re-reading the page…" label a little more weight.
+
 ## 2026-11-10 — Review page: a "Re-read this page" button on the couldn't-read state
 
 A page that failed to read ("Coop couldn't read this page. The read stalled...") told the reviewer to "re-read this page" but gave no way to do it from this screen. Added a **Re-read this page** button in the failed state (`upload-review.tsx`, editors only): it re-reads the stored file in place via `sendReread` (synchronous, heartbeat-kept-alive), shows a spinner while it runs, then refreshes to pick up the new status, so if it reads, the review workbench appears right there without leaving the page.

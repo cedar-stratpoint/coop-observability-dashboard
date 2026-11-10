@@ -338,6 +338,34 @@ html.coop-splash-seen .coop-splash { display: none; }
   animation: gl-progress-slide 1.4s ease-in-out infinite;
 }
 
+/* A calmer, modern "reading" bar: a soft ochre gradient glides across the whole track (not a
+   hard chunk sliding over an empty rail), so an in-progress read reads as a gentle shimmer
+   rather than a jumpy loader. Background-position only (cheap, no layout). Parked as a steady
+   partial tint under reduced motion. */
+@keyframes gl-reading-sweep {
+  0%   { background-position: 180% 0; }
+  100% { background-position: -80% 0; }
+}
+.gl-reading-bar {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--primary) 10%, transparent) 0%,
+    color-mix(in oklab, var(--primary) 22%, transparent) 32%,
+    color-mix(in oklab, var(--primary) 72%, transparent) 50%,
+    color-mix(in oklab, var(--primary) 22%, transparent) 68%,
+    color-mix(in oklab, var(--primary) 10%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: gl-reading-sweep 1.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gl-reading-bar {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+}
+
 /* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
    motion-reduce variant, so collapse every transition and animation here instead
    (the slide-in drawers, dialogs, hover tweens). Final states still apply, so
