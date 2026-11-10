@@ -153,6 +153,9 @@ export type ServerUploadPhase = 'uploading' | 'ingesting';
 export async function signAndIngestScan(input: {
   company: string;
   file: File;
+  /** Optional name the user typed for this upload; shown instead of the filename on the scan
+   *  tile and header. Stored per page so source-grouped views can read it. */
+  name?: string;
   onProgress?: (fraction: number) => void;
   onPhase?: (phase: ServerUploadPhase) => void;
 }): Promise<{batchId: string; pages: number}> {
@@ -191,7 +194,7 @@ export async function signAndIngestScan(input: {
   const ingestRes = await fetch(`/api/goldline/ingest?company=${company}`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({storagePath: signed.path, filename: input.file.name}),
+    body: JSON.stringify({storagePath: signed.path, filename: input.file.name, name: input.name?.trim() || undefined}),
   });
   const ingested = (await ingestRes.json().catch(() => null)) as {batchId?: string; pages?: number; error?: string} | null;
   if (!ingestRes.ok || !ingested?.batchId || typeof ingested.pages !== 'number') {

@@ -62,6 +62,7 @@ export type UploadRow = {
   created_at: string;
   storage_path: string | null;
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
+  batch_name?: string | null; // optional name the user gave this upload at drop time (else filename)
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
   page_kind?: string | null; // inventory | sales | blank | unknown, once classified
 };
@@ -87,6 +88,9 @@ export async function createUpload(input: {
   contentType: string;
   uploadedBy: string | null;
   batchId?: string | null;
+  /** Optional name the user typed for this group upload; stored on the row so source-grouped
+   *  views can show it instead of the filename. Null when the user named nothing. */
+  batchName?: string | null;
   /** The row's starting status. Default 'processing' (the client path reads synchronously);
    *  the server-driven ingest passes 'queued' so the pump reads it later. */
   status?: UploadStatus;
@@ -124,6 +128,7 @@ export async function createUpload(input: {
       status: input.status ?? ('processing' satisfies UploadStatus),
       uploaded_by: input.uploadedBy,
       batch_id: input.batchId ?? null,
+      batch_name: input.batchName?.trim() || null,
     })
     .select('id')
     .single();
@@ -515,7 +520,7 @@ export async function getUpload(companyId: string, id: string): Promise<UploadRo
   const supa = db();
   const res = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name')
     .eq('company_id', companyId)
     .eq('id', id)
     .maybeSingle();
@@ -567,7 +572,7 @@ export async function createScanUploadUrl(companyId: string, filename: string): 
  * is unchanged. Removes the temporary whole-PDF object once the per-page files exist. Returns
  * the new batch id and page count. maxDuration on the caller must cover the split + N stores.
  */
-export async function ingestScanPdf(input: {companyId: string; storagePath: string; filename: string; uploadedBy: string | null}): Promise<{batchId: string; pages: number}> {
+export async function ingestScanPdf(input: {companyId: string; storagePath: string; filename: string; uploadedBy: string | null; name?: string | null}): Promise<{batchId: string; pages: number}> {
   const supa = db();
   const dl = await supa.storage.from(GOLDLINE_BUCKET).download(input.storagePath);
   if (dl.error || !dl.data) throw new Error(`ingest download failed: ${dl.error?.message ?? 'no data'}`);
@@ -591,6 +596,7 @@ export async function ingestScanPdf(input: {companyId: string; storagePath: stri
       contentType: 'application/pdf',
       uploadedBy: input.uploadedBy,
       batchId,
+      batchName: input.name,
       status: 'queued',
     });
   }
@@ -748,7 +754,7 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
       (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
-          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,form_version,page_kind')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_name,form_version,page_kind')
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})

@@ -93,6 +93,9 @@ type QueueApi = {
   /** Server-driven path (P2): the whole scan is uploaded once and read server-side. Null on
    *  the client-driven path. When set, `items` are a live reflection of DB state (polled). */
   serverMode: boolean;
+  /** True when this company is on the server-driven upload path (a single whole-PDF drop is
+   *  uploaded once and read server-side). Lets the UI offer the optional upload name. */
+  serverUpload: boolean;
   serverBatch: ServerBatchState | null;
   active: number; // queued + running + waiting
   addFiles: (files: File[]) => Promise<void>;
@@ -100,6 +103,9 @@ type QueueApi = {
   cancel: (id: string) => void;
   remove: (id: string) => void;
   setBatchInfo: (patch: Partial<Pick<BatchInfo, 'storeCode' | 'periodStart' | 'periodEnd'>>) => void;
+  /** Optional name for a server-driven group upload, shown instead of the filename. */
+  uploadName: string;
+  setUploadName: (v: string) => void;
   reset: () => void;
   dismissNotice: () => void;
 };
@@ -122,6 +128,15 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   const [notice, setNotice] = useState<string | null>(null);
   const [forms, setForms] = useState<SplitForm[] | null>(null);
   const [splitting, setSplitting] = useState(false);
+  // Optional name the user types for a server-driven group upload (shown instead of the
+  // filename on the scan tile/header). A ref mirrors it so the stable startServerScan
+  // callback can read the latest value without being re-created.
+  const [uploadName, setUploadNameState] = useState('');
+  const uploadNameRef = useRef('');
+  const setUploadName = useCallback((v: string) => {
+    uploadNameRef.current = v;
+    setUploadNameState(v);
+  }, []);
   // Server-driven path (P2), only when the company is on the flag. While a server batch is
   // active the client-driven machinery (scheduler, split, beforeunload) stands down; the
   // ref lets those effects bail synchronously.
@@ -382,6 +397,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       const {batchId, pages} = await signAndIngestScan({
         company,
         file,
+        name: uploadNameRef.current.trim() || undefined,
         onProgress: (f) => setServerBatch((b) => (b ? {...b, uploadFrac: f} : b)),
         onPhase: (p) => setServerBatch((b) => (b ? {...b, phase: p} : b)),
       });
@@ -543,6 +559,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       forms,
       splitting,
       serverMode: Boolean(serverBatch),
+      serverUpload,
       serverBatch,
       active,
       addFiles,
@@ -576,12 +593,15 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
         setItems((all) => all.filter((i) => i.id !== id || i.state === 'running'));
       },
       setBatchInfo: (p) => setBatch((cur) => ({...cur, ...p, prefilled: false})),
+      uploadName,
+      setUploadName,
       reset: () => {
         if (!serverBatchRef.current && items.some((i) => i.state === 'running')) return;
         setItems([]);
         setBatch(EMPTY_BATCH);
         setForms(null);
         setServerBatch(null);
+        setUploadName('');
         serverStartedAt.current.clear();
         splitFor.current = null;
         batchPromise.current = null;
@@ -591,7 +611,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       dismissNotice: () => setNotice(null),
     }),
     // company: queueCompany.current follows it whenever the queue is empty.
-    [batch, items, preparing, notice, forms, splitting, serverBatch, active, addFiles, patch, company],
+    [batch, items, preparing, notice, forms, splitting, serverBatch, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
