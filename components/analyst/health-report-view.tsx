@@ -11,7 +11,7 @@ import type {PlanVersionInfo} from '@/src/plan-data';
 import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '@/src/plan-actions';
 import {
   METRICS, cardMonths, currentIndex, fmtPlan, metricStatus, monthPhase, runwayMonths, stepWindow, windowStart,
-  GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type PlanData, type Status,
+  GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, monthProgress, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type MonthProgress, type PlanData, type Status,
 } from '@/src/plan-compute';
 import {SHEET_ROWS, blockOf, rowOfLine} from '@/src/plan-sheet';
 import {GROUP_ROW, LABEL_CELL, SheetRows, STATUS_TEXT, cellActual, cellOf, monthLabel, type Actuals, type Edit} from './plan-sheet-rows';
@@ -63,15 +63,16 @@ function PastMonths({label, items}: {label: string; items: PastMonth[]}) {
 }
 
 /** One card: label and status top, the last closed month's figure, its target, then the actual-against-target line. The top rule carries the status colour. */
-function Tile({label, status, chip, value, sub, why, tip, foot, months, children}: {months?: PastMonth[]; label: string; status: Status; chip: string; value: string; sub: string; why?: () => void; tip?: string; foot?: React.ReactNode; children: React.ReactNode}) {
+function Tile({label, status, chip, value, suffix, sub, why, tip, foot, progress, months, children}: {months?: PastMonth[]; label: string; status: Status; chip: string; value: string; suffix?: string; sub: string; why?: () => void; tip?: string; foot?: React.ReactNode; progress?: React.ReactNode; children: React.ReactNode}) {
   return (
     <article className={cn('min-w-0 rounded-lg border border-border border-t-2 bg-card px-3.5 pb-2 pt-2.5 max-[560px]:shrink-0 max-[560px]:basis-[84%] max-[560px]:snap-center', status === 'ok' ? 'border-t-[var(--status-good)]' : status === 'bad' ? 'border-t-[var(--status-crit)]' : 'border-t-muted')} aria-label={label}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</h3>
         <span className={cn('inline-flex items-center gap-1 text-[12.5px] font-semibold tabular-nums', status === 'ok' && 'text-[var(--status-good)]', status === 'bad' && 'text-[var(--status-crit)]', status !== 'ok' && status !== 'bad' && 'font-medium text-muted-foreground')}><StatusMark status={status} />{chip}{tip && <InfoTip text={tip} label={`About ${label}`} className="-my-2 -mr-1.5" />}</span>
       </div>
-      <div className={cn('mt-0.5 font-serif text-xl leading-tight tabular-nums max-[560px]:text-[22px]', value === '—' && 'text-muted-foreground')}>{value}</div>
+      <div className={cn('mt-0.5 font-serif text-xl leading-tight tabular-nums max-[560px]:text-[22px]', value === '—' && 'text-muted-foreground')}>{value}{suffix && value !== '—' && <span className="ml-1 font-sans text-sm text-muted-foreground">{suffix}</span>}</div>
       <div className="flex h-[18px] items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"><span className="truncate" title={sub}>{sub}</span>{why && <button type="button" onClick={why} className="text-primary underline underline-offset-2">Why?</button>}</div>
+      {progress}
       {months && <PastMonths label={label} items={months} />}
       {children}
       {foot}
@@ -79,41 +80,85 @@ function Tile({label, status, chip, value, sub, why, tip, foot, months, children
   );
 }
 
-function KeyCard({m, plan, nowKey, actuals, onWhy, tip, foot}: {foot?: React.ReactNode; m: MetricDef; plan: PlanData; nowKey: string; actuals: Actuals; onWhy: (id: string, i: number) => void; tip?: string}) {
-  const i = leadIndex(plan.months, nowKey);
+/** Total GMV's partial note, naming the channels that are not fully in for month i (e.g. "Marketplace is partial; Events is not in yet."). */
+const missingChannels = (actuals: Actuals, i: number): string | undefined => { const s = GMV_CHANNELS.flatMap((id) => { const c = cellOf(actuals, id, i); return c.state === 'ok' ? [] : [`${DEF_BY_ID[id].label.replace(' GMV', '')} is ${c.state === 'partial' ? 'partial' : 'not in yet'}`]; }).join('; '); return s ? `${s}.` : undefined; };
+const daysLeftText = (n: number) => (n === 0 ? 'last day' : `${n} day${n === 1 ? '' : 's'} left`);
+/** BHR-08: plain progress of the month so far toward its full-month target (owner: no expected-by-today marker, no pace call). Neutral primary
+ * fill, never status green or red: a month in progress is never judged. Width caps at 100%; the text says when the target is reached. */
+function MonthBar({label, unit, actual, target, p}: {label: string; unit: MetricDef['unit']; actual: number; target: number; p: MonthProgress}) {
+  const pct = p.pct ?? 0;
+  return (
+    <div className="mt-1.5" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.max(0, Math.min(target, actual))} aria-valuetext={`${fmtPlan(unit, actual)} of ${fmtPlan(unit, target)}`} aria-label={`${label} so far against the month's target`} data-testid="month-progress">
+      <div className="h-2.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{width: `${Math.max(0, Math.min(100, pct))}%`}} /></div>
+      <div className="mt-1 flex justify-between gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+        <span className="truncate"><b className="font-semibold text-foreground">{fmtPlan(unit, actual)}</b> of {fmtPlan(unit, target)}</span>
+        <span className="truncate">{p.reached ? <b className="font-semibold text-foreground">Target reached</b> : <><b className="font-semibold text-foreground">{fmtPlan(unit, p.toGo)}</b> to go · {daysLeftText(p.daysLeft)}</>}</span>
+      </div>
+    </div>
+  );
+}
+
+function KeyCard({m, plan, nowKey, today, actuals, onWhy, tip, foot}: {foot?: React.ReactNode; m: MetricDef; plan: PlanData; nowKey: string; today: string; actuals: Actuals; onWhy: (id: string, i: number) => void; tip?: string}) {
+  // GMV (from Coop's readers) leads with the month in progress so the card tracks it (BHR-08); Cash is typed at month end, so it keeps the last ended month.
+  const live = m.source === 'coop';
+  const cur = currentIndex(plan.months, nowKey);
+  const i = live ? cur : leadIndex(plan.months, nowKey);
   const st = statusOf(m, plan, i, nowKey, actuals);
   const c = cellOf(actuals, m.id, i), t = plan.targets[m.id]?.[i] ?? null;
-  const chip = c.value === null ? 'waiting' : (st === 'ok' || st === 'bad') && t ? pctText(((c.value - t) / Math.abs(t)) * 100) : STATUS_TEXT[st].toLowerCase();
+  const p = monthProgress({actual: c.value, target: t, month: plan.months[i], today});
+  const hasTarget = t !== null && t > 0;
+  const chip = c.value === null ? 'waiting' : live ? (hasTarget ? `${(p.pct as number) > 0 && (p.pct as number) < 1 ? '<1' : Math.round(p.pct as number)}% of target` : 'no target') : (st === 'ok' || st === 'bad') && t ? pctText(((c.value - t) / Math.abs(t)) * 100) : STATUS_TEXT[st].toLowerCase();
+  const partial = c.state === 'partial' ? ' · partial' : '';
+  const sub = live ? `${shortMonth(plan.months[i])} 1${p.dayOfMonth > 1 ? `–${p.dayOfMonth}` : ''}${hasTarget ? ` · target ${fmtPlan(m.unit, t)} for the month` : ''}${partial}` : `${shortMonth(plan.months[i])} · target ${fmtPlan(m.unit, t)}${partial}`;
+  const liveTip = c.value === null ? PLAN_HELP.cardWaiting : c.state === 'partial' ? PLAN_HELP.soFarPartial(m.id === 'gmv_total' ? missingChannels(actuals, i) : c.note) : PLAN_HELP.soFar;
   return (
-    <Tile label={m.label} status={st} chip={chip} value={c.value === null ? '—' : fmtPlan(m.unit, c.value)} sub={`${shortMonth(plan.months[i])} · target ${fmtPlan(m.unit, t)}${c.state === 'partial' ? ' · partial' : ''}`} why={st === 'bad' ? () => onWhy(m.id, i) : undefined} foot={foot} months={lastPastMonths(plan.months, nowKey).map((k) => { const cc = cellOf(actuals, m.id, k), ss = statusOf(m, plan, k, nowKey, actuals); return {month: plan.months[k], value: cc.value === null ? '—' : fmtPlan(m.unit, cc.value), target: fmtPlan(m.unit, plan.targets[m.id]?.[k]), chip: cc.value === null ? 'waiting' : (ss === 'ok' || ss === 'bad') && plan.targets[m.id]?.[k] ? pctText(((cc.value - (plan.targets[m.id]?.[k] as number)) / Math.abs(plan.targets[m.id]?.[k] as number)) * 100) : STATUS_TEXT[ss].toLowerCase(), status: cc.value === null ? 'waiting' as Status : ss}; })} tip={tip ?? (c.value === null ? PLAN_HELP.cardWaiting : m.modelled ? PLAN_HELP.modelled : undefined)}>
-      <Spark label={m.label} months={plan.months} cur={currentIndex(plan.months, nowKey)} getT={(k) => plan.targets[m.id]?.[k] ?? null}
-        getA={(k) => (monthPhase(plan.months[k], nowKey) === 'past' ? cellOf(actuals, m.id, k).value : null)} st={(k) => statusOf(m, plan, k, nowKey, actuals)}
-        tip={(k) => `${monthLabel(plan.months[k])}: ${fmtPlan(m.unit, cellOf(actuals, m.id, k).value)} against target ${fmtPlan(m.unit, plan.targets[m.id]?.[k])}`}
+    <Tile label={m.label} status={st} chip={chip} value={c.value === null ? '—' : fmtPlan(m.unit, c.value)} suffix={live ? 'so far' : undefined} sub={sub} why={st === 'bad' ? () => onWhy(m.id, i) : undefined} foot={foot}
+      progress={live && c.value !== null && hasTarget ? <MonthBar label={m.label} unit={m.unit} actual={c.value} target={t} p={p} /> : undefined}
+      months={lastPastMonths(plan.months, nowKey).map((k) => { const cc = cellOf(actuals, m.id, k), ss = statusOf(m, plan, k, nowKey, actuals); return {month: plan.months[k], value: cc.value === null ? '—' : fmtPlan(m.unit, cc.value), target: fmtPlan(m.unit, plan.targets[m.id]?.[k]), chip: cc.value === null ? 'waiting' : (ss === 'ok' || ss === 'bad') && plan.targets[m.id]?.[k] ? pctText(((cc.value - (plan.targets[m.id]?.[k] as number)) / Math.abs(plan.targets[m.id]?.[k] as number)) * 100) : STATUS_TEXT[ss].toLowerCase(), status: cc.value === null ? 'waiting' as Status : ss}; })} tip={tip ?? (live ? liveTip : c.value === null ? PLAN_HELP.cardWaiting : m.modelled ? PLAN_HELP.modelled : undefined)}>
+      <Spark label={m.label} months={plan.months} cur={cur} lead={i} bars={live} getT={(k) => plan.targets[m.id]?.[k] ?? null}
+        getA={(k) => { const ph = monthPhase(plan.months[k], nowKey); return ph === 'past' || (live && ph === 'current') ? cellOf(actuals, m.id, k).value : null; }} st={(k) => statusOf(m, plan, k, nowKey, actuals)}
+        tip={(k) => (k === cur ? `${monthLabel(plan.months[k])}: ${fmtPlan(m.unit, cellOf(actuals, m.id, k).value)} so far against target ${fmtPlan(m.unit, plan.targets[m.id]?.[k])} for the month` : `${monthLabel(plan.months[k])}: ${fmtPlan(m.unit, cellOf(actuals, m.id, k).value)} against target ${fmtPlan(m.unit, plan.targets[m.id]?.[k])}`)}
         onWhy={(k) => onWhy(m.id, k)} />
     </Tile>
   );
 }
 
-/** Actual (solid, closed months only) against target (dashed) for the last six months. A dot carries its status; a red dot opens the breakdown. */
-function Spark({label, months, cur, getA, getT, st, tip, onWhy, minActs = 1}: {label: string; months: readonly string[]; cur: number; getA: (i: number) => number | null; getT: (i: number) => number | null; st: (i: number) => Status; tip: (i: number) => string; onWhy?: (i: number) => void; minActs?: number}) {
+/** Actual (a bar per month from 0 plus the solid line, closed months) against target (dashed) for the last six months. A dot and its bar carry the
+ * month's status; a red dot (keyboard) or bar (pointer) opens the breakdown. The month in progress, when given, is a dashed outline bar and a hollow
+ * grey point joined by a dotted segment: never judged. `bars={false}` keeps the old line-only chart and min-to-max scale (Cash and runway, unchanged by BHR-08). */
+function Spark({label, months, cur, lead = cur - 1, getA, getT, st, tip, onWhy, minActs = 1, bars = true}: {label: string; months: readonly string[]; cur: number; lead?: number; getA: (i: number) => number | null; getT: (i: number) => number | null; st: (i: number) => Status; tip: (i: number) => string; onWhy?: (i: number) => void; minActs?: number; bars?: boolean}) {
   const a = Math.max(0, cur - 5), b = Math.min(months.length - 1, cur + 1);
   const idx = Array.from({length: b - a + 1}, (_, k) => a + k);
-  const acts = idx.filter((i) => getA(i) !== null);
+  const all = idx.filter((i) => getA(i) !== null);
+  const acts = all.filter((i) => i !== cur); // closed months: the solid line
+  const now = all.includes(cur) ? cur : null; // the month in progress: hollow, dotted
   const tgs = idx.filter((i) => getT(i) !== null);
-  const vals = [...tgs.map((i) => getT(i) as number), ...acts.map((i) => getA(i) as number)];
-  if (b === a || vals.length === 0 || acts.length < minActs) return <div className="h-[65px]" data-testid="spark-empty" aria-hidden />;
-  const W = 340, H = 65, L = 8, R = 8, T = 6, B = 16;
+  const vals = [...tgs.map((i) => getT(i) as number), ...all.map((i) => getA(i) as number)];
+  const H = bars ? 84 : 65;
+  if (b === a || vals.length === 0 || all.length < minActs) return <div className={bars ? 'h-[84px]' : 'h-[65px]'} data-testid="spark-empty" aria-hidden />;
+  const W = 340, L = 8, R = 8, T = 6, B = 16;
   let mn = Math.min(...vals), mx = Math.max(...vals);
-  if (mx === mn) { mx += 1; mn -= 1; }
-  const pad = (mx - mn) * 0.14; mn -= pad; mx += pad;
+  if (bars) { mn = Math.min(0, mn); mx = Math.max(0, mx); } // bars start at 0 so their length is honest
+  if (mx === mn) { mx += 1; if (!bars) mn -= 1; }
+  const pad = (mx - mn) * 0.14; mx += pad; if (!bars || mn < 0) mn -= pad;
   const x = (i: number) => L + ((i - a) / (b - a)) * (W - L - R);
   const y = (v: number) => T + (1 - (v - mn) / (mx - mn)) * (H - T - B);
   const line = (ids: number[], f: (i: number) => number | null) => ids.map((i, k) => `${k ? 'L' : 'M'}${x(i).toFixed(1)} ${y(f(i) as number).toFixed(1)}`).join(' ');
   const dot = (s: Status) => (s === 'ok' ? 'var(--status-good)' : s === 'bad' ? 'var(--status-crit)' : 'var(--muted)');
+  const bw = Math.min(22, ((W - L - R) / (b - a)) * 0.4), y0 = y(0);
+  const prev = now !== null ? acts.filter((i) => i < now).at(-1) : undefined;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label}: actual against target by month`} className="mt-0.5 block h-[65px] w-full overflow-visible" data-testid="spark">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label}: actual against target by month`} className={cn('mt-0.5 block w-full overflow-visible', bars ? 'h-[84px]' : 'h-[65px]')} data-testid="spark">
+      {bars && <line x1={L} x2={W - R} y1={y0} y2={y0} stroke="var(--border)" strokeWidth="1" />}
+      {bars && all.map((i) => {
+        const v = getA(i) as number, top = Math.min(y(v), y0), h = Math.abs(y0 - y(v)), s = st(i);
+        if (i === now) return <rect key={i} x={x(i) - bw / 2} y={top} width={bw} height={h} rx="3" fill="none" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="3 2" data-testid="spark-bar-now" aria-hidden />;
+        const red = s === 'bad' && onWhy;
+        return <rect key={i} x={x(i) - bw / 2} y={top} width={bw} height={h} rx="3" fill={s === 'ok' ? 'var(--status-good)' : s === 'bad' ? 'var(--status-crit)' : 'var(--muted-foreground)'} opacity={s === 'ok' || s === 'bad' ? 0.28 : 0.16} className={red ? 'cursor-pointer' : undefined} onClick={red ? () => onWhy(i) : undefined} aria-hidden />;
+      })}
       {tgs.length > 1 && <path d={line(tgs, getT)} fill="none" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.8" />}
       {acts.length > 1 && <path d={line(acts, getA)} fill="none" stroke="var(--foreground)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+      {now !== null && prev !== undefined && <path d={line([prev, now], getA)} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="2 3" />}
       {acts.map((i) => {
         const s = st(i), cx = x(i), cy = y(getA(i) as number);
         const solid = s === 'ok' || s === 'bad';
@@ -123,7 +168,8 @@ function Spark({label, months, cur, getA, getT, st, tip, onWhy, minActs = 1}: {l
           </g>
         ) : <circle key={i} cx={cx} cy={cy} r="4.5" fill={dot(s)} stroke={solid ? 'var(--card)' : 'var(--muted-foreground)'} strokeWidth="2"><title>{tip(i)}</title></circle>;
       })}
-      {idx.map((i) => <text key={i} x={x(i)} y={H - 3} textAnchor="middle" fontSize="10" fontWeight={i === cur - 1 ? 600 : 500} fill={i === cur - 1 ? 'var(--foreground)' : 'var(--muted-foreground)'}>{shortMonth(months[i])}{i === cur ? ' ◔' : ''}</text>)}
+      {now !== null && <circle cx={x(now)} cy={y(getA(now) as number)} r="4.5" fill="var(--card)" stroke="var(--muted-foreground)" strokeWidth="2" data-testid="spark-now"><title>{tip(now)}</title></circle>}
+      {idx.map((i) => <text key={i} x={x(i)} y={H - 3} textAnchor="middle" fontSize="10" fontWeight={i === lead ? 600 : 500} fill={i === lead ? 'var(--foreground)' : 'var(--muted-foreground)'}>{shortMonth(months[i])}{i === cur ? ' ◔' : ''}</text>)}
       {tgs.length > 0 && getT(b) !== null && <text x={W - R} y={y(getT(b) as number) - 5} textAnchor="end" fontSize="10" fontWeight="500" fill="var(--muted-foreground)">target</text>}
     </svg>
   );
@@ -170,7 +216,7 @@ function RunwayCard({plan, nowKey, actuals, opening}: {plan: PlanData; nowKey: s
   const text = (k: number) => { const v = runwayMonths(cash, opening, k); return v === null ? 'waiting' : v === 'not-burning' ? 'not burning' : `${v.toFixed(1)} months`; };
   return (
     <Tile label="Rough runway" status="derived" tip={PLAN_HELP.runway} chip={r === null ? 'waiting' : r === 'not-burning' ? 'cash rising' : 'info only'} value={r === null ? '—' : r === 'not-burning' ? 'Not burning' : `${r.toFixed(1)} mo`} sub={shortMonth(plan.months[i])} months={lastPastMonths(plan.months, nowKey).map((k) => { const v = runwayMonths(cash, opening, k); return {month: plan.months[k], value: v === null ? '—' : v === 'not-burning' ? 'Not burning' : `${v.toFixed(1)} mo`, chip: v === null ? 'waiting' : 'info only', status: (v === null ? 'waiting' : 'derived') as Status}; })}>
-      <Spark label="Rough runway" months={plan.months} cur={cur} getT={() => null} getA={series} st={() => 'derived'} tip={(k) => `${monthLabel(plan.months[k])} runway: ${text(k)}`} minActs={2} />
+      <Spark label="Rough runway" months={plan.months} cur={cur} getT={() => null} getA={series} st={() => 'derived'} tip={(k) => `${monthLabel(plan.months[k])} runway: ${text(k)}`} minActs={2} bars={false} />
     </Tile>
   );
 }
@@ -479,12 +525,12 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
         );
       })()}
       <div className={CARDS} data-testid="key-cards">
-        {[keys.find((m) => m.id === 'gmv_total'), keys.find((m) => m.id === 'cash')].map((m) => m && <KeyCard key={m.id} m={m} plan={plan} nowKey={nowKey} actuals={actuals} onWhy={onWhy} foot={m.id === 'gmv_total' ? <button type="button" aria-expanded={gmvOpen} aria-controls="gmv-details" onClick={() => setGmvOpen((v) => !v)} data-testid="gmv-toggle" className="-mb-1 mt-0.5 inline-flex min-h-8 items-center gap-1 self-start rounded text-xs font-medium text-muted-foreground transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-2 focus-visible:outline-primary max-md:min-h-11">{gmvOpen ? 'Hide channels' : 'Show channels'}<ChevronDown className={cn('size-3.5 transition-transform motion-reduce:transition-none', gmvOpen && 'rotate-180')} aria-hidden /></button> : undefined} tip={m.id === 'cash' ? ((lines.opening_cash?.[0] ?? null) === null ? PLAN_HELP.cashNoOpening : PLAN_HELP.cashCheckBank) : undefined} />)}
+        {[keys.find((m) => m.id === 'gmv_total'), keys.find((m) => m.id === 'cash')].map((m) => m && <KeyCard key={m.id} m={m} plan={plan} nowKey={nowKey} today={today} actuals={actuals} onWhy={onWhy} foot={m.id === 'gmv_total' ? <button type="button" aria-expanded={gmvOpen} aria-controls="gmv-details" onClick={() => setGmvOpen((v) => !v)} data-testid="gmv-toggle" className="-mb-1 mt-0.5 inline-flex min-h-8 items-center gap-1 self-start rounded text-xs font-medium text-muted-foreground transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-2 focus-visible:outline-primary max-md:min-h-11">{gmvOpen ? 'Hide channels' : 'Show channels'}<ChevronDown className={cn('size-3.5 transition-transform motion-reduce:transition-none', gmvOpen && 'rotate-180')} aria-hidden /></button> : undefined} tip={m.id === 'cash' ? ((lines.opening_cash?.[0] ?? null) === null ? PLAN_HELP.cashNoOpening : PLAN_HELP.cashCheckBank) : undefined} />)}
         <RunwayCard plan={plan} nowKey={nowKey} actuals={actuals} opening={lines.opening_cash?.[0] ?? null} />
       </div>
       {gmvOpen && (
         <div id="gmv-details" className={cn(CARDS, 'mt-2.5')} data-testid="gmv-cards">
-          {keys.filter((m) => ['gmv_events', 'gmv_website', 'gmv_marketplace'].includes(m.id)).map((m) => <KeyCard key={m.id} m={m} plan={plan} nowKey={nowKey} actuals={actuals} onWhy={onWhy} />)}
+          {keys.filter((m) => ['gmv_events', 'gmv_website', 'gmv_marketplace'].includes(m.id)).map((m) => <KeyCard key={m.id} m={m} plan={plan} nowKey={nowKey} today={today} actuals={actuals} onWhy={onWhy} />)}
         </div>
       )}
       {drill && <Drilldown id={drill.id} i={drill.i} plan={plan} actuals={actuals} onClose={() => setDrill(null)} />}
