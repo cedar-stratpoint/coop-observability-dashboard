@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
+
+Same fix as the scan board's breadcrumb, applied to the batch-review page: its "← Scan…" control used `window.history.back()`, so on the filter-heavy scan board it retraced the view tabs / version cards / store chips you had clicked. It is a breadcrumb to the scan, so it now links straight to the scan board.
+
 ## 2026-11-11 — Fix: "‹ Uploads" goes to the uploads list, not back through filters
 
 The scan board (and the "All forms" inbox) "‹ Uploads" breadcrumb stepped back through history (`router.back()`), so on these filter-heavy boards it just walked back through every view tab / version card / store chip / BA filter you had clicked instead of leaving for the uploads list. It is a breadcrumb to a fixed place now: a direct link to `/uploads`. (Trade-off: it no longer restores a filter/scroll on the uploads list you came from; reaching Uploads reliably matters more.)
