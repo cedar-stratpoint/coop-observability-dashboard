@@ -331,3 +331,18 @@ describe('Test orders are named, so the CRM order total does not look like a con
     expect(testCheck(await customers({}, bodies(real)))).toBeUndefined();
   });
 });
+
+describe('Headline written by code: the answer line is on the block, whatever the model writes (staging test 2026-11-11)', () => {
+  it('orders_bucket carries the repeat rate as the result headline', async () => {
+    const r = (await customers({group_by: 'orders_bucket'})) as R & {meta: {headline?: string}};
+    expect(r.meta.headline).toBe('Repeat buyer rate: 4 of 9 buyers (44.4%). Target 25%, a plan target, not an actual.');
+  });
+  it('no buyers: the headline says so, with no percentage', async () => {
+    const r = (await customers({group_by: 'orders_bucket', buyers: 'non_buyers'})) as R & {meta: {headline?: string}};
+    expect(r.meta.headline).toBe('No buyers yet, so there is no repeat rate. Target 25%, a plan target, not an actual.');
+  });
+  it('min_orders 2+ (repeat buyers only) and other groupings: no headline', async () => {
+    expect(((await customers({group_by: 'orders_bucket', min_orders: 2})) as R & {meta: {headline?: string}}).meta.headline).toBeUndefined();
+    expect(((await customers({group_by: 'tier'})) as R & {meta: {headline?: string}}).meta.headline).toBeUndefined();
+  });
+});

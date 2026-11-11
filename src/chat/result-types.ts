@@ -138,6 +138,8 @@ export interface ResultMeta {
    * into "Other". Rows whose `key` value is in `omit` are left out of the chart only (the table twin keeps every row), and `note` says so.
    */
   chart_view?: {key: string; omit: string[]; note: string | null};
+  /** The answer in one line, written by code (repeat rate, best cohorts): every block bound from this result shows it under its title, so the headline never depends on the model's prose. */
+  headline?: string;
 }
 
 export interface MetricResult {

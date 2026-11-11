@@ -185,3 +185,17 @@ describe('G2 auto chart titles come from column labels, never from row or series
     expect(ok(run('render_chart', {source: 'x3', kind: 'auto', orientation: 'auto', x: 'auto', y: ['a', 'b'], title: ''}, s))[0].title).toBe('Revenue (PHP) and Cost (PHP) by Event');
   });
 });
+
+describe('meta.headline: the code-written answer line rides on every block of the result (RET-02 / RET-06)', () => {
+  const H = mk('r3', PETS.columns, PETS.rows, {headline: 'Repeat buyer rate: 21 of 145 buyers (14.5%). Target 25%, a plan target, not an actual.'});
+  const s: ResultStore = new Map([['r3', H], ['r1', PETS]]);
+  it('a chart and a table bound from it carry the headline', () => {
+    const c = ok(run('render_chart', {...chart, source: 'r3'}, s))[0];
+    const t = ok(run('render_table', {source: 'r3'}, s))[0];
+    expect(c.headline).toBe(H.meta.headline);
+    expect(t.headline).toBe(H.meta.headline);
+  });
+  it('a result without one: no headline key', () => {
+    expect('headline' in ok(run('render_chart', chart, s))[0]).toBe(false);
+  });
+});
