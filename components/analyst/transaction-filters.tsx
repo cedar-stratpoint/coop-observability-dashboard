@@ -4,9 +4,10 @@ import {useEffect, useState} from 'react';
 import Link from 'next/link';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {Popover} from '@base-ui/react/popover';
-import {CalendarDays, CalendarRange, Check, ChevronDown, CircleDot, SlidersHorizontal, Wallet, X, type LucideIcon} from 'lucide-react';
+import {CalendarDays, CalendarRange, Check, CircleDot, SlidersHorizontal, Wallet, X, type LucideIcon} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {Button} from '@/components/ui/button';
+import {POPUP, triggerClass, TriggerContent} from './filter-menu';
 import {RangeSlider} from '@/components/ui/slider';
 import {Calendar, type DateRange} from '@/components/ui/calendar';
 import {formatPeso} from '@/src/pos-format';
@@ -15,9 +16,6 @@ import type {PosEvent, PosOrdersFilter, PriceBounds} from '@/src/pos-sales-types
 
 type HrefWith = (patch: Record<string, string | null>) => string;
 type Router = ReturnType<typeof useRouter>;
-
-const POPUP =
-  'z-50 origin-[var(--transform-origin)] rounded-lg border bg-popover text-popover-foreground shadow-md outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0';
 
 const CLEARED = {method: null, status: null, event: null, from: null, to: null, min: null, max: null};
 
@@ -153,30 +151,6 @@ export function TransactionFilters({
         </ul>
       )}
     </div>
-  );
-}
-
-/** Shared look for every category trigger: a stable label, plus a dot when applied. */
-function triggerClass(active: boolean) {
-  return cn(
-    'inline-flex h-8 items-center gap-1.5 rounded-lg border bg-card px-3 text-xs font-medium transition-[color,border-color,transform] duration-150 ease-out active:scale-[0.97] data-[popup-open]:border-foreground/30 data-[popup-open]:text-foreground',
-    active ? 'border-primary/40 text-foreground' : 'text-muted-foreground hover:border-foreground/20 hover:text-foreground',
-  );
-}
-
-function TriggerContent({icon: Icon, label, active}: {icon: LucideIcon; label: string; active: boolean}) {
-  return (
-    <>
-      <Icon className="size-3.5" aria-hidden />
-      {label}
-      {active && (
-        <>
-          <span className="size-1.5 rounded-full bg-primary" aria-hidden />
-          <span className="sr-only">(applied)</span>
-        </>
-      )}
-      <ChevronDown className="size-3 opacity-60" aria-hidden />
-    </>
   );
 }
 
