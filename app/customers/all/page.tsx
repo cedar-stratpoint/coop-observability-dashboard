@@ -25,7 +25,7 @@ export default async function Page() {
   ]);
 
   const contacts = mergeContacts(
-    enrichCustomers(customers, orders, membership.programStart),
+    enrichCustomers(customers ?? [], orders ?? [], membership.programStart),
     leads,
     itemsToCustomers(lazada.items),
   );

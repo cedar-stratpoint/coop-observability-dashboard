@@ -1,5 +1,6 @@
 import 'server-only';
 import {createClient} from '@supabase/supabase-js';
+import type {DbError} from './supabase-errors';
 
 // F9: the ONLY database clients for Coop Reports (the two tables `coop_reports` and `coop_report_versions`). Design § 5b
 // "Write path" and § 5c layer 7; rule: knowledge/best-practices/chat-read-only.md. The chat tree must never import this
@@ -144,10 +145,7 @@ export function assertLocalIfRequired(url: string, env: Record<string, string | 
 
 // ---- the typed clients (layer 3: only the methods each client needs exist on its type) -------------------------------
 
-export interface DbError {
-  message: string;
-  code?: string;
-}
+export type {DbError};
 export interface DbResult<T> {
   data: T | null;
   error: DbError | null;
@@ -256,8 +254,5 @@ export function reportsWriteClient(opts: ReportsClientOptions = {}): {client: Re
   return build('write', opts);
 }
 
-/** True when the tables do not exist yet (PostgREST schema cache miss, or Postgres undefined_table). */
-export function isMissingTable(error: DbError | null | undefined): boolean {
-  if (!error) return false;
-  return error.code === 'PGRST205' || error.code === '42P01' || /could not find the table|relation .* does not exist/i.test(error.message);
-}
+/** True when the tables do not exist yet (shared with every dashboard-owned table: src/supabase-errors.ts). */
+export {isMissingTable} from './supabase-errors';
