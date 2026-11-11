@@ -309,3 +309,25 @@ describe('RET-02 AC3: both groupings draw a bar chart by default, without the "n
     expect(blocks).toHaveLength(0);
   });
 });
+
+describe('Test orders are named, so the CRM order total does not look like a contradiction (staging: 58 of 58 test orders)', () => {
+  const testCheck = (r: R) => r.meta.checks.find((c) => c.code === 'test_orders');
+  it('says how many captured orders are test orders, every grouping', async () => {
+    for (const group_by of ['none', 'orders_bucket']) {
+      const c = testCheck(await customers({group_by}));
+      expect(c?.values).toEqual({test_orders: 3, orders: ORDERS.length});
+      expect(c?.text).toMatch(new RegExp(`3 of ${ORDERS.length} captured website orders are Shopify test orders`));
+      expect(c?.text).toMatch(/CRM's own order total includes them/);
+    }
+  });
+  it('all orders test: no buyers, and the note explains why', async () => {
+    const allTest = ORDERS.map((o) => ({...o, raw: TEST_RAW_STRING}));
+    const r = await customers({group_by: 'orders_bucket'}, bodies(allTest));
+    expect(repeatCheck(r)?.values?.buyers).toBe(0);
+    expect(testCheck(r)?.text).toMatch(`${ORDERS.length} of ${ORDERS.length}`);
+  });
+  it('no test orders: no note', async () => {
+    const real = ORDERS.map((o) => ({...o, raw: JSON.stringify({test: false})}));
+    expect(testCheck(await customers({}, bodies(real)))).toBeUndefined();
+  });
+});

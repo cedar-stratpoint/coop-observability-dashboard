@@ -267,6 +267,8 @@ export function CrmView({
   const nameOf = (c: CustomerRow): string => [c.firstName, c.lastName].filter(Boolean).join(' ');
   const tiers = useMemo(() => tierCounts(customers ?? []), [customers]);
   const repeat = useMemo(() => repeatRate(all.map((c) => c.orderCount)), [all]);
+  // Named so the Orders tile (the CRM's own total, test orders in) and "No buyers yet" never read as a contradiction (staging is all test orders).
+  const testOrders = (orders ?? []).filter((o) => o.test === true).length;
   const charts = useMemo(
     () => ({
       buckets: countChart('crm-buyers-by-orders', 'Buyers by orders', 'Orders (all time)', buyersByOrders(all)),
@@ -488,7 +490,7 @@ export function CrmView({
           ))}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          All time, website orders in any payment status, test orders excluded. Customers with no order are not buyers and stay out of the charts.
+          All time, website orders in any payment status, test orders excluded{testOrders > 0 && ` (${testOrders.toLocaleString()} of ${(orders ?? []).length.toLocaleString()} orders here are Shopify test orders; the Orders tile counts them)`}. Customers with no order are not buyers and stay out of the charts.
         </p>
       </section>
 
