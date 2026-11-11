@@ -192,3 +192,14 @@ describe('S6.4 the tool says how to route cohort questions and never to guess th
     expect(def.description).toMatch(/never guess/i);
   });
 });
+
+describe('Headline written by code: the best cohorts are named on the block (staging test 2026-11-11)', () => {
+  it('names the best repeat rate among cohorts of 5+ buyers, says the small ones are too small, never the event', async () => {
+    const r = (await chat()) as R & {meta: {headline?: string}};
+    expect(r.meta.headline).toBe('Best repeat rate among cohorts of 5+ buyers: GRAND300 2 of 6 (33.3%). Target 25%, a plan target, not an actual. 5 smaller cohorts are too small for a rate.');
+  });
+  it('no cohort of 5+ buyers: says so instead of ranking', async () => {
+    const r = (await chat({tier: 'gold'})) as R & {meta: {headline?: string}};
+    expect(r.meta.headline).toMatch(/^No cohort has 5 or more buyers yet/);
+  });
+});
