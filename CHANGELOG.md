@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
+
+Found on Staging after the customer retention release (#585): every staging order is a Shopify test checkout (`raw.test = true`, 58 of 58), so the owner rule (test orders count nowhere) gives no buyers while the CRM's own Orders tile says 58. The numbers were right, but Ask Coop told the owner the two CRM readings "disagree", because nothing said why.
+
+- **Ask Coop:** `list_crm_customers` adds a `test_orders` check (new `CheckCode`) whenever any captured order is a test order: "N of M captured website orders are Shopify test orders and count nowhere here … the CRM's own order total includes them". It carries the values `{test_orders, orders}`; there is no note when there are no test orders. On PROD this reads 2 of 179.
+- **Website CRM page:** the Repeat buyers footnote names the count ("58 of 58 orders here are Shopify test orders; the Orders tile counts them").
+- **Decision: explain, don't change the rule.** Test orders still count nowhere; this only names them.
+- Test: `test/crm-customer-reads.test.ts`, three cases: some test orders, all test orders (0 buyers plus the note), none (no note).
+
 ## 2026-11-11 — Business Health Report: Website sales sync on Refresh, not on every reload (BHR-09)
 
 The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sales on every page load and get a manual Refresh instead. Website GMV came from the CRM Worker through `getCrmOrdersForPlan`, cached for 60 seconds, so the Worker was paged (500 orders a page) up to once a minute while people used the page.
