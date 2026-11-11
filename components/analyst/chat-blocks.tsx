@@ -169,6 +169,8 @@ function BlockCard({block, toggle, children}: {block: TableBlock | ChartBlock; t
         <div className="min-w-0">
           <h3 className="text-[13px] font-semibold leading-snug text-foreground">{block.title}</h3>
           {block.basis && <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{block.basis}</p>}
+          {/* The answer line, written by code (meta.headline): visible whatever the model's prose says. */}
+          {block.headline && <p className="mt-1.5 text-[13px] leading-snug text-foreground tabular-nums">{block.headline}</p>}
         </div>
         {toggle}
       </header>

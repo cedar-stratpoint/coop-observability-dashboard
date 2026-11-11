@@ -8,6 +8,23 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
+
+A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
+- "What is our repeat rate vs the 25% target?" drew the chart but **never said "14.5%"**; the rate sat only in the collapsed Notes.
+- "Who should get a repeat promo?" listed **25 of 30** and asked to load the rest.
+
+- **Decision: the headline is code, not prose.** A result can now carry `meta.headline`, which every block bound from it shows under its title (`bind.ts` → `BlockBase.headline` → `chat-blocks.tsx`). So the answer line no longer depends on what the model writes.
+  - `list_crm_customers` by `orders_bucket` sets "Repeat buyer rate: 21 of 145 buyers (14.5%). Target 25%, a plan target, not an actual." (or "No buyers yet…").
+  - By `first_order_code` it names the best 3 rates among cohorts of 5+ buyers, plus how many cohorts were too small. It never names an event.
+- **An outreach audience (repeat_promo / win_back) is listed whole** up to 100 rows, whatever page size the model asked for.
+- Tests: headline cases in `test/crm-customer-reads.test.ts` and `test/crm-code-cohorts.test.ts`; block carry in `test/chat-bind.test.ts`; a 30-person audience at limit 10 in `test/crm-outreach-lists.test.ts`.
+- Checked in the browser on PROD data, light and dark: the rate line shows on the chart and the table, the repeat promo list has all 30, and the cohort line reads "no code 8 of 14 (57.1%), ZOOMY300 5 of 21 (23.8%), …".
+
+## 2026-11-11 — Goldline reader: more token headroom for the densest pages, explicit truncation error
+
+Once the 600s window let the densest V1 pages (e.g. 33, 57) read to completion, they failed not on time but on content: the extractor emits one JSON object per row, and these pages ran past the `max_tokens: 16000` cap, so the JSON came back truncated and `JSON.parse` failed with a generic "did not return valid JSON" that the retry loop then repeated pointlessly. Raised the extract `max_tokens` to **32000** (well under the model's output cap) to give those outputs real headroom, and `parseJsonContent` now checks `stop_reason`: a parse failure with `stop_reason === 'max_tokens'` is reported as a distinct, non-transient **"output was truncated (page too dense)"** error instead of being retried. (The separate "no text content" empties stay transient/retried as before.)
+
 ## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
 
 Found on Staging after the customer retention release (#585): every staging order is a Shopify test checkout (`raw.test = true`, 58 of 58), so the owner rule (test orders count nowhere) gives no buyers while the CRM's own Orders tile says 58. The numbers were right, but Ask Coop told the owner the two CRM readings "disagree", because nothing said why.
