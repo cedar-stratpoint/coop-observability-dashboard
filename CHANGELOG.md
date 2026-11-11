@@ -8,7 +8,35 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+Dates are local working dates (GMT+8). Newest first.
 
+## v1.23.0 (2026-11-11): Website customers in Ask Coop and on the Website CRM page, plus Business Health Report Refresh sync (prod release)
+Ships, on top of `main` (staging and main have diverged by ~550 commits):
+- the customer retention and outreach work (#584 → staging #585), its two follow-up fixes (#595 → #596, #599 → #600);
+- the Business Health Report changes (#592 + #593 → staging #594).
+
+Nothing else from staging rides along: no uploads, review or goldline changes.
+
+**Decision: port the Ask Coop tools the customer work builds on, as-is from staging.** `crm_query`, `shopify_query`, `compare_sku` and the contacts find / overlap / draft tools were on staging but never on `main`. They are taken file for file from staging at `57f1a71`, the customer work's base (one `chore(release): port …` commit). All of them read existing PROD tables or the PROD CRM Worker and fail soft:
+- `compare_sku` logs and returns nothing if `product_channel_alias` is absent;
+- the spin-lead read is `select('*')`, so a missing `consent_at` reads as empty.
+
+What the owner gets:
+- **Ask Coop:**
+  - customers acquired per first-order month;
+  - orders per customer;
+  - the repeat buyer rate vs the 25% target, on a code-written line under the chart;
+  - repeat promo and win-back lists with times contacted (listed whole);
+  - cohorts by first-order discount code.
+- **Website CRM page:** a Repeat buyers section, a Customers tab with orders, first and last order, emails sent, manual contacts and consent, and a "Log contact" dialog.
+- **Business Health Report:** the GMV cards show bars plus the target line only; Website / Shopify sales sync on **Refresh** (admins), not on every reload.
+
+PROD steps:
+- **(1) Supabase PROD (co-worker's project):** apply `supabase/customer_contacts.sql`. Until then the Manual column reads "unavailable" and "Log contact" says the log is not set up. Nothing breaks.
+- **(2) CRM Worker PROD (optional, speed only):** `npx wrangler d1 migrations apply zoomy-crm --remote --env production` (index `0012`).
+- **(3)** No env changes.
+
+Check after deploy: on `/customers/website-crm`, about 193 customers, a repeat rate of about 14.5% vs the 25% target, and Repeat promo / Win-back counts. In Ask Coop, ask "What is our repeat buyer rate vs the 25% target?": the line under the chart states the rate. On `/health-report`, Refresh updates the "Updated … ago" time.
 
 ## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
 
@@ -22,10 +50,6 @@ A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop t
 - **An outreach audience (repeat_promo / win_back) is listed whole** up to 100 rows, whatever page size the model asked for.
 - Tests: headline cases in `test/crm-customer-reads.test.ts` and `test/crm-code-cohorts.test.ts`; block carry in `test/chat-bind.test.ts`; a 30-person audience at limit 10 in `test/crm-outreach-lists.test.ts`.
 - Checked in the browser on PROD data, light and dark: the rate line shows on the chart and the table, the repeat promo list has all 30, and the cohort line reads "no code 8 of 14 (57.1%), ZOOMY300 5 of 21 (23.8%), …".
-
-## 2026-11-11 — Goldline reader: more token headroom for the densest pages, explicit truncation error
-
-Once the 600s window let the densest V1 pages (e.g. 33, 57) read to completion, they failed not on time but on content: the extractor emits one JSON object per row, and these pages ran past the `max_tokens: 16000` cap, so the JSON came back truncated and `JSON.parse` failed with a generic "did not return valid JSON" that the retry loop then repeated pointlessly. Raised the extract `max_tokens` to **32000** (well under the model's output cap) to give those outputs real headroom, and `parseJsonContent` now checks `stop_reason`: a parse failure with `stop_reason === 'max_tokens'` is reported as a distinct, non-transient **"output was truncated (page too dense)"** error instead of being retried. (The separate "no text content" empties stay transient/retried as before.)
 
 ## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
 
@@ -53,48 +77,6 @@ The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sale
 
 - **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
 - Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
-
-## 2026-11-11 — Batch review: modernised the Form pages chips
-
-Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
-
-## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
-
-Same fix as the scan board's breadcrumb, applied to the batch-review page: its "← Scan…" control used `window.history.back()`, so on the filter-heavy scan board it retraced the view tabs / version cards / store chips you had clicked. It is a breadcrumb to the scan, so it now links straight to the scan board.
-
-## 2026-11-11 — Fix: "‹ Uploads" goes to the uploads list, not back through filters
-
-The scan board (and the "All forms" inbox) "‹ Uploads" breadcrumb stepped back through history (`router.back()`), so on these filter-heavy boards it just walked back through every view tab / version card / store chip / BA filter you had clicked instead of leaving for the uploads list. It is a breadcrumb to a fixed place now: a direct link to `/uploads`. (Trade-off: it no longer restores a filter/scroll on the uploads list you came from; reaching Uploads reliably matters more.)
-
-## 2026-11-11 — Fix: breadcrumb no longer loops with the scan board's Back
-
-The new per-file breadcrumb pushed a history entry when you clicked an ancestor (e.g. the store name), so the scan board's own "‹ Uploads" Back (which steps through history) then returned to the review page instead of the uploads list, a loop you could only escape via the side nav. The breadcrumb crumbs now navigate with **replace** (a breadcrumb goes up the hierarchy, it doesn't stack), so going up removes the review from the back path and "‹ Uploads" reaches the uploads list again.
-
-## 2026-11-11 — Uploads: the per-file review keeps the store / BA you filtered to
-
-Opening a page from a chosen store (or BA) on the scan triage board used to drop the context: the ‹ › navigator stepped page-by-page across the whole scan, Back landed on the default (unfiltered) board, and nothing on the page named the store. Now the per-file review **stays inside the filter you chose**:
-
-- **Breadcrumb up top.** A clickable trail replaces the bare back line: `Scan2026-10-30_171554 › SM CITY-SAN PABLO 1 › (page)`. The scan and store (or BA) segments link back to the board; the ← button does a browser-style Back. Per BA shows the BA; the plain Per file list shows just the scan.
-- **Scoped ‹ › navigator.** The arrows step through only that store's pages (all its forms) or that BA's pages, in scan order, instead of all 98. The scope travels in the page URL so the next page stays scoped too.
-- **Back restores the filter.** The triage board's store filter now lives in the URL (`?store=`), so Back (or a shared link) returns to the same filtered view instead of the default.
-
-A page opened from a card carries its store (or, when drilled into a BA, that BA) as the scope. New `scanScopeIds` reuses the cached triage grouping so the stepper matches exactly what the board showed. Touches `triage-board` (URL-driven store filter + scoped card links), `scan-file-nav` (scope in the review query), the per-file page (`app/uploads/[id]`), and `upload-review` (breadcrumb).
-
-## 2026-11-11 — Uploads: scans no longer open the whole-batch review
-
-A server-ingested scan is **one open batch** of many pages across many stores, so opening any of its pages used to funnel into `batch-review` (`/uploads/batch/[id]`), which then declared "this batch is not one store's form" and showed an overwhelming `P.X` sheet grid. That whole-batch screen was built for the old model (one batch = one store's form) and is superseded for scans by the triage board + the per-file review.
-
-Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one store's multi-page form). New additive `upload_batches.kind` column (Nichido Staging; existing scans backfilled by page count). Routing:
-
-- `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
-- Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
-- Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
-
-`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
-
-`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
-
-`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 ## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
@@ -152,10 +134,6 @@ The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) 
 - `list_crm_customers` gains `group_by: first_order_code` (closed enum, the tool stays non-strict): rows `group`, `buyers`, `repeat`, `rate_pct`. A `reconciles` check gives the buyer total, says the event-to-code mapping is the owner's (never guessed) and states the 25% as a target. **Decision: cohorts under 5 buyers are a small group:** a `small_sample` warning says not to rank by them, and `meta.chart_view.omit` keeps them out of the default bar chart of the rate (they stay in the table twin).
 - Routing lives in the tool description (cohort / which promo brings repeat buyers / event promo → `first_order_code`; ask the owner which code was which event) and in `crm_query`'s pointer back to `list_crm_customers`. The crm-tools topic was left unchanged: it is at its 500-token budget. Chat only this stage; the Customers tab does not show cohorts yet. Data catalog: `GET /api/orders` row now names what is kept from `raw`.
 - Tests: `test/crm-code-cohorts.test.ts` (14: projection and BDAY cut, the key, first order not a later one, test-order first order skipped, rates and the small-group flag, chat parity with the shared compute, no `BDAY` anywhere in the result, default bar chart through the real loop, closed grammar). Plan: `knowledge/tasks/2026-11-10-customer-code-cohorts-stage6.md`.
-
-## 2026-11-10 — Uploads: name a group upload
-
-Dates are local working dates (GMT+8). Newest first.
 
 ## v1.22.0 (2026-11-10): Business Health Report, GMV cards lead with this month so far (prod release)
 Ships #571 (staging #572) to prod as a health-report-only change on top of `main` (staging and main have diverged). Every code file it touches was identical on `main` and `staging`, so the commit cherry-picked cleanly; only this CHANGELOG entry was rewritten.
