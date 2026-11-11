@@ -10,7 +10,8 @@ import {useMemo, useState, useTransition, useEffect, useLayoutEffect, useRef} fr
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {createPortal} from 'react-dom';
-import {ArrowLeftRight, Eye, EyeOff, MoreHorizontal, Pencil, Search, Tag, Type, Undo2, X, type LucideIcon} from 'lucide-react';
+import {ArrowLeftRight, CircleDot, Eye, EyeOff, Layers, MoreHorizontal, Pencil, Search, Shapes, Store, Tag, Type, Undo2, Warehouse, X, type LucideIcon} from 'lucide-react';
+import {FilterMenu, AppliedFilters, type AppliedFilter} from './filter-menu';
 import {cn} from '@/lib/utils';
 import {Card, CardContent} from '@/components/ui/card';
 import {POS_CATEGORIES, POS_SUBCATEGORIES, SUBCATEGORY_CATEGORY, formatPeso} from '@/src/pos-format';
@@ -31,7 +32,22 @@ const PAGE_SIZE = 12; // rows per page on the merged product table
 const STATUS_RANK: Record<ForecastStatus, number> = {out: 0, low: 1, healthy: 2};
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
 
-export function InventoryTable({rows: initialRows, usingMock}: {rows: InventoryRow[]; usingMock: boolean}) {
+const STATUS_OPTIONS = [
+  {value: 'out', label: 'Out'},
+  {value: 'low', label: 'Low'},
+  {value: 'healthy', label: 'Healthy'},
+  {value: 'unlisted', label: 'Unlisted'},
+] as const;
+const LOC_OPTIONS = [
+  {value: 'event', label: 'In Event'},
+  {value: 'office', label: 'In Office'},
+];
+
+/** Venue is a URL param owned by the page (sales are venue-scoped server-side); the
+ *  table only renders its trigger so every filter sits in one bar. */
+export type VenueFilter = {value: string; options: {key: string; label: string}[]; onChange: (venue: string) => void};
+
+export function InventoryTable({rows: initialRows, usingMock, venue}: {rows: InventoryRow[]; usingMock: boolean; venue?: VenueFilter}) {
   const [rows, setRows] = useState(initialRows);
   useEffect(() => setRows(initialRows), [initialRows]);
 
@@ -55,6 +71,31 @@ export function InventoryTable({rows: initialRows, usingMock}: {rows: InventoryR
   const [page, setPage] = useState(1);
 
   const outCount = useMemo(() => rows.filter((r) => r.status === 'out').length, [rows]);
+  // Counts shown inside the Line and Status menus, over every loaded row, so each
+  // menu doubles as a quick readout before anything is picked.
+  const lineCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) if (r.category) m.set(r.category, (m.get(r.category) ?? 0) + 1);
+    return m;
+  }, [rows]);
+  const statusCounts = useMemo(() => ({
+    out: rows.filter((r) => r.status === 'out').length,
+    low: rows.filter((r) => r.status === 'low').length,
+    healthy: rows.filter((r) => r.status === 'healthy').length,
+    unlisted: rows.filter((r) => !r.active).length,
+  }), [rows]);
+
+  const venueLabel = venue && venue.value !== 'all' ? venue.options.find((o) => o.key === venue.value)?.label ?? venue.value : null;
+  const applied: AppliedFilter[] = [];
+  if (venue && venueLabel) applied.push({key: 'venue', category: 'Venue', value: venueLabel, onRemove: () => venue.onChange('all')});
+  if (line) applied.push({key: 'line', category: 'Line', value: line, onRemove: () => {setLine(''); setSub('');}});
+  if (line === SUBCATEGORY_CATEGORY && sub) applied.push({key: 'sub', category: 'Type', value: sub, onRemove: () => setSub('')});
+  if (status) applied.push({key: 'status', category: 'Status', value: STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status, onRemove: () => setStatus('')});
+  if (loc) applied.push({key: 'loc', category: 'Location', value: LOC_OPTIONS.find((o) => o.value === loc)?.label ?? loc, onRemove: () => setLoc('')});
+  function clearFilters() {
+    setLine(''); setSub(''); setStatus(''); setLoc('');
+    if (venue && venue.value !== 'all') venue.onChange('all');
+  }
 
   const filtered = useMemo(
     () => filterInventoryRows(rows, {line, sub, status, loc, showOut, search}),
@@ -107,26 +148,19 @@ export function InventoryTable({rows: initialRows, usingMock}: {rows: InventoryR
 
   return (
     <div>
-      {/* Filters: Line, then (Freeze-Dried only) Type, Status and Location as pill rows,
-          then search. All inline; there is no separate Filters modal. */}
-      <div className="mb-4 flex flex-col gap-2.5">
-        <PillRow label="Line" items={[{v: '', l: 'All'}, ...POS_CATEGORIES.map((c) => ({v: c as string, l: c}))]} active={line}
-          onSelect={(v) => {setLine(v); if (v !== SUBCATEGORY_CATEGORY) setSub('');}} />
-        {line === SUBCATEGORY_CATEGORY && (
-          <PillRow label="Type" items={[{v: '', l: 'All'}, ...POS_SUBCATEGORIES.map((c) => ({v: c as string, l: c}))]} active={sub} onSelect={setSub} />
-        )}
-        <PillRow label="Status" items={[{v: '', l: 'All'}, {v: 'out', l: 'Out'}, {v: 'low', l: 'Low'}, {v: 'healthy', l: 'Healthy'}, {v: 'unlisted', l: 'Unlisted'}]} active={status} onSelect={(v) => {setStatus(v as '' | ForecastStatus | 'unlisted'); if (v === 'out') setShowOut(true);}} />
-        <PillRow label="Location" items={[{v: '', l: 'All'}, {v: 'event', l: 'In Event'}, {v: 'office', l: 'In Office'}]} active={loc} onSelect={(v) => setLoc(v as '' | 'office' | 'event')} />
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      {/* Filter bar (Hick's law): search plus a few stable category triggers, each
+          hiding its choices until asked for, then the applied filters read back as
+          removable pills. Type only appears once Line is Freeze Dried. */}
+      <div className="mb-4 flex flex-col gap-3">
+        <div role="toolbar" aria-label="Filter products" className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1 basis-64 max-sm:basis-full">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or SKU…"
+              placeholder="Search name or SKU"
               aria-label="Search products"
-              className="w-full rounded-md border bg-background py-2 pl-9 pr-8 text-sm outline-none transition-colors focus-visible:border-ring"
+              className="h-8 w-full rounded-lg border bg-card pl-8.5 pr-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             />
             {search && (
               <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
@@ -135,16 +169,43 @@ export function InventoryTable({rows: initialRows, usingMock}: {rows: InventoryR
               </button>
             )}
           </div>
+          {venue && (
+            <FilterMenu icon={Store} label="Venue" width="w-56"
+              options={venue.options.map((o) => ({value: o.key === 'all' ? null : o.key, label: o.label}))}
+              selected={venue.value === 'all' ? null : venue.value}
+              onSelect={(v) => venue.onChange(v ?? 'all')} />
+          )}
+          <FilterMenu icon={Layers} label="Line"
+            options={[{value: null, label: 'All lines'}, ...POS_CATEGORIES.map((c) => ({value: c as string, label: c as string, count: lineCounts.get(c) ?? 0}))]}
+            selected={line || null}
+            onSelect={(v) => {setLine(v ?? ''); if (v !== SUBCATEGORY_CATEGORY) setSub('');}} />
+          {line === SUBCATEGORY_CATEGORY && (
+            <FilterMenu icon={Shapes} label="Type"
+              options={[{value: null, label: 'All types'}, ...POS_SUBCATEGORIES.map((c) => ({value: c as string, label: c as string}))]}
+              selected={sub || null}
+              onSelect={(v) => setSub(v ?? '')} />
+          )}
+          <FilterMenu icon={CircleDot} label="Status"
+            options={[{value: null, label: 'Any status'}, ...STATUS_OPTIONS.map((o) => ({...o, count: statusCounts[o.value]}))]}
+            selected={status || null}
+            onSelect={(v) => {setStatus((v ?? '') as '' | ForecastStatus | 'unlisted'); if (v === 'out') setShowOut(true);}} />
+          <FilterMenu icon={Warehouse} label="Location"
+            options={[{value: null, label: 'Anywhere'}, ...LOC_OPTIONS]}
+            selected={loc || null}
+            onSelect={(v) => setLoc((v ?? '') as '' | 'office' | 'event')} />
+
           <button type="button" role="switch" aria-checked={showOut}
             onClick={() => {const next = !showOut; setShowOut(next); if (!next && status === 'out') setStatus('');}}
-            className="group inline-flex shrink-0 items-center gap-2 rounded-md py-1 text-sm font-medium transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            <span aria-hidden className={cn('relative h-5 w-9 rounded-full transition-colors duration-150', showOut ? 'bg-primary' : 'bg-muted-foreground/30')}>
-              <span className={cn('absolute left-0.5 top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none', showOut && 'translate-x-4')} />
+            className="group ml-auto inline-flex h-8 shrink-0 items-center gap-2 rounded-md pl-2 text-xs font-medium transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            <span aria-hidden className={cn('relative h-4.5 w-8 rounded-full transition-colors duration-150', showOut ? 'bg-primary' : 'bg-muted-foreground/30')}>
+              <span className={cn('absolute left-0.5 top-0.5 size-3.5 rounded-full bg-background shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none', showOut && 'translate-x-3.5')} />
             </span>
             <span className={showOut ? 'text-foreground' : 'text-muted-foreground'}>Show out of stock</span>
             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{outCount}</span>
           </button>
         </div>
+
+        <AppliedFilters pills={applied} onClearAll={clearFilters} />
       </div>
 
       <Card>
@@ -205,7 +266,7 @@ export function InventoryTable({rows: initialRows, usingMock}: {rows: InventoryR
       {sorted.length > 0 && (
         <div className="mt-4 flex flex-col-reverse items-center justify-between gap-3 sm:flex-row">
           <p className="text-xs text-muted-foreground tabular-nums">
-            Showing {from + 1}–{Math.min(from + PAGE_SIZE, sorted.length)} of {sorted.length}
+            Showing {from + 1} to {Math.min(from + PAGE_SIZE, sorted.length)} of {sorted.length}
           </p>
           <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Products pagination" />
         </div>

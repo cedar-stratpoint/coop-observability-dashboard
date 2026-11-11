@@ -4,13 +4,14 @@
 // read as one page. Data: src/boxme-inventory-data.ts.
 
 import Link from 'next/link';
-import {AlertTriangle, ExternalLink, Globe, KeyRound, PackageX} from 'lucide-react';
+import {AlertTriangle, ExternalLink, KeyRound, PackageX} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {Card, CardContent} from '@/components/ui/card';
 import {fmtDate, fmtManilaWhen, syncPill, type Tone} from '@/src/boxme-format';
 import {KEY_WARN_DAYS} from '@/src/boxme-inventory-compute';
 import type {BoxmePageData} from '@/src/boxme-inventory-data';
 import {BoxmeInventoryTable} from './boxme-inventory-table';
+import {InventoryHeader, HeaderMeta} from './inventory-header';
 
 const TONE_DOT: Record<Tone, string> = {
   good: 'bg-emerald-500',
@@ -27,38 +28,32 @@ export function BoxmeInventoryView({data}: {data: BoxmePageData}) {
 
   return (
     <div className="mx-auto max-w-6xl px-6 pt-8 md:px-10 max-md:px-4 max-md:pt-6">
-      <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <Globe className="size-3.5" /> Online inventory · BoxMe fulfilment
-            {data.usingMock && <span className="text-amber-600 dark:text-amber-400">· demo data</span>}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
-            <div className="inline-flex rounded-md border p-0.5">
-              <Link href="/inventory" scroll={false} className="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-                Stratpoint <span className="font-mono text-[9px] opacity-70">offline</span>
-              </Link>
-              <span aria-current="page" className="flex items-center gap-1.5 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground">
-                BoxMe <span className="font-mono text-[9px] opacity-70">online</span>
-              </span>
-            </div>
-            <span className="inline-flex items-center gap-2 rounded-full border bg-background px-2.5 py-1 text-[11px]" title={data.sync.lastRunAt ? `Last run ${fmtManilaWhen(data.sync.lastRunAt, now)} (Manila)` : undefined}>
+      <InventoryHeader
+        channel="online"
+        offlineHref="/inventory"
+        onlineHref="/inventory?channel=online"
+        meta={
+          <HeaderMeta demo={data.usingMock}>
+            <span className="inline-flex items-center gap-1.5" title={data.sync.lastRunAt ? `Last run ${fmtManilaWhen(data.sync.lastRunAt, now)} (Manila)` : undefined}>
               <span aria-hidden className={cn('size-1.5 rounded-full', TONE_DOT[pill.tone])} />
-              <span className="font-medium">{pill.label}</span>
-              {hasData && (
-                <span className="text-muted-foreground">
-                  · {data.summary.total} SKUs{warehouseNames && ` · ${warehouseNames}`}
-                </span>
-              )}
+              <span className="font-medium text-foreground">{pill.label}</span>
             </span>
-          </div>
-        </div>
-        <a href="https://oms.boxme.asia" target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-          Open BoxMe OMS <ExternalLink className="size-3.5" />
-        </a>
-      </header>
+            {hasData && (
+              <>
+                <span aria-hidden className="opacity-50">·</span>
+                <span><span className="font-medium tabular-nums text-foreground">{data.summary.total}</span> SKUs</span>
+                {warehouseNames && (<><span aria-hidden className="opacity-50">·</span><span>{warehouseNames}</span></>)}
+              </>
+            )}
+          </HeaderMeta>
+        }
+        actions={
+          <a href="https://oms.boxme.asia" target="_blank" rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Open BoxMe OMS <ExternalLink className="size-3.5" />
+          </a>
+        }
+      />
 
       <SyncBanner data={data} now={now} />
 

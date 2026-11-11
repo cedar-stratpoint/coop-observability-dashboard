@@ -40,7 +40,7 @@ export function FreeTasteButton({products, className}: {products: TasteProduct[]
   );
 }
 
-function FreeTasteModal({products, onClose}: {products: TasteProduct[]; onClose: () => void}) {
+export function FreeTasteModal({products, onClose}: {products: TasteProduct[]; onClose: () => void}) {
   const titleId = useId();
   const router = useRouter();
   const [sku, setSku] = useState('');

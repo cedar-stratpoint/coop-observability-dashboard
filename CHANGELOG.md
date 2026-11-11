@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Inventory: Hick's-law header + filter bar (cosmetic)
+
+The Offline Inventory page showed ~25 simultaneous choices above the table (4 equal-weight header buttons, channel switch, boxed tabs, venue select, then 13 filter pills across Line / Status / Location rows). Cosmetic distill, no behaviour or data change:
+
+- **Shared `InventoryHeader`** for both channels (Stratpoint offline and BoxMe online), so flipping the channel no longer jumps the layout. Dropped the "OFFLINE INVENTORY" eyebrow (the channel switch already says it). The switch is now a soft segmented control (card on muted) so the only filled-primary element is **Add stock**. Office / Event totals read as quiet text ("274 in Office · 311 at Events"); the demo-data flag became a small amber pill. BoxMe's sync status / SKU count / warehouse moved into the same meta line.
+- **One primary action.** Add stock (primary) + Move stock (secondary) stay visible; **Log a free taste** and **New product** moved into a `⋯` More menu (Base UI Menu). Decision: these are the rarer back-office actions; if Free taste turns out to be daily, promote it back next to Move stock.
+- **Underline tabs** (All products / Bundles / Summary) instead of a second boxed segmented control, so tabs no longer compete with the channel switch.
+- **Filter bar** reuses the Transactions pattern: search + Venue / Line / (Type, only when Line = Freeze Dried) / Status / Location dropdown triggers in one row, with the "Show out of stock" switch on the right, and applied filters read back as removable pills + Clear all. Line and Status menus show per-option counts so they double as a readout. Venue moved from its own row into the bar (still a URL param, still refetches server-side).
+- Extracted the filter primitives (`POPUP`, `triggerClass`, `TriggerContent`) from `transaction-filters.tsx` into a new `filter-menu.tsx` (plus callback-driven `FilterMenu` / `AppliedFilters`) so Transactions and Inventory share one source. Transactions renders unchanged.
+- Copy: "Showing 1–12 of N" now reads "Showing 1 to 12 of N" (no en dashes in UI).
+
 ## 2026-11-11 — Goldline reader: raise extract max_tokens to 64000 for the very densest pages
 
 The full 98-page re-read on the new pilot left exactly one failure: page 23, whose token log showed output = 32105, i.e. it hit the `max_tokens: 32000` cap dead-on and truncated ("Vision output was truncated"). Raised the cap to **64000** (still half the model's 128K output ceiling). This is purely a ceiling: every other page generates far fewer tokens and is byte-for-byte unchanged (same output, same cost); only a page that would otherwise truncate is affected, and it only pays for the extra tokens it actually generates. Streaming (from the earlier fix) is what makes a cap this high usable at all.

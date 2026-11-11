@@ -1,21 +1,25 @@
 'use client';
 
-// Chrome for the merged Inventory page (Stratpoint / Offline channel): title,
-// the All products / Summary tabs, the channel segment, the venue dropdown, and
-// the New product + Add stock header actions. Tab / channel / venue are URL params
+// Chrome for the merged Inventory page (Stratpoint / Offline channel): the shared
+// InventoryHeader (title, channel switch, Office/Event totals, actions), the
+// All products / Bundles / Summary underline tabs, and the venue trigger handed to
+// the table's filter bar. Hick's law: Add stock is the one primary action, Move
+// stock the secondary, and Free taste / New product sit in a More menu. Tab / channel / venue are URL params
 // so the server refetches (monthly sales are venue-scoped); Line/status/search/sort
 // stay client-side on the loaded rows.
 
 import {useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {Package, Plus, X} from 'lucide-react';
+import {Menu} from '@base-ui/react/menu';
+import {Dog, MoreHorizontal, Plus, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {POS_CATEGORIES} from '@/src/pos-format';
 import {createProductAction} from '@/src/pos-actions';
 import {AddStockButton} from './add-stock-button';
 import {TransferStockButton} from './transfer-stock-button';
-import {FreeTasteButton} from './free-taste-button';
+import {FreeTasteModal} from './free-taste-button';
+import {InventoryHeader, HeaderMeta} from './inventory-header';
 import {SamplingPanel} from './sampling-panel';
 import {InventoryTable} from './inventory-table';
 import {InventorySummary} from './inventory-summary';
@@ -34,6 +38,7 @@ export function InventoryView({data, bundles, tab, channel, venue, locations, sa
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [tasting, setTasting] = useState(false);
 
   // Build an /inventory href preserving the other params (omitting defaults).
   const href = (next: {tab?: Tab; channel?: string; venue?: string}) => {
@@ -59,57 +64,42 @@ export function InventoryView({data, bundles, tab, channel, venue, locations, sa
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8 md:px-10 max-md:px-4 max-md:py-6">
-      <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <Package className="size-3.5" /> Offline inventory {data.usingMock && <span className="text-amber-600 dark:text-amber-400">· demo data</span>}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
-            <div className="inline-flex rounded-md border p-0.5">
-              <ChannelLink href={href({channel: 'offline'})} active={channel === 'offline'}>Stratpoint <span className="font-mono text-[9px] opacity-70">offline</span></ChannelLink>
-              <ChannelLink href={href({channel: 'online'})} active={false}>BoxMe <span className="font-mono text-[9px] opacity-70">online</span></ChannelLink>
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-md border bg-background px-2.5 py-1 font-mono text-[10px] text-muted-foreground">
-              <span><span className="text-foreground">Office</span> <span className="tabular-nums">{officeTotal}</span></span>
-              <span aria-hidden className="opacity-40">·</span>
-              <span><span className="text-foreground">Event</span> <span className="tabular-nums">{eventTotal}</span></span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-            <Plus className="size-3.5" /> New product
-          </button>
-          <TransferStockButton products={transferProducts} />
-          <FreeTasteButton products={transferProducts} />
-          <AddStockButton products={intake} />
-        </div>
-      </header>
+      <InventoryHeader
+        channel="offline"
+        offlineHref={href({channel: 'offline'})}
+        onlineHref={href({channel: 'online'})}
+        meta={
+          <HeaderMeta demo={data.usingMock}>
+            <span><span className="font-medium tabular-nums text-foreground">{officeTotal.toLocaleString()}</span> in Office</span>
+            <span aria-hidden className="opacity-50">·</span>
+            <span><span className="font-medium tabular-nums text-foreground">{eventTotal.toLocaleString()}</span> at Events</span>
+          </HeaderMeta>
+        }
+        actions={
+          <>
+            <MoreActions onFreeTaste={() => setTasting(true)} onNewProduct={() => setCreating(true)} />
+            <TransferStockButton products={transferProducts} className="h-8 rounded-lg" />
+            <AddStockButton products={intake} className="h-8 rounded-lg" />
+          </>
+        }
+      />
 
-      {/* Tabs */}
-      <div className="mb-4 inline-flex gap-1 rounded-lg border bg-muted/40 p-1">
+      {/* View tabs: an underline nav, so it never reads as a second segmented
+          control competing with the channel switch above. */}
+      <nav aria-label="Inventory views" className="mb-6 flex gap-6 border-b border-border">
         <TabLink href={href({tab: 'all'})} active={tab === 'all'}>All products</TabLink>
         <TabLink href={href({tab: 'bundles'})} active={tab === 'bundles'}>Bundles</TabLink>
         <TabLink href={href({tab: 'summary'})} active={tab === 'summary'}>Summary</TabLink>
-      </div>
-
-      {/* Venue (only meaningful on All products) */}
-      {tab === 'all' && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Venue</span>
-            <select value={venue} onChange={(e) => router.push(href({venue: e.target.value}))} aria-label="Filter by venue" className="bg-transparent font-medium outline-none">
-              {data.venues.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}
-            </select>
-          </label>
-        </div>
-      )}
+      </nav>
 
       {tab === 'all' && <SamplingPanel sampling={sampling} />}
 
       {tab === 'all' ? (
-        <InventoryTable rows={data.rows} usingMock={data.usingMock} />
+        <InventoryTable
+          rows={data.rows}
+          usingMock={data.usingMock}
+          venue={{value: venue, options: data.venues.map((v) => ({key: v.key, label: v.label})), onChange: (v) => router.push(href({venue: v}), {scroll: false})}}
+        />
       ) : tab === 'bundles' ? (
         <BundleControls bundles={bundles} />
       ) : (
@@ -117,15 +107,52 @@ export function InventoryView({data, bundles, tab, channel, venue, locations, sa
       )}
 
       {creating && <NewProductDialog usingMock={data.usingMock} onClose={() => setCreating(false)} onCreated={() => {setCreating(false); router.refresh();}} />}
+      {tasting && <FreeTasteModal products={transferProducts} onClose={() => setTasting(false)} />}
     </div>
   );
 }
 
 function TabLink({href, active, children}: {href: string; active: boolean; children: React.ReactNode}) {
-  return <Link href={href} scroll={false} className={cn('rounded-md px-4 py-1.5 text-sm font-semibold transition-colors', active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{children}</Link>;
+  return (
+    <Link href={href} scroll={false} aria-current={active ? 'page' : undefined}
+      className={cn(
+        'relative -mb-px border-b-2 pb-2.5 text-sm font-medium transition-colors duration-150 focus-visible:text-foreground focus-visible:outline-none',
+        active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+      )}>
+      {children}
+    </Link>
+  );
 }
-function ChannelLink({href, active, children}: {href: string; active: boolean; children: React.ReactNode}) {
-  return <Link href={href} scroll={false} className={cn('flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors', active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>{children}</Link>;
+
+const MENU_ITEM =
+  'flex w-full cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs font-medium text-foreground outline-none select-none data-[highlighted]:bg-muted';
+
+// Hick's law: Add stock is the one primary action and Move stock the frequent
+// secondary; the rarer ones (log a free taste, create a product) live here.
+function MoreActions({onFreeTaste, onNewProduct}: {onFreeTaste: () => void; onNewProduct: () => void}) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label="More actions"
+        title="More actions"
+        className="inline-flex size-8 items-center justify-center rounded-lg border text-muted-foreground outline-none transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.97] data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
+      >
+        <MoreHorizontal className="size-4" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="end" sideOffset={6} className="z-50">
+          <Menu.Popup className="w-48 origin-[var(--transform-origin)] rounded-lg border bg-popover p-1 text-popover-foreground shadow-md outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+            <Menu.Item onClick={onFreeTaste} className={MENU_ITEM}>
+              <Dog className="size-3.5 text-muted-foreground" aria-hidden /> Log a free taste
+            </Menu.Item>
+            <Menu.Item onClick={onNewProduct} className={MENU_ITEM}>
+              <Plus className="size-3.5 text-muted-foreground" aria-hidden /> New product
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
 }
 
 function NewProductDialog({usingMock, onClose: onClosed, onCreated}: {usingMock: boolean; onClose: () => void; onCreated: () => void}) {
