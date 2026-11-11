@@ -7,7 +7,7 @@ import {uploadSource} from '@/src/goldline-upload-groups';
 import {fileListParams, fileNeighbours, fileReviewQuery, parseFileFilter} from '@/src/scan-file-nav';
 import {scanPageLabel} from '@/src/upload-batch';
 import type {FormVersion} from '@/src/goldline-extract';
-import {duplicateMatchFor} from '@/src/goldline-triage-data';
+import {duplicateMatchFor, scanScopeIds} from '@/src/goldline-triage-data';
 import {MANIFESTS} from '@/src/goldline-extract';
 import {committedSnapshotFor} from '@/src/goldline-inventory-data';
 import {UploadReview} from '@/components/analyst/upload-review';
@@ -41,14 +41,16 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   }
   const upload = await getUpload(ctx.companyId, id);
   if (!upload) notFound();
-  // A page waiting for review inside an open batch is reviewed WITH its batch: one
-  // place for the store, period, every page and the commit, whichever way you got here
-  // (a file in the batch, the Files list, a page link). Committed, failed and
-  // single-file uploads keep this page.
-  // The Per file list opts out: there a page is reviewed and committed on its own.
+  // A page of a single store's FORM batch is reviewed WITH its batch: one place for the
+  // store, period, every page and the commit, whichever way you got here (a file in the
+  // batch, the Files list, a page link). A server-ingested SCAN batch is different, it spans
+  // many pages across many stores, so it is never "one store's form": its pages are reviewed
+  // one at a time here and sorted from the triage board, never funnelled into batch-review.
+  // Committed, failed and single-file uploads keep this page too.
+  // The Per file list opts out as well: there a page is reviewed and committed on its own.
   if (!fromFile && upload.kind === 'inventory_pdf' && upload.status === 'needs_review' && upload.batch_id) {
     const batch = await getBatch(ctx.companyId, upload.batch_id);
-    if (batch?.status === 'open') redirect(`/uploads/batch/${batch.id}?page=${upload.id}`);
+    if (batch?.status === 'open' && batch.kind !== 'scan') redirect(`/uploads/batch/${batch.id}?page=${upload.id}`);
   }
   const extraction = upload.kind === 'inventory_pdf' ? await getExtraction(ctx.companyId, id) : null;
   // Same-origin proxy (streams the private file) so the browser can embed it in an
@@ -80,22 +82,42 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const source = uploadSource(upload.filename);
     const version = VERSIONS.find((v) => v === one('version')) ?? null;
     const filter = parseFileFilter({type: one('type'), status: one('status'), fv: one('fv')});
-    const query = fileReviewQuery(filter, version);
+    // Opened from a chosen store or BA (the triage board): the arrows, Back and breadcrumb all
+    // stay inside that store/BA, not the whole scan. BA wins when both are present (the BA view
+    // drills into the store view narrowed by BA). No scope = the plain Per file list.
+    const baParam = one('ba');
+    const storeParam = one('store');
+    const scope = baParam ? ({kind: 'ba', name: baParam} as const) : storeParam ? ({kind: 'store', code: storeParam} as const) : null;
+    const query = fileReviewQuery(filter, version, scope);
     const [all, read, batch, baReg] = await Promise.all([
       listUploads(ctx.companyId),
       getPageSuggestion(ctx.companyId, upload.id),
       upload.batch_id ? getBatch(ctx.companyId, upload.batch_id) : Promise.resolve(null),
       extraction ? getCurrentBas(ctx.companyId) : Promise.resolve(undefined),
     ]);
-    const files = all.filter((u) => uploadSource(u.filename) === source && (!version || (u.form_version ?? 'unknown') === version));
+    const allFiles = all.filter((u) => uploadSource(u.filename) === source && (!version || (u.form_version ?? 'unknown') === version));
+    // Narrow the ‹ › stepper to just this store's / BA's pages, grouped the same way the board is.
+    const scopedIds = scope ? await scanScopeIds(ctx.companyId, source, scope, scope.kind === 'ba' ? baReg?.names ?? [] : []) : null;
+    const files = scopedIds ? allFiles.filter((u) => scopedIds.has(u.id)) : allFiles;
     const {prev, next} = fileNeighbours(files, filter, upload.id);
+    const enc = encodeURIComponent;
+    const scanHref = `/uploads/scan/${enc(source)}`;
     const back = fileListParams(filter, version);
+    // Back / the breadcrumb's scope link return to the board the way the reviewer left it: the
+    // store (or BA) filtered view, or the Per file list with its filters when there's no scope.
+    const scopeLabel = scope ? (scope.kind === 'ba' ? scope.name : stores.find((s) => s.code === scope.code)?.name ?? `Store ${scope.code}`) : null;
+    const scopeHref = scope
+      ? `${scanHref}?${scope.kind === 'ba' ? `view=store&ba=${enc(scope.name)}` : `view=store&store=${enc(scope.code)}`}`
+      : null;
+    const backHref = scopeHref ?? `${scanHref}?${back.toString()}`;
     nav = {
       source,
       label: scanPageLabel(upload.filename).title,
       prevHref: prev ? `/uploads/${prev.id}?${query}` : null,
       nextHref: next ? `/uploads/${next.id}?${query}` : null,
-      backHref: `/uploads/scan/${encodeURIComponent(source)}?${back.toString()}`,
+      backHref,
+      // The clickable trail: the scan, then the chosen store/BA (when scoped).
+      crumbs: [{label: source, href: scope ? scanHref : backHref}, ...(scope ? [{label: scopeLabel!, href: scopeHref!}] : [])],
     };
     const head = extraction?.data;
     const v = (x: string | null | undefined) => (x && x.trim() ? x.trim() : null); // '' is "not read"

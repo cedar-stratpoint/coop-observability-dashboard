@@ -8,6 +8,32 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Fix: breadcrumb no longer loops with the scan board's Back
+
+The new per-file breadcrumb pushed a history entry when you clicked an ancestor (e.g. the store name), so the scan board's own "‹ Uploads" Back (which steps through history) then returned to the review page instead of the uploads list, a loop you could only escape via the side nav. The breadcrumb crumbs now navigate with **replace** (a breadcrumb goes up the hierarchy, it doesn't stack), so going up removes the review from the back path and "‹ Uploads" reaches the uploads list again.
+
+## 2026-11-11 — Uploads: the per-file review keeps the store / BA you filtered to
+
+Opening a page from a chosen store (or BA) on the scan triage board used to drop the context: the ‹ › navigator stepped page-by-page across the whole scan, Back landed on the default (unfiltered) board, and nothing on the page named the store. Now the per-file review **stays inside the filter you chose**:
+
+- **Breadcrumb up top.** A clickable trail replaces the bare back line: `Scan2026-10-30_171554 › SM CITY-SAN PABLO 1 › (page)`. The scan and store (or BA) segments link back to the board; the ← button does a browser-style Back. Per BA shows the BA; the plain Per file list shows just the scan.
+- **Scoped ‹ › navigator.** The arrows step through only that store's pages (all its forms) or that BA's pages, in scan order, instead of all 98. The scope travels in the page URL so the next page stays scoped too.
+- **Back restores the filter.** The triage board's store filter now lives in the URL (`?store=`), so Back (or a shared link) returns to the same filtered view instead of the default.
+
+A page opened from a card carries its store (or, when drilled into a BA, that BA) as the scope. New `scanScopeIds` reuses the cached triage grouping so the stepper matches exactly what the board showed. Touches `triage-board` (URL-driven store filter + scoped card links), `scan-file-nav` (scope in the review query), the per-file page (`app/uploads/[id]`), and `upload-review` (breadcrumb).
+
+## 2026-11-11 — Uploads: scans no longer open the whole-batch review
+
+A server-ingested scan is **one open batch** of many pages across many stores, so opening any of its pages used to funnel into `batch-review` (`/uploads/batch/[id]`), which then declared "this batch is not one store's form" and showed an overwhelming `P.X` sheet grid. That whole-batch screen was built for the old model (one batch = one store's form) and is superseded for scans by the triage board + the per-file review.
+
+Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one store's multi-page form). New additive `upload_batches.kind` column (Nichido Staging; existing scans backfilled by page count). Routing:
+
+- `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
+- Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
+- Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
+
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
+
 ## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) found that `list_crm_customers` counted Shopify test orders (repeat came out as 21 where the true figure is 20). It also had no first or last order date and no way to group by first-order month. The `crm_query` "2+ orders" identity drill-down returned 0 people, because the CRM's `customers.ordersCount` is null on every row.
