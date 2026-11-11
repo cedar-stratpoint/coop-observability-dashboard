@@ -325,6 +325,10 @@ export function UploadReview({
                   {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />}
                   <Link
                     href={c.href}
+                    // A breadcrumb goes UP the hierarchy, so it replaces this page rather than
+                    // pushing a new entry. Pushing left this review in history, so the board's
+                    // own "‹ Uploads" Back then returned here instead of the uploads list (a loop).
+                    replace
                     className={cn(
                       'truncate transition-colors hover:text-foreground',
                       i === nav.crumbs.length - 1 && nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]',
