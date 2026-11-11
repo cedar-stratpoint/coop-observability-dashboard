@@ -122,7 +122,7 @@ export function isKeyLevelError(e: unknown): boolean {
 async function createMessageWithFallback(
   params: unknown,
   opts: {timeout: number},
-): Promise<{content?: Array<{type: string; text?: string}>}> {
+): Promise<{content?: Array<{type: string; text?: string}>; stop_reason?: string | null}> {
   const creds = goldlineCreds();
   if (creds.length === 0) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   let lastErr: unknown;
@@ -132,7 +132,7 @@ async function createMessageWithFallback(
       return (await client.messages.create(
         params as Parameters<typeof client.messages.create>[0],
         {timeout: opts.timeout},
-      )) as {content?: Array<{type: string; text?: string}>};
+      )) as {content?: Array<{type: string; text?: string}>; stop_reason?: string | null};
     } catch (e) {
       lastErr = e;
       if (i < creds.length - 1 && isKeyLevelError(e)) {
@@ -151,13 +151,19 @@ function pdfDoc(pdfBase64: string) {
   return {type: 'document', source: {type: 'base64', media_type: 'application/pdf', data: pdfBase64}};
 }
 
-/** First text block of a response, JSON-parsed; throws loud on empty/invalid JSON. */
-function parseJsonContent(res: {content?: Array<{type: string; text?: string}>}): unknown {
+/** First text block of a response, JSON-parsed; throws loud on empty/invalid JSON. When the
+ *  model stopped because it hit `max_tokens`, the JSON is truncated, not malformed: that is a
+ *  distinct, non-transient failure (the page has more rows than one pass can return), so it
+ *  gets its own message and is NOT retried (a retry would truncate at the same place). */
+function parseJsonContent(res: {content?: Array<{type: string; text?: string}>; stop_reason?: string | null}): unknown {
   const text = res.content?.find((b) => b.type === 'text' && typeof b.text === 'string')?.text;
   if (!text) throw new Error('Vision returned no text content');
   try {
     return JSON.parse(text);
   } catch {
+    if (res.stop_reason === 'max_tokens') {
+      throw new Error('Vision output was truncated: the page has more rows than the extractor can return in one pass.');
+    }
     throw new Error('Vision did not return valid JSON');
   }
 }
@@ -271,9 +277,12 @@ export async function extractInventoryPage(
 
   const params = {
     model: EXTRACT_MODEL,
-    // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON. 16000 covers the
-    // largest page's one-object-per-item output with headroom.
-    max_tokens: 16000,
+    // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON, 16000 covered them but the
+    // densest V1 pages (e.g. 33/57) still ran past it and failed with truncated JSON. 32000
+    // gives those one-object-per-item outputs real headroom (well under the model's cap); a
+    // page that still exceeds it now surfaces a clear "truncated" error instead of a silent
+    // invalid-JSON retry loop (see parseJsonContent).
+    max_tokens: 32000,
     // Cached: the system prompt is the same for every page (ignored by the API if it is
     // under the model's minimum cacheable size, which is harmless).
     system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
