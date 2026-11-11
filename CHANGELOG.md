@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Uploads: the per-file review keeps the store / BA you filtered to
+
+Opening a page from a chosen store (or BA) on the scan triage board used to drop the context: the ‹ › navigator stepped page-by-page across the whole scan, Back landed on the default (unfiltered) board, and nothing on the page named the store. Now the per-file review **stays inside the filter you chose**:
+
+- **Breadcrumb up top.** A clickable trail replaces the bare back line: `Scan2026-10-30_171554 › SM CITY-SAN PABLO 1 › (page)`. The scan and store (or BA) segments link back to the board; the ← button does a browser-style Back. Per BA shows the BA; the plain Per file list shows just the scan.
+- **Scoped ‹ › navigator.** The arrows step through only that store's pages (all its forms) or that BA's pages, in scan order, instead of all 98. The scope travels in the page URL so the next page stays scoped too.
+- **Back restores the filter.** The triage board's store filter now lives in the URL (`?store=`), so Back (or a shared link) returns to the same filtered view instead of the default.
+
+A page opened from a card carries its store (or, when drilled into a BA, that BA) as the scope. New `scanScopeIds` reuses the cached triage grouping so the stepper matches exactly what the board showed. Touches `triage-board` (URL-driven store filter + scoped card links), `scan-file-nav` (scope in the review query), the per-file page (`app/uploads/[id]`), and `upload-review` (breadcrumb).
+
 ## 2026-11-11 — Uploads: scans no longer open the whole-batch review
 
 A server-ingested scan is **one open batch** of many pages across many stores, so opening any of its pages used to funnel into `batch-review` (`/uploads/batch/[id]`), which then declared "this batch is not one store's form" and showed an overwhelming `P.X` sheet grid. That whole-batch screen was built for the old model (one batch = one store's form) and is superseded for scans by the triage board + the per-file review.

@@ -5,6 +5,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import {knownStoreCodes} from './goldline-store-registry';
+import {reconcileBaNames} from './goldline-ba-reconcile';
 import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
 import type {FormVersion} from './goldline-extract';
@@ -145,6 +146,27 @@ export async function triageBoard(companyId: string, opts?: {source?: string}): 
     ['gl-triage', companyId, source ?? 'all'],
     {tags: [glTags.uploads(companyId)], revalidate: 30},
   )();
+}
+
+/** The ordered upload ids for one scope within a scan, computed the same way the board groups
+ *  so the per-file review's ‹ › arrows step through exactly that store's (or BA's) pages. Store
+ *  scope = every page of that store's forms; BA scope = every page under that canonical BA. */
+export async function scanScopeIds(
+  companyId: string,
+  source: string,
+  scope: {kind: 'store'; code: string} | {kind: 'ba'; name: string},
+  knownBas: string[] = [],
+): Promise<Set<string>> {
+  const board = await triageBoard(companyId, {source});
+  let forms = board.forms;
+  if (scope.kind === 'store') {
+    forms = forms.filter((f) => f.storeCode === scope.code);
+  } else {
+    const canon = reconcileBaNames(board.forms.map((f) => f.consultant), knownBas, {foldFirstName: true});
+    const nameOf = (c: string | null) => (c?.trim() ? canon.get(c.trim()) ?? c.trim() : 'No BA on the form');
+    forms = forms.filter((f) => nameOf(f.consultant) === scope.name);
+  }
+  return new Set(forms.flatMap((f) => f.uploadIds));
 }
 
 /** Map each batch id the rows touch to its kind ('form' | 'scan'), so a form card can link to

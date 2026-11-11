@@ -89,14 +89,21 @@ export function fileNeighbours<T extends NavFile>(files: T[], filter: FileFilter
   return {prev: before[before.length - 1]?.best ?? null, next: shown.find((g) => g.idx > idx)?.best ?? null};
 }
 
-/** The query that carries the list's filters (and the scan-level version card) into a page
- *  review, so its arrows and Back keep the same list. `from=file` marks the one-page view. */
-export function fileReviewQuery(filter: FileFilter, version: FormVersion | null): string {
+/** A store/BA scope the one-page review stays inside: its arrows, Back and breadcrumb cover
+ *  only that store's (or BA's) pages, not the whole scan. */
+export type FileScope = {kind: 'store'; code: string} | {kind: 'ba'; name: string} | null;
+
+/** The query that carries the list's filters (and the scan-level version card, plus any
+ *  store/BA scope) into a page review, so its arrows and Back keep the same list. `from=file`
+ *  marks the one-page view. */
+export function fileReviewQuery(filter: FileFilter, version: FormVersion | null, scope: FileScope = null): string {
   const qs = new URLSearchParams({from: 'file'});
   if (filter.type !== 'all') qs.set('type', filter.type);
   if (filter.status !== 'all') qs.set('status', filter.status);
   if (filter.fv !== 'all') qs.set('fv', filter.fv);
   if (version) qs.set('version', version);
+  if (scope?.kind === 'store') qs.set('store', scope.code);
+  if (scope?.kind === 'ba') qs.set('ba', scope.name);
   return qs.toString();
 }
 

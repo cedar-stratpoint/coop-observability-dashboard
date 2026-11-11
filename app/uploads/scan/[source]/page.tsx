@@ -182,7 +182,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       ) : view === 'ba' ? (
         board && <BaCards data={board} source={source} knownBas={baReg.names} canEdit={canEdit} company={companyId} />
       ) : (
-        data && <TriageBoard data={data} company={companyId} scan={source} stores={stores} canEdit={canEdit} embedded />
+        data && <TriageBoard data={data} company={companyId} scan={source} stores={stores} canEdit={canEdit} embedded baScope={ba} />
       )}
     </div>
   );
