@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Goldline reader: more token headroom for the densest pages, explicit truncation error
+
+Once the 600s window let the densest V1 pages (e.g. 33, 57) read to completion, they failed not on time but on content: the extractor emits one JSON object per row, and these pages ran past the `max_tokens: 16000` cap, so the JSON came back truncated and `JSON.parse` failed with a generic "did not return valid JSON" that the retry loop then repeated pointlessly. Raised the extract `max_tokens` to **32000** (well under the model's output cap) to give those outputs real headroom, and `parseJsonContent` now checks `stop_reason`: a parse failure with `stop_reason === 'max_tokens'` is reported as a distinct, non-transient **"output was truncated (page too dense)"** error instead of being retried. (The separate "no text content" empties stay transient/retried as before.)
+
 ## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
 
 Found on Staging after the customer retention release (#585): every staging order is a Shopify test checkout (`raw.test = true`, 58 of 58), so the owner rule (test orders count nowhere) gives no buyers while the CRM's own Orders tile says 58. The numbers were right, but Ask Coop told the owner the two CRM readings "disagree", because nothing said why.
