@@ -32,7 +32,17 @@ type EditRow = ExtractedRow;
 
 /** The one-page view's place in the scan (from the Per file list): its label, the ‹ ›
  *  neighbours in that same filtered list, and the list itself for a fresh-tab Back. */
-export type PageNav = {source: string; label: string; prevHref: string | null; nextHref: string | null; backHref: string};
+export type PageCrumb = {label: string; href: string};
+export type PageNav = {
+  source: string;
+  label: string;
+  prevHref: string | null;
+  nextHref: string | null;
+  backHref: string;
+  /** The clickable trail shown top-left: the scan, then the chosen store/BA when scoped. The
+   *  last segment links to where Back goes. */
+  crumbs: PageCrumb[];
+};
 /** Coop's suggestion for this page's header. `storeFrom` says where the store came from. */
 export type PageSuggestionView = {storeCode: string | null; storeFrom: 'page' | 'batch' | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
 
@@ -294,20 +304,38 @@ export function UploadReview({
       {nav ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                // Browser-style Back: the arrows replace history rather than add to it, so
-                // one step back is the screen that opened this review (the Per file list,
-                // with its filter and list page restored from the URL). A fresh tab with
-                // nothing to step back to opens that list instead.
-                if (window.history.length > 1) router.back();
-                else router.push(nav.backHref);
-              }}
-              className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ArrowLeft className="size-3.5 shrink-0" /> <span className="max-w-[16rem] truncate">{nav.source}</span>
-            </button>
+            {/* Clickable breadcrumb: the scan, then the chosen store/BA (when scoped). The ←
+                does a browser-style Back (the arrows replace history, so one step back is the
+                board the way it was left); each crumb is a direct link for a fresh tab or a jump
+                further up. */}
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.history.length > 1) router.back();
+                  else router.push(nav.backHref);
+                }}
+                aria-label="Back"
+                className="shrink-0 transition-colors hover:text-foreground"
+              >
+                <ArrowLeft className="size-3.5" />
+              </button>
+              {nav.crumbs.map((c, i) => (
+                <span key={`${c.href}-${i}`} className="flex min-w-0 items-center gap-1">
+                  {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />}
+                  <Link
+                    href={c.href}
+                    className={cn(
+                      'truncate transition-colors hover:text-foreground',
+                      i === nav.crumbs.length - 1 && nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]',
+                    )}
+                    title={c.label}
+                  >
+                    {c.label}
+                  </Link>
+                </span>
+              ))}
+            </nav>
             {/* Page stepper, upper right. An arrow shows only when there is a page that way;
                 the empty slot keeps the other arrow from jumping under the cursor. Switching
                 pages is instant (no slide): it is repeated many times in a session. */}

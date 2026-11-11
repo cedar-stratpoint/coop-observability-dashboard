@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import {useMemo, useState, useTransition} from 'react';
-import {useRouter} from 'next/navigation';
+import {useCallback, useMemo, useState, useTransition} from 'react';
+import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, Check, Loader2, MapPin, Pencil, Search, Store, User} from 'lucide-react';
 import {Button} from '@/components/ui/button';
@@ -328,17 +328,20 @@ function GroupStoreDialog({company, group, stores, onClose}: {company: string; g
   );
 }
 
-function FormCard({form, stores, canEdit, company}: {form: TriageForm; stores: StoreOption[]; canEdit: boolean; company: string}) {
+function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; stores: StoreOption[]; canEdit: boolean; company: string; baScope?: string | null}) {
   const s = statusOf(form);
   const needsStore = s.rank === 0;
   // A single store's form batch opens in batch-review (store, period, every page, commit all).
   // A scan's pages (one big multi-store batch) are never "one store's form", so open the first
-  // page in the per-file review instead; the scan is worked from this triage board.
+  // page in the per-file review instead; the scan is worked from this triage board. The review
+  // stays inside the filter the reviewer chose: a BA when drilled into one, else this store, so
+  // its ‹ › arrows, Back and breadcrumb cover just that store's / BA's pages.
+  const scopeQs = baScope ? `&ba=${encodeURIComponent(baScope)}` : form.storeCode ? `&store=${encodeURIComponent(form.storeCode)}` : '';
   const href =
     form.batchId && form.batchKind !== 'scan'
       ? `/uploads/batch/${form.batchId}`
       : form.uploadIds[0]
-        ? `/uploads/${form.uploadIds[0]}?from=file`
+        ? `/uploads/${form.uploadIds[0]}?from=file${scopeQs}`
         : '#';
 
   // A "needs a store" form the user can fix gets the inline picker (not a link), so the
@@ -369,6 +372,7 @@ export function TriageBoard({
   stores = [],
   canEdit = false,
   embedded = false,
+  baScope = null,
 }: {
   data: TriageResult;
   company: string;
@@ -376,6 +380,9 @@ export function TriageBoard({
   stores?: StoreOption[];
   canEdit?: boolean;
   embedded?: boolean;
+  /** The BA the board is drilled into (`?view=store&ba=…`), if any: a form opened from here
+   *  reviews inside that BA's pages, not this store's. */
+  baScope?: string | null;
 }) {
   const {needsStore, groups, singles, counts, storeCount, n} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
@@ -431,8 +438,23 @@ export function TriageBoard({
 
   // One jump-and-filter pill per section, in the same order they appear below, so the whole
   // scan's stores read at a glance and a deep-down store is one tap away instead of a long
-  // scroll. Keys: 'needs-store', a store code, or 'singles'.
-  const [storeFilter, setStoreFilter] = useState<string | null>(null);
+  // scroll. Keys: 'needs-store', a store code, or 'singles'. Kept in the URL (`?store=`) so a
+  // page opened from a card and Back'd out of lands back on the same filtered view, and a
+  // filtered board is a shareable link.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const storeFilter = searchParams.get('store');
+  const setStoreFilter = useCallback(
+    (key: string | null) => {
+      const params = new URLSearchParams(searchParams);
+      if (key) params.set('store', key);
+      else params.delete('store');
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, {scroll: false});
+    },
+    [router, pathname, searchParams],
+  );
   const sections = useMemo(() => {
     const list: Array<{key: string; label: string; count: number; tone?: Tone}> = [];
     if (needsStore.length > 0) list.push({key: 'needs-store', label: 'Needs a store', count: needsStore.length, tone: 'crit'});
@@ -529,7 +551,7 @@ export function TriageBoard({
               <GroupHeading title="Needs a store" count={needsStore.length} tone="crit" />
               <FormGrid>
                 {needsStore.map((f) => (
-                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} baScope={baScope} />
                 ))}
               </FormGrid>
             </section>
@@ -550,7 +572,7 @@ export function TriageBoard({
                 />
                 <FormGrid>
                   {g.forms.map((f) => (
-                    <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                    <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} baScope={baScope} />
                   ))}
                 </FormGrid>
               </section>
@@ -562,7 +584,7 @@ export function TriageBoard({
               {(activeFilter === 'singles' || needsStore.length > 0 || groups.length > 0) && <GroupHeading title="One-off stores" count={singles.length} />}
               <FormGrid>
                 {singles.map((f) => (
-                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} />
+                  <FormCard key={f.key} form={f} stores={stores} canEdit={canEdit} company={company} baScope={baScope} />
                 ))}
               </FormGrid>
             </section>
