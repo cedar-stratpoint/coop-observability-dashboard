@@ -8,6 +8,67 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
+
+Found on Staging after the customer retention release (#585): every staging order is a Shopify test checkout (`raw.test = true`, 58 of 58), so the owner rule (test orders count nowhere) gives no buyers while the CRM's own Orders tile says 58. The numbers were right, but Ask Coop told the owner the two CRM readings "disagree", because nothing said why.
+
+- **Ask Coop:** `list_crm_customers` adds a `test_orders` check (new `CheckCode`) whenever any captured order is a test order: "N of M captured website orders are Shopify test orders and count nowhere here … the CRM's own order total includes them". It carries the values `{test_orders, orders}`; there is no note when there are no test orders. On PROD this reads 2 of 179.
+- **Website CRM page:** the Repeat buyers footnote names the count ("58 of 58 orders here are Shopify test orders; the Orders tile counts them").
+- **Decision: explain, don't change the rule.** Test orders still count nowhere; this only names them.
+- Test: `test/crm-customer-reads.test.ts`, three cases: some test orders, all test orders (0 buyers plus the note), none (no note).
+
+## 2026-11-11 — Business Health Report: Website sales sync on Refresh, not on every reload (BHR-09)
+
+The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sales on every page load and get a manual Refresh instead. Website GMV came from the CRM Worker through `getCrmOrdersForPlan`, cached for 60 seconds, so the Worker was paged (500 orders a page) up to once a minute while people used the page.
+
+- **Decision:** the report's Website read (`getCrmOrdersForPlan`, `src/crm-data.ts`) is now cached with no time limit (`revalidate: false`) under its own tag `plan-gmv-web` (`PLAN_WEB_TAG`, `src/crm-cache.ts`), and carries `syncedAt`, the time the Worker was actually read. A reload serves the same numbers and the same time; nothing re-reads the Worker until someone presses Refresh.
+- **Refresh:** a `RefreshControl` in the report header calls the new server action `syncHealthReport()` (`src/plan-actions.ts`), gated like the other report actions (`planEditor`: Coop Admin or Zoomy admin). It `updateTag`s `plan-gmv-web`, the POS orders and events tags and `digest-archive`, so the click shows every channel as of now (not stale-while-revalidate). View-only users see the time without the button. The PH time and what Refresh does sit in an info tooltip (`PLAN_HELP.sync`).
+- **A failure is not cached:** the read throws inside the cache on a failed page, and `unstable_cache` only stores results, so a CRM outage shows "Not updated: no answer" with "waiting" cells and the next load tries again, instead of pinning the gap until someone presses Refresh.
+- **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. **Close month reads the Worker fresh** (`getGmvActuals(..., {fresh: true})`), so a frozen snapshot never holds Website numbers older than the close. No snapshot table, cron or direct Shopify Admin call (YAGNI).
+- Plan: `knowledge/tasks/2026-11-11-bhr-manual-sync.md`; story: `BHR-09-manual-sync.md`.
+
+## 2026-11-11 — Business Health Report: GMV card charts drop the solid actual line (BHR-08 follow-up)
+
+- **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
+- Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
+## 2026-11-11 — Batch review: modernised the Form pages chips
+
+Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
+
+## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
+
+Same fix as the scan board's breadcrumb, applied to the batch-review page: its "← Scan…" control used `window.history.back()`, so on the filter-heavy scan board it retraced the view tabs / version cards / store chips you had clicked. It is a breadcrumb to the scan, so it now links straight to the scan board.
+
+## 2026-11-11 — Fix: "‹ Uploads" goes to the uploads list, not back through filters
+
+The scan board (and the "All forms" inbox) "‹ Uploads" breadcrumb stepped back through history (`router.back()`), so on these filter-heavy boards it just walked back through every view tab / version card / store chip / BA filter you had clicked instead of leaving for the uploads list. It is a breadcrumb to a fixed place now: a direct link to `/uploads`. (Trade-off: it no longer restores a filter/scroll on the uploads list you came from; reaching Uploads reliably matters more.)
+
+## 2026-11-11 — Fix: breadcrumb no longer loops with the scan board's Back
+
+The new per-file breadcrumb pushed a history entry when you clicked an ancestor (e.g. the store name), so the scan board's own "‹ Uploads" Back (which steps through history) then returned to the review page instead of the uploads list, a loop you could only escape via the side nav. The breadcrumb crumbs now navigate with **replace** (a breadcrumb goes up the hierarchy, it doesn't stack), so going up removes the review from the back path and "‹ Uploads" reaches the uploads list again.
+
+## 2026-11-11 — Uploads: the per-file review keeps the store / BA you filtered to
+
+Opening a page from a chosen store (or BA) on the scan triage board used to drop the context: the ‹ › navigator stepped page-by-page across the whole scan, Back landed on the default (unfiltered) board, and nothing on the page named the store. Now the per-file review **stays inside the filter you chose**:
+
+- **Breadcrumb up top.** A clickable trail replaces the bare back line: `Scan2026-10-30_171554 › SM CITY-SAN PABLO 1 › (page)`. The scan and store (or BA) segments link back to the board; the ← button does a browser-style Back. Per BA shows the BA; the plain Per file list shows just the scan.
+- **Scoped ‹ › navigator.** The arrows step through only that store's pages (all its forms) or that BA's pages, in scan order, instead of all 98. The scope travels in the page URL so the next page stays scoped too.
+- **Back restores the filter.** The triage board's store filter now lives in the URL (`?store=`), so Back (or a shared link) returns to the same filtered view instead of the default.
+
+A page opened from a card carries its store (or, when drilled into a BA, that BA) as the scope. New `scanScopeIds` reuses the cached triage grouping so the stepper matches exactly what the board showed. Touches `triage-board` (URL-driven store filter + scoped card links), `scan-file-nav` (scope in the review query), the per-file page (`app/uploads/[id]`), and `upload-review` (breadcrumb).
+
+## 2026-11-11 — Uploads: scans no longer open the whole-batch review
+
+A server-ingested scan is **one open batch** of many pages across many stores, so opening any of its pages used to funnel into `batch-review` (`/uploads/batch/[id]`), which then declared "this batch is not one store's form" and showed an overwhelming `P.X` sheet grid. That whole-batch screen was built for the old model (one batch = one store's form) and is superseded for scans by the triage board + the per-file review.
+
+Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one store's multi-page form). New additive `upload_batches.kind` column (Nichido Staging; existing scans backfilled by page count). Routing:
+
+- `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
+- Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
+- Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
+
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
+
 ## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) found that `list_crm_customers` counted Shopify test orders (repeat came out as 21 where the true figure is 20). It also had no first or last order date and no way to group by first-order month. The `crm_query` "2+ orders" identity drill-down returned 0 people, because the CRM's `customers.ordersCount` is null on every row.
