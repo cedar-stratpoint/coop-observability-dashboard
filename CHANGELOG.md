@@ -8,6 +8,20 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Business Health Report: Website sales sync on Refresh, not on every reload (BHR-09)
+
+The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sales on every page load and get a manual Refresh instead. Website GMV came from the CRM Worker through `getCrmOrdersForPlan`, cached for 60 seconds, so the Worker was paged (500 orders a page) up to once a minute while people used the page.
+
+- **Decision:** the report's Website read (`getCrmOrdersForPlan`, `src/crm-data.ts`) is now cached with no time limit (`revalidate: false`) under its own tag `plan-gmv-web` (`PLAN_WEB_TAG`, `src/crm-cache.ts`), and carries `syncedAt`, the time the Worker was actually read. A reload serves the same numbers and the same time; nothing re-reads the Worker until someone presses Refresh.
+- **Refresh:** a `RefreshControl` in the report header calls the new server action `syncHealthReport()` (`src/plan-actions.ts`), gated like the other report actions (`planEditor`: Coop Admin or Zoomy admin). It `updateTag`s `plan-gmv-web`, the POS orders and events tags and `digest-archive`, so the click shows every channel as of now (not stale-while-revalidate). View-only users see the time without the button. The PH time and what Refresh does sit in an info tooltip (`PLAN_HELP.sync`).
+- **A failure is not cached:** the read throws inside the cache on a failed page, and `unstable_cache` only stores results, so a CRM outage shows "Not updated: no answer" with "waiting" cells and the next load tries again, instead of pinning the gap until someone presses Refresh.
+- **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. **Close month reads the Worker fresh** (`getGmvActuals(..., {fresh: true})`), so a frozen snapshot never holds Website numbers older than the close. No snapshot table, cron or direct Shopify Admin call (YAGNI).
+- Plan: `knowledge/tasks/2026-11-11-bhr-manual-sync.md`; story: `BHR-09-manual-sync.md`.
+
+## 2026-11-11 — Business Health Report: GMV card charts drop the solid actual line (BHR-08 follow-up)
+
+- **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
+- Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
 ## 2026-11-11 — Batch review: modernised the Form pages chips
 
 Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
@@ -44,9 +58,7 @@ Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one
 - Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
 - Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
 
-`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
-
-## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) found that `list_crm_customers` counted Shopify test orders (repeat came out as 21 where the true figure is 20). It also had no first or last order date and no way to group by first-order month. The `crm_query` "2+ orders" identity drill-down returned 0 people, because the CRM's `customers.ordersCount` is null on every row.
 

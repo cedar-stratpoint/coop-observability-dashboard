@@ -1,7 +1,7 @@
 import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
-import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
+import {CRM_CACHE_REVALIDATE, CRM_TAG, PLAN_WEB_TAG} from './crm-cache';
 import {envelope, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder, type CrmBirthdayVoucherSafe} from './crm-project';
 import {collectOrderPages, crmCoverage} from './plan-gmv';
 import type {RemoteSpinLead} from './spin-leads-sync';
@@ -100,33 +100,45 @@ const ordersCached = unstable_cache(async (): Promise<CrmOrder[] | null> => {
   }
 }, ['crm-orders'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
+/** The Business Health Report's Website orders and when the Worker was read for them (ISO time). */
+export type PlanWebOrders = {orders: CrmOrder[]; truncated: boolean; syncedAt: string};
+
 /**
  * The Business Health Report's Website read. Unlike getCrmOrders it never turns a failure into "no orders": null means the CRM is not
  * configured or any page failed (a gap on the report). It pages the Worker's filtered /api/orders from `fromDay` (the first plan month),
  * so `truncated` is only true when the page ceiling was hit. An old Worker that ignores the filter (no `next_cursor`) returns its newest
  * 1000, so that case keeps the cap rule with the /api/metrics order count.
+ *
+ * Synced on demand (BHR-09): the result is kept with no time limit until the report's Refresh expires PLAN_WEB_TAG, so a page reload
+ * does not re-read the Worker. A failed read is NOT cached (it throws inside the cache, and unstable_cache stores only results), so the
+ * next load tries again instead of pinning a gap until someone presses Refresh.
  */
-export const getCrmOrdersForPlan = cache((fromDay: string): Promise<{orders: CrmOrder[]; truncated: boolean} | null> =>
-  crmConfigured() ? ordersForPlanCached(fromDay) : Promise.resolve(null),
-);
-
-const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<{orders: CrmOrder[]; truncated: boolean} | null> => {
+export const getCrmOrdersForPlan = cache(async (fromDay: string, opts?: {fresh?: boolean}): Promise<PlanWebOrders | null> => {
+  if (!crmConfigured()) return null;
   try {
-    const fields = 'shopifyOrderId,createdAt,financialStatus,totalPrice';
-    const read = await collectOrderPages<CrmOrder>(async (cursor) => {
-      // lines=1: each order's line price and quantity, for Shopify gross sales (src/plan-gmv.ts orderGross).
-      const qs = `from=${encodeURIComponent(fromDay)}&limit=500&fields=${fields}&lines=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-      const body = await crmGet<{next_cursor?: string | null}>(`/api/orders?${qs}`);
-      return {orders: (envelope(body, 'orders') ?? []).map(projectOrder), nextCursor: body.next_cursor};
-    });
-    if (!read.legacy) return {orders: read.orders, truncated: !read.complete};
-    const metrics = await getCrmMetrics(); // soft: null just means we rely on the cap alone
-    return {orders: read.orders, truncated: crmCoverage(read.orders.length, metrics?.orders ?? null).truncated};
+    // fresh: Close month reads the Worker directly, so a frozen snapshot never holds numbers older than the close.
+    return await (opts?.fresh ? readOrdersForPlan(fromDay) : ordersForPlanCached(fromDay));
   } catch (err) {
     console.warn(`CRM orders (plan) read failed: ${(err as Error).message}`);
     return null;
   }
-}, ['crm-orders-plan'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
+});
+
+async function readOrdersForPlan(fromDay: string): Promise<PlanWebOrders> {
+  const fields = 'shopifyOrderId,createdAt,financialStatus,totalPrice';
+  const read = await collectOrderPages<CrmOrder>(async (cursor) => {
+    // lines=1: each order's line price and quantity, for Shopify gross sales (src/plan-gmv.ts orderGross).
+    const qs = `from=${encodeURIComponent(fromDay)}&limit=500&fields=${fields}&lines=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const body = await crmGet<{next_cursor?: string | null}>(`/api/orders?${qs}`);
+    return {orders: (envelope(body, 'orders') ?? []).map(projectOrder), nextCursor: body.next_cursor};
+  });
+  const syncedAt = new Date().toISOString();
+  if (!read.legacy) return {orders: read.orders, truncated: !read.complete, syncedAt};
+  const metrics = await getCrmMetrics(); // soft: null just means we rely on the cap alone
+  return {orders: read.orders, truncated: crmCoverage(read.orders.length, metrics?.orders ?? null).truncated, syncedAt};
+}
+
+const ordersForPlanCached = unstable_cache(readOrdersForPlan, ['crm-orders-plan-synced'], {revalidate: false, tags: [PLAN_WEB_TAG]});
 
 export const getCrmCheckouts = cache((): Promise<CrmCheckout[] | null> =>
   crmConfigured() ? checkoutsCached() : Promise.resolve(null),
