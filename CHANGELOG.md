@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Fix: breadcrumb no longer loops with the scan board's Back
+
+The new per-file breadcrumb pushed a history entry when you clicked an ancestor (e.g. the store name), so the scan board's own "‹ Uploads" Back (which steps through history) then returned to the review page instead of the uploads list, a loop you could only escape via the side nav. The breadcrumb crumbs now navigate with **replace** (a breadcrumb goes up the hierarchy, it doesn't stack), so going up removes the review from the back path and "‹ Uploads" reaches the uploads list again.
+
 ## 2026-11-11 — Uploads: the per-file review keeps the store / BA you filtered to
 
 Opening a page from a chosen store (or BA) on the scan triage board used to drop the context: the ‹ › navigator stepped page-by-page across the whole scan, Back landed on the default (unfiltered) board, and nothing on the page named the store. Now the per-file review **stays inside the filter you chose**:
