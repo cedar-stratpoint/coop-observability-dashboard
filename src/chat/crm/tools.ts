@@ -219,7 +219,7 @@ export function fitBytes(rows: MetricRow[]): {rows: MetricRow[]; cut: number} {
   return {rows: out, cut: rows.length - out.length};
 }
 
-export function finish(metric: ResultMetricId, dimension: string, columns: ResultColumn[], rows: MetricRow[], o: {range: Range; measure: string; measures: MeasureDecl[]; notes: Check[]; days: (string | null)[]; chart?: ResultMeta['chart_view']}): MetricResult {
+export function finish(metric: ResultMetricId, dimension: string, columns: ResultColumn[], rows: MetricRow[], o: {range: Range; measure: string; measures: MeasureDecl[]; notes: Check[]; days: (string | null)[]; chart?: ResultMeta['chart_view']; headline?: string}): MetricResult {
   const fitted = fitBytes(rows.slice(0, CRM_LIMITS.maxRowsPerResult));
   const checks: Check[] = [info(BASIS_NOTE), ...o.notes, info(UNTRUSTED_NOTE)];
   if (fitted.cut > 0) checks.push({code: 'partial_coverage', status: 'warn', text: `${fitted.cut} rows were left out to keep the answer small. Ask for fewer rows (limit) or a narrower filter.`});
@@ -247,6 +247,7 @@ export function finish(metric: ResultMetricId, dimension: string, columns: Resul
       checks,
       reliable: true,
       ...(o.chart ? {chart_view: o.chart} : {}),
+      ...(o.headline ? {headline: o.headline} : {}),
     },
   };
 }
@@ -422,6 +423,21 @@ const COHORT_MEASURES: MeasureDecl[] = [
   {key: 'rate_pct', label: 'Repeat rate', kind: 'derived', unit: 'percent', method: 'repeat / buyers x 100, one decimal (the owner\'s repeat buyer rate, per cohort).'},
 ];
 const NO_ORDERS = 'no orders';
+const AUDIENCE_PAGE = 100;
+const TARGET_LINE = `Target ${REPEAT_TARGET_PCT}%, a plan target, not an actual.`;
+/** The answer line the block shows under its title, written by code so it never depends on the model's prose (RET-02). */
+export function repeatHeadline(orderCounts: readonly number[]): string {
+  const {repeat, buyers, ratePct} = repeatRate(orderCounts);
+  return buyers === 0 ? `No buyers yet, so there is no repeat rate. ${TARGET_LINE}` : `Repeat buyer rate: ${repeat} of ${buyers} buyers (${(ratePct ?? 0).toFixed(1)}%). ${TARGET_LINE}`;
+}
+/** RET-06: the best rates among cohorts big enough for a rate (top 3), and how many were too small. Never names an event. */
+export function cohortHeadline(cohorts: readonly {group: string; buyers: number; repeat: number; ratePct: number | null; small: boolean}[]): string {
+  const big = cohorts.filter((c) => !c.small).sort((a, b) => (b.ratePct ?? 0) - (a.ratePct ?? 0) || b.buyers - a.buyers || a.group.localeCompare(b.group)).slice(0, 3);
+  const small = cohorts.filter((c) => c.small).length;
+  const tail = small ? ` ${small} smaller cohort${small > 1 ? 's are' : ' is'} too small for a rate.` : '';
+  if (!big.length) return `No cohort has ${SMALL_COHORT} or more buyers yet: too few for a rate. ${TARGET_LINE}`;
+  return `Best repeat rate among cohorts of ${SMALL_COHORT}+ buyers: ${big.map((c) => `${safeText(c.group, 60) ?? c.group} ${c.repeat} of ${c.buyers} (${(c.ratePct ?? 0).toFixed(1)}%)`).join(', ')}. ${TARGET_LINE}${tail}`;
+}
 /** The owner's repeat buyer rate (2026-11-09), computed in code (src/crm-compute.ts repeatRate) and never by the model. REPEAT_TARGET_PCT is a target, never an actual. */
 export function repeatRateCheck(orderCounts: readonly number[]): Check {
   const {repeat, buyers, ratePct} = repeatRate(orderCounts);
@@ -473,7 +489,8 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   if (!membership) notes.push({code: 'partial_coverage', status: 'warn', text: `The membership settings could not be read, so the default programme start (${MEMBERSHIP_FALLBACK.programStart}) was used.`});
 
   if (req.group_by === 'none') {
-    const {rows, note} = pageOf(sorted, req);
+    // an outreach audience is listed whole (staging 2026-11-11: the model asked for 25 and the owner got 25 of 30)
+    const {rows, note} = pageOf(sorted, req.audience === 'all' ? req : {...req, limit: Math.max(req.limit, AUDIENCE_PAGE)});
     // the contact tally is read only for an outreach audience (two more GETs: checkouts, birthday vouchers; plus the manual log, not a CRM read)
     const t = req.audience === 'all' ? null : await crmContactTally(get, orders, manual);
     if (t) notes.push(...t.notes);
@@ -528,7 +545,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
     const columns = [col('group', GROUP_LABEL.first_order_code, 'text', 'category'), col('buyers', 'Buyers', 'count', 'measure'), col('repeat', 'Repeat buyers', 'count', 'measure'), col('rate_pct', 'Repeat rate', 'percent', 'measure')];
     const out: MetricRow[] = cohorts.map((c) => ({group: safeText(c.group, 60) ?? c.group, buyers: c.buyers, repeat: c.repeat, rate_pct: c.ratePct}));
     const chart = {key: 'group', omit: small, note: small.length ? `${small.length} cohorts under ${SMALL_COHORT} buyers are in the table, not the chart: too few buyers for a rate.` : null};
-    return finish('crm_customers', 'first_order_code', columns, out, {range, measure: 'rate_pct', measures: COHORT_MEASURES, notes, days, chart});
+    return finish('crm_customers', 'first_order_code', columns, out, {range, measure: 'rate_pct', measures: COHORT_MEASURES, notes, days, chart, headline: cohortHeadline(cohorts)});
   }
 
   const g = req.group_by;
@@ -558,7 +575,8 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const none = g === 'orders_bucket' ? '0' : NO_ORDERS;
   const left = acc.get(none)?.customers ?? 0;
   const chart = g === 'orders_bucket' || g === 'first_order_month' ? {key: 'group', omit: [none], note: left > 0 ? `Customers with no orders (${left}) are in the table, not the chart: they are not buyers.` : null} : undefined;
-  return finish('crm_customers', g, columns, out, {range, measure: 'customers', measures: CUSTOMER_GROUP_MEASURES, notes, days, chart});
+  const headline = g === 'orders_bucket' && req.min_orders < 2 ? repeatHeadline(matched.map((c) => c.orderCount)) : undefined;
+  return finish('crm_customers', g, columns, out, {range, measure: 'customers', measures: CUSTOMER_GROUP_MEASURES, notes, days, chart, headline});
 }
 
 /* ---------- list_crm_checkouts ---------- */

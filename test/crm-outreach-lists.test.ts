@@ -244,3 +244,11 @@ describe('S5.3 Ask Coop: manual_contacts and times_contacted', () => {
     expect(r.columns.map((c) => c.key)).not.toContain('manual_contacts');
   });
 });
+
+describe('An audience list is never cut short by a small page (staging test 2026-11-11: 25 of 30)', () => {
+  it('30 lapsed one-time buyers, limit 10: all 30 are listed', async () => {
+    const ids = Array.from({length: 30}, (_, i) => `l${String(i).padStart(2, '0')}`);
+    const bodies = {...BODIES, customers: {customers: ids.map((c) => cust(c))}, orders: {orders: ids.map((c) => ord(c, '2026-08-01T10:00:00+08:00'))}};
+    expect((await run({audience: 'repeat_promo', limit: 10}, bodies)).r.rows).toHaveLength(30);
+  });
+});
