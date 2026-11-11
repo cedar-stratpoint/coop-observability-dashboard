@@ -129,10 +129,14 @@ async function createMessageWithFallback(
   for (let i = 0; i < creds.length; i++) {
     const client = clientFor(creds[i]);
     try {
-      return (await client.messages.create(
-        params as Parameters<typeof client.messages.create>[0],
-        {timeout: opts.timeout},
-      )) as {content?: Array<{type: string; text?: string}>; stop_reason?: string | null};
+      // Stream (then collect the final message) rather than a plain create: with the extract's
+      // raised max_tokens, Anthropic rejects a NON-streaming request outright ("Streaming is
+      // required for operations that may take longer than 10 minutes"). Streaming lifts that cap
+      // and the final message is identical in shape (content + stop_reason). The route's 600s
+      // maxDuration still bounds the whole read.
+      return (await client.messages
+        .stream(params as Parameters<typeof client.messages.stream>[0], {timeout: opts.timeout})
+        .finalMessage()) as {content?: Array<{type: string; text?: string}>; stop_reason?: string | null};
     } catch (e) {
       lastErr = e;
       if (i < creds.length - 1 && isKeyLevelError(e)) {

@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Goldline reader: stream the extract call (removes the 10-minute non-streaming limit)
+
+Raising `max_tokens` to 32000 was enough that Anthropic now rejects the extract request up front with "Streaming is required for operations that may take longer than 10 minutes": a non-streaming `messages.create` is not allowed once `max_tokens` is high enough to potentially exceed ten minutes, and the densest pages were failing instantly with that, read_attempts 0. Switched `createMessageWithFallback` from `client.messages.create(...)` to `client.messages.stream(...).finalMessage()`. The final message is identical in shape (content + stop_reason), so the truncation detection and the fallback-key path are unchanged; the route's 600s maxDuration still bounds the whole read. This is what actually lets pages 33 and 57 finish.
+
 ## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
 
 A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
