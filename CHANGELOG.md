@@ -8,6 +8,7 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+
 ## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
 
 A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
@@ -48,6 +49,7 @@ The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sale
 
 - **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
 - Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
+
 ## 2026-11-11 — Batch review: modernised the Form pages chips
 
 Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
@@ -83,6 +85,8 @@ Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one
 - `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
 - Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
 - Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
+
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
 
 `batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
