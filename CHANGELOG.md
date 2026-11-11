@@ -9,6 +9,7 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
 
+
 ## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
 
 A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
@@ -42,6 +43,8 @@ The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sale
 - **Decision:** the report's Website read (`getCrmOrdersForPlan`, `src/crm-data.ts`) is now cached with no time limit (`revalidate: false`) under its own tag `plan-gmv-web` (`PLAN_WEB_TAG`, `src/crm-cache.ts`), and carries `syncedAt`, the time the Worker was actually read. A reload serves the same numbers and the same time; nothing re-reads the Worker until someone presses Refresh.
 - **Refresh:** a `RefreshControl` in the report header calls the new server action `syncHealthReport()` (`src/plan-actions.ts`), gated like the other report actions (`planEditor`: Coop Admin or Zoomy admin). It `updateTag`s `plan-gmv-web`, the POS orders and events tags and `digest-archive`, so the click shows every channel as of now (not stale-while-revalidate). View-only users see the time without the button. The PH time and what Refresh does sit in an info tooltip (`PLAN_HELP.sync`).
 - **A failure is not cached:** the read throws inside the cache on a failed page, and `unstable_cache` only stores results, so a CRM outage shows "Not updated: no answer" with "waiting" cells and the next load tries again, instead of pinning the gap until someone presses Refresh.
+- **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. Close month takes its GMV snapshot from the same cached Website read the page shows, so press Refresh before closing to include orders since the last sync. No snapshot table, cron or direct Shopify Admin call (YAGNI).
+
 - **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. **Close month reads the Worker fresh** (`getGmvActuals(..., {fresh: true})`), so a frozen snapshot never holds Website numbers older than the close. No snapshot table, cron or direct Shopify Admin call (YAGNI).
 - Plan: `knowledge/tasks/2026-11-11-bhr-manual-sync.md`; story: `BHR-09-manual-sync.md`.
 
@@ -85,6 +88,8 @@ Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one
 - `/uploads/[id]` only redirects into `batch-review` when the page's batch is a **`form`** batch. A **`scan`** page stays in the **per-file review** (one page at a time, store suggestion, prev/next stepper, back to the scan board).
 - Triage **per-store** cards link a `form` batch to `batch-review` and a `scan` form to the per-file review.
 - Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
+
+`batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 `batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
 
