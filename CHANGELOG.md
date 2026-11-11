@@ -22,6 +22,9 @@ The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sale
 
 - **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
 - Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
+## 2026-11-11 — Batch review: modernised the Form pages chips
+
+Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
 
 ## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
 
