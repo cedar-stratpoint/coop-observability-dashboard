@@ -17,4 +17,5 @@ export const PLAN_HELP = {
   openingCash: (canEdit: boolean, typed: boolean) => (!typed ? (canEdit ? 'Type your bank balance at Aug 1: cash waits for it.' : 'Not typed yet: cash waits for it.') : 'Check this against your bank.'),
   closeMonth: (requiredCount: number) => `Needs all ${requiredCount} lines and complete GMV.`,
   notTyped: 'Not typed yet.',
+  sync: (syncedAtPh: string | null) => `${syncedAtPh ? `Website orders last read from the CRM at ${syncedAtPh}, Philippine time.` : 'Website orders could not be read from the CRM, so Website cells wait.'} They are read again only when an admin presses Refresh, not on every page load. Refresh also re-reads Events and Marketplace. Typed lines and closes always show at once.`,
 } as const;

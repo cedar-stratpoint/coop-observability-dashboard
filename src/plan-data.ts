@@ -75,7 +75,12 @@ export const noGmvActuals = (months: readonly string[]): GmvActuals => {
 };
 
 export async function getGmvActuals(months: readonly string[], nowKey: string): Promise<GmvActuals> {
-  if (usingPlanMock() || months.length === 0) return noGmvActuals(months);
+  return (await getGmvActualsSynced(months, nowKey)).gmv;
+}
+
+/** getGmvActuals plus when the Website orders were last read from the CRM Worker (BHR-09: they sync on Refresh). Null = not read. */
+export async function getGmvActualsSynced(months: readonly string[], nowKey: string): Promise<{gmv: GmvActuals; webSyncedAt: string | null}> {
+  if (usingPlanMock() || months.length === 0) return {gmv: noGmvActuals(months), webSyncedAt: null};
   const today = phDay(Date.now());
   const fromDay = `${months[0].slice(0, 7)}-01`;
   const [orders, events, digests, daily, crm] = await Promise.all([
@@ -95,7 +100,7 @@ export async function getGmvActuals(months: readonly string[], nowKey: string): 
   const gmv_events = eventsCells(months, nowKey, pos);
   const gmv_website = websiteCells(months, nowKey, crm);
   const gmv_marketplace = marketplaceCells(months, nowKey, buckets);
-  return {gmv_events, gmv_website, gmv_marketplace, gmv_total: totalCells([gmv_events, gmv_website, gmv_marketplace])};
+  return {gmv: {gmv_events, gmv_website, gmv_marketplace, gmv_total: totalCells([gmv_events, gmv_website, gmv_marketplace])}, webSyncedAt: crm?.syncedAt ?? null};
 }
 
 // ---- BHR-03: typed monthly lines ------------------------------------------------------------------------------------------------
