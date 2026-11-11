@@ -7,6 +7,9 @@ import {
   WRITE_CALL_EXCEPTIONS,
   buildClosure,
   extractImports,
+  LEADS_SEAM,
+  SKU_SEAM,
+  CONTACTS_LOG_SEAM,
   forbiddenInClosure,
   impureInClosure,
   importersOf,
@@ -36,9 +39,21 @@ describe('real tree', () => {
   });
 
   it('the only legacy exception is the old digest import, and it is not traversed (Train 4 removed the CRM one)', () => {
-    expect([...closure.legacyHits]).toEqual(['src/data.ts']);
+    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/contacts-log-seam.ts', 'app/api/chat/leads-seam.ts', 'app/api/chat/sku-seam.ts', 'src/data.ts']);
     expect(closure.files.has('src/data.ts')).toBe(false);
     expect(closure.files.has('src/crm-data.ts')).toBe(false);
+  });
+
+  it('the leads seam reaches only the loaders the leads page itself uses', () => {
+    expect(extractImports(files[LEADS_SEAM] ?? '').sort()).toEqual(['@/src/lazada-data', '@/src/lazada-export', '@/src/lead-order-match', '@/src/pos-prize-data', '@/src/pos-sales', '@/src/spin-leads']); // type-only imports are not counted
+  });
+
+  it('the contact-log seam reaches only the Customers tab\'s read of the log, never its actions (RET-05)', () => {
+    expect(extractImports(files[CONTACTS_LOG_SEAM] ?? '').sort()).toEqual(['@/src/customer-contacts-data']);
+  });
+
+  it('the SKU seam reaches only the two loaders behind the comparison (compare_sku)', () => {
+    expect(extractImports(files[SKU_SEAM] ?? '').sort()).toEqual(['@/src/sku-compare-data']);
   });
 
   it('no chat module or the chat route mentions src/crm-data.ts in any import form', () => {

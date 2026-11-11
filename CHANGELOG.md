@@ -10,6 +10,131 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## v1.23.0 (2026-11-11): Website customers in Ask Coop and on the Website CRM page, plus Business Health Report Refresh sync (prod release)
+Ships, on top of `main` (staging and main have diverged by ~550 commits):
+- the customer retention and outreach work (#584 → staging #585), its two follow-up fixes (#595 → #596, #599 → #600);
+- the Business Health Report changes (#592 + #593 → staging #594).
+
+Nothing else from staging rides along: no uploads, review or goldline changes.
+
+**Decision: port the Ask Coop tools the customer work builds on, as-is from staging.** `crm_query`, `shopify_query`, `compare_sku` and the contacts find / overlap / draft tools were on staging but never on `main`. They are taken file for file from staging at `57f1a71`, the customer work's base (one `chore(release): port …` commit). All of them read existing PROD tables or the PROD CRM Worker and fail soft:
+- `compare_sku` logs and returns nothing if `product_channel_alias` is absent;
+- the spin-lead read is `select('*')`, so a missing `consent_at` reads as empty.
+
+What the owner gets:
+- **Ask Coop:**
+  - customers acquired per first-order month;
+  - orders per customer;
+  - the repeat buyer rate vs the 25% target, on a code-written line under the chart;
+  - repeat promo and win-back lists with times contacted (listed whole);
+  - cohorts by first-order discount code.
+- **Website CRM page:** a Repeat buyers section, a Customers tab with orders, first and last order, emails sent, manual contacts and consent, and a "Log contact" dialog.
+- **Business Health Report:** the GMV cards show bars plus the target line only; Website / Shopify sales sync on **Refresh** (admins), not on every reload.
+
+PROD steps:
+- **(1) Supabase PROD (co-worker's project):** apply `supabase/customer_contacts.sql`. Until then the Manual column reads "unavailable" and "Log contact" says the log is not set up. Nothing breaks.
+- **(2) CRM Worker PROD (optional, speed only):** `npx wrangler d1 migrations apply zoomy-crm --remote --env production` (index `0012`).
+- **(3)** No env changes.
+
+Check after deploy: on `/customers/website-crm`, about 193 customers, a repeat rate of about 14.5% vs the 25% target, and Repeat promo / Win-back counts. In Ask Coop, ask "What is our repeat buyer rate vs the 25% target?": the line under the chart states the rate. On `/health-report`, Refresh updates the "Updated … ago" time.
+
+## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
+
+A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
+- "What is our repeat rate vs the 25% target?" drew the chart but **never said "14.5%"**; the rate sat only in the collapsed Notes.
+- "Who should get a repeat promo?" listed **25 of 30** and asked to load the rest.
+
+- **Decision: the headline is code, not prose.** A result can now carry `meta.headline`, which every block bound from it shows under its title (`bind.ts` → `BlockBase.headline` → `chat-blocks.tsx`). So the answer line no longer depends on what the model writes.
+  - `list_crm_customers` by `orders_bucket` sets "Repeat buyer rate: 21 of 145 buyers (14.5%). Target 25%, a plan target, not an actual." (or "No buyers yet…").
+  - By `first_order_code` it names the best 3 rates among cohorts of 5+ buyers, plus how many cohorts were too small. It never names an event.
+- **An outreach audience (repeat_promo / win_back) is listed whole** up to 100 rows, whatever page size the model asked for.
+- Tests: headline cases in `test/crm-customer-reads.test.ts` and `test/crm-code-cohorts.test.ts`; block carry in `test/chat-bind.test.ts`; a 30-person audience at limit 10 in `test/crm-outreach-lists.test.ts`.
+- Checked in the browser on PROD data, light and dark: the rate line shows on the chart and the table, the repeat promo list has all 30, and the cohort line reads "no code 8 of 14 (57.1%), ZOOMY300 5 of 21 (23.8%), …".
+
+## 2026-11-11 — Website customers: test orders are named, so "No buyers yet" next to 58 orders is explained
+
+Found on Staging after the customer retention release (#585): every staging order is a Shopify test checkout (`raw.test = true`, 58 of 58), so the owner rule (test orders count nowhere) gives no buyers while the CRM's own Orders tile says 58. The numbers were right, but Ask Coop told the owner the two CRM readings "disagree", because nothing said why.
+
+- **Ask Coop:** `list_crm_customers` adds a `test_orders` check (new `CheckCode`) whenever any captured order is a test order: "N of M captured website orders are Shopify test orders and count nowhere here … the CRM's own order total includes them". It carries the values `{test_orders, orders}`; there is no note when there are no test orders. On PROD this reads 2 of 179.
+- **Website CRM page:** the Repeat buyers footnote names the count ("58 of 58 orders here are Shopify test orders; the Orders tile counts them").
+- **Decision: explain, don't change the rule.** Test orders still count nowhere; this only names them.
+- Test: `test/crm-customer-reads.test.ts`, three cases: some test orders, all test orders (0 buyers plus the note), none (no note).
+
+## 2026-11-11 — Business Health Report: Website sales sync on Refresh, not on every reload (BHR-09)
+
+The owner asked (2026-11-11) that the report stop re-fetching Shopify gross sales on every page load and get a manual Refresh instead. Website GMV came from the CRM Worker through `getCrmOrdersForPlan`, cached for 60 seconds, so the Worker was paged (500 orders a page) up to once a minute while people used the page.
+
+- **Decision:** the report's Website read (`getCrmOrdersForPlan`, `src/crm-data.ts`) is now cached with no time limit (`revalidate: false`) under its own tag `plan-gmv-web` (`PLAN_WEB_TAG`, `src/crm-cache.ts`), and carries `syncedAt`, the time the Worker was actually read. A reload serves the same numbers and the same time; nothing re-reads the Worker until someone presses Refresh.
+- **Refresh:** a `RefreshControl` in the report header calls the new server action `syncHealthReport()` (`src/plan-actions.ts`), gated like the other report actions (`planEditor`: Coop Admin or Zoomy admin). It `updateTag`s `plan-gmv-web`, the POS orders and events tags and `digest-archive`, so the click shows every channel as of now (not stale-while-revalidate). View-only users see the time without the button. The PH time and what Refresh does sit in an info tooltip (`PLAN_HELP.sync`).
+- **A failure is not cached:** the read throws inside the cache on a failed page, and `unstable_cache` only stores results, so a CRM outage shows "Not updated: no answer" with "waiting" cells and the next load tries again, instead of pinning the gap until someone presses Refresh.
+
+- **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. Close month takes its GMV snapshot from the same cached Website read the page shows, so press Refresh before closing to include orders since the last sync. No snapshot table, cron or direct Shopify Admin call (YAGNI).
+
+- **Trade-offs:** POS and Marketplace keep their short timers (cheap Supabase reads); typed lines and closes stay uncached. The Website CRM page and its readers are unchanged. The cache key changed with the reader, so the first load after this deploy reads the Worker once; a later deploy that changes the reader does the same. **Close month reads the Worker fresh** (`getGmvActuals(..., {fresh: true})`), so a frozen snapshot never holds Website numbers older than the close. No snapshot table, cron or direct Shopify Admin call (YAGNI).
+- Plan: `knowledge/tasks/2026-11-11-bhr-manual-sync.md`; story: `BHR-09-manual-sync.md`.
+
+## 2026-11-11 — Business Health Report: GMV card charts drop the solid actual line (BHR-08 follow-up)
+
+- **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
+- Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
+
+## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
+
+The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) found that `list_crm_customers` counted Shopify test orders (repeat came out as 21 where the true figure is 20). It also had no first or last order date and no way to group by first-order month. The `crm_query` "2+ orders" identity drill-down returned 0 people, because the CRM's `customers.ordersCount` is null on every row.
+
+- **Decision (owner rules, locked 2026-11-09):** an order counts in any payment status (voided, cancelled and refunded included) but **a test order counts nowhere**. Spent = paid orders only. A customer is acquired in the **PH month of their first order**. Repeat = **2 or more counted orders, all time**. Consent that was never set reads `"unknown"` and is never a filter. The rules live in one constant (`CUSTOMER_RULES`, `src/chat/crm/tools.ts`), which feeds both the result note and the tool description.
+- `projectOrder` now carries `test` (read from the order's `raw.test`, the only thing read from `raw`; raw itself is still never projected). `enrichCustomers` skips test orders for both count and spend, and adds `firstOrderAt` and `lastOrderAt`. **The Customers page shares `enrichCustomers`, so it now shows fewer orders for customers who had test orders. That is intended.**
+- `list_crm_customers` gains:
+  - groups `first_order_month` (PH; non-buyers fall under `no orders`) and `orders_bucket` (0/1/2/3/4+);
+  - a `min_orders` filter (closed enum 0–5; 2 = repeat buyers);
+  - sorts `last_order_desc` and `last_order_asc` (customers with no orders go last);
+  - columns for first order, last order and days since the last order.
+  The tool is still non-strict, so the strict grammar size is unchanged.
+- **Decision: route repeat buyers and orders per customer to `list_crm_customers`, not `crm_query`,** until the CRM identity fix (zoomy-crm RET-01) is deployed. The `crm_query` and `shopify_query` descriptions and the crm-tools skill topic now say so. The topic was tightened to stay under its 500-token budget.
+- A `partial_coverage` warning appears when a CRM customers or orders list read returns exactly 1,000 rows, because the Worker stops there silently (`list_crm_customers` and `list_crm_orders`).
+- Test: `test/crm-customer-reads.test.ts` is a 12-customer reconciliation fixture whose answers were written by hand first. It runs through the real executors and covers the test-order negative case, voided/cancelled orders, and the 23:30-PH month boundary. Plan: `knowledge/tasks/2026-11-10-customer-read-foundation-stage1.md`.
+
+**Stage 2 (RET-02): the repeat buyer rate and two default charts.**
+- `list_crm_customers` with `group_by: orders_bucket` now carries a `repeat_rate` check written by code: values `repeat`, `buyers`, `rate_pct` (one decimal) and `target_pct`. Its text reads "Repeat buyer rate (owner rule): X of Y buyers (Z%). Target 25% (plan target, not an actual)." With no buyers it says "no buyers" and gives no percentage. **Decision:** the 25 lives in one constant (`REPEAT_TARGET_PCT`, `src/chat/crm/tools.ts`, sourced from the retention brief and the plan workbook's C118 note). It is always labelled as a target, never shown as an actual (lesson `plan-workbook-is-targets-only`). The model quotes the check and never computes the rate.
+- **Decision: charts by default through the existing path, with no new chart component.** A result can now set `meta.chart_view` (`{key, omit, note}`):
+  - `recommendView` keeps the row order, never folds the rows into "Other", draws columns, and leaves the `omit` rows out of the chart only. The table twin keeps every row, and a block note says what was left out.
+  - The loop's backstop (`autoRender`) draws such a result when the model drew nothing.
+  - `orders_bucket` (bars for 1/2/3/4+) and `first_order_month` (monthly bars in calendar order) set it, and the `0` / `no orders` row is omitted.
+- The tool description and the crm-tools topic route "repeat rate / retention / target" to `orders_bucket` and "new / acquired customers" to `first_order_month`. The topic stays under its 500-token budget.
+- Tests: the RET-02 blocks in `test/crm-customer-reads.test.ts` cover the hand answer (4 of 9, 44.4%), the live shape (20 of 140, 14.3%), no buyers, the target never being an actual, and both default charts drawn through the real executors and loop. Plan: `knowledge/tasks/2026-11-10-customer-retention-stage2.md`.
+
+**Stage 3 (RET-03): outreach lists, copy and CSV only.**
+- `list_crm_customers` gains a closed `audience`: `all` (default, unchanged), `repeat_promo` or `win_back`. **Decision (owner rules):** repeat promo = **exactly 1 counted order, last order 30+ PH days ago**; win-back = **2+ counted orders, last order 60+ PH days ago**; test orders never count. Each rule is one constant (`AUDIENCE_RULES`, words in `AUDIENCE_TEXT`, feeding both the result note and the tool description). An audience list is always sorted by last order, oldest first.
+- An audience list adds `emails_sent` plus `reminders` (summed `checkouts.remindersSent`), `winback` (1 per cart with `winbackSentAt`), `review_requests` (1 per order with `reviewRequestSentAt`, test orders excluded) and `birthday_vouchers` (1 per ledger row), matched by lower-cased email. They all come from one pure tally, `contactTally` in `src/crm-compute.ts`, which Stages 4 and 5 will reuse. **Decision:** a source that cannot be read leaves its column and `emails_sent` blank, with a warning. It never reads as 0, because a low count would invite double-contacting.
+- **Decision: consent is shown, never a filter.** The result note tells the owner to respect it. **Nothing can send:** no new POST. The table block's existing CSV is the only way out.
+- New client allowlist entry `birthdayVouchers` (`GET /api/birthday-vouchers`, no parameters) with `projectBirthdayVoucher` (email, year, tier, sentAt; **the code and discount node are never projected**). The tally is read only for audience lists, so a plain list still makes 3 GETs and an audience list makes 5, under the per-turn cap of 8. The cap is unchanged; two client tests that GET every allowlisted endpoint once now lift it to the allowlist length (9).
+- The crm-tools topic routes "repeat promo / win back / who to contact" to `audience` and stays under its 500-token budget. The tool is still non-strict, so the strict grammar is unchanged.
+- Test: `test/crm-outreach-lists.test.ts` has hand-written answers for the 29/30 and 59/60 PH-day boundaries (00:10 PH, which is still the previous day in UTC), each email source, test orders, the voucher code never appearing, a source that cannot be read, no send path, and 5 GETs through the real client. Plan: `knowledge/tasks/2026-11-10-customer-outreach-stage3.md`.
+
+**Stage 4 (RET-04): the Website CRM Customers tab shows what Ask Coop answers.**
+- **Decision: one implementation, not a page copy.** The audience rules (`AUDIENCE_RULES`, `inAudience`, `audienceRows`), PH days since (`phDaysSince`), `repeatRate` + `REPEAT_TARGET_PCT`, `ordersBucket`, `compareLastOrder`, `buyersByOrders`, `newBuyersByMonth` and `customerRows` moved into `src/crm-compute.ts`. `src/chat/crm/tools.ts` now imports them (and re-exports the constants), so chat behaviour and its tests are unchanged.
+- The Customers tab gains orders (test excluded), first and last order, days since last order, emails sent (unknown when a source did not answer) and consent ("unknown" when unset); a repeat buyer rate tile ("X of Y buyers (Z%)", 25% labelled as a plan target, never an actual); new buyers per first-order month and buyers by orders (1/2/3/4+) charts drawn with Ask Coop's own `ChartView`; All / Repeat promo / Win-back presets (longest-lapsed first, the chat's order) and the extra columns in the existing CSV. Nothing on the page can send.
+- **Audit fix: unavailable, never 0.** `getCrmCustomers` / `getCrmOrders` / `getCrmCheckouts` / `getCrmBirthdayVouchers` return null when the CRM is not configured or the read failed (`/customers/all` writes `?? []`). Tiles and tables then say Unavailable, and `RefreshControl` takes `fetchedAt: null` so "Updated just now" only shows when the CRM answered.
+- **Fix: no voucher code reaches the browser.** The voucher ledger is projected on the server (`projectBirthdayVoucher`) before it reaches the page; the cache key changed so an old cached copy is not served.
+- **Fix: spend this membership year** on this page now uses `membershipWindowStart` (Jan 1 or the programme start), as the chat does, instead of the raw programme start.
+- Test: `test/crm-customers-page.test.ts` passes one fixture through the page compute and through `list_crm_customers` and checks they match: repeat rate, both chart groupings, both audience lists in order, and per-customer orders, days, emails sent and consent. Plan: `knowledge/tasks/2026-11-10-customer-page-stage4.md`.
+
+**Stage 5 (RET-05): the manual contact log (`customer_contacts`).** Tested with the table present on a throwaway local Postgres + PostgREST (log, refusals, delete-own, anon denied, tally). That run found that PostgREST 12.2 answers an insert into a missing table with 404 and an empty body; `writeError()` (`src/supabase-errors.ts`) now maps that to "not set up" instead of "saving failed".
+- **New table, written but NOT applied:** `supabase/customer_contacts.sql` (`id`, `customer_email` lower-cased, `channel` in dm/sms/call/email/other, `note` at most 500 characters, `contacted_at`, `created_by`, `created_at`; RLS on, no policies, service role only). The owner applies it by hand on Staging after approval. **Until then nothing breaks:** the Manual column and Ask Coop's `manual_contacts` read Unavailable / blank, never 0, and "Log contact" says the log is not set up.
+- **Decision: the rules are pure and injected.** `src/customer-contacts.ts` validates (a real email, the closed channel list, the note limit) and stamps `created_by` from the session, never from the input. There is no shared "coop" author: no session means refused. The `'use server'` actions (`src/customer-contacts-actions.ts`, `logContact` / `deleteContact`) only wire `reportsViewerEmail()` and the service-role client, then `updateTag` the log so the writer sees the change at once.
+- **Decision: delete-own in one statement.** The delete filters by id AND `created_by = <caller>` and counts the rows it removed; 0 rows means "you can only delete a contact you logged". The dialog shows Delete only on the viewer's own rows, but the action is the boundary.
+- `contactTally` gains `manual` (1 per logged contact) and `automated` (the four CRM emails); `total` = automated + manual. `customerRows` takes which parts were read (`{automated, manual}`), so a missing CRM list and a missing log are each unknown on their own, never 0. `isMissingTable` moved to `src/supabase-errors.ts` (re-exported from `src/reports-client.ts`) so the log's read and write share it.
+- **Customers tab:** a Manual column next to Emails sent, a Log contact button per row (and per mobile card), and a dialog with a channel choice, an optional note with a counter, and the customer's logged contacts (newest first, the author's own rows deletable with a two-step confirm). Built within the style guide, from the existing free-item dialog pattern. Nothing on it sends. The CSV gains Manual contacts and Times contacted.
+- **Ask Coop:** audience lists keep `emails_sent` automated-only and add `manual_contacts` and `times_contacted`. **Decision: the chat gets counts through a server seam, not a Supabase client.** `app/api/chat/contacts-log-seam.ts` reuses the page's read and hands the chat one `{email}` per contact (no note, no author); the CRM client stays GET-only and src/chat gains no data-layer import (architecture test pinned). The seam is wired only when the CRM tools are on. A missing log adds a warning and leaves both columns blank. The crm-tools topic was left as is (already at its 500-token budget); the tool description and the measure methods say what the columns mean.
+- Tests: `test/customer-contacts.test.ts` (validation, delete-own refused for another user, missing table null, tally with manual, page rows, no send path, the DDL's RLS/no-policy/checks) and an S5.3 block in `test/crm-outreach-lists.test.ts` (7 automated + 2 manual = 9, missing or failing log blank with a warning, audience all never reads the log). Plan: `knowledge/tasks/2026-11-10-customer-contact-log-stage5.md`.
+
+**Stage 6 (RET-06): cohorts by first-order discount code (the event-promo proxy).**
+- Orders carry no event tag or UTM, but every order keeps `raw.discount_codes`. `projectOrder` now also carries `discountCodes` (codes only, trimmed and upper-cased; amounts and types dropped). **Decision: a `BDAY-` code is cut to its prefix at the projection,** because a single-use birthday voucher names one customer; the live code is never held by the page or the chat.
+- **Decision (owner rules):** a customer's cohort is the code on their **first counted order** (test orders skipped), the first listed when there are several, `no code` without one. `BDAY-` reads `birthday voucher` and is never a key; `BUNDLE-` codes collapse to `BUNDLE (auto)`. One shared core in `src/crm-compute.ts`: `firstOrderCode` (the key, set by `enrichCustomers` as `firstOrderCode`) and `codeCohorts` (buyers, repeat buyers, `repeatRate` per cohort, biggest first). Cohort buyers sum to all buyers.
+- `list_crm_customers` gains `group_by: first_order_code` (closed enum, the tool stays non-strict): rows `group`, `buyers`, `repeat`, `rate_pct`. A `reconciles` check gives the buyer total, says the event-to-code mapping is the owner's (never guessed) and states the 25% as a target. **Decision: cohorts under 5 buyers are a small group:** a `small_sample` warning says not to rank by them, and `meta.chart_view.omit` keeps them out of the default bar chart of the rate (they stay in the table twin).
+- Routing lives in the tool description (cohort / which promo brings repeat buyers / event promo → `first_order_code`; ask the owner which code was which event) and in `crm_query`'s pointer back to `list_crm_customers`. The crm-tools topic was left unchanged: it is at its 500-token budget. Chat only this stage; the Customers tab does not show cohorts yet. Data catalog: `GET /api/orders` row now names what is kept from `raw`.
+- Tests: `test/crm-code-cohorts.test.ts` (14: projection and BDAY cut, the key, first order not a later one, test-order first order skipped, rates and the small-group flag, chat parity with the shared compute, no `BDAY` anywhere in the result, default bar chart through the real loop, closed grammar). Plan: `knowledge/tasks/2026-11-10-customer-code-cohorts-stage6.md`.
+
 ## v1.22.0 (2026-11-10): Business Health Report, GMV cards lead with this month so far (prod release)
 Ships #571 (staging #572) to prod as a health-report-only change on top of `main` (staging and main have diverged). Every code file it touches was identical on `main` and `staging`, so the commit cherry-picked cleanly; only this CHANGELOG entry was rewritten.
 

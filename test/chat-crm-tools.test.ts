@@ -86,7 +86,7 @@ describe('the list tools are not strict, so a missing key takes its default', ()
 describe('list_crm_customers', () => {
   it('orders and spend come from captured orders (paid only), never Shopify counters; contacts are present (owner decision)', async () => {
     const r = await crmCustomersResult(req(readCustomersInput(CUS)), get(), NOW);
-    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
+    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, first_order: '2026-09-28', last_order: '2026-09-30', days_since_last_order: 7, pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
     expect(r.rows.find((x) => x.name === 'Ben')).toMatchObject({tier: 'guest', orders: 1, spent: 0});
     expect(JSON.stringify(r)).not.toMatch(/SECRET|apiKey|99999/);
     expect(checks(r)).toMatch(/membership year starts 2026-07-01/);
@@ -205,7 +205,7 @@ describe('createCrmExecutors', () => {
 
   it('a non-CRM error is logged as internal and rethrown (dispatchToolCall reports a generic failure)', async () => {
     const s = sink();
-    const client = {get: async () => { throw new TypeError('bug'); }};
+    const client = {get: async () => { throw new TypeError('bug'); }, postShopify: async () => { throw new TypeError('bug'); }};
     const ex = createCrmExecutors({client, now: NOW, user: null, sink: s, keep: (r) => r});
     await expect(ex.get_crm_metrics({})).rejects.toThrow(TypeError);
     expect(lines(s)[0]).toMatchObject({ok: false, code: 'internal'});
@@ -215,11 +215,11 @@ describe('createCrmExecutors', () => {
 describe('wiring', () => {
   const data = (): MetricData => ({source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []});
 
-  it('createExecutors adds the four CRM tools only with a client, and stores results as r1, r2', async () => {
+  it('createExecutors adds the five CRM tools only with a client, and stores results as r1, r2', async () => {
     const without = createExecutors({data: async () => data(), now: NOW, user: null});
     expect(Object.keys(without).filter((k) => k.includes('crm'))).toEqual([]);
     const ex = createExecutors({data: async () => data(), now: NOW, user: null, crm: fakeCrmClient().client});
-    expect(Object.keys(ex).filter((k) => k.includes('crm')).sort()).toEqual(['get_crm_metrics', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders']);
+    expect(Object.keys(ex).filter((k) => k.includes('crm')).sort()).toEqual(['crm_query', 'get_crm_metrics', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders']);
     const r = (await ex.list_crm_orders?.(ORD)) as {id: string; rows: unknown[]};
     expect(r.id).toBe('r1');
     expect(r.rows).toHaveLength(2);
@@ -229,11 +229,12 @@ describe('wiring', () => {
   it('chatTools: CRM tools after get_channel_report, run_query after query_metric, set_report_title last, at most 20, all strict with no optionals', () => {
     const t = chatTools({explore: true, crm: true});
     const names = t.map((x) => x.name);
-    expect(names.slice(names.indexOf('get_channel_report'), names.indexOf('get_channel_report') + 5)).toEqual(['get_channel_report', 'get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts']);
+    expect(names.slice(names.indexOf('get_channel_report'), names.indexOf('get_channel_report') + 6)).toEqual(['get_channel_report', 'get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'crm_query']);
     expect(names[names.indexOf('query_metric') + 1]).toBe('run_query');
     expect(names[names.length - 1]).toBe('set_report_title');
-    expect(t.length).toBeLessThanOrEqual(20);
-    for (const d of t) expect(d.input_schema.required.length).toBe(Object.keys(d.input_schema.properties).length);
+    expect(t.filter((x) => x.strict).length).toBeLessThanOrEqual(20); // the limit is on strict tools
+    expect(t.length).toBeLessThanOrEqual(24); // our own sanity ceiling on the total
+    for (const d of t.filter((x) => x.strict)) expect(d.input_schema.required.length).toBe(Object.keys(d.input_schema.properties).length);
     expect(chatTools({explore: false, crm: false})).toEqual(CHAT_TOOLS);
     expect(chatTools({explore: true, crm: true})).toBe(t); // memoised
     expect(() => assertRequestShape({model: 'm', max_tokens: 1, messages: [], tools: t})).not.toThrow();

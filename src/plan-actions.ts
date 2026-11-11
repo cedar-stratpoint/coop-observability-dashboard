@@ -6,6 +6,8 @@ import {planEditor} from './plan-auth';
 import {PLAN_TAG, getGmvActuals, planClient} from './plan-data';
 import {METRICS, currentMonthKey, gmvSnapshot, MONTH_NOT_OVER, closeBlocker, monthEnded, monthTag, targetLock, validateLine} from './plan-compute';
 import {phDay} from './custom-range';
+import {PLAN_WEB_TAG} from './crm-cache';
+import {POS_TAGS} from './pos-cache';
 
 // Business Health Report writes. The ONLY write path for typed monthly lines: the editor check re-reads memberships (src/plan-auth.ts), input
 // is validated here, and the save is one SECURITY DEFINER RPC (supabase/plan_report.sql) that compares the value the person last saw and writes
@@ -74,7 +76,7 @@ export async function closeMonthAction(input: {month: string}): Promise<ActionRe
   if (!monthEnded(input.month, today)) return {ok: false, error: MONTH_NOT_OVER(monthTag(input.month))};
   const sb = planClient();
   if (!sb) return {ok: false, error: 'Demo mode: no database is connected, so nothing was saved.'};
-  const snapshot = gmvSnapshot(await getGmvActuals([input.month], currentMonthKey(new Date())));
+  const snapshot = gmvSnapshot(await getGmvActuals([input.month], currentMonthKey(new Date()), {fresh: true}));
   // The same snapshot is what the RPC stores and validates again: a month closes only with all three channels complete.
   const blocked = closeBlocker({month: input.month, today, tag: monthTag(input.month), gmv: snapshot});
   if (blocked) return {ok: false, error: blocked};
@@ -143,4 +145,17 @@ export async function editTargetsAction(input: {changes: Array<{month: string; m
   updateTag(PLAN_TAG);
   revalidatePath('/health-report');
   return {ok: true};
+}
+
+// BHR-09: everything the report's GMV rows read through a cache. The Website read (PLAN_WEB_TAG) is kept until this runs; POS and the
+// marketplace tags also expire on their own short timers, and are included so one click shows every channel as of now.
+const HEALTH_REPORT_SYNC_TAGS = [PLAN_WEB_TAG, POS_TAGS.orders, POS_TAGS.events, 'digest-archive'] as const;
+
+/**
+ * The report's Refresh: expire the cached GMV reads so the page re-renders with fresh numbers on this click (updateTag, not
+ * stale-while-revalidate). Same gate as the other report actions; a non-editor does not see the button, and a call anyway does nothing.
+ */
+export async function syncHealthReport(): Promise<void> {
+  if (!(await planEditor())) return;
+  for (const tag of HEALTH_REPORT_SYNC_TAGS) updateTag(tag);
 }

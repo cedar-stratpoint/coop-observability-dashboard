@@ -51,9 +51,10 @@
   },
   {
    "id": "booth-leads",
-   "title": "Booth leads",
+   "title": "Booth leads and the manual contact log",
    "tables": [
-    "spin_wheel_leads"
+    "spin_wheel_leads",
+    "customer_contacts"
    ]
   },
   {
@@ -342,7 +343,15 @@
    "name": "spin_wheel_leads",
    "domain": "booth-leads",
    "about": "Spin-the-wheel sign-ups collected at booths. Imported by hand from CSV; no key to orders or events.",
-   "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (never surfaced by the UI), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
+   "columns": "lead_id, email (nullable since v2), mobile, prize, campaign (admin event slug such as modern-market-sept2026; a hint, not a key), collected_at, consent_at (first sign-up consent time, never updated), created_at, instagram (lowercase, no @), pet (free text such as \"Mimi / Puspin\").",
+   "prefer": null,
+   "testOrders": null
+  },
+  "customer_contacts": {
+   "name": "customer_contacts",
+   "domain": "booth-leads",
+   "about": "The manual contact log (RET-05, 2026-11-10): a DM, SMS, call, hand-sent email or other contact a team member logged against a website customer, so \"times contacted\" counts more than the automated CRM emails. It records a contact; nothing sends one.",
+   "columns": "id, customer_email (the website customer's email, lower-cased), channel, note (free text, nullable), contacted_at (default now), created_by (the signed-in Coop email that logged it), created_at.",
    "prefer": null,
    "testOrders": null
   },
@@ -370,11 +379,19 @@
    "prefer": null,
    "testOrders": null
   },
-  "business_health": {
-   "name": "business_health",
-   "domain": "business-health",
-   "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
-   "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
+  "import_runs": {
+   "name": "import_runs",
+   "domain": "digest",
+   "about": "Ledger of the Shopee weekly-export import (append-only model; plan knowledge/tasks/2026-10-22-shopee-import-data-engineering-plan.md). One row per file plan.",
+   "columns": "import_id, report_type (all five Shopee reports are imported: sales_overview, ads, sku_detail, traffic, product_overview), channel, period_from, period_to, source_filename, sha256, exported_at, row_count, status (staged, accepted, rejected, superseded), checks, plan (the preview and the figures it was made against), note, restated, imported_by, imported_at, accepted_at, raw_path (the original file in the private storage bucket shopee-imports, as <report_type>/<sha256>.<ext>; null when it could not be stored, and the import carries on without it). exported_at is set when the file says it (the ads report does); the readers use it to pick between two imports of the same period. For the four snapshot reports plan is null and checks.summary holds the figures that identify the file (ad spend, product sales, page views).",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_daily_observations": {
+   "name": "marketplace_daily_observations",
+   "domain": "digest",
+   "about": "The daily Shopee figures each import brought; insert only, never updated or deleted by the pipeline.",
+   "columns": "import_id, day (PH), channel, sales_placed, sales_confirmed, orders_placed, orders_confirmed, units_placed, units_confirmed, buyers_placed, buyers_confirmed, visitors. Confirmed can exceed placed on a day (it counts orders confirmed that day).",
    "prefer": null,
    "testOrders": null
   },
@@ -383,6 +400,78 @@
    "domain": "digest",
    "about": "A VIEW (it replaced an earlier plain table that was never filled): per day and channel, the newest accepted import's figures. This is what the Sales page (src/marketplace-daily-data.ts) and Ask Coop (coop_chat_marketplace_daily) read.",
    "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_ads_week_observations": {
+   "name": "marketplace_ads_week_observations",
+   "domain": "digest",
+   "about": "The campaign rows of one weekly Shopee ads (CPC overall) report, as one import brought them; insert only, never updated or deleted by the pipeline. One file is the whole week (a snapshot), so there is no day-by-day merge.",
+   "columns": "import_id, seq (row order in the file), ad_name (for example Shop GMV Max, or a product ad), ads_type, status, impressions, clicks, conversions, direct_conversions, items_sold, gmv (sales credited to the ads, what ROAS is made from), direct_gmv, expense (ad spend, pesos). ROAS = sum of gmv / sum of expense over the campaigns, never an average of per-campaign ratios.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_sku_week_observations": {
+   "name": "marketplace_sku_week_observations",
+   "domain": "digest",
+   "about": "The product and variation rows of one weekly Shopee parent SKU detail report (its Top Performing Products sheet only); insert only.",
+   "columns": "import_id, seq, item_id, product, variation_id, variation_name, sku, parent_sku, sales_placed, sales_confirmed, units_placed, units_confirmed, orders_placed, orders_confirmed, buyers_placed, buyers_confirmed, impressions, clicks, visitors, page_views. A row with variation_id null is the product's own row; the variation rows under it break the same sales down, so never add a product row and its variation rows together.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_traffic_day_observations": {
+   "name": "marketplace_traffic_day_observations",
+   "domain": "digest",
+   "about": "The daily shop traffic of one Shopee Traffic Overview report, for all traffic and for PC and APP separately; insert only.",
+   "columns": "import_id, day (PH), platform (all, pc, app), page_views, avg_page_views, avg_time_seconds, bounce_rate (a percent: 19.44 means 19.44%), visitors, new_visitors, existing_visitors, new_followers. Page views add across days (the import checks them against the file's own total); visitors do not add across days (they are unique per span), and all is not the sum of pc and app.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_funnel_day_observations": {
+   "name": "marketplace_funnel_day_observations",
+   "domain": "digest",
+   "about": "The daily shop-level product funnel of one Shopee Product Overview report (visit, add to cart, placed, confirmed); insert only.",
+   "columns": "import_id, day (PH), visitors, page_views, items_visited, bounce_visitors, bounce_rate (percent), search_clicks, likes, add_to_cart_visitors, add_to_cart_units, buyers_placed, units_placed, sales_placed, buyers_confirmed, units_confirmed, sales_confirmed. Placed sales equal the Sales Overview figure for the same day.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_ads_weekly": {
+   "name": "marketplace_ads_weekly",
+   "domain": "digest",
+   "about": "A VIEW: for each week (period_from, period_to), the campaign rows of the newest accepted ads import of that week (ordered by exported_at, then accepted_at). Undoing an import makes the view fall back to the previous one by itself.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_sku_weekly": {
+   "name": "marketplace_sku_weekly",
+   "domain": "digest",
+   "about": "A VIEW: for each week, the product and variation rows of the newest accepted SKU import of that week.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_traffic_daily": {
+   "name": "marketplace_traffic_daily",
+   "domain": "digest",
+   "about": "A VIEW: per PH day and platform, the figures of the newest accepted traffic import.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "marketplace_funnel_daily": {
+   "name": "marketplace_funnel_daily",
+   "domain": "digest",
+   "about": "A VIEW: per PH day, the figures of the newest accepted product funnel import.",
+   "columns": "",
+   "prefer": null,
+   "testOrders": null
+  },
+  "business_health": {
+   "name": "business_health",
+   "domain": "business-health",
+   "about": "Per-channel facts snapshot used to compute QRR (quality-of-revenue ratio) live in the UI.",
+   "columns": "id, window_from, window_to (date), snapshot (jsonb BusinessHealthSnapshot: window, target, perChannel[] of orders / buyers / revenue / adSpend / adRevenue / platformFeeApplies / default knobs, monthly[], cohorts, buyerMix, computedAt), computed_at.",
    "prefer": null,
    "testOrders": null
   },
@@ -769,86 +858,6 @@
    "columns": "",
    "prefer": null,
    "testOrders": null
-  },
-  "import_runs": {
-   "name": "import_runs",
-   "domain": "digest",
-   "about": "Ledger of the Shopee weekly-export import (append-only model; plan knowledge/tasks/2026-10-22-shopee-import-data-engineering-plan.md). One row per file plan.",
-   "columns": "import_id, report_type (all five Shopee reports are imported: sales_overview, ads, sku_detail, traffic, product_overview), channel, period_from, period_to, source_filename, sha256, exported_at, row_count, status (staged, accepted, rejected, superseded), checks, plan (the preview and the figures it was made against), note, restated, imported_by, imported_at, accepted_at, raw_path (the original file in the private storage bucket shopee-imports, as <report_type>/<sha256>.<ext>; null when it could not be stored, and the import carries on without it). exported_at is set when the file says it (the ads report does); the readers use it to pick between two imports of the same period. For the four snapshot reports plan is null and checks.summary holds the figures that identify the file (ad spend, product sales, page views).",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_daily_observations": {
-   "name": "marketplace_daily_observations",
-   "domain": "digest",
-   "about": "The daily Shopee figures each import brought; insert only, never updated or deleted by the pipeline.",
-   "columns": "import_id, day (PH), channel, sales_placed, sales_confirmed, orders_placed, orders_confirmed, units_placed, units_confirmed, buyers_placed, buyers_confirmed, visitors. Confirmed can exceed placed on a day (it counts orders confirmed that day).",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_ads_week_observations": {
-   "name": "marketplace_ads_week_observations",
-   "domain": "digest",
-   "about": "The campaign rows of one weekly Shopee ads (CPC overall) report, as one import brought them; insert only, never updated or deleted by the pipeline. One file is the whole week (a snapshot), so there is no day-by-day merge.",
-   "columns": "import_id, seq (row order in the file), ad_name (for example Shop GMV Max, or a product ad), ads_type, status, impressions, clicks, conversions, direct_conversions, items_sold, gmv (sales credited to the ads, what ROAS is made from), direct_gmv, expense (ad spend, pesos). ROAS = sum of gmv / sum of expense over the campaigns, never an average of per-campaign ratios.",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_sku_week_observations": {
-   "name": "marketplace_sku_week_observations",
-   "domain": "digest",
-   "about": "The product and variation rows of one weekly Shopee parent SKU detail report (its Top Performing Products sheet only); insert only.",
-   "columns": "import_id, seq, item_id, product, variation_id, variation_name, sku, parent_sku, sales_placed, sales_confirmed, units_placed, units_confirmed, orders_placed, orders_confirmed, buyers_placed, buyers_confirmed, impressions, clicks, visitors, page_views. A row with variation_id null is the product's own row; the variation rows under it break the same sales down, so never add a product row and its variation rows together.",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_traffic_day_observations": {
-   "name": "marketplace_traffic_day_observations",
-   "domain": "digest",
-   "about": "The daily shop traffic of one Shopee Traffic Overview report, for all traffic and for PC and APP separately; insert only.",
-   "columns": "import_id, day (PH), platform (all, pc, app), page_views, avg_page_views, avg_time_seconds, bounce_rate (a percent: 19.44 means 19.44%), visitors, new_visitors, existing_visitors, new_followers. Page views add across days (the import checks them against the file's own total); visitors do not add across days (they are unique per span), and all is not the sum of pc and app.",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_funnel_day_observations": {
-   "name": "marketplace_funnel_day_observations",
-   "domain": "digest",
-   "about": "The daily shop-level product funnel of one Shopee Product Overview report (visit, add to cart, placed, confirmed); insert only.",
-   "columns": "import_id, day (PH), visitors, page_views, items_visited, bounce_visitors, bounce_rate (percent), search_clicks, likes, add_to_cart_visitors, add_to_cart_units, buyers_placed, units_placed, sales_placed, buyers_confirmed, units_confirmed, sales_confirmed. Placed sales equal the Sales Overview figure for the same day.",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_ads_weekly": {
-   "name": "marketplace_ads_weekly",
-   "domain": "digest",
-   "about": "A VIEW: for each week (period_from, period_to), the campaign rows of the newest accepted ads import of that week (ordered by exported_at, then accepted_at). Undoing an import makes the view fall back to the previous one by itself.",
-   "columns": "",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_sku_weekly": {
-   "name": "marketplace_sku_weekly",
-   "domain": "digest",
-   "about": "A VIEW: for each week, the product and variation rows of the newest accepted SKU import of that week.",
-   "columns": "",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_traffic_daily": {
-   "name": "marketplace_traffic_daily",
-   "domain": "digest",
-   "about": "A VIEW: per PH day and platform, the figures of the newest accepted traffic import.",
-   "columns": "",
-   "prefer": null,
-   "testOrders": null
-  },
-  "marketplace_funnel_daily": {
-   "name": "marketplace_funnel_daily",
-   "domain": "digest",
-   "about": "A VIEW: per PH day, the figures of the newest accepted product funnel import.",
-   "columns": "",
-   "prefer": null,
-   "testOrders": null
   }
  },
  "pages": [
@@ -1093,7 +1102,7 @@
   {
    "route": "/health-report",
    "title": "Business Health Report",
-   "shows": "Plan vs actual by month: the Cedar Tree workbook targets (versioned) beside Coop's actuals. GMV actuals are real (BHR-02): Events GMV = non-voided pos_orders with an event, Website GMV = CRM orders other than refunded and voided (pending, authorized, partially_paid, paid count; partially_refunded counts in full and is flagged \"may overstate\"), Marketplace GMV = Shopee + Lazada per-day sales; a month with no data, a failed or truncated CRM read is an empty \"waiting\" cell, never 0 or red; only the workbook's input rows are typed into the grid by a Coop Admin or Zoomy company admin (server action savePlanLineAction, src/plan-actions.ts), each on its own sheet row's actual line (BHR-06): the six overhead rows (salaries to R&D, rows 33 to 38), COGS by channel (rows 52 to 54), platform fees, fulfilment, event costs, the ad lines and content and other (rows 66 to 70; totals rows 39, 55 and 71 are sums, never typed, waiting while a row is blank), and the cash-flow inputs (bridge funding row 87, liability settlement row 88, freight row 89, inventory purchases paid), plus optional ROAS and the one-time opening_cash (the bank balance at the start of the first month, typed once in the first month's column, may be negative); everything the workbook computes by formula is calculated here by the same formula and never typed (derivedActuals): CM1 to EBITDA, cash at month end (opening cash, then last cash + EBITDA + COGS − stock bought + funding − settlement − freight; the workbook has no opening-cash cell, so every month waits until the opening cash is typed; a \"Check against your bank\" tooltip sits on the cash row and card), inventory coverage (stock on hand ÷ next month's planned COGS), active customers and CAC (the workbook's customer roll); a calculated cell waits until every input behind it, this month and earlier, is typed; everyone else with access is read-only, no inputs; admins close a month (Close month, only after the month has ended in Manila time, only with Events, Website and Marketplace GMV all complete (no gap, no partial; the button says what blocks it), and only with all 21 typed lines filled; GMV snapshot frozen, cells locked) and unlock it with a required reason, and a \"close is waiting\" banner shows until it is closed (closeMonthAction, unlockMonthAction); admins also get one header button named for the waiting month (for example Close Oct'26: primary when ready, quiet with the reason in its info tooltip when blocked, hidden when nothing waits; it scrolls to that month's Close row and focuses its Close button); the breakdown modal is retired (BHR-06): the itemised rows are typed in place; the Edit targets drawer was removed (BHR-05 UI, 2026-11-05) because every target is derived and locked: the server action editTargetsAction and the plan_edit_targets RPC stay for a future plan engine, and the current target version shows in the Target badge tooltip. All explanatory copy (where the numbers come from, grid how-to, card and chart notes, view-only note) lives in info (i) tooltips, copy in src/plan-help.ts; only state and safety text stays visible. Funding, one-time payments and stock bought are not a free-form ledger: they are the workbook's own monthly rows (Actuals · cash flow, as in the workbook, thousands of pesos, never negative). Calculated rows say \"calculated: ...\" under their label; forward coverage is judged within ±25% of the coverage target; Rough runway is information only: cash divided by the average net cash burn of the last 3 months, \"not burning\" when cash did not fall. ROAS is the one optional typed measure (\"type it in the open cell\"; readers: \"not typed yet\"). Open to a Zoomy data viewer and to a Coop Admin (requireHealthReportAccess); a Goldline view is bounced. Mock mode (no env) renders the page with empty targets and a banner (the repo holds no plan figure; targets are loaded privately by scripts/seed-plan-from-workbook.mjs)",
+   "shows": "Plan vs actual by month: the Cedar Tree workbook targets (versioned) beside Coop's actuals. GMV actuals are real (BHR-02): Events GMV = non-voided pos_orders with an event, Website GMV = CRM orders other than refunded and voided (pending, authorized, partially_paid, paid count; partially_refunded counts in full and is flagged \"may overstate\"), Marketplace GMV = Shopee + Lazada per-day sales; a month with no data, a failed or truncated CRM read is an empty \"waiting\" cell, never 0 or red; Website orders are read on Refresh, not per page load (BHR-09, 2026-11-11): the CRM read is cached with no time limit under its own tag plan-gmv-web and re-read only when an admin presses the header Refresh (syncHealthReport, src/plan-actions.ts, which also expires the POS orders/events and digest-archive tags); the header shows when the Worker was last read (\"Updated … ago\", PH time in the info tooltip; \"Not updated: no answer\" when the read failed, and a failed read is not cached, so the next load tries again); view-only users see the time without the button; only the workbook's input rows are typed into the grid by a Coop Admin or Zoomy company admin (server action savePlanLineAction, src/plan-actions.ts), each on its own sheet row's actual line (BHR-06): the six overhead rows (salaries to R&D, rows 33 to 38), COGS by channel (rows 52 to 54), platform fees, fulfilment, event costs, the ad lines and content and other (rows 66 to 70; totals rows 39, 55 and 71 are sums, never typed, waiting while a row is blank), and the cash-flow inputs (bridge funding row 87, liability settlement row 88, freight row 89, inventory purchases paid), plus optional ROAS and the one-time opening_cash (the bank balance at the start of the first month, typed once in the first month's column, may be negative); everything the workbook computes by formula is calculated here by the same formula and never typed (derivedActuals): CM1 to EBITDA, cash at month end (opening cash, then last cash + EBITDA + COGS − stock bought + funding − settlement − freight; the workbook has no opening-cash cell, so every month waits until the opening cash is typed; a \"Check against your bank\" tooltip sits on the cash row and card), inventory coverage (stock on hand ÷ next month's planned COGS), active customers and CAC (the workbook's customer roll); a calculated cell waits until every input behind it, this month and earlier, is typed; everyone else with access is read-only, no inputs; admins close a month (Close month, only after the month has ended in Manila time, only with Events, Website and Marketplace GMV all complete (no gap, no partial; the button says what blocks it), and only with all 21 typed lines filled; GMV snapshot frozen, cells locked) and unlock it with a required reason, and a \"close is waiting\" banner shows until it is closed (closeMonthAction, unlockMonthAction); admins also get one header button named for the waiting month (for example Close Oct'26: primary when ready, quiet with the reason in its info tooltip when blocked, hidden when nothing waits; it scrolls to that month's Close row and focuses its Close button); the breakdown modal is retired (BHR-06): the itemised rows are typed in place; the Edit targets drawer was removed (BHR-05 UI, 2026-11-05) because every target is derived and locked: the server action editTargetsAction and the plan_edit_targets RPC stay for a future plan engine, and the current target version shows in the Target badge tooltip. All explanatory copy (where the numbers come from, grid how-to, card and chart notes, view-only note) lives in info (i) tooltips, copy in src/plan-help.ts; only state and safety text stays visible. Funding, one-time payments and stock bought are not a free-form ledger: they are the workbook's own monthly rows (Actuals · cash flow, as in the workbook, thousands of pesos, never negative). Calculated rows say \"calculated: ...\" under their label; forward coverage is judged within ±25% of the coverage target; Rough runway is information only: cash divided by the average net cash burn of the last 3 months, \"not burning\" when cash did not fall. ROAS is the one optional typed measure (\"type it in the open cell\"; readers: \"not typed yet\"). Open to a Zoomy data viewer and to a Coop Admin (requireHealthReportAccess); a Goldline view is bounced. Mock mode (no env) renders the page with empty targets and a banner (the repo holds no plan figure; targets are loaded privately by scripts/seed-plan-from-workbook.mjs)",
    "data": "pos_orders, pos_events, digest_archive, marketplace_daily_sales, plan_actuals, plan_month_closes, plan_versions, plan_targets, website CRM (API)",
    "domains": [
     "business-health"
@@ -1252,13 +1261,14 @@
   {
    "route": "/customers/website-crm",
    "title": "Website CRM",
-   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership",
+   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership; Customers tab (RET-04) with orders (test excluded), first/last order, PH days since last order, emails sent, manual contacts (RET-05: a Log contact dialog per row records a DM, SMS, call, email by hand or other; only its author can delete it; the log not applied reads Unavailable), email consent, a repeat buyer rate tile (25% shown as a target, never an actual), new buyers per first-order month and buyers by orders charts, Repeat promo / Win-back presets and CSV of the visible rows. A list the CRM could not read shows Unavailable, never 0",
    "data": "website CRM (API)",
    "domains": [
-    "crm-api"
+    "crm-api",
+    "booth-leads (customer_contacts)"
    ],
    "fenced": false,
-   "access": "partial: CRM tools (metrics, customers, orders, checkouts); vouchers and checkout links withheld",
+   "access": "partial: CRM tools (metrics, customers incl. audiences, repeat rate, emails sent, manual contacts and times contacted, orders, checkouts); voucher codes and checkout links withheld",
    "redirectTo": null
   },
   {
@@ -1401,7 +1411,7 @@
   {
    "id": "crm-api",
    "source": "Website CRM Worker (Cloudflare Worker over D1; Shopify customers, orders, checkouts)",
-   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts (GET only)"
+   "askCoop": "tools: get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts, crm_query (GET; identity detail only for the Explore allowlist), shopify_query (the one POST: a read-only Shopify GraphQL query through the CRM; identity fields only for the Explore allowlist), compare_sku (one SKU across POS, Shopee and the website; reads GET /api/products/sales)"
   },
   {
    "id": "shopee-files",

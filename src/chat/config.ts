@@ -24,7 +24,7 @@ const POS_QUESTIONS = 'Offline POS questions (sales, orders, products, bundles, 
 const WEB_DIGEST_ONLY = 'Shopee, Lazada and Website figures come only from the digest.'; // digest-only mode: no tools are sent
 const WEB_NONE = `${SHOPEE_LAZADA_SOURCE} Website figures come only from the digest.`;
 const WEB_REPORT = `${SHOPEE_LAZADA_SOURCE} Website totals for any dates come live from get_channel_report; other Website figures come only from the digest.`;
-const WEB_TOOLS = `${SHOPEE_LAZADA_SOURCE} Website orders, customers and abandoned checkouts come live from the website CRM tools (get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts).`;
+const WEB_TOOLS = `${SHOPEE_LAZADA_SOURCE} Website data comes live from the website CRM tools (crm_query, get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts).`;
 
 /** The "Offline POS questions" line for the explore / website-CRM states. `website` = the CRM can be read (get_channel_report's Website row is live); `crm` = the four tools are sent too. */
 function availabilityLine(o: {explore?: boolean; crm?: boolean; website?: boolean; tools?: boolean}): string {

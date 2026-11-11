@@ -36,6 +36,8 @@ export const leadKey = (l: SpinLead) => `${l.email ?? `@${l.instagram}`}|${l.col
 // Breed text → species, for leads from Sep 24 on (they carry "Name / Breed").
 const CAT = /\bcats?\b|persian|puspin|shorthair|siamese|ragdoll|bengal|maine coon|scottish|munchkin|himalayan|sphynx|exotic/i;
 const species = (l: SpinLead) => (l.pet ? (CAT.test(l.pet) ? 'cat' : 'dog') : null);
+/** The same guess, for display: it comes from the typed breed text, so it is an estimate and null when no pet was typed. */
+export const estimatedSpecies = species;
 
 /** What the till says this order won: the prize table, or a cashier note. */
 function wonAtTill(o: PosOrder, prizeOrders: Set<string>): string | null {

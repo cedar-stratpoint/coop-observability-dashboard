@@ -8,7 +8,9 @@ import {HelpTip as InfoTip} from './help-tip';
 import {axisTicks, fmtAxisTick} from '@/src/plan-axis';
 import {PLAN_HELP} from '@/src/plan-help';
 import type {PlanVersionInfo} from '@/src/plan-data';
-import {closeMonthAction, savePlanLineAction, unlockMonthAction} from '@/src/plan-actions';
+import {closeMonthAction, savePlanLineAction, syncHealthReport, unlockMonthAction} from '@/src/plan-actions';
+import {fmtPh} from '@/src/crm-compute';
+import {RefreshControl} from './refresh-control';
 import {
   METRICS, cardMonths, currentIndex, fmtPlan, metricStatus, monthPhase, runwayMonths, stepWindow, windowStart,
   GAP, GRID_LINE_LABEL, LINES, MEASURE_LINES, REQUIRED_COUNT, derivedActuals, applySnapshots, closeQueue, closeWaiting, closeWaitingWho, earlierUnclosed, lastPastMonths, monthProgress, daysSinceMonthEnd, nextEmptyLine, REQUIRED_LINE_ORDER, filledCount, monthComplete, monthEnded, closeAction, closeBlocker, monthTag, stockOrderSeries, withTotals, type ActualCell, type ClosedMonth, type LineSeries, type MetricDef, type MonthProgress, type PlanData, type Status,
@@ -130,7 +132,7 @@ function Spark({label, months, cur, lead = cur - 1, getA, getT, st, tip, onWhy, 
   const a = Math.max(0, cur - 5), b = Math.min(months.length - 1, cur + 1);
   const idx = Array.from({length: b - a + 1}, (_, k) => a + k);
   const all = idx.filter((i) => getA(i) !== null);
-  const acts = all.filter((i) => i !== cur); // closed months: the solid line
+  const acts = all.filter((i) => i !== cur); // closed months: dots (+ the solid line when there are no bars)
   const now = all.includes(cur) ? cur : null; // the month in progress: hollow, dotted
   const tgs = idx.filter((i) => getT(i) !== null);
   const vals = [...tgs.map((i) => getT(i) as number), ...all.map((i) => getA(i) as number)];
@@ -157,8 +159,8 @@ function Spark({label, months, cur, lead = cur - 1, getA, getT, st, tip, onWhy, 
         return <rect key={i} x={x(i) - bw / 2} y={top} width={bw} height={h} rx="3" fill={s === 'ok' ? 'var(--status-good)' : s === 'bad' ? 'var(--status-crit)' : 'var(--muted-foreground)'} opacity={s === 'ok' || s === 'bad' ? 0.28 : 0.16} className={red ? 'cursor-pointer' : undefined} onClick={red ? () => onWhy(i) : undefined} aria-hidden />;
       })}
       {tgs.length > 1 && <path d={line(tgs, getT)} fill="none" stroke="var(--muted-foreground)" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.8" />}
-      {acts.length > 1 && <path d={line(acts, getA)} fill="none" stroke="var(--foreground)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
-      {now !== null && prev !== undefined && <path d={line([prev, now], getA)} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="2 3" />}
+      {!bars && acts.length > 1 && <path d={line(acts, getA)} fill="none" stroke="var(--foreground)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+      {!bars && now !== null && prev !== undefined && <path d={line([prev, now], getA)} fill="none" stroke="var(--muted-foreground)" strokeWidth="2" strokeDasharray="2 3" />}
       {acts.map((i) => {
         const s = st(i), cx = x(i), cy = y(getA(i) as number);
         const solid = s === 'ok' || s === 'bad';
@@ -396,7 +398,7 @@ function CloseCell({month, filled, complete, blocker, short, className, edit}: {
   );
 }
 
-export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: savedLines = EMPTY_LINES, canEdit = false, linesNotice = null, closes = EMPTY_CLOSES, today = '', versions = []}: {versions?: PlanVersionInfo[]; plan: PlanData; nowKey: string; gmv?: Actuals; lines?: LineSeries; canEdit?: boolean; linesNotice?: string | null; closes?: Record<string, ClosedMonth>; today?: string}) {
+export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: savedLines = EMPTY_LINES, canEdit = false, linesNotice = null, closes = EMPTY_CLOSES, today = '', versions = [], syncedAt = null, canSync = false}: {versions?: PlanVersionInfo[]; plan: PlanData; nowKey: string; gmv?: Actuals; lines?: LineSeries; canEdit?: boolean; linesNotice?: string | null; closes?: Record<string, ClosedMonth>; today?: string; syncedAt?: string | null; canSync?: boolean}) {
   const [gmvOpen, setGmvOpen] = useState(false);
   const [reveal, setReveal] = useState<{month: string; n: number} | null>(null);
   const [lines, setLines] = useState<LineSeries>(savedLines);
@@ -491,13 +493,22 @@ export function HealthReportView({plan, nowKey, gmv = EMPTY_ACTUALS, lines: save
           <span className="inline-flex items-center rounded-full bg-muted py-0.5 pl-2.5 pr-1 text-xs font-medium text-muted-foreground" data-testid="target-version">Target {plan.label}<InfoTip text={versionTip} label="About the target version" className="size-6 max-md:size-8" /></span>
           {!canEdit && !linesNotice && <span data-testid="read-only" className="inline-flex items-center text-muted-foreground"><Lock className="size-3.5" aria-hidden /><InfoTip text={PLAN_HELP.readOnly} label="View only" /></span>}
         </div>
-        {canEdit && closeBtn && (
-          <span className="flex items-center gap-1">
-            <button type="button" data-testid="header-close" aria-disabled={closeBtn.blocked || undefined} data-blocked={closeBtn.blocked || undefined} onClick={() => goClose()}
-              className={cn(HEAD_BTN, !closeBtn.blocked && 'border-primary bg-primary text-primary-foreground hover:border-primary', closeBtn.blocked && 'text-muted-foreground')}>{closeBtn.label}</button>
-            {closeBtn.reason && <InfoTip text={closeBtn.reason} label={`Why ${closeBtn.label} is not ready`} />}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* BHR-09: Website orders are read when an admin presses Refresh, not per load; the time says how fresh the GMV rows are. */}
+          <span className="flex items-center gap-0.5" data-testid="sync">
+            {canSync
+              ? <RefreshControl fetchedAt={syncedAt} beforeRefresh={syncHealthReport} />
+              : <span className="text-xs text-muted-foreground">{syncedAt ? `Updated ${fmtPh(syncedAt)}` : 'Not updated: no answer'}</span>}
+            <InfoTip text={PLAN_HELP.sync(syncedAt ? fmtPh(syncedAt) : null)} label="When was this data read?" />
           </span>
-        )}
+          {canEdit && closeBtn && (
+            <span className="flex items-center gap-1">
+              <button type="button" data-testid="header-close" aria-disabled={closeBtn.blocked || undefined} data-blocked={closeBtn.blocked || undefined} onClick={() => goClose()}
+                className={cn(HEAD_BTN, !closeBtn.blocked && 'border-primary bg-primary text-primary-foreground hover:border-primary', closeBtn.blocked && 'text-muted-foreground')}>{closeBtn.label}</button>
+              {closeBtn.reason && <InfoTip text={closeBtn.reason} label={`Why ${closeBtn.label} is not ready`} />}
+            </span>
+          )}
+        </div>
       </div>
       {linesNotice && <p role="status" className="mb-3 rounded-lg bg-[var(--amber-bg)] px-3.5 py-2 text-[13px] text-[var(--bhr-warn)]">{linesNotice}</p>}
       {plan.notice && <p role="status" className="mb-3 rounded-lg bg-[var(--amber-bg)] px-3.5 py-2 text-[13px] text-[var(--bhr-warn)]">{plan.notice}</p>}

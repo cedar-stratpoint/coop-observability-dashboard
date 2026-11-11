@@ -39,7 +39,7 @@ function specOf(tool: RenderTool, input: Record<string, unknown>, block: ChatBlo
 
 export type RenderExecutors = Pick<ToolExecutors, RenderTool> & {
   /**
-   * Backstop for a registry (`query_metric`) result too: a successful result of at least two rows that no block was bound from is drawn with the registry's own recommended view (at most AUTO_REGISTRY_MAX per turn);
+   * Backstop for a registry (`query_metric`) result, and any result that asks for a chart by default (meta.chart_view: RET-02's customer groups), too: a successful result of at least two rows that no block was bound from is drawn with the registry's own recommended view (at most AUTO_REGISTRY_MAX per turn);
    * a one-row result is a figure for the text and stays undrawn (THINK-06).
    * Explore backstop: draw EVERY successful, non-empty `run_query` final result no block was bound from yet (query order, at most AUTO_RENDER_MAX, the rest named in a note), each exactly as render_chart with auto selection
    * would (chart with its table twin, chip, SQL, code-written caveats). No model call and no model-typed value. Returns the block ids it drew ([] when nothing was due).
@@ -135,7 +135,7 @@ export function createRenderExecutors(ctx: ChatToolContext, session: ReportSessi
   const autoRender = async (): Promise<string[]> => {
     const explore = [...session.store.entries()].filter(([id, r]) => /^x[1-9][0-9]*$/.test(id) && r.metric === 'explore' && r.rows.length > 0 && !bound.has(id));
     const registry = [...session.store.entries()].filter(([id, r]) => /^r[1-9][0-9]*$/.test(id) && !bound.has(id) && (
-      ((session.requestOf(id) !== undefined || r.metric === 'channel_report') && r.rows.length >= 2) ||
+      ((session.requestOf(id) !== undefined || r.metric === 'channel_report' || r.meta.chart_view !== undefined) && r.rows.length >= 2) ||
       (r.metric === 'product_lookup' && r.dimension === 'stock') // B1: one product's stock draws as tiles (one row)
     ));
     const draw = [...explore.slice(0, AUTO_RENDER_MAX), ...registry.slice(0, AUTO_REGISTRY_MAX)];

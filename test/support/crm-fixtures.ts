@@ -37,6 +37,9 @@ export const CRM_BODIES: Partial<Record<CrmEndpointId, unknown>> = {
 export function fakeCrmClient(bodies: Partial<Record<CrmEndpointId, unknown>> = CRM_BODIES) {
   const gets: CrmEndpointId[] = [];
   const client: CrmClient = {
+    async postShopify() {
+      throw new CrmError('refused'); // these fakes serve GETs only; the Shopify door has its own fake (test/support/fake-shopify-door.ts)
+    },
     async get(endpoint) {
       gets.push(endpoint);
       if (!Object.prototype.hasOwnProperty.call(bodies, endpoint)) throw new CrmError('unreachable');

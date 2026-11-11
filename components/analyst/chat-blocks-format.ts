@@ -201,3 +201,30 @@ export function pieSlices(chart: ChartBlock['chart'], max = 6): PieSlice[] {
     .filter((r): r is PieSlice => typeof r.value === 'number' && r.value > 0)
     .slice(0, max);
 }
+
+type TableOf = Extract<ChatBlock, {kind: 'table'}>;
+const isPiiTable = (b: ChatBlock): boolean => b.kind === 'table' && b.pii === true;
+export const CONTACTS_NOT_SAVED = 'A contact list was shown here. It is not saved in this browser, so ask again to see it.';
+
+/** What goes into the browser's storage: a turn that showed a contact table keeps neither the table nor its text (the answer may quote values). */
+export function redactForStorage<T extends {content: string; blocks?: PlacedBlock[]}>(msgs: readonly T[]): T[] {
+  return msgs.map((m) => {
+    if (!m.blocks?.some((p) => isPiiTable(p.block))) return m;
+    const {blocks: _dropped, ...rest} = m;
+    return {...rest, content: CONTACTS_NOT_SAVED} as T;
+  });
+}
+
+/** The distinct, non-empty values of the column named by the block's copy button, one per line. */
+export function copyList(b: TableOf, which: 'emails' | 'mobiles' | 'messages'): string {
+  const key = b.copyColumns?.[which];
+  if (!key) return '';
+  const all = b.rows.map((r) => r[key]).filter((v): v is string | number => v !== null && v !== undefined && String(v).trim() !== '').map(String);
+  const values = which === 'messages' ? all : [...new Set(all)]; // two leads can get the same message: keep both
+  return values.join(which === 'messages' ? '\n\n---\n\n' : '\n'); // messages can hold line breaks, so they get a divider
+}
+
+/** Header (the labels the owner sees) then each row in column order; csv.ts guards formulas when it writes them. */
+export function csvRows(b: TableOf): string[][] {
+  return [b.columns.map((c) => c.label), ...b.rows.map((r) => b.columns.map((c) => String(r[c.key] ?? '')))];
+}

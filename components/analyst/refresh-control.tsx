@@ -24,17 +24,20 @@ function relativeLabel(fetchedAtMs: number, now: number): string {
  * (the CRM's live proxy): without invalidating that cache, router.refresh()
  * would re-render the same figures and the label would still reset to "just
  * now" — a refresh that says it worked and did nothing.
+ *
+ * `fetchedAt` null means the source did not answer: the label says so instead
+ * of "Updated just now", and the Refresh button stays to try again.
  */
 export function RefreshControl({
   fetchedAt,
   beforeRefresh,
 }: {
-  fetchedAt: string;
+  fetchedAt: string | null;
   beforeRefresh?: () => Promise<void>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const fetchedAtMs = new Date(fetchedAt).getTime();
+  const fetchedAtMs = fetchedAt ? new Date(fetchedAt).getTime() : 0;
   const [now, setNow] = useState(fetchedAtMs);
 
   // Tick the relative label. Re-syncs whenever a refresh lands a new fetchedAt.
@@ -47,7 +50,7 @@ export function RefreshControl({
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-muted-foreground tabular-nums">
-        Updated {pending ? 'now…' : relativeLabel(fetchedAtMs, now)}
+        {pending ? 'Updated now…' : fetchedAt ? `Updated ${relativeLabel(fetchedAtMs, now)}` : 'Not updated: no answer'}
       </span>
       <button
         type="button"

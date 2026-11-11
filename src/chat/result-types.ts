@@ -16,7 +16,7 @@ export type MetricId =
   | 'stock_cover';
 
 /** What a stored result may be: a registry metric, or one of the lookup tools' results (F10). Only registry metrics can be re-run or saved. */
-export type ResultMetricId = MetricId | 'digest' | 'product_lookup' | 'explore' | 'channel_report' | 'crm_metrics' | 'crm_customers' | 'crm_orders' | 'crm_checkouts';
+export type ResultMetricId = MetricId | 'digest' | 'product_lookup' | 'explore' | 'channel_report' | 'crm_query' | 'shopify_query' | 'sku_compare' | 'crm_metrics' | 'crm_customers' | 'crm_orders' | 'crm_checkouts';
 
 export type PetKey = 'dog' | 'cat' | 'both' | 'untagged';
 
@@ -68,7 +68,9 @@ export type CheckCode =
   | 'partial_coverage'
   | 'sudden_change'
   | 'mock_source'
-  | 'values_hidden';
+  | 'values_hidden'
+  | 'repeat_rate'
+  | 'test_orders';
 
 export interface Check {
   code: CheckCode;
@@ -130,6 +132,14 @@ export interface ResultMeta {
   totals?: ChannelTotal[];
   /** Set only on an Explore (run_query) result: the label the block shows, the SQL for the disclosure (never given to the model), a code-written coverage note and lint warnings. */
   exploratory?: {label: string; sql: string; coverage_note: string; warnings: string[]};
+  /**
+   * Set by a tool whose category rows already read in their own order (list_crm_customers by first-order month or by orders bucket).
+   * It asks for a chart by default (the loop's backstop draws it when the model did not), and the bar keeps the row order and never folds
+   * into "Other". Rows whose `key` value is in `omit` are left out of the chart only (the table twin keeps every row), and `note` says so.
+   */
+  chart_view?: {key: string; omit: string[]; note: string | null};
+  /** The answer in one line, written by code (repeat rate, best cohorts): every block bound from this result shows it under its title, so the headline never depends on the model's prose. */
+  headline?: string;
 }
 
 export interface MetricResult {
