@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Batch review: modernised the Form pages chips
+
+Now that batch-review is only for a genuine single store's form, gave its "Form pages" section a visual pass. Each of the five form pages is a numbered marker + label row; a page with no sheet reads as a quiet dashed "Not in this batch" slot so the five pages line up as one consistent column instead of a sparse list. The sheet chips (P.90, P.89…) are larger and calmer: the scan-page number leads in mono, an amber count pill shows how many rows still need a glance (a green check when there is nothing to check or it is committed), and the selected sheet gets an ochre tint + ring. Press feedback (scale on active) and subtle hover kept. Behaviour unchanged; visual only.
+
 ## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
 
 Same fix as the scan board's breadcrumb, applied to the batch-review page: its "← Scan…" control used `window.history.back()`, so on the filter-heavy scan board it retraced the view tabs / version cards / store chips you had clicked. It is a breadcrumb to the scan, so it now links straight to the scan board.

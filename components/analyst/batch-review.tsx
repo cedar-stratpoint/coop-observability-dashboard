@@ -505,28 +505,32 @@ export function BatchReview({
               const open = Math.max(0, info.flagged - info.resolved);
               const multi = p.page != null && coverage.duplicates.includes(p.page);
               const sheetNo = scanPageNumber(p.upload.filename);
+              const committed = p.upload.status === 'committed';
+              const selected = tab === k;
               return (
                 <button
                   key={p.upload.id}
                   role="tab"
                   type="button"
-                  aria-selected={tab === k}
+                  aria-selected={selected}
                   aria-label={`${sheetNo ? `Scan page ${sheetNo}` : p.upload.filename}, form page ${p.page ?? 'unknown'}`}
                   onClick={() => setTab(k)}
                   className={cn(
-                    'inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
-                    tab === k ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/30',
+                    'inline-flex h-9 items-center gap-2.5 rounded-xl border px-3 text-sm transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.975]',
+                    selected
+                      ? 'border-primary/60 bg-primary/10 ring-1 ring-inset ring-primary/30'
+                      : 'border-border bg-card hover:border-foreground/25 hover:bg-muted/40',
                   )}
                 >
-                  {sheetNo && <span className="font-mono text-[11px] text-muted-foreground tabular-nums">P.{sheetNo}</span>}
-                  {p.upload.status === 'committed' ? (
-                    <CheckCircle2 className="size-3.5" style={{color: 'var(--status-good)'}} aria-label="committed" />
+                  <span className="font-mono text-[13px] font-semibold tabular-nums">{sheetNo ? `P.${sheetNo}` : '—'}</span>
+                  {committed ? (
+                    <CheckCircle2 className="size-4" style={{color: 'var(--status-good)'}} aria-label="committed" />
                   ) : open ? (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums" style={{color: toneText('var(--status-warn)'), background: 'color-mix(in oklab, var(--status-warn) 14%, transparent)'}}>
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[11px] font-bold tabular-nums" style={{color: toneText('var(--status-warn)'), background: 'color-mix(in oklab, var(--status-warn) 16%, transparent)'}}>
                       {open}
                     </span>
                   ) : (
-                    <CheckCircle2 className="size-3.5 text-muted-foreground" aria-label="nothing to check" />
+                    <CheckCircle2 className="size-4 text-muted-foreground/70" aria-label="nothing to check" />
                   )}
                   {multi && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="more than one sheet for this page" />}
                 </button>
@@ -534,46 +538,54 @@ export function BatchReview({
             };
             const unknown = byPage.get('unknown') ?? [];
             return (
-              <div className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-xs font-medium text-muted-foreground">Form pages</span>
-                <span className="text-[11px] text-muted-foreground/70">each chip is a scanned sheet (P. = its page in the scan)</span>
-              </div>
-              <div role="tablist" aria-label="Form pages" className="flex flex-col gap-1.5">
-                {FORM_PAGES.map((n) => {
-                  const copies = byPage.get(String(n)) ?? [];
-                  if (copies.length === 0) {
-                    return coverage.missing.includes(n) && coverage.missing.length < 5 ? (
-                      <div key={n} className="flex items-center gap-2">
-                        <span className="w-14 shrink-0 text-xs font-medium text-muted-foreground">Page {n}</span>
-                        <span className="text-xs text-muted-foreground/60">not in this batch</span>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Form pages</span>
+                  <span className="text-[11px] text-muted-foreground/70">
+                    each chip is a scanned sheet <span className="text-muted-foreground/50">·</span> <span className="font-mono">P.</span> = its page in the scan
+                  </span>
+                </div>
+                <div role="tablist" aria-label="Form pages" className="flex flex-col gap-2">
+                  {FORM_PAGES.map((n) => {
+                    const copies = byPage.get(String(n)) ?? [];
+                    const present = copies.length > 0;
+                    // A page with no sheet here still gets a quiet row (when only a few are
+                    // missing) so the five form pages read as one consistent column.
+                    if (!present && !(coverage.missing.includes(n) && coverage.missing.length < 5)) return null;
+                    return (
+                      <div key={n} className="flex min-h-9 flex-wrap items-center gap-3">
+                        <span
+                          className={cn(
+                            'grid size-7 shrink-0 place-items-center rounded-lg border font-mono text-xs font-semibold tabular-nums',
+                            present ? 'border-border bg-muted text-foreground' : 'border-border/70 text-muted-foreground/60',
+                          )}
+                        >
+                          {n}
+                        </span>
+                        <span className={cn('w-12 shrink-0 text-[13px]', present ? 'font-medium text-foreground' : 'text-muted-foreground')}>Page {n}</span>
+                        {present ? (
+                          <div className="flex flex-wrap items-center gap-2">{copies.map((k) => chip(k))}</div>
+                        ) : (
+                          <span className="rounded-[10px] border border-dashed border-border px-3 py-1.5 text-xs text-muted-foreground/60">Not in this batch</span>
+                        )}
                       </div>
-                    ) : null;
-                  }
-                  return (
-                    <div key={n} className="flex flex-wrap items-center gap-2">
-                      <span className="w-14 shrink-0 text-xs font-medium">Page {n}</span>
-                      <div className="flex flex-wrap items-center gap-1.5">{copies.map((k) => chip(k))}</div>
+                    );
+                  })}
+                  {unknown.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setOpenGroups((g) => ({...g, unknown: !g.unknown}))}
+                        aria-expanded={Boolean(openGroups.unknown)}
+                        className="inline-flex h-9 shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <ChevronDown className={cn('size-4 transition-transform duration-150', openGroups.unknown && 'rotate-180')} />
+                        No page number ({unknown.length})
+                      </button>
+                      {openGroups.unknown && <div className="flex flex-wrap items-center gap-2">{unknown.map((k) => chip(k))}</div>}
                     </div>
-                  );
-                })}
-                {unknown.length > 0 && (
-                  <div className="flex items-start gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setOpenGroups((g) => ({...g, unknown: !g.unknown}))}
-                      aria-expanded={Boolean(openGroups.unknown)}
-                      className="inline-flex h-6 shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <ChevronDown className={cn('size-3.5 transition-transform', openGroups.unknown && 'rotate-180')} />
-                      No page number ({unknown.length})
-                    </button>
-                    {openGroups.unknown && (
-                      <div className="flex flex-wrap gap-1.5">{unknown.map((k) => chip(k))}</div>
-                    )}
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
               </div>
             );
           })()}
