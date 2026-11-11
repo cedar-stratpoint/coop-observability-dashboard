@@ -1,5 +1,6 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
+import type {ReadUsage} from './goldline-extract-run';
 
 // Observability for the scan-read pipeline (o1_read_logs). One row per page the uploader
 // reads, and per store-assign attempt — the inputs, the classifier/extract summary,
@@ -33,7 +34,18 @@ export type ReadLogInput = {
   readMs?: number | null;
   error?: string | null;
   detail?: unknown;
+  /** Claude token tally for this page (input/output/cache/calls). Folded into the `detail`
+   *  jsonb under a `usage` key so a run's Claude cost can be summed from the DB later. */
+  usage?: ReadUsage | null;
 };
+
+/** Merge the token tally into the detail jsonb (as `detail.usage`), leaving the rest of
+ *  detail intact. No usage → detail is written as-is. */
+function detailWithUsage(detail: unknown, usage: ReadUsage | null | undefined): unknown {
+  if (!usage) return detail ?? null;
+  const base = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : detail != null ? {detail} : {};
+  return {...base, usage};
+}
 
 /** Write one read-pipeline log row. Best-effort — never throws; returns quietly if the
  *  Nichido env isn't configured (mock mode) or the insert errors. */
@@ -65,7 +77,7 @@ export async function logReadEvent(input: ReadLogInput): Promise<void> {
         classify_ms: input.classifyMs ?? null,
         read_ms: input.readMs ?? null,
         error: input.error ?? null,
-        detail: (input.detail ?? null) as never,
+        detail: detailWithUsage(input.detail, input.usage) as never,
       });
   } catch {
     /* logging is best-effort — swallow so an upload is never blocked by its own log */

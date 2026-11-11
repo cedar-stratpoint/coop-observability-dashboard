@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Goldline reader: record Claude token usage per page (so a run's API cost is in the DB)
+
+There was no per-read record of Claude token usage anywhere: `read_logs.detail` carried only the classifier output, and the Anthropic console only aggregates a whole workspace by day, so comparing the API cost of two scan runs meant eyeballing a noisy console delta. Now every page read records its tokens. `createMessageWithFallback` (the single Anthropic call site) folds each call's `usage` (input / output / cache-read / cache-create / call count) into a per-page tally held in an `AsyncLocalStorage` (not a module global, because Fluid Compute reuses one instance across concurrent reads, which would otherwise mix two pages' tokens). The read pipeline opens the tally with `withReadUsage` and snapshots it onto every `read_logs` row (success, set-aside, and failure alike) under `detail.usage`. Purely additive, no migration, no behavior change to the read itself. A run's Claude cost is now `sum` over `detail->'usage'` with current Sonnet pricing.
+
 ## 2026-11-11 — Goldline reader: stream the extract call (removes the 10-minute non-streaming limit)
 
 Raising `max_tokens` to 32000 was enough that Anthropic now rejects the extract request up front with "Streaming is required for operations that may take longer than 10 minutes": a non-streaming `messages.create` is not allowed once `max_tokens` is high enough to potentially exceed ten minutes, and the densest pages were failing instantly with that, read_attempts 0. Switched `createMessageWithFallback` from `client.messages.create(...)` to `client.messages.stream(...).finalMessage()`. The final message is identical in shape (content + stop_reason), so the truncation detection and the fallback-key path are unchanged; the route's 600s maxDuration still bounds the whole read. This is what actually lets pages 33 and 57 finish.

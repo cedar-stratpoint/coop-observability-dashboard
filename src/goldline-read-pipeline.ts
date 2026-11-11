@@ -1,7 +1,7 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
-import {classifyPage, extractInventoryPage, type ExtractedPage} from './goldline-extract-run';
+import {classifyPage, extractInventoryPage, readUsageSnapshot, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
@@ -71,6 +71,9 @@ export async function runInventoryRead(args: {
   // Accumulates what we learn about this page so the read_logs row is complete no matter
   // which branch (set aside / read / failed) the page takes — including the catch below.
   const rec: ReadLogInput = {companyId, uploadId, filename, fileSize, source: uploadSource(filename)};
+  // One token tally for the whole page read: classify + extract (and any retry) all record
+  // into it, and each log row below snapshots it, so the page's Claude cost is in the DB.
+  return withReadUsage(async () => {
   try {
     // Phase 0: classify the page (number, kind, orientation, form version, handwritten
     // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
@@ -127,7 +130,7 @@ export async function runInventoryRead(args: {
     if (cls.kind === 'sales' || page === 6) {
       const reason = 'This is the page 6 Sales Report, not an inventory page. It has been set aside (out of scope for now).';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'sales'});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'sales', usage: readUsageSnapshot()});
       return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: cls.kind}};
     }
     if (!inv) {
@@ -136,12 +139,12 @@ export async function runInventoryRead(args: {
       if (cls.kind === 'blank') {
         const reason = 'This looks like a blank page (a back side with no form). It has been set aside.';
         await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-        await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'blank'});
+        await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'blank', usage: readUsageSnapshot()});
         return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: 'blank'}};
       }
       const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      await logReadEvent({...rec, status: 'rejected', stage: 'classified'});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified', usage: readUsageSnapshot()});
       return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: cls.kind}};
     }
 
@@ -166,7 +169,7 @@ export async function runInventoryRead(args: {
     if (outPdf.length) {
       const reason = `Scanned form is for store ${extracted.store_code}, outside your access.`;
       await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
-      await logReadEvent({...rec, status: 'rejected', stage: 'read', storeCode: extracted.store_code, rowCount: extracted.rows.length});
+      await logReadEvent({...rec, status: 'rejected', stage: 'read', storeCode: extracted.store_code, rowCount: extracted.rows.length, usage: readUsageSnapshot()});
       return {http: 403, body: {uploadId, status: 'rejected', error: reason}};
     }
     emit?.({type: 'stage', stage: 'saving'});
@@ -180,6 +183,7 @@ export async function runInventoryRead(args: {
       docConfidence: avgConfidence(extracted),
       flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
       offManifest: extracted.rows.filter((r) => r.off_manifest).length,
+      usage: readUsageSnapshot(),
     });
     return {
       http: 200,
@@ -212,7 +216,8 @@ export async function runInventoryRead(args: {
     console.error('goldline read: extraction failed', msg(e));
     const friendly = humanizeExtractError(e);
     await setUploadStatus(uploadId, 'failed', {rejectReason: friendly, errorDetail: msg(e)});
-    await logReadEvent({...rec, status: 'failed', stage: rec.readMs != null ? 'read' : 'classified', error: msg(e), detail: {...(rec.detail as object | null), error: msg(e)}});
+    await logReadEvent({...rec, status: 'failed', stage: rec.readMs != null ? 'read' : 'classified', error: msg(e), detail: {...(rec.detail as object | null), error: msg(e)}, usage: readUsageSnapshot()});
     return {http: 422, body: {uploadId, status: 'failed', error: friendly}};
   }
+  });
 }
