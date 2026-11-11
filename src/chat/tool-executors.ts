@@ -1,5 +1,16 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {draftLeads} from './contacts/draft';
+import {matchPeople} from './contacts/match';
+import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
+import {tracked} from './crm/executors';
+import {crmEnrichedCustomers} from './crm/tools';
+import {listEventLeads, readContactsInput} from './contacts/leads';
+import {logCrmCall, logPiiRead} from './audit';
+import {CrmError} from './crm/client';
+import type {CrmGet} from './crm/tools';
+import {paramsFingerprint} from './explore/fingerprint';
+import {compareForChat, readCompareInput, skuCompareResult} from './sku-compare-tool';
 import {askOwner, isClarify, type ClarifyResult} from './clarify';
 import {rangeLabel} from './range';
 import {describeData} from './coverage';
@@ -33,6 +44,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
   let loaded: ReturnType<ChatToolContext['data']> | null = null;
   const data = () => (loaded ??= ctx.data());
   let counter = 0;
+  let contactBlocks = 0;
   // The open report (F8) owns the result store: results are reachable by result id and by block id. Empty when none is open.
   const session = ctx.report ?? createReportSession();
   // Train 4: CRM results go into the same store as every other tool (charts and the number check work on them).
@@ -43,12 +55,51 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     return compact(r, id);
   };
 
+  // The website side of find/overlap goes through the chat's own GET-only CRM client (one chat_crm_call line per read); never src/crm-data.ts.
+  const peopleSource = async (s: import('./contacts/leads').LeadsSource): Promise<PeopleSource> => {
+    const base = {leads: s.leads, lazada: s.lazada ?? null, events: s.events};
+    if (!ctx.crm) return {...base, website: null, websiteNote: 'the website CRM is not connected for this chat'};
+    const out = await tracked({client: ctx.crm, user: ctx.user, sink: ctx.sink}, 'contacts', {endpoint: 'customers'}, (get) => crmEnrichedCustomers(get, ctx.now), (r) => r.enriched.length);
+    return 'error' in out ? {...base, website: null, websiteNote: out.error.split('. ')[0].toLowerCase()} : {...base, website: out.enriched};
+  };
+
   return {
     ...createRenderExecutors(ctx, session),
     ...createReportExecutors(ctx, session, data),
     ...(ctx.explore ? {run_query: ctx.explore} : {}),
     ...(ctx.exploreSchema ? {list_tables: ctx.exploreSchema.list_tables, describe_table: ctx.exploreSchema.describe_table} : {}),
-    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep}) : {}),
+    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true}) : {}),
+    // One product across POS, Shopee and the website (src/sku-compare.ts). Not strict: validated in code. The website channel reads the CRM once per week through the
+    // same client (one chat_crm_call line for the whole call); a CRM failure makes that channel "failed" in the result, never a silent zero.
+    ...(ctx.sku
+      ? {
+          compare_sku: async (input: unknown) => {
+            const req = readCompareInput(input);
+            if ('error' in req) return {error: req.error};
+            const t0 = Date.now();
+            const endpoints = new Set<string>();
+            let bytes = 0;
+            let failure: string | null = null;
+            const crm = ctx.crm;
+            const crmGet: CrmGet | undefined = crm
+              ? async (endpoint, query, opts) => {
+                  endpoints.add(endpoint);
+                  try {
+                    const r = await crm.get(endpoint, query, opts);
+                    bytes += r.cached ? 0 : r.bytes;
+                    return r;
+                  } catch (e) {
+                    failure = e instanceof CrmError ? e.code : 'internal';
+                    throw e;
+                  }
+                }
+              : undefined;
+            const cmp = await compareForChat(req, {data: async () => data(), aliases: ctx.sku!.aliases, shopee: ctx.sku!.shopee, crmGet, now: ctx.now});
+            if (crm) logCrmCall({tool: 'compare_sku', endpoints: [...endpoints], paramsFp: paramsFingerprint(req), ok: failure === null, code: failure, rows: cmp.channels.length, bytes, ms: Date.now() - t0, user: ctx.user}, ctx.sink);
+            return keep(skuCompareResult(cmp, ctx.now));
+          },
+        }
+      : {}),
     describe_data: async (input) => describeData(input as {metric: string}, await data(), ctx.now, !!ctx.explore, !!ctx.crm, !!ctx.crmOrders || !!ctx.crm),
     query_metric: async (input) => {
       let result = runMetric(input, await data(), ctx.now);
@@ -139,6 +190,26 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       session.store.set(id, {...result, id});
       return compact(result, id);
     },
+    ...(ctx.leads ? {contacts: async (input: unknown) => {
+      const req = readContactsInput(input);
+      if ('error' in req) return {error: req.error};
+      const source = await ctx.leads!();
+      let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
+      if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
+        const people = await peopleSource(source);
+        out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
+      } else {
+        out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
+      }
+      if ('table' in out) {
+        contactBlocks += 1;
+        ctx.emitBlock?.({kind: 'table', id: `c${contactBlocks}`, source: `contacts:${out.audit.eventId}`, ...out.table});
+        logPiiRead({tool: 'contacts', mode: req.mode, ok: true, code: null, eventId: out.audit.eventId, rows: out.audit.rows, columns: out.audit.columns, user: ctx.user}, ctx.sink);
+        return {ok: true, shown: true, block: `c${contactBlocks}`, ...out.model};
+      }
+      logPiiRead({tool: 'contacts', mode: req.mode, ok: false, code: isClarify(out) ? 'clarify' : 'no_result', eventId: null, rows: null, columns: [], user: ctx.user}, ctx.sink);
+      return out;
+    }} : {}),
     ask_owner: async (input) => askOwner(input), // a question: the loop writes it and ends the turn
     lookup_product: async (input) => {
       const result = lookupProduct(input, await data(), ctx.now);
@@ -167,13 +238,15 @@ function compact(r: MetricResult, id: string) {
   const {measures, ...meta} = r.meta;
   const used = measures.find((m) => m.key === meta.measure);
   const total = r.rows.length;
+  // crm_query already capped its rows and bytes for the model (src/chat/crm/query-config.ts); every other result keeps the 100-row payload
+  const cap = r.metric === 'crm_query' ? total : MAX_PAYLOAD_ROWS;
   return {
     id,
     metric: r.metric,
     dimension: r.dimension,
     columns: r.columns,
-    rows: total > MAX_PAYLOAD_ROWS ? r.rows.slice(0, MAX_PAYLOAD_ROWS) : r.rows,
-    ...(total > MAX_PAYLOAD_ROWS ? {truncated: {shown: MAX_PAYLOAD_ROWS, total}} : {}),
+    rows: total > cap ? r.rows.slice(0, cap) : r.rows,
+    ...(total > cap ? {truncated: {shown: cap, total}} : {}),
     meta: {...meta, method: used?.method ?? '', declared_measures: measures.map((m) => m.key)},
   };
 }
@@ -195,10 +268,14 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'get_digest') return 'Reading a stored digest';
   if (name === 'get_channel_report') return 'Building the channel report';
   if (name === 'get_crm_metrics') return 'Reading the website CRM totals';
+  if (name === 'crm_query') return 'Querying the website CRM';
+  if (name === 'shopify_query') return 'Reading live from Shopify (slower)';
+  if (name === 'compare_sku') return 'Comparing one product across channels';
   if (name === 'list_crm_orders') return 'Looking up website orders';
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';
   if (name === 'lookup_product') return 'Looking up a product';
+  if (name === 'contacts') return 'Looking up contacts';
   if (name === 'ask_owner') return 'Checking what you mean';
   if (name === 'render_kpi') return 'Adding a tile';
   if (name === 'render_chart') return 'Drawing a chart';

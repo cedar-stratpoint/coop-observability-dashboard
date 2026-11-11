@@ -5,6 +5,7 @@
 // groups, then one table at a time — carts, orders, customers — each searchable
 // and exportable. Read-only by design: the reminder and win-back sends stay on
 // the storefront admin, so nothing here can email a customer.
+import {downloadCsv} from '@/src/csv';
 import {useMemo, useState} from 'react';
 import {
   AlertTriangle,
@@ -108,25 +109,6 @@ function FilterSelect({
       </select>
     </label>
   );
-}
-
-function csvCell(v: unknown): string {
-  const raw = String(v ?? '');
-  // A cell starting with = + - @ can execute as a formula in Excel/Sheets, and
-  // these rows carry customer-supplied emails and names.
-  const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
-  const escaped = safe.replace(/"/g, '""');
-  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-}
-
-function downloadCsv(filename: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 export function CrmView({

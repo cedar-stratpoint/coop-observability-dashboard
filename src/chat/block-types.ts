@@ -70,6 +70,16 @@ export interface TableBlock extends BlockBase {
   columns: ResultColumn[];
   rows: MetricRow[]; // exactly the stored rows for the chosen columns, plus nothing else
   total: MetricRow | null; // a total row when the parts add to a whole (computed by code)
+  /** Contact data (the `contacts` tool): the UI offers Copy and CSV, and never saves this block or the turn's text in the browser. */
+  pii?: true;
+  /** Which row keys feed the Copy emails / Copy mobiles / Copy all messages buttons (a button shows only for a key that is set). */
+  copyColumns?: {emails?: string; mobiles?: string; messages?: string};
+  /** File name for the CSV download. */
+  csvName?: string;
+  /** crm_query "all": the app holds every row for Copy and CSV (not only the first `screenRows`), and shows the Download CSV button even for non-contact data. */
+  exportable?: true;
+  /** Rows drawn on screen when `rows` holds more (the CSV and Copy use all of `rows`). */
+  screenRows?: number;
 }
 
 export interface ChartBlock extends BlockBase {

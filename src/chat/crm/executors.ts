@@ -1,13 +1,19 @@
 // The website CRM tool executors (spec 4.2, 4.3): a per-turn call cap, one chat_crm_call audit line per call, honest failure. Pure:
 // the GET-only client is injected (src/chat/crm/client.ts), so vitest drives it with a fake.
 import type {RangeOrder} from '../../custom-range';
-import {logCrmCall, type AuditSink} from '../audit';
+import {logCrmCall, logPiiRead, type AuditSink} from '../audit';
+import type {ChatBlock} from '../block-types';
 import {paramsFingerprint} from '../explore/fingerprint';
 import type {MetricError, MetricResult} from '../result-types';
-import {CRM_LIMITS, CrmError, type CrmClient, type CrmEndpointId, type CrmErrorCode, type CrmRead} from './client';
+import {CRM_LIMITS, CrmError, type CrmClient, type CrmErrorCode, type CrmRead, type ShopifyBody} from './client';
+import {loadCatalog, resetCatalogCache} from './query-catalog';
+import {runQuery} from './query-run';
+import {describeCatalog} from './query-shape';
+import {isErr, readQueryInput} from './query-spec';
+import {isIdentityDenied, readShopifyInput, shopifyResult} from './shopify-query';
 import {crmCheckoutsResult, crmCustomersResult, crmMetricsResult, crmOrdersResult, crmRangeOrders, isMetricError, readCheckoutsInput, readCustomersInput, readMetricsInput, readOrdersInput, type CrmGet} from './tools';
 
-export const CRM_TOOL_NAMES = ['get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts'] as const;
+export const CRM_TOOL_NAMES = ['get_crm_metrics', 'crm_query', 'shopify_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts'] as const;
 export type CrmToolName = (typeof CRM_TOOL_NAMES)[number];
 
 const SAY = 'Say so plainly and give no website figure; do not guess, and do not use another source in its place.';
@@ -29,12 +35,19 @@ export interface CrmDeps {
 }
 
 /** One CRM read on behalf of `tool`: tracks the GETs, writes one chat_crm_call line, and turns a CrmError into its honest text. Any other error is logged as "internal" and rethrown (dispatchToolCall reports a generic failure). */
-export async function tracked<T>(deps: CrmDeps, tool: string, params: unknown, run: (get: CrmGet) => Promise<T>, rowsOf: (value: T) => number | null): Promise<T | MetricError> {
-  const endpoints = new Set<CrmEndpointId>();
+export type CrmPostShopify = (payload: ShopifyBody) => Promise<CrmRead>;
+export async function tracked<T>(deps: CrmDeps, tool: string, params: unknown, run: (get: CrmGet, post: CrmPostShopify) => Promise<T>, rowsOf: (value: T) => number | null): Promise<T | MetricError> {
+  const endpoints = new Set<string>();
   const reads: CrmRead[] = [];
-  const get: CrmGet = async (endpoint) => {
+  const get: CrmGet = async (endpoint, query) => {
     endpoints.add(endpoint);
-    const r = await deps.client.get(endpoint);
+    const r = await deps.client.get(endpoint, query);
+    reads.push(r);
+    return r;
+  };
+  const post: CrmPostShopify = async (payload) => {
+    endpoints.add('shopify');
+    const r = await deps.client.postShopify(payload);
     reads.push(r);
     return r;
   };
@@ -42,12 +55,21 @@ export async function tracked<T>(deps: CrmDeps, tool: string, params: unknown, r
   const line = (ok: boolean, code: string | null, rows: number | null): void =>
     logCrmCall({tool, endpoints: [...endpoints], paramsFp: paramsFingerprint(params), ok, code, rows, bytes: reads.reduce((s, r) => s + (r.cached ? 0 : r.bytes), 0), ms: Date.now() - t0, user: deps.user}, deps.sink);
   try {
-    const value = await run(get);
+    const value = await run(get, post);
     line(true, null, rowsOf(value));
     return value;
   } catch (e) {
     if (e instanceof CrmError) {
       line(false, e.code, null);
+      if (tool === 'shopify_query' && e.code === 'upstream_error') {
+        // the CRM's guard refused the query (400, with its own reason), or Shopify did not accept it or could not be reached (502): neither is a CRM catalog problem
+        return {error: e.status === 400 ? `The CRM's read-only Shopify door refused that query${e.reason ? `: ${e.reason}` : ''}. Fix the query once using only the fields in the tool description, or say plainly that this cannot be read.` : `Shopify did not answer that query${e.status ? ` (HTTP ${e.status})` : ''}, so this data is not available right now. ${SAY}`};
+      }
+      // the CRM refused the query itself (HTTP 400): the catalog may have changed since it was read, so read it again next time
+      if (e.code === 'upstream_error' && e.status === 400) {
+        resetCatalogCache();
+        return {error: 'The website CRM refused that query as invalid. Call crm_query with describe true (and the table) to see what is allowed now, then correct the query once.'};
+      }
       return {error: CRM_ERROR_TEXT[e.code]};
     }
     line(false, 'internal', null);
@@ -62,11 +84,16 @@ export interface CrmExecutorDeps extends CrmDeps {
   maxCalls?: number;
   /** Cap on refused (bad input) calls, separate from the read budget, so the model cannot loop on bad input. */
   maxRefused?: number;
+  /** The caller is on the allowlist that also gates `contacts` (EXPLORE_ALLOWED_EMAILS, decided by the route): only then may crm_query return customer identity (detail "identity"). */
+  allowIdentity?: boolean;
+  /** Draws a table for the owner (the "all" strategy); absent: no table is drawn and the model is told so. */
+  emitBlock?: (block: ChatBlock) => void;
 }
 
 export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (input: unknown) => Promise<unknown>> {
   let calls = 0;
   let refused = 0;
+  let tables = 0;
   const max = deps.maxCalls ?? CRM_LIMITS.maxToolCallsPerTurn;
   const maxRefused = deps.maxRefused ?? CRM_LIMITS.maxToolCallsPerTurn;
   const refusedLine = (tool: CrmToolName, input: unknown, code: string): void =>
@@ -94,6 +121,84 @@ export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (
     };
   return {
     get_crm_metrics: tool('get_crm_metrics', readMetricsInput, (_req, get) => crmMetricsResult(get, deps.now)),
+    crm_query: async (input: unknown): Promise<unknown> => {
+      const identityAsked = input !== null && typeof input === 'object' && !Array.isArray(input) && (input as {detail?: unknown}).detail === 'identity';
+      const refuse = (out: MetricError, code: string): MetricError => {
+        if (refused >= maxRefused) {
+          refusedLine('crm_query', input, 'refused_cap');
+          return {error: CRM_ERROR_TEXT.refused_cap};
+        }
+        refused += 1;
+        refusedLine('crm_query', input, code);
+        if (identityAsked) logPiiRead({tool: 'crm_query', mode: 'identity', ok: false, code, eventId: null, rows: null, columns: [], user: deps.user}, deps.sink);
+        return out;
+      };
+      // Identity detail is decided here, BEFORE any CRM call (not even the catalog read), for everyone who is not on the allowlist.
+      if (identityAsked && deps.allowIdentity !== true) return refuse({error: 'Names, pet names, email and phone are not available to this user. Answer with counts and totals only, and say so.'}, 'identity_denied');
+      if (calls >= max) {
+        refusedLine('crm_query', input, 'call_cap');
+        return {error: CRM_ERROR_TEXT.call_cap};
+      }
+      const {catalog, source} = await loadCatalog((e, q) => deps.client.get(e, q), deps.now.getTime());
+      const req = readQueryInput(input, catalog, {allowIdentity: deps.allowIdentity === true});
+      if (isErr(req)) return refuse(req, 'input');
+      if (req.kind === 'describe') return describeCatalog(catalog, req.table, deps.allowIdentity === true, source);
+      calls += 1;
+      const out = await tracked(deps, 'crm_query', req.spec, (get) => runQuery(req, {get, cat: catalog, now: deps.now}), (r) => r.rowsOut);
+      if (req.identity) {
+        // one line per identity call: who, which columns, how many rows. Never a value.
+        const ok = !isMetricError(out);
+        logPiiRead({tool: 'crm_query', mode: 'identity', ok, code: ok ? null : 'crm_error', eventId: null, rows: ok ? out.rowsOut : null, columns: ok ? out.result.columns.map((c) => c.key) : [], user: deps.user}, deps.sink);
+      }
+      if (isMetricError(out)) return out;
+      const kept = deps.keep(out.result) as Record<string, unknown>;
+      if (out.table && deps.emitBlock) {
+        tables += 1;
+        deps.emitBlock({kind: 'table', id: `q${tables}`, source: `crm_query:${tables}`, ...out.table});
+        return {...kept, shown: true, block: `q${tables}`, delivered_rows: out.rowsOut};
+      }
+      return out.table ? {...kept, shown: false, note: 'The table could not be drawn here; give the answer from the sample and the facts.'} : kept;
+    },
+    shopify_query: async (input: unknown): Promise<unknown> => {
+      const refuse = (out: MetricError, code: string, identity: boolean): MetricError => {
+        if (refused >= maxRefused) {
+          refusedLine('shopify_query', input, 'refused_cap');
+          return {error: CRM_ERROR_TEXT.refused_cap};
+        }
+        refused += 1;
+        refusedLine('shopify_query', input, code);
+        if (identity) logPiiRead({tool: 'shopify_query', mode: 'identity', ok: false, code, eventId: null, rows: null, columns: [], user: deps.user}, deps.sink);
+        return out;
+      };
+      // Everything below runs BEFORE any request to the CRM: input shape, courtesy checks and the identity rule.
+      const req = readShopifyInput(input, {allowIdentity: deps.allowIdentity === true});
+      if ('error' in req) return refuse(req, 'input', false);
+      if (isIdentityDenied(req)) return refuse({error: 'Names, email, phone, customer fields and shop metafields (booth leads) are not available to this user. Query only non-personal fields (orders, products, inventory, discounts) and say so.'}, 'identity_denied', true);
+      if (calls >= max) {
+        refusedLine('shopify_query', input, 'call_cap');
+        return {error: CRM_ERROR_TEXT.call_cap};
+      }
+      calls += 1;
+      const out = await tracked(
+        deps,
+        'shopify_query',
+        {query_chars: req.query.length, vars: req.variables ? Object.keys(req.variables).length : 0, identity: req.identity, fp: req.query.replace(/"[^"]*"/g, '"?"').replace(/\s+/g, ' ')},
+        async (_get, post) => {
+          const r = await post({query: req.query, ...(req.variables ? {variables: req.variables} : {})});
+          const shaped = shopifyResult(r.body, req, deps.now);
+          if (!shaped) throw new CrmError('bad_shape');
+          return shaped;
+        },
+        (r) => r.rowsOut,
+      );
+      if (req.identity) {
+        // one line per identity call: who, which columns, how many rows. Never a value.
+        const ok = !isMetricError(out);
+        logPiiRead({tool: 'shopify_query', mode: 'identity', ok, code: ok ? null : 'crm_error', eventId: null, rows: ok ? out.rowsOut : null, columns: ok ? out.result.columns.map((c) => c.key) : [], user: deps.user}, deps.sink);
+      }
+      if (isMetricError(out)) return out;
+      return deps.keep(out.result);
+    },
     list_crm_orders: tool('list_crm_orders', readOrdersInput, crmOrdersResult),
     list_crm_customers: tool('list_crm_customers', readCustomersInput, (req, get) => crmCustomersResult(req, get, deps.now)),
     list_crm_checkouts: tool('list_crm_checkouts', readCheckoutsInput, crmCheckoutsResult),

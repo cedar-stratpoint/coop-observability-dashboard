@@ -42,7 +42,10 @@ describe('no URL, path, method or header from the model', () => {
   it('no CRM tool schema has such a property, and every schema is closed', () => {
     for (const t of CRM_TOOLS) {
       expect(t.input_schema.additionalProperties).toBe(false);
-      expect(Object.keys(t.input_schema.properties ?? {}).filter((k) => /url|path|method|header|host|endpoint|query|body|token/i.test(k))).toEqual([]);
+      const keys = Object.keys(t.input_schema.properties ?? {});
+      // shopify_query's `query` is a GraphQL string for the CRM's one read-only door: the only property of any CRM tool that may carry that name, and it has no URL, path or method beside it
+      if (t.name === 'shopify_query') expect(keys).toEqual(['query', 'variables']);
+      else expect(keys.filter((k) => /url|path|method|header|host|endpoint|query|body|token/i.test(k))).toEqual([]);
     }
   });
   it.each([{url: 'https://evil.example'}, {path: '/admin/send'}, {method: 'POST'}, {headers: {Authorization: 'x'}}, {endpoint: 'admin'}])('extra key %j is refused with zero requests', async (extra) => {

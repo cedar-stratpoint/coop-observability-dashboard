@@ -30,13 +30,20 @@ describe('no POST, no other method', () => {
     expect(crm).toEqual(expect.arrayContaining(['src/chat/crm/client.ts', 'src/chat/crm/config.ts']));
     for (const f of crm) {
       const code = strip(files[f], false);
-      expect(code, f).not.toMatch(/['"](POST|PUT|PATCH|DELETE|HEAD|OPTIONS)['"]/i);
+      // ONE narrowly scoped POST exists, in client.ts only: the CRM's read-only Shopify GraphQL door (postShopify). Exactly one 'POST' literal, one request body,
+      // and the path constant appears once. Every other verb, every other file and every other body stays banned.
+      const verbs = f === 'src/chat/crm/client.ts' ? /['"](PUT|PATCH|DELETE|HEAD|OPTIONS)['"]/i : /['"](POST|PUT|PATCH|DELETE|HEAD|OPTIONS)['"]/i;
+      expect(code, f).not.toMatch(verbs);
       expect(code, f).not.toMatch(/\/admin/);
-      expect(code, f).not.toMatch(/\bbody\s*:(?!\s*unknown\b)/);
+      expect(code, f).not.toMatch(f === 'src/chat/crm/client.ts' ? /\bbody\s*:(?!\s*(unknown\b|JSON\.stringify\(payload\)))/ : /\bbody\s*:(?!\s*unknown\b)/);
       // `method:` may only be followed by a quote (the GET literal, or a prose description in tools.ts, whose verbs the line above bans): never by a variable
       expect(code, f).not.toMatch(/\bmethod\s*:\s*[^'"\s]/);
       if (f !== 'src/chat/crm/client.ts') expect(code, f).not.toMatch(/\b(fetch|XMLHttpRequest|WebSocket|sendBeacon)\s*\(/);
     }
+    const client = strip(files['src/chat/crm/client.ts'], false);
+    expect(client.match(/['"]POST['"]/g)).toHaveLength(1);
+    expect(client.match(/\/api\/shopify\/query/g)).toHaveLength(1);
+    expect(client.match(/\bbody\s*:\s*JSON\.stringify\(payload\)/g)).toHaveLength(1);
   });
 });
 

@@ -21,7 +21,7 @@ const PET_EVENT = 'Pet type and event ARE available (pet_mix, event_rollup): run
 // "Not in the database" line then names what still is not readable, from the same flags.
 const salesSources = (flags: DataFlags): string =>
   flags.crm
-    ? 'Website orders, customers and abandoned checkouts ARE available live (get_crm_metrics, list_crm_orders, list_crm_customers, list_crm_checkouts).'
+    ? 'Website orders, customers and abandoned checkouts ARE available live (crm_query, get_crm_metrics, list_crm_*).'
     : flags.website
       ? 'Website totals for any dates ARE available live through get_channel_report; other Website figures come from the stored digests only.'
       : 'Website sales come from the stored digests only.';
