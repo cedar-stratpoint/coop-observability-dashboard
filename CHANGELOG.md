@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Business Health Report: GMV card charts drop the solid actual line (BHR-08 follow-up)
+
+- **Decision (owner, 2026-11-11):** on the GMV key cards the vertical bars already show each month's actual, so the solid actual line on top of them was double ink. The chart now shows **bars + the dashed target line** only. The dots on the bar tops stay (status colour, and red dots still open "Why?"); the current month keeps its dashed bar outline and hollow dot, without the dotted connector.
+- Charts without bars (Cash, Rough runway) keep their actual line. Change: `Spark` in `components/analyst/health-report-view.tsx` draws the actual line only when `bars` is off.
+
 ## 2026-11-11 — Fix: batch-review's "← Scan" back link goes to the scan, not back through filters
 
 Same fix as the scan board's breadcrumb, applied to the batch-review page: its "← Scan…" control used `window.history.back()`, so on the filter-heavy scan board it retraced the view tabs / version cards / store chips you had clicked. It is a breadcrumb to the scan, so it now links straight to the scan board.
@@ -41,7 +46,6 @@ Now batches carry a **kind**: `scan` (server-ingested whole scan) or `form` (one
 - Direct hits on `/uploads/batch/[scanId]` (old links) **bounce to the scan's triage board** instead of rendering the batch screen or trying to split it.
 
 `batch-review` (and its `P.X` grid) is unchanged and still used for genuine single-store `form` batches, where it is only a handful of pages. Touches `upload_batches.kind` (+ `createBatch` / `ingestScanPdf` / `getBatch`), the two uploads routes, and `triageBoard` (new `batchKind` on each form).
-
 ## 2026-11-10 — Ask Coop reads website customers right, answers the repeat target, and lists who to contact; the Customers tab shows the same and logs manual contacts; cohorts by first-order code (RET-00 Stage 1, RET-02 Stage 2, RET-03 Stage 3, RET-04 Stage 4, RET-05 Stage 5, RET-06 Stage 6)
 
 The live read check (`knowledge/tasks/2026-11-09-customer-foundation-audit.md`) found that `list_crm_customers` counted Shopify test orders (repeat came out as 21 where the true figure is 20). It also had no first or last order date and no way to group by first-order month. The `crm_query` "2+ orders" identity drill-down returned 0 people, because the CRM's `customers.ordersCount` is null on every row.
