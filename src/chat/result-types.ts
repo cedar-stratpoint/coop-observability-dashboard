@@ -69,7 +69,8 @@ export type CheckCode =
   | 'sudden_change'
   | 'mock_source'
   | 'values_hidden'
-  | 'repeat_rate';
+  | 'repeat_rate'
+  | 'test_orders';
 
 export interface Check {
   code: CheckCode;

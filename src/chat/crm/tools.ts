@@ -467,6 +467,9 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
     ...capped,
   ];
   if (req.audience !== 'all') notes.push(info(`Audience (owner rule): ${AUDIENCE_TEXT[req.audience]}; test orders never count. Listed by last order, oldest first. Email marketing consent is shown, never a filter: respect it before contacting anyone. Nothing is sent from here: the owner copies the table or downloads its CSV.`, 'reconciles'));
+  // A store that checks out in test mode (staging) has orders but no buyers: name the excluded orders so the CRM's own total doesn't read as a contradiction.
+  const testOrders = orders.filter((o) => o.test === true).length;
+  if (testOrders > 0) notes.push({code: 'test_orders', status: 'info', text: `${testOrders} of ${orders.length} captured website orders are Shopify test orders and count nowhere here (owner rule): no orders, spend or buyers. The CRM's own order total includes them, so it is higher than the orders counted here.`, values: {test_orders: testOrders, orders: orders.length}});
   if (!membership) notes.push({code: 'partial_coverage', status: 'warn', text: `The membership settings could not be read, so the default programme start (${MEMBERSHIP_FALLBACK.programStart}) was used.`});
 
   if (req.group_by === 'none') {
