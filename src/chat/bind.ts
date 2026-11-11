@@ -73,7 +73,8 @@ function baseOf(result: MetricResult, id: string, title: string, usesShare: bool
   const {meta} = result;
   const basis = [usesShare ? meta.share_basis : null, meta.range.label].filter((p): p is string => Boolean(p)).join(', ');
   const base: BlockBase = {id, source: result.id, title, reliable: meta.reliable, caveats: [...meta.caveats], basis: basis || null};
-  return meta.exploratory ? {...base, exploratory: true, sql: meta.exploratory.sql} : base;
+  const withHeadline: BlockBase = meta.headline ? {...base, headline: meta.headline} : base;
+  return meta.exploratory ? {...withHeadline, exploratory: true, sql: meta.exploratory.sql} : withHeadline;
 }
 
 const isShareLike = (cols: ResultColumn[]): boolean => cols.some((c) => c.role === 'share' || c.unit === 'percent');
