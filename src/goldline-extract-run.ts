@@ -326,12 +326,16 @@ export async function extractInventoryPage(
 
   const params = {
     model: EXTRACT_MODEL,
-    // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON, 16000 covered them but the
-    // densest V1 pages (e.g. 33/57) still ran past it and failed with truncated JSON. 32000
-    // gives those one-object-per-item outputs real headroom (well under the model's cap); a
-    // page that still exceeds it now surfaces a clear "truncated" error instead of a silent
-    // invalid-JSON retry loop (see parseJsonContent).
-    max_tokens: 32000,
+    // One JSON object per inventory row, so output scales with row count. The cap has climbed
+    // with the pages we met: 8000 truncated dense pages, 16000 covered most, 32000 covered all
+    // but the very densest (a real scan page measured 32105 output tokens and truncated). 64000
+    // clears those too and is still only half the model's 128K output ceiling. This is purely a
+    // CEILING: a normal page generates far fewer tokens and is byte-for-byte unchanged (same
+    // output, same cost) — only a page that would otherwise truncate is affected. A page still
+    // exceeding it surfaces a clear "truncated" error, not a silent invalid-JSON retry loop
+    // (see parseJsonContent). Streaming (createMessageWithFallback) is what makes a cap this
+    // high usable: a non-streaming call is rejected once max_tokens could run past 10 minutes.
+    max_tokens: 64000,
     // Cached: the system prompt is the same for every page (ignored by the API if it is
     // under the model's minimum cacheable size, which is harmless).
     system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
