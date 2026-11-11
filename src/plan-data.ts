@@ -74,18 +74,18 @@ export const noGmvActuals = (months: readonly string[]): GmvActuals => {
   return {gmv_events: gaps, gmv_website: gaps, gmv_marketplace: gaps, gmv_total: gaps};
 };
 
-export async function getGmvActuals(months: readonly string[], nowKey: string): Promise<GmvActuals> {
-  return (await getGmvActualsSynced(months, nowKey)).gmv;
+export async function getGmvActuals(months: readonly string[], nowKey: string, opts?: {fresh?: boolean}): Promise<GmvActuals> {
+  return (await getGmvActualsSynced(months, nowKey, opts)).gmv;
 }
 
 /** getGmvActuals plus when the Website orders were last read from the CRM Worker (BHR-09: they sync on Refresh). Null = not read. */
-export async function getGmvActualsSynced(months: readonly string[], nowKey: string): Promise<{gmv: GmvActuals; webSyncedAt: string | null}> {
+export async function getGmvActualsSynced(months: readonly string[], nowKey: string, opts?: {fresh?: boolean}): Promise<{gmv: GmvActuals; webSyncedAt: string | null}> {
   if (usingPlanMock() || months.length === 0) return {gmv: noGmvActuals(months), webSyncedAt: null};
   const today = phDay(Date.now());
   const fromDay = `${months[0].slice(0, 7)}-01`;
   const [orders, events, digests, daily, crm] = await Promise.all([
     soft(getPosOrders, 'pos_orders'), soft(getPosEvents, 'pos_events'), soft(getDigests, 'digest_archive'), soft(getMarketplaceDaily, 'marketplace_daily_sales'),
-    soft(() => getCrmOrdersForPlan(fromDay), 'crm orders'),
+    soft(() => getCrmOrdersForPlan(fromDay, opts), 'crm orders'),
   ]);
   const pos = orders && events ? {orders, events} : null;
   // Same definition as the Sales page: stored digests' per-day figures plus the backend's per-day rows, merged by rollupChannels.
