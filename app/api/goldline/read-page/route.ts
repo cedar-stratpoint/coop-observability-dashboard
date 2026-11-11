@@ -15,10 +15,12 @@ import {pumpSecretOk, serverUploadEnabled} from '@/src/goldline-server-upload';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// One classify (~20s) + one extract (~85-150s) Vision call, same budget as the upload route.
-// NOTE: a 600s window for dense pages is planned but DEFERRED until coop-brand-os is on Vercel
-// Pro + Fluid (its plan caps functions at 300s). See supabase/nichido/server_upload_read_window.sql.
-export const maxDuration = 300;
+// One classify (~20s) + one extract (~85-150s) Vision call. 600s gives the densest forms room
+// to finish instead of being killed at 300s. Requires the host to be on Vercel Pro + Fluid
+// Compute (which allows >300s); paired with the DB reaper/backstop windows widened to match
+// (reaper 12m, STALE_READ_MIN 15m) so a legitimately-long read is never re-queued mid-flight.
+// See supabase/nichido/server_upload_read_window.sql.
+export const maxDuration = 600;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json'}});
