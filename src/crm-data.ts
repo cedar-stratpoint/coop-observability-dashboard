@@ -113,17 +113,18 @@ export type PlanWebOrders = {orders: CrmOrder[]; truncated: boolean; syncedAt: s
  * does not re-read the Worker. A failed read is NOT cached (it throws inside the cache, and unstable_cache stores only results), so the
  * next load tries again instead of pinning a gap until someone presses Refresh.
  */
-export const getCrmOrdersForPlan = cache(async (fromDay: string): Promise<PlanWebOrders | null> => {
+export const getCrmOrdersForPlan = cache(async (fromDay: string, opts?: {fresh?: boolean}): Promise<PlanWebOrders | null> => {
   if (!crmConfigured()) return null;
   try {
-    return await ordersForPlanCached(fromDay);
+    // fresh: Close month reads the Worker directly, so a frozen snapshot never holds numbers older than the close.
+    return await (opts?.fresh ? readOrdersForPlan(fromDay) : ordersForPlanCached(fromDay));
   } catch (err) {
     console.warn(`CRM orders (plan) read failed: ${(err as Error).message}`);
     return null;
   }
 });
 
-const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<PlanWebOrders> => {
+async function readOrdersForPlan(fromDay: string): Promise<PlanWebOrders> {
   const fields = 'shopifyOrderId,createdAt,financialStatus,totalPrice';
   const read = await collectOrderPages<CrmOrder>(async (cursor) => {
     // lines=1: each order's line price and quantity, for Shopify gross sales (src/plan-gmv.ts orderGross).
@@ -135,7 +136,9 @@ const ordersForPlanCached = unstable_cache(async (fromDay: string): Promise<Plan
   if (!read.legacy) return {orders: read.orders, truncated: !read.complete, syncedAt};
   const metrics = await getCrmMetrics(); // soft: null just means we rely on the cap alone
   return {orders: read.orders, truncated: crmCoverage(read.orders.length, metrics?.orders ?? null).truncated, syncedAt};
-}, ['crm-orders-plan-synced'], {revalidate: false, tags: [PLAN_WEB_TAG]});
+}
+
+const ordersForPlanCached = unstable_cache(readOrdersForPlan, ['crm-orders-plan-synced'], {revalidate: false, tags: [PLAN_WEB_TAG]});
 
 export const getCrmCheckouts = cache((): Promise<CrmCheckout[] | null> =>
   crmConfigured() ? checkoutsCached() : Promise.resolve(null),

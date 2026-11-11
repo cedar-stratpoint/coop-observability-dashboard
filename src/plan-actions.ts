@@ -76,7 +76,7 @@ export async function closeMonthAction(input: {month: string}): Promise<ActionRe
   if (!monthEnded(input.month, today)) return {ok: false, error: MONTH_NOT_OVER(monthTag(input.month))};
   const sb = planClient();
   if (!sb) return {ok: false, error: 'Demo mode: no database is connected, so nothing was saved.'};
-  const snapshot = gmvSnapshot(await getGmvActuals([input.month], currentMonthKey(new Date())));
+  const snapshot = gmvSnapshot(await getGmvActuals([input.month], currentMonthKey(new Date()), {fresh: true}));
   // The same snapshot is what the RPC stores and validates again: a month closes only with all three channels complete.
   const blocked = closeBlocker({month: input.month, today, tag: monthTag(input.month), gmv: snapshot});
   if (blocked) return {ok: false, error: blocked};
