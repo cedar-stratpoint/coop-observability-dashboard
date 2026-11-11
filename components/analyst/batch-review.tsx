@@ -311,21 +311,15 @@ export function BatchReview({
     <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 pt-6 pb-6">
       <div className="flex flex-col gap-1.5">
         <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
-          <button
-            type="button"
-            onClick={() => {
-              // Use window.history.back(), not router.back(): the page switcher updates the
-              // URL with window.history.replaceState, after which Next's router.back() fails
-              // to pop (it stays on this batch and grows history). A raw history.back() pops
-              // correctly to the scan; fall back to the scan URL on a deep link with nothing
-              // to pop.
-              if (typeof window !== 'undefined' && window.history.length > 1) window.history.back();
-              else router.push(`/uploads/scan/${encodeURIComponent(scanSource)}`);
-            }}
-            className="inline-flex shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+          {/* A breadcrumb to the scan, so it links straight there. (Not history.back(): the
+              scan board is filter-heavy, and stepping back through history just retraced the
+              view tabs / version cards / store chips the reviewer had clicked.) */}
+          <Link
+            href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
+            className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
-          </button>
+          </Link>
           {curPageLabel && (
             <span
               className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums"
