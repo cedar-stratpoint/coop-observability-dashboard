@@ -1,4 +1,5 @@
 import 'server-only';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   buildSystemPrompt,
@@ -115,6 +116,44 @@ export function isKeyLevelError(e: unknown): boolean {
   return /credit balance|billing|not scoped to a workspace|authentication|invalid x-api-key|x-api-key header|expired|unauthorized|permission_error/.test(s);
 }
 
+// Token-usage accounting for one page read, so each read_logs row can carry the Claude
+// cost of the page (there is NO per-read usage anywhere else: the Anthropic console only
+// aggregates a whole workspace by day). Kept in an AsyncLocalStorage, not a module global,
+// because Fluid Compute reuses one instance across CONCURRENT reads — a global would mix two
+// pages' tokens together. `createMessageWithFallback` (the single Anthropic call site, two
+// levels below the pipeline) adds each call's usage to the active page's tally; the pipeline
+// opens a tally with `withReadUsage` and snapshots it onto every log row.
+export type ReadUsage = {input: number; output: number; cacheRead: number; cacheCreate: number; calls: number};
+const usageStore = new AsyncLocalStorage<ReadUsage>();
+
+/** Run `fn` with a fresh per-page token tally active (so nested Anthropic calls record into it). */
+export function withReadUsage<T>(fn: () => Promise<T>): Promise<T> {
+  return usageStore.run({input: 0, output: 0, cacheRead: 0, cacheCreate: 0, calls: 0}, fn);
+}
+
+/** A copy of the current page's token tally (or null outside a `withReadUsage` scope). */
+export function readUsageSnapshot(): ReadUsage | null {
+  const u = usageStore.getStore();
+  return u ? {...u} : null;
+}
+
+/** Fold one Anthropic response's `usage` into the active page tally (no-op outside a scope). */
+function recordUsage(usage: unknown): void {
+  const u = usageStore.getStore();
+  if (!u || !usage || typeof usage !== 'object') return;
+  const x = usage as {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
+  u.input += x.input_tokens ?? 0;
+  u.output += x.output_tokens ?? 0;
+  u.cacheRead += x.cache_read_input_tokens ?? 0;
+  u.cacheCreate += x.cache_creation_input_tokens ?? 0;
+  u.calls += 1;
+}
+
 /** Send one message, trying each key in order and advancing to the next ONLY on a
  *  key-level error (expired/out-of-credits/workspace). Transient and content errors
  *  propagate from the key that hit them, unchanged, so the caller's retry/timeout logic
@@ -134,9 +173,15 @@ async function createMessageWithFallback(
       // required for operations that may take longer than 10 minutes"). Streaming lifts that cap
       // and the final message is identical in shape (content + stop_reason). The route's 600s
       // maxDuration still bounds the whole read.
-      return (await client.messages
+      const message = (await client.messages
         .stream(params as Parameters<typeof client.messages.stream>[0], {timeout: opts.timeout})
-        .finalMessage()) as {content?: Array<{type: string; text?: string}>; stop_reason?: string | null};
+        .finalMessage()) as {
+        content?: Array<{type: string; text?: string}>;
+        stop_reason?: string | null;
+        usage?: unknown;
+      };
+      recordUsage(message.usage);
+      return message;
     } catch (e) {
       lastErr = e;
       if (i < creds.length - 1 && isKeyLevelError(e)) {
