@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-11 — Fix: "‹ Uploads" goes to the uploads list, not back through filters
+
+The scan board (and the "All forms" inbox) "‹ Uploads" breadcrumb stepped back through history (`router.back()`), so on these filter-heavy boards it just walked back through every view tab / version card / store chip / BA filter you had clicked instead of leaving for the uploads list. It is a breadcrumb to a fixed place now: a direct link to `/uploads`. (Trade-off: it no longer restores a filter/scroll on the uploads list you came from; reaching Uploads reliably matters more.)
+
 ## 2026-11-11 — Fix: breadcrumb no longer loops with the scan board's Back
 
 The new per-file breadcrumb pushed a history entry when you clicked an ancestor (e.g. the store name), so the scan board's own "‹ Uploads" Back (which steps through history) then returned to the review page instead of the uploads list, a loop you could only escape via the side nav. The breadcrumb crumbs now navigate with **replace** (a breadcrumb goes up the hierarchy, it doesn't stack), so going up removes the review from the back path and "‹ Uploads" reaches the uploads list again.
