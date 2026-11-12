@@ -126,8 +126,8 @@ export const CUSTOMER_SORT = {
   consent: (c: CustomerRow) => text(c.consent),
   spend: (c: CustomerRow) => c.spendYtd,
   memberSince: (c: CustomerRow) => at(c.createdAt),
-  // Vince sorts To Platinum by this year's spend; a guest has no tier, so nothing to sort.
-  toPlatinum: (c: CustomerRow) => (c.membershipTier === 'gold' || c.membershipTier === 'platinum' ? c.spendYtd : null),
+  // Gold by this year's spend (Vince's order), Platinum past every Gold (already qualified); a guest has no tier, so nothing to sort.
+  toPlatinum: (c: CustomerRow) => (c.membershipTier === 'platinum' ? Number.POSITIVE_INFINITY : c.membershipTier === 'gold' ? c.spendYtd : null),
   pet: (c: CustomerRow) => text(c.petName),
 } satisfies Getters<CustomerRow>;
 export type CustomerSortKey = keyof typeof CUSTOMER_SORT;

@@ -84,8 +84,8 @@ describe('header sorting', () => {
     expect(ids(sortRows(people, {key: 'lastContacted', dir: 'desc'}, CUSTOMER_SORT))).toEqual(['known-new', 'known-old', 'never', 'unknown']);
   });
 
-  it('tier ranks Platinum over Gold over Guest; To Platinum has nothing for a guest', () => {
-    const people = [row('g', {membershipTier: null}), row('p', {membershipTier: 'platinum', spendYtd: 3000}), row('o', {membershipTier: 'gold', spendYtd: 900})];
+  it('tier ranks Platinum over Gold over Guest; To Platinum puts Platinum past every Gold and has nothing for a guest', () => {
+    const people = [row('g', {membershipTier: null}), row('p', {membershipTier: 'platinum', spendYtd: 100}), row('o', {membershipTier: 'gold', spendYtd: 900})];
     expect(ids(sortRows(people, {key: 'tier', dir: 'desc'}, CUSTOMER_SORT))).toEqual(['p', 'o', 'g']);
     expect(ids(sortRows(people, {key: 'toPlatinum', dir: 'asc'}, CUSTOMER_SORT))).toEqual(['o', 'p', 'g']);
   });
