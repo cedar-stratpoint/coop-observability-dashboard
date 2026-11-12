@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Goldline template-anchored extraction (promoted from develop, flag-gated)
+
+Reads V1/V2 inventory forms by FILLING A FIXED TEMPLATE instead of re-transcribing every row, which kills the dropped and invented rows the QA found and cuts cost (numbers-only output). Promoted from develop as one change; behind `GOLDLINE_TEMPLATE_READ_COMPANIES` (fail-closed), so flag-off is byte-identical to today. New modules: `goldline-form-template.ts` (+ `-data`) build the per-page structural template (per-version column layout, family-header bands + printed prices derived from `MANIFESTS` + the products catalog); `goldline-anchored-extract.ts` (anchored prompt, numbers-only schema, map back to `ExtractedPage` with every template row present by construction, write-ins + price overrides surfaced, version-confidence gate, set-aside-retry gate); `goldline-anchored-flag.ts`. `extractInventoryPageAnchored` (goldline-extract-run.ts) runs the Vision call; `runInventoryRead` branches to it only for a confidently classified V1/V2 with a loaded template, and re-reads a low-confidence sales/blank once before setting it aside. Classifier prompt hardened to decide V1 vs V2 by the Delivery-column position only. Plan: `knowledge/tasks/2026-11-12-template-anchored-extraction.md`.
+
 ## 2026-11-12 — Website CRM: customer profile drawer and communication timeline (RET-08, slices 8B + 8C)
 
 The owner wanted to pick one customer and see their details, orders and every contact we made with them, as in Klaviyo, without opening four tables.

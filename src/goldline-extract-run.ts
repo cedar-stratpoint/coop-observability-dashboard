@@ -21,6 +21,15 @@ import {
 } from './goldline-legacy-extract';
 import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
+import {
+  ANCHORED_EXTRACTION_SCHEMA,
+  buildAnchoredPrompt,
+  buildAnchoredSystemPrompt,
+  mapAnchoredToExtractedPage,
+  type AnchoredMapResult,
+  type AnchoredOutput,
+} from './goldline-anchored-extract';
+import type {FormTemplate} from './goldline-form-template';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
 // GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
@@ -386,6 +395,40 @@ export async function extractInventoryPage(
     store_code: typeof parsed.store_code === 'string' ? parsed.store_code : '',
     reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
   };
+}
+
+/**
+ * Template-anchored read of ONE scanned inventory page (V1/V2 only; Legacy already reads this
+ * way via its own path). The model is given the page's fixed template rows and returns only the
+ * handwritten numbers by row index; `mapAnchoredToExtractedPage` then rebuilds the full page from
+ * the template, so no row is dropped or invented. Numbers-only output, so `max_tokens` is small.
+ * Throws on no key or an empty read, like `extractInventoryPage`.
+ */
+export async function extractInventoryPageAnchored(
+  pdfBase64: string,
+  template: FormTemplate,
+  profile?: WriterProfile,
+): Promise<AnchoredMapResult> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const params = {
+    model: EXTRACT_MODEL,
+    // Numbers-only output (index + a few integers per row) — far smaller than the free-read
+    // schema, which is where the cost saving and the end of truncation come from.
+    max_tokens: 8000,
+    system: [{type: 'text', text: buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
+    output_config: {format: {type: 'json_schema', schema: ANCHORED_EXTRACTION_SCHEMA}},
+    messages: [
+      {
+        role: 'user',
+        content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: buildAnchoredPrompt(template)}],
+      },
+    ],
+  };
+  const parsed = (await visionJson(params, {timeout: 150_000})) as AnchoredOutput;
+  if (!parsed || !Array.isArray(parsed.rows)) {
+    throw new Error('Anchored read returned no rows');
+  }
+  return mapAnchoredToExtractedPage(template, parsed);
 }
 
 /** The writer's reference page (an earlier confirmed scan of the same page + its
