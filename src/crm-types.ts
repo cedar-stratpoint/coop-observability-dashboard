@@ -16,6 +16,16 @@ export type CrmMetrics = {
   reminded: number;
   revenueRecovered: number;
   recoveryRate: number;
+  // RET-09: the CRM engine's own email schedule settings (Vince's ⏱ lines). Optional: an older Worker does not send them, and the page
+  // then hides the line rather than inventing a schedule.
+  /** How many reminder emails one abandoned cart gets ("n of N"). */
+  reminderStepCount?: number;
+  /** Minutes after abandonment each reminder goes out. */
+  reminderSteps?: number[];
+  remindersEnabled?: boolean;
+  /** Minutes after fulfillment the review request goes out. */
+  reviewAfterMinutes?: number;
+  reviewEmailsEnabled?: boolean;
 };
 
 export type CrmCustomer = {
@@ -80,6 +90,8 @@ export type CrmCheckout = {
    * crm-data.ts) so the browser gets the label without the raw blob's PII.
    */
   stage: CheckoutStage;
+  /** RET-09: how many line items the cart holds (a count only, from the Worker's lineItems); absent when the Worker sent no list. */
+  items?: number;
 };
 
 /**

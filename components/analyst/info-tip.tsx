@@ -2,6 +2,7 @@
 
 import {useCallback, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
+import {Popover} from '@base-ui/react/popover';
 import {Info} from 'lucide-react';
 import {cn} from '@/lib/utils';
 
@@ -51,5 +52,32 @@ export function InfoTip({text, className}: {text: string; className?: string}) {
           document.body,
         )}
     </span>
+  );
+}
+
+/** The ⓘ for a longer explainer (a list of what each value means): a popover that opens on hover or on a tap, so a phone can read it
+ *  too, and stays open while the pointer is over it. Scales in from its trigger. */
+export function InfoPop({label, children, className}: {label: string; children: React.ReactNode; className?: string}) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        openOnHover
+        delay={120}
+        aria-label={label}
+        className={cn(
+          'inline-flex items-center rounded-full align-middle text-muted-foreground/55 outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 data-[popup-open]:text-foreground',
+          className,
+        )}
+      >
+        <Info className="size-[13px]" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={8} className="z-[200]">
+          <Popover.Popup className="w-72 max-w-[calc(100vw-16px)] origin-[var(--transform-origin)] space-y-1.5 rounded-lg border bg-popover p-3 text-left text-xs font-normal normal-case leading-snug tracking-normal text-popover-foreground shadow-md outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0">
+            {children}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

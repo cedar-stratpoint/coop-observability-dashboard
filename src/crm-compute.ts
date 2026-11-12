@@ -106,7 +106,7 @@ export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.
   membership: 'Membership email',
   ...CHANNEL_LABEL,
 });
-const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
+export const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
 const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_CHANNELS as readonly unknown[]).includes(c) ? (c as ContactChannel) : 'other');
 
 /**
@@ -292,6 +292,18 @@ export function petBirthdayStatus(
   const key = emailKey(c.email);
   if (key && vouchers.some((v) => v.year === Number(today.slice(0, 4)) && emailKey(v.email) === key)) return 'Sent';
   return `${md[1]}-${md[2]}` < today.slice(5) ? 'Passed' : 'Upcoming';
+}
+
+/** PH days until the pet's next birthday (0 = today, a day already passed this PH year rolls to next year); null when it is no date. */
+export function daysToPetBirthday(birthday: string | null | undefined, now: Date): number | null {
+  const md = /(\d{2})-(\d{2})$/.exec(String(birthday ?? '').trim().slice(0, 10));
+  if (!md) return null;
+  const today = phDay(now.getTime());
+  const year = Number(today.slice(0, 4));
+  const at = (y: number) => Date.parse(`${y}-${md[1]}-${md[2]}T00:00:00Z`);
+  const t0 = Date.parse(`${today}T00:00:00Z`);
+  const next = at(year) >= t0 ? at(year) : at(year + 1);
+  return Number.isFinite(next) ? Math.round((next - t0) / 86_400_000) : null;
 }
 
 /* ---------- retention rules (RET-02/03/04): ONE implementation for the Customers tab and Ask Coop ---------- */
