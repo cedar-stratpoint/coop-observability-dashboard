@@ -31,6 +31,7 @@ import {
   cartStatus,
   customerOrders,
   customerTimeline,
+  daysToPetBirthday,
   fmtPh,
   fmtPhDate,
   inAudience,
@@ -125,18 +126,6 @@ function Stat({title, value, sub, unknown, children}: {title: string; value: str
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
-}
-
-/** PH days until the next birthday (0 = today); null when the birthday does not read as a date. */
-function daysToBirthday(birthday: string | null, now: Date): number | null {
-  const md = /(\d{2})-(\d{2})$/.exec(String(birthday ?? '').trim().slice(0, 10));
-  if (!md) return null;
-  const today = phDay(now.getTime());
-  const year = Number(today.slice(0, 4));
-  const at = (y: number) => Date.parse(`${y}-${md[1]}-${md[2]}T00:00:00Z`);
-  const t0 = Date.parse(`${today}T00:00:00Z`);
-  const next = at(year) >= t0 ? at(year) : at(year + 1);
-  return Number.isFinite(next) ? Math.round((next - t0) / 86_400_000) : null;
 }
 
 function eventText(e: TimelineEvent, viewer: string | null): {title: string; detail: string | null} {
@@ -653,7 +642,7 @@ function Checkouts({carts}: {carts: CrmCheckout[]}) {
 function Pets({row, vouchers, now}: {row: CustomerRow; vouchers: CrmBirthdayVoucherSafe[] | null; now: Date}) {
   if (!row.petName && !row.petBirthday) return <p className="py-8 text-center text-sm text-muted-foreground">No pet profile on this customer.</p>;
   const status = vouchers === null ? null : petBirthdayStatus(row, vouchers, now);
-  const days = daysToBirthday(row.petBirthday, now);
+  const days = daysToPetBirthday(row.petBirthday, now);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-3">
       <div className="flex items-center gap-3">
