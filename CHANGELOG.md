@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Customers: last contacted per customer, on the page and in Ask Coop (RET-07, slice 7A)
+
+Syl asked (2026-11-10) to see when each customer was last contacted, and the staging check (2026-11-11) found Ask Coop could not answer "who did we contact most" or "who haven't we talked to longest": the contact columns were only on the repeat-promo and win-back lists, and the tally kept no dates. Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (rules R1 to R7).
+
+- **Decision: one code path.** `contactTally` (`src/crm-compute.ts`) now keeps the newest dated contact per email (`lastAt`, `lastKind`: cart reminder, win-back, review request, birthday voucher, or the manual log's channel), and `customerRows` turns it into `lastContactedAt` / `lastContactKind` / `lastContactKnown`. The Customers tab and `list_crm_customers` both read it, and share the sort comparators (`compareLastContacted`, `compareTimesContacted`).
+- **Decision: unknown is not never (R3).** If a CRM list (checkouts, birthday vouchers) or the contact log was not read, last contacted is "unknown" for every row, never "never". "Never" (R2) only shows when every source was read and there is no contact. A test-order review request never counts (R4), and a date that does not parse still counts the contact but never dates it.
+- **Ask Coop:** every customer list (`group_by none`) now carries `emails_sent`, `manual_contacts`, `times_contacted`, `last_contacted` (PH day) and `last_contact_kind` ("never" / "unknown" spelled out), not only audiences. That costs two more CRM GETs (checkouts, birthday vouchers; 5 in total, under the cap of 8). Group counts still read 3. New sorts: `contacted_desc` and `last_contacted_asc` (R5: never contacted first, then the oldest contact; unknown rows last). Audiences keep their forced last-order order. The per-source breakdown (reminders, win-back, …) stays on audiences only, so the plain list does not get too wide.
+- **The chat seam for the manual log** (`getManualContactEmails`) now passes each contact's `channel` and `contactedAt`. It still never passes the note or the author.
+- **Customers tab:** a Last contacted column (PH date, kind underneath), a Sort control (Default / Haven't contacted longest / Most contacted), a Last contacted line on the mobile card, and "Last contacted (PH)" + "Last contact kind" in the CSV.
+- **Trade-off:** membership emails are not counted yet (slice 7C needs a CRM route). Instagram, Facebook and Viber are still logged as "DM" until slice 7B.
+- Tests: `test/crm-last-contacted.test.ts` (tally, never vs unknown, the two sorts, the chat columns). The pinned expectations in `crm-outreach-lists`, `chat-crm-tools`, `chat-crm-tools-attack` and `customer-contacts` were updated on purpose (plain lists now read the tally).
+
 ## 2026-11-11 — Ask Coop: the customer answer line is written by code, and outreach lists come whole
 
 A real-data test (staging code against the PROD CRM, read-only) asked Ask Coop the five customer questions like a user. The numbers were right, but two answers were hard to use:
