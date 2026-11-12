@@ -15,6 +15,10 @@
 // RET-05: each customer row can log a manual contact (DM, SMS, call, email by hand, other; contact-log-dialog.tsx). The
 // Manual column counts them apart from the automated emails, through the same contactTally the chat uses. The log not
 // applied (contacts null) reads "Unavailable" in that column, never 0.
+//
+// RET-07 (7A): a Last contacted column (PH date + kind) from the same customerRows the chat uses; "never" when every source was
+// read and there is no contact, "unknown" when any source was not (never claimed as never). The sort control reuses the chat's
+// comparators (compareLastContacted, compareTimesContacted).
 import {downloadCsv} from '@/src/csv';
 import dynamic from 'next/dynamic';
 import {useMemo, useState} from 'react';
@@ -42,10 +46,13 @@ import {Pagination} from './pagination';
 import type {ChartBlock} from '@/src/chat/block-types';
 import {
   AUDIENCE_RULES,
+  CONTACT_KIND_LABEL,
   REPEAT_TARGET_PCT,
   audienceRows,
   buyersByOrders,
   cartStatus,
+  compareLastContacted,
+  compareTimesContacted,
   contactTally,
   customerRows,
   enrichCustomers,
@@ -55,6 +62,7 @@ import {
   filterOrders,
   fmtPh,
   fmtPhDate,
+  lastContactLabel,
   membershipWindowStart,
   newBuyersByMonth,
   repeatRate,
@@ -118,6 +126,8 @@ function countChart(id: string, title: string, xLabel: string, rows: Array<{grou
   };
 }
 
+/** RET-07: the Customers tab order on top of the audience ('all' = the default order; same comparators as Ask Coop's sorts). */
+type CustomerSort = 'all' | 'last_contacted_asc' | 'contacted_desc';
 const PRESETS: Array<{key: CustomerAudience; label: string}> = [
   {key: 'all', label: 'All'},
   {key: 'repeat_promo', label: 'Repeat promo'},
@@ -229,6 +239,7 @@ export function CrmView({
   const [orderFilter, setOrderFilter] = useState(EMPTY_ORDER_FILTER);
   const [customerFilter, setCustomerFilter] = useState(EMPTY_CUSTOMER_FILTER);
   const [preset, setPreset] = useState<CustomerAudience>('all');
+  const [customerSort, setCustomerSort] = useState<CustomerSort>('all');
   const [logFor, setLogFor] = useState<CustomerRow | null>(null);
   const needle = q.trim().toLowerCase();
 
@@ -287,8 +298,9 @@ export function CrmView({
   const rows = useMemo(() => {
     if (tab === 'carts') return filterCarts(checkouts ?? [], cartFilter, needle);
     if (tab === 'orders') return filterOrders(orders ?? [], orderFilter, needle);
-    return audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
-  }, [tab, needle, checkouts, orders, all, cartFilter, orderFilter, customerFilter, preset, nowDate]);
+    const listed = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
+    return customerSort === 'all' ? listed : listed.sort(customerSort === 'last_contacted_asc' ? compareLastContacted : compareTimesContacted);
+  }, [tab, needle, checkouts, orders, all, cartFilter, orderFilter, customerFilter, preset, customerSort, nowDate]);
   const tabRead = tab === 'carts' ? checkouts !== null : tab === 'orders' ? orders !== null : customerRead;
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PER_PAGE));
@@ -335,7 +347,7 @@ export function CrmView({
     } else {
       const name = preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
       downloadCsv(`${name} (${rows.length}).csv`, [
-        ['Name', 'Email', 'Mobile', 'Tier', 'Orders', 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'Pet'],
+        ['Name', 'Email', 'Mobile', 'Tier', 'Orders', 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Last contacted (PH)', 'Last contact kind', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'Pet'],
         ...(rows as CustomerRow[]).map((c) => [
           [c.firstName, c.lastName].filter(Boolean).join(' '),
           c.email ?? '',
@@ -348,6 +360,8 @@ export function CrmView({
           c.emailsSent === null ? 'unknown' : String(c.emailsSent),
           c.manualContacts === null ? 'unknown' : String(c.manualContacts),
           c.timesContacted === null ? 'unknown' : String(c.timesContacted),
+          lastContactLabel(c),
+          c.lastContactKind ? CONTACT_KIND_LABEL[c.lastContactKind] : '',
           c.consent,
           peso(c.spent),
           peso(c.spendYtd),
@@ -659,11 +673,24 @@ export function CrmView({
                   ['none', 'Never ordered'],
                 ]}
               />
+              <FilterSelect
+                label="Sort"
+                value={customerSort}
+                onChange={(v) => {
+                  setCustomerSort(v as CustomerSort);
+                  setPage(1);
+                }}
+                options={[
+                  ['all', 'Default'],
+                  ['last_contacted_asc', "Haven't contacted longest"],
+                  ['contacted_desc', 'Most contacted'],
+                ]}
+              />
             </>
           )}
           {tab === 'customers' && preset !== 'all' && (
             <p className="basis-full text-xs text-muted-foreground">
-              {PRESETS.find((p) => p.key === preset)?.label}: {presetRule(preset)} Listed by last order, oldest first.
+              {PRESETS.find((p) => p.key === preset)?.label}: {presetRule(preset)}{customerSort === 'all' ? ' Listed by last order, oldest first.' : ''}
               Check email consent before contacting anyone. Nothing is sent from here.
             </p>
           )}
@@ -727,6 +754,7 @@ export function CrmView({
                         <th className="px-4 py-2.5 text-right font-medium" title="Philippine days since the last counted order">Days since</th>
                         <th className="px-4 py-2.5 text-right font-medium" title="Automated CRM emails already sent: cart reminders, win-back, review requests, birthday vouchers">Emails sent</th>
                         <th className="px-4 py-2.5 text-right font-medium" title="Contacts the team logged by hand: DM, SMS, call, email by hand, other">Manual</th>
+                        <th className="px-4 py-2.5 font-medium" title="The newest contact of any kind, Philippine date. Unknown when a source could not be read">Last contacted</th>
                         <th className="px-4 py-2.5 font-medium">Consent</th>
                         <th className="px-4 py-2.5 text-right font-medium">Spend (year)</th>
                         <th className="px-4 py-2.5 font-medium">Pet</th>
@@ -799,6 +827,10 @@ export function CrmView({
                           </td>
                           <td className="px-4 py-2.5 text-right tabular-nums" title={c.manualContacts === null ? 'Unavailable: the contact log is not set up here' : undefined}>
                             {c.manualContacts ?? '—'}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground" title={c.lastContactKnown ? undefined : 'Unknown: a CRM source or the contact log did not answer'}>
+                            {lastContactLabel(c)}
+                            {c.lastContactKind && <span className="block">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.consent.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{peso(c.spendYtd)}</td>
@@ -926,6 +958,13 @@ export function CrmView({
                         <div className="flex flex-col">
                           <dt>Pet</dt>
                           <dd className="text-foreground">{c.petName ?? '—'}</dd>
+                        </div>
+                        <div className="col-span-3 flex justify-between gap-2">
+                          <dt>Last contacted</dt>
+                          <dd className="text-foreground">
+                            {lastContactLabel(c)}
+                            {c.lastContactKind && <span className="text-muted-foreground"> · {CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
+                          </dd>
                         </div>
                       </dl>
                       <button
