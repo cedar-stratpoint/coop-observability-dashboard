@@ -4,7 +4,7 @@
  * dashboards read the same API and must not disagree about what "Recovered" or
  * "Platinum" means.
  */
-import {phDay, phDayStart} from './custom-range';
+import {parseLineItems, phDay, phDayStart} from './custom-range';
 import type {CheckoutStage, CrmCheckout, CrmCustomer, CrmOrder} from './crm-types';
 import {CHANNEL_LABEL, CONTACT_CHANNELS, type ContactChannel} from './customer-contacts';
 
@@ -144,6 +144,143 @@ export function contactTally(src: {
   for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1, v.sentAt, 'birthday_voucher');
   for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1, m.contactedAt, channelKind(m.channel));
   return out;
+}
+
+/* ---------- RET-08: one customer's profile (8B) and communication timeline (8C), from the lists the page already reads ---------- */
+
+/**
+ * The orders that belong to one customer, newest first, test orders kept (the profile tags them). The same match as
+ * enrichCustomers: orders carrying this customer id, else (only when none of those counts) orders with no customer id and this email.
+ */
+export function customerOrders<T extends Pick<CrmOrder, 'shopifyCustomerId' | 'email' | 'createdAt' | 'test'>>(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly T[]): T[] {
+  const byId = orders.filter((o) => o.shopifyCustomerId === c.shopifyCustomerId);
+  const key = emailKey(c.email);
+  const byEmail = key ? orders.filter((o) => !o.shopifyCustomerId && emailKey(o.email) === key) : [];
+  const counted = (l: T[]) => l.some((o) => o.test !== true);
+  const mine = counted(byId) ? byId : counted(byEmail) ? byEmail : [...byId, ...byEmail];
+  return [...mine].sort((a, b) => (ms(b.createdAt) || 0) - (ms(a.createdAt) || 0));
+}
+
+/** Filter-chip groups. `account` (account created) shows only under All. */
+export type TimelineGroup = 'orders' | 'checkouts' | 'emails' | 'manual' | 'account';
+/** A contact event's kind is 7A's ContactKind, so the timeline and Last contacted name the same thing. */
+export type TimelineKind = 'account_created' | 'order_placed' | 'order_fulfilled' | 'review_submitted' | 'checkout_abandoned' | ContactKind;
+export type TimelineEvent = {
+  /** Stable React key. */
+  id: string;
+  kind: TimelineKind;
+  group: TimelineGroup;
+  /** Null when the source has no readable date: still listed, after the dated events. */
+  at: string | null;
+  /** Counts toward times contacted (exactly the events contactTally counts); `count` = how many contacts it stands for. */
+  contact: boolean;
+  count: number;
+  /** A Shopify test order's event: shown, tagged, counted nowhere. */
+  test: boolean;
+  orderId?: string;
+  orderNumber?: string | null;
+  total?: string | null;
+  currency?: string | null;
+  items?: {title: string; quantity: number; unitPrice: number}[];
+  codes?: string[];
+  turnaround?: string;
+  checkoutId?: string;
+  stage?: CheckoutStage;
+  status?: CartStatus;
+  /** Only on an open (unconverted) checkout, and only when the page read it. Never in Ask Coop or a CSV. */
+  recoveryUrl?: string | null;
+  /** Cart reminders: the CRM keeps only the last reminder's date, so `at` is that date and the count is the total. */
+  lastDateOnly?: boolean;
+  year?: number;
+  note?: string | null;
+  by?: string;
+};
+
+export const TIMELINE_GROUP_LABEL: Readonly<Record<Exclude<TimelineGroup, 'account'>, string>> = Object.freeze({
+  orders: 'Orders',
+  checkouts: 'Abandoned checkouts',
+  emails: 'Emails',
+  manual: 'Manual',
+});
+
+/**
+ * Everything that happened with one customer, newest first (RET-08 / 8C). Orders, fulfilment and reviews come from customerOrders;
+ * the contacts follow contactTally exactly (matched by email, test-order review requests not counted, reminders = one event ×N), so
+ * the newest contact event is customerRows' last contacted and the contact counts sum to times contacted.
+ */
+export function customerTimeline(
+  c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email' | 'createdAt'>,
+  src: {
+    orders: readonly CrmOrder[];
+    checkouts: readonly (Omit<CrmCheckout, 'abandonedCheckoutUrl'> & Partial<Pick<CrmCheckout, 'abandonedCheckoutUrl'>>)[];
+    birthdayVouchers: readonly {email: string | null; year?: number; sentAt?: string | null}[];
+    manualContacts: readonly {id: string; email: string | null; channel?: string | null; note?: string | null; contactedAt?: string | null; createdBy?: string}[];
+  },
+): TimelineEvent[] {
+  const key = emailKey(c.email);
+  const mailOf = (e: string | null | undefined) => key !== '' && emailKey(e) === key;
+  const ev: TimelineEvent[] = [];
+  const push = (e: Omit<TimelineEvent, 'contact' | 'count' | 'test'> & Partial<Pick<TimelineEvent, 'contact' | 'count' | 'test'>>) =>
+    ev.push({contact: false, count: 0, test: false, ...e});
+  if (c.createdAt) push({id: 'account', kind: 'account_created', group: 'account', at: c.createdAt});
+  for (const o of customerOrders(c, src.orders)) {
+    const base = {orderId: o.shopifyOrderId, orderNumber: o.orderNumber, test: o.test === true};
+    const items = parseLineItems(o.lineItems).map(({title, quantity, unitPrice}) => ({title, quantity, unitPrice}));
+    push({...base, id: `order:${o.shopifyOrderId}`, kind: 'order_placed', group: 'orders', at: o.createdAt, total: o.totalPrice, currency: o.currency, items, codes: o.discountCodes ?? []});
+    if (o.fulfilledAt) push({...base, id: `fulfilled:${o.shopifyOrderId}`, kind: 'order_fulfilled', group: 'orders', at: o.fulfilledAt, turnaround: turnaround(o.createdAt, o.fulfilledAt)});
+    if (o.reviewSubmittedAt) push({...base, id: `reviewed:${o.shopifyOrderId}`, kind: 'review_submitted', group: 'orders', at: o.reviewSubmittedAt});
+  }
+  // Review requests are matched by the order's email, as contactTally counts them.
+  for (const o of src.orders) {
+    if (!o.reviewRequestSentAt || !mailOf(o.email)) continue;
+    const test = o.test === true;
+    push({id: `review:${o.shopifyOrderId}`, kind: 'review_request', group: 'emails', at: o.reviewRequestSentAt, orderId: o.shopifyOrderId, orderNumber: o.orderNumber, test, contact: !test, count: test ? 0 : 1});
+  }
+  for (const k of src.checkouts) {
+    if (!mailOf(k.email)) continue;
+    const status = cartStatus(k);
+    push({
+      id: `checkout:${k.shopifyCheckoutId}`, kind: 'checkout_abandoned', group: 'checkouts', at: k.createdAt ?? k.updatedAt, checkoutId: k.shopifyCheckoutId,
+      total: k.totalPrice, currency: k.currency, stage: k.stage, status, recoveryUrl: status === 'Active' ? (k.abandonedCheckoutUrl ?? null) : null,
+    });
+    const n = Number(k.remindersSent) || 0;
+    if (n > 0) push({id: `reminder:${k.shopifyCheckoutId}`, kind: 'reminder', group: 'emails', at: k.lastReminderAt ?? null, checkoutId: k.shopifyCheckoutId, lastDateOnly: true, contact: true, count: n});
+    if (k.winbackSentAt) push({id: `winback:${k.shopifyCheckoutId}`, kind: 'winback', group: 'emails', at: k.winbackSentAt, checkoutId: k.shopifyCheckoutId, contact: true, count: 1});
+  }
+  src.birthdayVouchers.forEach((v, i) => {
+    if (mailOf(v.email)) push({id: `voucher:${v.year ?? ''}:${i}`, kind: 'birthday_voucher', group: 'emails', at: v.sentAt || null, year: v.year, contact: true, count: 1});
+  });
+  for (const m of src.manualContacts) {
+    if (mailOf(m.email)) push({id: `manual:${m.id}`, kind: channelKind(m.channel), group: 'manual', at: m.contactedAt ?? null, note: m.note ?? null, by: m.createdBy, contact: true, count: 1});
+  }
+  // Newest first; undated last (stable, so their source order is kept).
+  return ev.sort((a, b) => {
+    const x = ms(a.at);
+    const y = ms(b.at);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return Number(!Number.isFinite(x)) - Number(!Number.isFinite(y));
+    return y - x;
+  });
+}
+
+/** The To Platinum bar: share of the threshold reached this membership year (0–100) and the pesos still to go. */
+export function toPlatinum(spendYtd: number, threshold: number): {pct: number; left: number} {
+  if (!(threshold > 0)) return {pct: 100, left: 0};
+  return {pct: Math.min(100, Math.round((spendYtd / threshold) * 100)), left: Math.max(0, threshold - spendYtd)};
+}
+
+export type PetBirthdayStatus = 'Sent' | 'Upcoming' | 'Passed';
+/** This year's birthday voucher: Sent when the ledger has one for this email and PH year; else Upcoming / Passed by the PH day. */
+export function petBirthdayStatus(
+  c: Pick<CrmCustomer, 'email' | 'petBirthday'>,
+  vouchers: readonly {email: string | null; year?: number}[],
+  now: Date,
+): PetBirthdayStatus | null {
+  const md = /(\d{2})-(\d{2})$/.exec(String(c.petBirthday ?? '').trim().slice(0, 10));
+  if (!md) return null;
+  const today = phDay(now.getTime());
+  const key = emailKey(c.email);
+  if (key && vouchers.some((v) => v.year === Number(today.slice(0, 4)) && emailKey(v.email) === key)) return 'Sent';
+  return `${md[1]}-${md[2]}` < today.slice(5) ? 'Passed' : 'Upcoming';
 }
 
 /* ---------- retention rules (RET-02/03/04): ONE implementation for the Customers tab and Ask Coop ---------- */
@@ -372,6 +509,13 @@ export function fmtPh(iso: string | null | undefined): string {
     minute: '2-digit',
   });
 }
+
+const pesoDigits = {minimumFractionDigits: 2, maximumFractionDigits: 2} as const;
+/** Pesos with centavos ("₱1,234.50"). */
+export const peso = (n: number): string => `₱${Number(n || 0).toLocaleString('en-PH', pesoDigits)}`;
+/** A money string straight off the API, which may carry its own currency. */
+export const money = (amount: string | null | undefined, currency?: string | null): string =>
+  `${!currency || currency === 'PHP' ? '₱' : `${currency} `}${Number(amount ?? 0).toLocaleString('en-PH', pesoDigits)}`;
 
 /** A PH calendar date ("Oct 11, 2026") for day-level columns; '—' when absent. */
 export function fmtPhDate(iso: string | null | undefined): string {
