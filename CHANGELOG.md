@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Customers: CRM membership emails count as contacts (RET-07, slice 7C)
+
+Membership emails (tier welcome, upgrade and the like) are sent by the CRM but were not in "emails sent" or "last contacted". Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (section 7C, rule R3).
+
+- **Read:** the CRM's new `GET /api/membership-events` (read token allowed; `{membershipEvents: [{id, email, shopifyCustomerId, tier, event, sentAt}]}`, newest first, at most 2,000). `projectMembershipEvent` keeps email, tier, event and sentAt. Page: `getCrmMembershipEvents` (`src/crm-data.ts`, cached like the voucher ledger); Ask Coop: client allowlist id `membershipEvents` (a customer list now makes 6 GETs, still under the per-turn cap of 8).
+- **Count:** `contactTally` adds `membership` (1 per email, its `sentAt` can be Last contacted · "Membership email"), inside emails sent. The profile timeline lists each one under Emails with its tier and event, so the timeline still sums to Times contacted. Ask Coop's `emails_sent` method names five kinds; audience lists add a `membership_emails` column.
+- **Decision: a 404 is "not live yet", not "unknown".** The route ships in the CRM repo separately. Under R3 alone, an old CRM answering 404 would blank emails sent and last contacted for every customer until the CRM deploy. So `readMembershipEvents` (`src/crm-project.ts`) returns a typed result: `{live: true, events}`; `{live: false}` on a 404 = membership emails left out of the counts, everything else stays known, with the note "Membership emails are not counted yet: the CRM route is not live." (Ask Coop result note; profile timeline line; `membership_emails` blank, not 0); `null` on any other failure (5xx, 401, network, a body with no list) = unknown per R3. Pinned by `test/crm-membership-emails.test.ts`.
+- **Rollout:** merge only after the CRM route is live on PROD. The 404 handling keeps an earlier merge safe, but until then the counts quietly leave membership emails out, which the owner should not have to remember.
+- **Not yet:** the Customers table itself shows no "not counted yet" note (it lives in the profile and Ask Coop) to keep this slice off the table code 8A is changing.
+
 ## 2026-11-12 — Website CRM: customer profile drawer and communication timeline (RET-08, slices 8B + 8C)
 
 The owner wanted to pick one customer and see their details, orders and every contact we made with them, as in Klaviyo, without opening four tables.
