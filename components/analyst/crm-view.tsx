@@ -82,7 +82,7 @@ import {
   type CustomerAudience,
   type CustomerRow,
 } from '@/src/crm-compute';
-import type {CrmBirthdayVoucherSafe} from '@/src/crm-project';
+import type {CrmBirthdayVoucherSafe, MembershipEventsRead} from '@/src/crm-project';
 import type {CustomerContact} from '@/src/customer-contacts';
 import {refreshCrm} from '@/src/crm-actions';
 import type {
@@ -226,6 +226,7 @@ export function CrmView({
   orders,
   checkouts,
   birthdayVouchers,
+  membershipEvents,
   membership,
   contacts,
   viewer,
@@ -238,6 +239,8 @@ export function CrmView({
   orders: CrmOrder[] | null;
   checkouts: CrmCheckout[] | null;
   birthdayVouchers: CrmBirthdayVoucherSafe[] | null;
+  /** RET-07 7C: null = unread (unknown); live false = the CRM route is not deployed yet (not counted, emails sent stays known). */
+  membershipEvents: MembershipEventsRead | null;
   membership: CrmMembershipConfig;
   /** The manual contact log, newest first; null when it is not set up here or could not be read (RET-05). */
   contacts: CustomerContact[] | null;
@@ -308,9 +311,9 @@ export function CrmView({
     // The membership year as the chat computes it (Jan 1, or the programme start when later), not the raw programme start.
     const enriched = enrichCustomers(customers, orders, membershipWindowStart(nowDate, membership.programStart));
     // Emails sent needs every CRM source and the manual count needs the log; an unread part is unknown for every row, never 0.
-    const tally = contactTally({checkouts: checkouts ?? [], orders, birthdayVouchers: birthdayVouchers ?? [], manualContacts: contacts ?? []});
-    return customerRows(enriched, tally, nowDate, {automated: checkouts !== null && birthdayVouchers !== null, manual: contacts !== null});
-  }, [customers, orders, checkouts, birthdayVouchers, contacts, membership.programStart, nowDate]);
+    const tally = contactTally({checkouts: checkouts ?? [], orders, birthdayVouchers: birthdayVouchers ?? [], membershipEvents: membershipEvents?.events ?? [], manualContacts: contacts ?? []});
+    return customerRows(enriched, tally, nowDate, {automated: checkouts !== null && birthdayVouchers !== null && membershipEvents !== null, manual: contacts !== null});
+  }, [customers, orders, checkouts, birthdayVouchers, membershipEvents, contacts, membership.programStart, nowDate]);
   // Each customer's logged contacts for the dialog, newest first (the read is already ordered that way).
   const contactsByEmail = useMemo(() => {
     const m = new Map<string, CustomerContact[]>();
@@ -1078,6 +1081,7 @@ export function CrmView({
           orders={orders}
           checkouts={checkouts}
           birthdayVouchers={birthdayVouchers}
+          membershipEvents={membershipEvents}
           contacts={contacts}
           membership={membership}
           now={nowDate}

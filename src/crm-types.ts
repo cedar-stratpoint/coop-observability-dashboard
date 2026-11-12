@@ -101,6 +101,19 @@ export type CrmBirthdayVoucher = {
   sentAt: string;
 };
 
+/**
+ * A membership email the CRM sent (RET-07 7C): GET /api/membership-events, newest first, at most 2,000 rows. The dashboard keeps
+ * email, tier, event and sentAt only (projectMembershipEvent); `id` and `shopifyCustomerId` are not needed and are dropped.
+ */
+export type CrmMembershipEvent = {
+  id: number;
+  email: string;
+  shopifyCustomerId: string | null;
+  tier: string;
+  event: string;
+  sentAt: string;
+};
+
 /** Membership settings, straight from the Shopify metafield the admin edits. */
 export type CrmMembershipConfig = {
   platinumThreshold: number;

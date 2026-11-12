@@ -76,7 +76,7 @@ const ANSWER = {
 type Row = Record<string, unknown>;
 type R = {rows: Row[]; columns: {key: string}[]; meta: {checks: {code: string; status: string; text: string}[]}; error?: string};
 const BASE = {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', limit: 100, offset: 0};
-const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: ORDERS}, membership: {platinumThreshold: 2000, programStart: '2026-07-01'}, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}};
+const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: ORDERS}, membership: {platinumThreshold: 2000, programStart: '2026-07-01'}, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}, membershipEvents: {membershipEvents: []}};
 
 async function run(input: Record<string, unknown>, bodies: Record<string, unknown> = BODIES) {
   const f = fakeCrmClient(bodies as never);
@@ -114,12 +114,12 @@ describe('S3.1 audience: the owner rules, fixed in code, at the PH-day boundarie
     expect(text).toMatch(/60 or more Philippine days/);
     expect(r.meta.checks.find((c) => c.code === 'reconciles')?.text).toMatch(/^2 website customers match/);
   });
-  it('audience all (the default): every customer, the contact columns (RET-07) but not the per-source breakdown; five reads', async () => {
+  it('audience all (the default): every customer, the contact columns (RET-07) but not the per-source breakdown; six reads (7C added membership emails)', async () => {
     const {r, gets} = await run({});
     expect(r.rows).toHaveLength(CUSTOMERS.length);
     expect(r.columns.map((c) => c.key)).toEqual(expect.arrayContaining(['emails_sent', 'times_contacted', 'last_contacted']));
     expect(r.columns.map((c) => c.key)).not.toContain('reminders');
-    expect([...gets].sort()).toEqual(['birthdayVouchers', 'checkouts', 'customers', 'membership', 'orders']);
+    expect([...gets].sort()).toEqual(['birthdayVouchers', 'checkouts', 'customers', 'membership', 'membershipEvents', 'orders']);
   });
   it('anything else is refused before any read', async () => {
     for (const audience of ['everyone', 'winback', 'REPEAT_PROMO', 1, null]) {
@@ -143,7 +143,7 @@ describe('S3.2 emails sent: one per-email tally, each source counted', () => {
       orders: [{email: 'a@x.com', reviewRequestSentAt: 'x', test: false}, {email: 'a@x.com', reviewRequestSentAt: 'x', test: true}, {email: 'a@x.com', reviewRequestSentAt: null, test: false}],
       birthdayVouchers: [{email: 'a@X.com '}],
     });
-    expect(t.get('a@x.com')).toEqual({reminders: 2, winback: 1, reviewRequests: 1, birthdayVouchers: 1, automated: 5, manual: 0, total: 5, lastAt: null, lastKind: null}); // Stage 5 added automated + manual; RET-07 lastAt ('x' does not parse, so no date)
+    expect(t.get('a@x.com')).toEqual({reminders: 2, winback: 1, reviewRequests: 1, birthdayVouchers: 1, membership: 0, automated: 5, manual: 0, total: 5, lastAt: null, lastKind: null}); // Stage 5 added automated + manual; RET-07 lastAt ('x' does not parse, so no date)
     expect(t.size).toBe(1);
   });
   it('consent is shown as is ("unknown" when never set) and never filters anyone out', async () => {
@@ -182,8 +182,8 @@ describe('negative cases: test orders, voucher codes, no send path, the GET cap'
     expect(client.match(/['"]POST['"]/g)).toHaveLength(1);
     expect(readFileSync('src/chat/crm/tools.ts', 'utf8')).not.toMatch(/['"](POST|PUT|PATCH|DELETE)['"]|\/admin|send_?email/i);
   });
-  it('an audience call makes 5 distinct reads through the real client, within the per-turn GET cap', async () => {
-    const PATHS: Record<string, string> = {'/api/customers': 'customers', '/api/orders': 'orders', '/api/membership-config': 'membership', '/api/checkouts': 'checkouts', '/api/birthday-vouchers': 'birthdayVouchers'};
+  it('an audience call makes 6 distinct reads through the real client, within the per-turn GET cap', async () => {
+    const PATHS: Record<string, string> = {'/api/customers': 'customers', '/api/orders': 'orders', '/api/membership-config': 'membership', '/api/checkouts': 'checkouts', '/api/birthday-vouchers': 'birthdayVouchers', '/api/membership-events': 'membershipEvents'};
     const sent: {url: string; method?: string}[] = [];
     const fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
       sent.push({url: String(input), method: init.method});
@@ -193,7 +193,7 @@ describe('negative cases: test orders, voucher codes, no send path, the GET cap'
     const ex = createCrmExecutors({client, now: NOW, user: 'test@example.com', keep: (r) => r, maxCalls: 99, sink: {info: () => undefined, warn: () => undefined, error: () => undefined} as never});
     const r = (await ex.list_crm_customers({...BASE, audience: 'win_back'})) as R;
     expect(r.rows.map(id)).toEqual(ANSWER.win_back);
-    expect(sent).toHaveLength(5);
+    expect(sent).toHaveLength(6);
     expect(sent.every((s) => s.method === 'GET')).toBe(true);
     expect(sent.length).toBeLessThanOrEqual(CRM_LIMITS.maxGetsPerTurn);
   });
@@ -228,7 +228,7 @@ describe('S5.3 Ask Coop: manual_contacts and times_contacted', () => {
     const keys = r.columns.map((c) => c.key);
     expect(keys).toEqual(expect.arrayContaining(['emails_sent', 'manual_contacts', 'times_contacted']));
     expect(keys.indexOf('manual_contacts')).toBe(keys.indexOf('emails_sent') + 1);
-    expect([...gets].sort()).toEqual(['birthdayVouchers', 'checkouts', 'customers', 'membership', 'orders']);
+    expect([...gets].sort()).toEqual(['birthdayVouchers', 'checkouts', 'customers', 'membership', 'membershipEvents', 'orders']);
   });
   it('the log not applied (null) or not wired: manual_contacts and times_contacted are null with a warning, emails_sent still shows', async () => {
     for (const manual of [async () => null, undefined, async () => { throw new Error('boom'); }]) {

@@ -13,7 +13,7 @@ import {CRM_BODIES, INJECTED_PET} from './support/crm-fixtures';
 const TOKEN = 'tok-SECRET-tools';
 const NOW = new Date('2026-10-07T04:00:00Z');
 const data = (): MetricData => ({source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []});
-const PATHS: Record<string, string> = {'/api/metrics': 'metrics', '/api/customers': 'customers', '/api/orders': 'orders', '/api/checkouts': 'checkouts', '/api/membership-config': 'membership', '/api/birthday-vouchers': 'birthdayVouchers'}; // RET-07: every customer list reads the contact tally (checkouts + birthday vouchers)
+const PATHS: Record<string, string> = {'/api/metrics': 'metrics', '/api/customers': 'customers', '/api/orders': 'orders', '/api/checkouts': 'checkouts', '/api/membership-config': 'membership', '/api/birthday-vouchers': 'birthdayVouchers', '/api/membership-events': 'membershipEvents'}; // RET-07: every customer list reads the contact tally (checkouts + birthday vouchers + membership emails, 7C)
 
 type Bodies = Record<string, unknown>;
 function world(over: {fail?: boolean; bodies?: Bodies; limits?: Partial<CrmLimits>; noCrm?: boolean; status?: number} = {}) {
@@ -75,7 +75,7 @@ describe('no URL, path, method or header from the model', () => {
     ];
     for (const [name, input] of tries) expect((await w.call(name, input)).is_error).toBe(true);
     expect(w.sent).toHaveLength(0);
-    // The legal calls still send only the six allowlisted paths, GET, no query.
+    // The legal calls still send only the seven allowlisted paths, GET, no query.
     for (const [name, input] of ALL_CALLS) await w.call(name, input);
     for (const s of w.sent) {
       const u = new URL(s.url);
@@ -99,7 +99,7 @@ describe('hidden fields never surface (Review Focus 5)', () => {
     const everything = JSON.stringify(results) + JSON.stringify(w.blocks) + w.logs();
     expect(everything).not.toMatch(/SECRET|abandonedCheckoutUrl|checkouts\/|apiKey|discountCode|"raw"/);
     expect(w.sent.every((s) => s.init.method === 'GET')).toBe(true);
-    expect(new Set(w.sent.map((s) => new URL(s.url).pathname))).toEqual(new Set(['/api/metrics', '/api/orders', '/api/customers', '/api/membership-config', '/api/checkouts', '/api/birthday-vouchers']));
+    expect(new Set(w.sent.map((s) => new URL(s.url).pathname))).toEqual(new Set(['/api/metrics', '/api/orders', '/api/customers', '/api/membership-config', '/api/checkouts', '/api/birthday-vouchers', '/api/membership-events']));
   });
 
   it('SECRET in line-item properties, SKU, vendor, extra keys and the order note is in no tool result (requirement 1 and 2)', async () => {

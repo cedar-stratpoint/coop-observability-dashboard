@@ -107,7 +107,7 @@ const CHECKOUTS = [
   {shopifyCheckoutId: 'k2', email: 'ccc@example.com', totalPrice: '1', currency: 'PHP', createdAt: '2026-08-28T10:00:00Z', updatedAt: null, convertedAt: null, remindersSent: 0, lastReminderAt: null, reachedPaymentAt: null, winbackSentAt: '2026-09-01T10:00:00Z', raw: '{}'},
 ];
 const VOUCHERS = [{id: 1, email: 'ddd@example.com', shopifyCustomerId: 'ddd', year: 2026, tier: 'gold', code: 'SECRET', amount: '100', discountNodeId: null, expiresAt: null, sentAt: '2026-10-10T10:00:00Z'}];
-const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: []}, membership: {platinumThreshold: 2000, programStart: '2026-07-01'}, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}};
+const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: []}, membership: {platinumThreshold: 2000, programStart: '2026-07-01'}, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}, membershipEvents: {membershipEvents: []}};
 const LOG = async () => [{email: 'aaa@example.com', channel: 'sms', contactedAt: '2026-10-20T10:00:00Z'}];
 const BASE = {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', limit: 100, offset: 0};
 type Row = Record<string, unknown>;
