@@ -8,6 +8,21 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Website CRM: everything the storefront admin's CRM page does (RET-09, slice 8A)
+
+The owner wants the team to use one place, so Coop's Website CRM page now does everything Vince's `zoomyforpets.com/admin/crm` does (read from its `origin/main`), with Coop's rules where they differ. Plan: `knowledge/tasks/2026-11-12-customer-profile-stage8.md` (8A); story RET-09.
+
+- **Decision: one view, with tabs (owner).** Customers · Abandoned checkouts · Orders · Pet birthdays, each with its count; Customers opens first. "Cart recovery" is now "Abandoned checkouts", and that tab carries its own cart-recovery tiles, filters, schedule line and table.
+- **Parity, every table:** sortable column headers (`aria-sort`, nulls last whichever way, Vince's first-click direction), 10 / 25 / 50 rows per page, Clear filters, and a CSV that starts with Vince's summary header (as-of PH time, the active filters, counts). An ⓘ hint on every stat tile (`Metric` gains `hint`), Vince's copy reworded where Coop differs.
+- **Abandoned checkouts:** Items (the line-item count, projected from the Worker's `lineItems`; no item detail leaves the server), a 3-dot Email → Shipping → Payment stepper, reminders "n of N" + last sent, RETURN30, popovers explaining Progress and Status, and **Copy link on every cart that has a recovery link**, converted too, as Vince does. Default order: newest abandoned first.
+- **Schedule lines from the CRM, never invented.** `projectMetrics` keeps `reminderStepCount`, `reminderSteps`, `remindersEnabled`, `reviewAfterMinutes`, `reviewEmailsEnabled` when the Worker sends them. "Reminder: sent 1 hour after abandonment · paused" and "Review email: sent 7 days after fulfillment" read them; a field the Worker does not send hides its line, and "n of N" falls back to the plain count (Vince defaults N to 3; PROD's real N is 1, so a default would be wrong). The profile drawer's checkouts read "n of N" too.
+- **Orders:** Fulfilled, Review sent and Reviewed columns; default newest placed first. **Customers:** Member since and To Platinum (bar + pesos left for Gold, Qualified for Platinum; sorted Gold by spend, then Platinum, guests last), a tier explainer.
+- **Decision: one sort model on Customers.** The header sort is the order; 7A's Sort select is a shortcut that writes the same state ("Haven't contacted longest" = Last contacted ascending, "Most contacted" = times contacted descending, both proven equal to 7A's comparators in tests). A header click shows "By column" in the select; Default restores the list order (an audience preset's own order).
+- **Pet birthdays tab:** one row per customer with a pet, birthday, next birthday in PH days, this year's voucher Sent / Upcoming / Passed (`petBirthdayStatus`, the profile's rule) with the send time on hover, a status filter and an explainer. **Not ported:** Vince's "primary" tag (Coop's projection carries one pet per customer, not `pet_profiles`), the voucher code on hover (the code never reaches the page, by RET-03 design), and his Due / Scheduled split (it needs the CRM's `birthdayLeadDays`, not projected).
+- **Coop's rules over Vince's:** the Orders CSV's paid revenue excludes Shopify test orders and says how many are listed (Vince's counts them). No CSV carries a recovery link or a voucher code; Ask Coop never sees either.
+- Pure parts in `src/crm-table.ts` (`test/crm-table.test.ts`, 20 tests) and the projection tests in `test/crm-project.test.ts`. Vince's `/admin/crm` is untouched.
+- **Not yet:** sorting on phones (the cards have no headers), Vince's 5-rows option.
+
 ## 2026-11-12 — Customers: CRM membership emails count as contacts (RET-07, slice 7C)
 
 Membership emails (tier welcome, upgrade and the like) are sent by the CRM but were not in "emails sent" or "last contacted". Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (section 7C, rule R3).
