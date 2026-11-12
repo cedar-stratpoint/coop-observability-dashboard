@@ -2,10 +2,10 @@
 // both readers: the pages' live proxy (src/crm-data.ts) and Ask Coop's GET-only client (src/chat/crm/). A field is copied only when
 // it is listed here, so a field the Worker adds later is dropped until someone adds it on purpose.
 // Never projected: `raw` (the Shopify payload; reduced to `stage` on a checkout and to the `test` flag and discount codes on an order, BDAY- codes cut to the prefix), `abandonedCheckoutUrl` (only the pages add it back, in
-// crm-data.ts), the birthday voucher `code` and `discountNodeId` (projectBirthdayVoucher keeps email, year, tier and sentAt only). Ask Coop sees none of them.
+// crm-data.ts), the birthday voucher `code` and `discountNodeId` (projectBirthdayVoucher keeps email, year, tier and sentAt only), and a membership event's `id` and `shopifyCustomerId`. Ask Coop sees none of them.
 import {checkoutStage} from './crm-compute';
 import {parseLineItems} from './custom-range';
-import type {CrmBirthdayVoucher, CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder, CrmOrderLine} from './crm-types';
+import type {CrmBirthdayVoucher, CrmCheckout, CrmMembershipEvent, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder, CrmOrderLine} from './crm-types';
 
 export type CrmCheckoutSafe = Omit<CrmCheckout, 'abandonedCheckoutUrl'>;
 type Rec = Record<string, unknown>;
@@ -156,6 +156,30 @@ export function projectCheckoutSafe(c: Rec): CrmCheckoutSafe {
 export type CrmBirthdayVoucherSafe = Pick<CrmBirthdayVoucher, 'email' | 'year' | 'tier' | 'sentAt'>;
 export function projectBirthdayVoucher(v: Rec): CrmBirthdayVoucherSafe {
   return {email: str(v.email) ?? '', year: num(v.year), tier: str(v.tier) ?? '', sentAt: str(v.sentAt) ?? ''};
+}
+
+/** What the dashboard and Ask Coop keep of a membership email (RET-07 7C): who, which tier, which event, when. */
+export type CrmMembershipEventSafe = Pick<CrmMembershipEvent, 'email' | 'tier' | 'event' | 'sentAt'>;
+export function projectMembershipEvent(v: Rec): CrmMembershipEventSafe {
+  return {email: str(v.email) ?? '', tier: str(v.tier) ?? '', event: str(v.event) ?? '', sentAt: str(v.sentAt) ?? ''};
+}
+
+/**
+ * The membership email read (RET-07 7C). `live: false` = the CRM answered 404 for /api/membership-events: the route is not deployed
+ * yet (rollout), so membership emails are EXCLUDED from the counts with a note, and the other sources stay known. Any other failure
+ * (5xx, network, a body with no list) is null = unknown (R3): emails_sent and last contacted are unknown, never a guess.
+ */
+export type MembershipEventsRead = {live: true; events: CrmMembershipEventSafe[]} | {live: false; events: []};
+export const MEMBERSHIP_EVENTS_NOT_LIVE = 'Membership emails are not counted yet: the CRM route is not live.';
+
+/** Classifies one /api/membership-events read. `get` resolves the response body or throws an error carrying the HTTP `status` (both CRM readers do). */
+export async function readMembershipEvents(get: () => Promise<unknown>): Promise<MembershipEventsRead | null> {
+  try {
+    const rows = envelope(await get(), 'membershipEvents');
+    return rows ? {live: true, events: rows.map(projectMembershipEvent)} : null;
+  } catch (err) {
+    return (err as {status?: unknown} | null)?.status === 404 ? {live: false, events: []} : null;
+  }
 }
 
 export function projectMembership(body: unknown): CrmMembershipConfig {

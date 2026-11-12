@@ -48,7 +48,7 @@ import {
   type TimelineGroup,
 } from '@/src/crm-compute';
 import {parseLineItems, phDay} from '@/src/custom-range';
-import type {CrmBirthdayVoucherSafe} from '@/src/crm-project';
+import {MEMBERSHIP_EVENTS_NOT_LIVE, type CrmBirthdayVoucherSafe, type MembershipEventsRead} from '@/src/crm-project';
 import type {CheckoutStage, CrmCheckout, CrmMembershipConfig, CrmOrder} from '@/src/crm-types';
 import type {CustomerContact} from '@/src/customer-contacts';
 
@@ -166,6 +166,8 @@ function eventText(e: TimelineEvent, viewer: string | null): {title: string; det
       return {title: 'Win-back email (RETURN30)', detail: 'One-off win-back for an abandoned checkout'};
     case 'birthday_voucher':
       return {title: 'Birthday voucher email', detail: e.year ? `${e.year} voucher` : null};
+    case 'membership':
+      return {title: 'Membership email', detail: [e.tier, e.membershipEvent?.replace(/_/g, ' ')].filter(Boolean).join(' · ') || null};
     default:
       return {title: CONTACT_KIND_LABEL[e.kind as ContactKind], detail: `Logged by ${viewer !== null && e.by === viewer ? 'you' : (e.by ?? 'the team')}`};
   }
@@ -178,6 +180,7 @@ export function CustomerProfile({
   orders,
   checkouts,
   birthdayVouchers,
+  membershipEvents,
   contacts,
   membership,
   now,
@@ -193,6 +196,8 @@ export function CustomerProfile({
   orders: CrmOrder[] | null;
   checkouts: CrmCheckout[] | null;
   birthdayVouchers: CrmBirthdayVoucherSafe[] | null;
+  /** RET-07 7C: null = unread; live false = the CRM route is not deployed yet (not counted, with a note). */
+  membershipEvents: MembershipEventsRead | null;
   contacts: CustomerContact[] | null;
   membership: CrmMembershipConfig;
   now: Date;
@@ -260,15 +265,15 @@ export function CustomerProfile({
     const mine = customerOrders(row, orders ?? []);
     const key = (row.email ?? '').trim().toLowerCase();
     const carts = key ? (checkouts ?? []).filter((k) => (k.email ?? '').trim().toLowerCase() === key) : [];
-    const events = customerTimeline(row, {orders: orders ?? [], checkouts: checkouts ?? [], birthdayVouchers: birthdayVouchers ?? [], manualContacts: contacts ?? []});
+    const events = customerTimeline(row, {orders: orders ?? [], checkouts: checkouts ?? [], birthdayVouchers: birthdayVouchers ?? [], membershipEvents: membershipEvents?.events ?? [], manualContacts: contacts ?? []});
     const paid = mine.filter((o) => o.test !== true && o.financialStatus === 'paid').length;
     return {mine, carts, events, paid};
-  }, [row, orders, checkouts, birthdayVouchers, contacts]);
+  }, [row, orders, checkouts, birthdayVouchers, membershipEvents, contacts]);
 
   if (!mounted) return null;
 
   const name = row ? [row.firstName, row.lastName].filter(Boolean).join(' ') : '';
-  const unread = [checkouts === null && 'abandoned checkouts and cart emails', birthdayVouchers === null && 'birthday vouchers', contacts === null && 'manual contacts (the log is not set up here)'].filter(Boolean);
+  const unread = [checkouts === null && 'abandoned checkouts and cart emails', birthdayVouchers === null && 'birthday vouchers', membershipEvents === null && 'membership emails', contacts === null && 'manual contacts (the log is not set up here)'].filter(Boolean);
   const tabs: Array<[ProfileTab, string]> = data
     ? [
         ['timeline', 'Timeline'],
@@ -409,6 +414,7 @@ export function CustomerProfile({
                     filter={filter}
                     onFilter={setFilter}
                     unread={unread as string[]}
+                    pending={membershipEvents?.live === false ? MEMBERSHIP_EVENTS_NOT_LIVE : null}
                     viewer={viewer}
                     onOrder={(id) => {
                       setExpanded(id);
@@ -450,6 +456,7 @@ function Timeline({
   filter,
   onFilter,
   unread,
+  pending,
   viewer,
   onOrder,
 }: {
@@ -457,6 +464,8 @@ function Timeline({
   filter: Filter;
   onFilter: (f: Filter) => void;
   unread: string[];
+  /** A source that is not live yet (7C membership emails): left out on purpose, said in a muted line, not a warning. */
+  pending: string | null;
   viewer: string | null;
   onOrder: (orderId: string) => void;
 }) {
@@ -485,6 +494,7 @@ function Timeline({
           Not shown, the source did not answer: {unread.join('; ')}.
         </p>
       )}
+      {pending && <p className="mb-3 text-xs text-muted-foreground">{pending}</p>}
       {shown.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">Nothing of this kind yet.</p>
       ) : (

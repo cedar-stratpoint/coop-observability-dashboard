@@ -4,6 +4,7 @@ import {
   getCrmCheckouts,
   getCrmCustomers,
   getCrmMembershipConfig,
+  getCrmMembershipEvents,
   getCrmMetrics,
   getCrmOrders,
 } from '@/src/crm-data';
@@ -16,12 +17,14 @@ import {CrmView} from '@/components/analyst/crm-view';
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const [metrics, customers, orders, checkouts, birthdayVouchers, membership, contacts, viewer] = await Promise.all([
+  const [metrics, customers, orders, checkouts, birthdayVouchers, membershipEvents, membership, contacts, viewer] = await Promise.all([
     getCrmMetrics(),
     getCrmCustomers(),
     getCrmOrders(),
     getCrmCheckouts(),
     getCrmBirthdayVouchers(),
+    // RET-07 7C: null = unread (unknown); {live: false} = the CRM route is not deployed yet (not counted, with a note).
+    getCrmMembershipEvents(),
     getCrmMembershipConfig(),
     // The manual contact log (RET-05): null when the table is not applied yet, so the page shows "unavailable", never 0.
     getCustomerContacts(),
@@ -39,6 +42,7 @@ export default async function Page() {
       orders={orders}
       checkouts={checkouts}
       birthdayVouchers={birthdayVouchers}
+      membershipEvents={membershipEvents}
       membership={membership}
       contacts={contacts}
       viewer={viewer}
