@@ -9,9 +9,22 @@
 import {fetchAllRows, type MakePage} from './pos-fetch-paginate';
 import {isMissingTable, type DbError} from './supabase-errors';
 
-export const CONTACT_CHANNELS = ['dm', 'sms', 'call', 'email', 'other'] as const;
+/**
+ * In the order the Log contact dialog lists them: the most used first. Stage 7B added instagram / facebook / viber (the DB
+ * check widens with supabase/customer_contacts_channels_7b.sql); 'dm' stays, as "DM (other app)", so older rows stay valid.
+ */
+export const CONTACT_CHANNELS = ['instagram', 'facebook', 'viber', 'dm', 'sms', 'call', 'email', 'other'] as const;
 export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
-export const CHANNEL_LABEL: Readonly<Record<ContactChannel, string>> = Object.freeze({dm: 'DM', sms: 'SMS', call: 'Call', email: 'Email (by hand)', other: 'Other'});
+export const CHANNEL_LABEL: Readonly<Record<ContactChannel, string>> = Object.freeze({
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  viber: 'Viber',
+  dm: 'DM (other app)',
+  sms: 'SMS',
+  call: 'Call',
+  email: 'Email (by hand)',
+  other: 'Other',
+});
 /** Characters; the table checks the same limit. */
 export const CONTACT_NOTE_MAX = 500;
 
@@ -31,6 +44,9 @@ export interface ContactLogDeps {
 
 const NOT_SET_UP = 'The contact log is not set up yet in this environment (supabase/customer_contacts.sql has not been applied). Nothing was saved.';
 const SIGN_IN = 'Sign in again to log contacts.';
+const CHANNEL_NOT_ENABLED = "This channel isn't enabled in the database yet — run the Stage 7B SQL (supabase/customer_contacts_channels_7b.sql). Nothing was saved.";
+/** The pre-7B channel check refused the row (Postgres check_violation 23514 on customer_contacts_channel_check). */
+const isOldChannelCheck = (e: DbError): boolean => e.code === '23514' && /customer_contacts_channel_check/.test(e.message);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (error: string): ContactResult => ({ok: false, error});
@@ -55,6 +71,7 @@ export async function logContactWith(deps: ContactLogDeps, input: unknown): Prom
   const error = await deps.insert({customer_email: v.email, channel: v.channel, note: v.note, created_by: by});
   if (!error) return {ok: true};
   if (isMissingTable(error)) return fail(NOT_SET_UP);
+  if (isOldChannelCheck(error)) return fail(CHANNEL_NOT_ENABLED);
   console.warn(`customer_contacts insert failed: ${error.code ?? ''} ${error.message}`);
   return fail('Saving the contact failed. Nothing was saved; try again.');
 }
