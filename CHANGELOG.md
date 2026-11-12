@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Website CRM: customer profile drawer and communication timeline (RET-08, slices 8B + 8C)
+
+The owner wanted to pick one customer and see their details, orders and every contact we made with them, as in Klaviyo, without opening four tables.
+
+- **Decision: a drawer over the page, not a new page.** The list, search and filters stay where they were. `?customer=<Shopify customer id>` is written with the native History API (Next 16 syncs it with `useSearchParams`, no server round trip), so a refresh reopens the profile and Back, Escape or × closes it. Full screen on phones.
+- **Opens from:** a name or email on Customers, an email on Cart recovery (opens on Abandoned checkouts), an order number or email on Orders (opens on Orders with that order expanded). A cart or order with no matching customer stays plain text.
+- **Decision: no new fetch, one compute.** The profile is built in the browser from the lists the page already reads. Its header and stat strip are the Customers tab row (`customerRows`), the audience chips are `inAudience` (the presets' and Ask Coop's rule), and a source that did not answer reads "unknown", never 0 or "never".
+- **Timeline (`customerTimeline`, `src/crm-compute.ts`):** account created, orders placed and fulfilled, review requests and reviews, abandoned checkouts (value, progress, Active / Recovered / Converted), cart reminders, win-back, birthday vouchers and manual contacts, newest first, with filter chips All · Orders · Abandoned checkouts · Emails · Manual. **Its contact events use 7A's `ContactKind` and `contactTally`'s matching**, so the newest contact is Last contacted and the contact counts add up to Times contacted (pinned by `test/crm-customer-timeline.test.ts`).
+- **Limits shown, never hidden:** cart reminders are one event "Cart reminder ×N" with the last date only, because the CRM keeps only that date. A test order is listed with a "test" tag and counted nowhere, its review request included.
+- **Copy recovery link** comes to Coop on the page only, and only while a checkout is open (never in Ask Coop or a CSV). Log contact reuses the existing dialog; the new contact appears at the top of the timeline after the refresh. Nothing sends.
+- **Not yet:** the checkout list carries no line items, so abandoned checkouts show value and progress but no item list; reminders read "n sent" until 8A brings the reminder step count ("n of N"). Pet birthdays tab, sortable headers and Member since / To Platinum on the list stay in 8A.
+
 ## 2026-11-12 — Ask Coop: works with an org-scoped Anthropic key (ANTHROPIC_WORKSPACE_ID)
 
 The owner's new Anthropic key was created at organization level, not inside a workspace. Anthropic answers every call made with such a key with 400 "This API key is not scoped to a workspace" unless the request names the workspace. Ask Coop sent only the key, so the chat failed with it.
