@@ -6,6 +6,7 @@
  */
 import {phDay, phDayStart} from './custom-range';
 import type {CheckoutStage, CrmCheckout, CrmCustomer, CrmOrder} from './crm-types';
+import {CHANNEL_LABEL, CONTACT_CHANNELS, type ContactChannel} from './customer-contacts';
 
 export type CartStatus = 'Active' | 'Recovered' | 'Converted';
 
@@ -91,40 +92,57 @@ export function enrichCustomers(
 /**
  * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The four automated CRM emails,
  * `automated` = their sum, `manual` = contacts the team logged by hand (customer_contacts), `total` = automated + manual.
+ * RET-07: `lastAt` / `lastKind` = the newest dated contact of any kind (null when none of its contacts carries a readable date).
  */
-export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; automated: number; manual: number; total: number};
+export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
 type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers';
+/** RET-07: what the last contact was. An automated CRM email kind, or the manual log's own channel (the two sets never overlap). */
+export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | ContactChannel;
+export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.freeze({
+  reminder: 'Cart reminder',
+  winback: 'Win-back email',
+  review_request: 'Review request',
+  birthday_voucher: 'Birthday voucher',
+  ...CHANNEL_LABEL,
+});
 const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
+const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_CHANNELS as readonly unknown[]).includes(c) ? (c as ContactChannel) : 'other');
 
 /**
  * The per-email contact tally, keyed by trimmed lower-cased email. Owner rules (2026-11-10): cart reminders = checkouts.remindersSent
  * summed; win-back = 1 per checkout with winbackSentAt; review requests = 1 per order with reviewRequestSentAt, test orders excluded;
  * birthday vouchers = 1 per voucher row; manual = 1 per logged contact. Rows without an email are skipped. Only addresses with at
- * least one contact are present.
+ * least one contact are present. RET-07 (2026-11-11): the newest timestamp of a counted contact wins (lastReminderAt, winbackSentAt,
+ * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact.
  */
 export function contactTally(src: {
-  checkouts: readonly Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'>[];
+  checkouts: readonly (Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'> & Partial<Pick<CrmCheckout, 'lastReminderAt'>>)[];
   orders: readonly Pick<CrmOrder, 'email' | 'reviewRequestSentAt' | 'test'>[];
-  birthdayVouchers: readonly {email: string | null}[];
-  manualContacts?: readonly {email: string | null}[];
+  birthdayVouchers: readonly {email: string | null; sentAt?: string | null}[];
+  manualContacts?: readonly {email: string | null; channel?: string | null; contactedAt?: string | null}[];
 }): Map<string, ContactTally> {
   const out = new Map<string, ContactTally>();
-  const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number) => {
+  const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number, at: string | null | undefined, kind: ContactKind) => {
     const key = emailKey(email);
     if (!key || !(n > 0)) return;
-    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0};
+    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
     t[k] += n;
     if (k !== 'manual') t.automated += n;
     t.total += n;
+    const when = ms(at ?? null);
+    if (Number.isFinite(when) && (t.lastAt === null || when > ms(t.lastAt))) {
+      t.lastAt = at as string;
+      t.lastKind = kind;
+    }
     out.set(key, t);
   };
   for (const c of src.checkouts) {
-    add(c.email, 'reminders', Number(c.remindersSent) || 0);
-    if (c.winbackSentAt) add(c.email, 'winback', 1);
+    add(c.email, 'reminders', Number(c.remindersSent) || 0, c.lastReminderAt, 'reminder');
+    if (c.winbackSentAt) add(c.email, 'winback', 1, c.winbackSentAt, 'winback');
   }
-  for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1);
-  for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1);
-  for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1);
+  for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1, o.reviewRequestSentAt, 'review_request');
+  for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1, v.sentAt, 'birthday_voucher');
+  for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1, m.contactedAt, channelKind(m.channel));
   return out;
 }
 
@@ -225,8 +243,19 @@ export const ordersBucket = (n: number): string => (n >= 4 ? '4+' : String(n));
  * The Customers tab row: the enriched customer plus days since last order, consent and how often they were contacted.
  * Null = a source unread: emails sent (automated) when a CRM list did not answer, manual contacts when the log is not applied,
  * times contacted (their sum) when either is unknown. Never 0 for unknown.
+ * RET-07 last contacted: `lastContactKnown` is false when any source is unread (R3: unknown, never "never"); known with a null
+ * `lastContactedAt` = never contacted (R2).
  */
-export type CustomerRow = EnrichedCustomer & {daysSinceLastOrder: number | null; emailsSent: number | null; manualContacts: number | null; timesContacted: number | null; consent: string};
+export type CustomerRow = EnrichedCustomer & {
+  daysSinceLastOrder: number | null;
+  emailsSent: number | null;
+  manualContacts: number | null;
+  timesContacted: number | null;
+  lastContactedAt: string | null;
+  lastContactKind: ContactKind | null;
+  lastContactKnown: boolean;
+  consent: string;
+};
 
 /** `known` says which parts of `tally` were read; by default the automated part is known when a tally is given and the manual part is not. */
 export function customerRows(
@@ -245,9 +274,29 @@ export function customerRows(
       emailsSent: auto ? (t?.automated ?? 0) : null,
       manualContacts: manual ? (t?.manual ?? 0) : null,
       timesContacted: auto && manual ? (t?.total ?? 0) : null,
+      lastContactedAt: auto && manual ? (t?.lastAt ?? null) : null,
+      lastContactKind: auto && manual ? (t?.lastKind ?? null) : null,
+      lastContactKnown: auto && manual,
       consent: c.emailMarketingState?.trim() || 'unknown',
     };
   });
+}
+
+type LastContact = Pick<CustomerRow, 'lastContactedAt' | 'lastContactKnown'>;
+/** RET-07 display: the PH date of the last contact, "never" (known, none) or "unknown" (a source unread). */
+export function lastContactLabel(r: LastContact): string {
+  if (!r.lastContactKnown) return 'unknown';
+  return r.lastContactedAt === null ? 'never' : fmtPhDate(r.lastContactedAt);
+}
+/** R5 "haven't talked to longest": never contacted first, then the oldest last contact; unknown rows last (their order is kept). */
+export function compareLastContacted(a: LastContact, b: LastContact): number {
+  const rank = (r: LastContact): number => (!r.lastContactKnown ? 2 : r.lastContactedAt === null ? 0 : 1);
+  return rank(a) - rank(b) || (rank(a) === 1 ? ms(a.lastContactedAt) - ms(b.lastContactedAt) : 0);
+}
+/** Most contacted first (times contacted desc); unknown (null) last. */
+export function compareTimesContacted(a: Pick<CustomerRow, 'timesContacted'>, b: Pick<CustomerRow, 'timesContacted'>): number {
+  if (a.timesContacted === null || b.timesContacted === null) return Number(a.timesContacted === null) - Number(b.timesContacted === null);
+  return b.timesContacted - a.timesContacted;
 }
 
 /** An audience preset's rows, longest-lapsed first (the chat's audience order); "all" returns the rows unchanged. */

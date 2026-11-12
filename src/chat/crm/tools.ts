@@ -2,7 +2,7 @@
 // page IN CODE, and return a MetricResult the render tools can draw and the number check can read. Pure: `get` is injected.
 // Customer text is untrusted (spec 4.1): control and bidi characters are removed, each value is capped, and the result says so.
 // The hidden fields never reach this module: src/crm-project.ts does not project them.
-import {AUDIENCE_RULES, CUSTOMER_AUDIENCES, REPEAT_TARGET_PCT, SMALL_COHORT, cartStatus, codeCohorts, compareLastOrder, contactTally, enrichCustomers, filterCustomers, inAudience, membershipWindowStart, ordersBucket, phDaysSince, repeatRate, type ContactTally} from '../../crm-compute';
+import {AUDIENCE_RULES, CONTACT_KIND_LABEL, CUSTOMER_AUDIENCES, REPEAT_TARGET_PCT, SMALL_COHORT, cartStatus, codeCohorts, compareLastContacted, compareLastOrder, compareTimesContacted, contactTally, customerRows, enrichCustomers, filterCustomers, inAudience, membershipWindowStart, ordersBucket, phDaysSince, repeatRate, type ContactTally} from '../../crm-compute';
 import {envelope, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrderChat, type CrmCheckoutSafe, type CrmLineItemSafe, type CrmOrderChat} from '../../crm-project';
 import {phDay, phDayStart, type RangeOrder} from '../../custom-range';
 import {dayKeysBetween, MAX_RANGE_DAYS, mondayOf, rangeLabel} from '../range';
@@ -10,15 +10,15 @@ import type {Check, ColumnRole, ColumnUnit, MeasureDecl, MetricError, MetricResu
 import {CRM_LIMITS, CrmError, type CrmEndpointId, type CrmRead} from './client';
 
 export type CrmGet = (endpoint: CrmEndpointId, query?: Readonly<Record<string, number | string>>, opts?: {paged?: boolean}) => Promise<CrmRead>;
-/** The manual contact log (RET-05), read by the route's server seam (app/api/chat/contacts-log-seam.ts): one entry per logged contact, the email only. Null = not applied or unreadable. Not a CRM read. */
-export type ManualContactsRead = () => Promise<readonly {email: string | null}[] | null>;
+/** The manual contact log (RET-05), read by the route's server seam (app/api/chat/contacts-log-seam.ts): one entry per logged contact, its email, channel and time only (never the note or author; RET-07). Null = not applied or unreadable. Not a CRM read. */
+export type ManualContactsRead = () => Promise<readonly {email: string | null; channel?: string | null; contactedAt?: string | null}[] | null>;
 
 export const ORDER_STATUSES = ['all', 'paid', 'pending', 'authorized', 'partially_paid', 'partially_refunded', 'refunded', 'voided', 'expired'] as const;
 export const ORDER_GROUPS = ['none', 'day', 'week', 'month', 'financial_status', 'fulfillment_status', 'product'] as const;
 export const CUSTOMER_TIERS = ['all', 'platinum', 'gold', 'guest'] as const;
 export const CUSTOMER_BUYERS = ['all', 'buyers', 'non_buyers'] as const;
 export const CUSTOMER_GROUPS = ['none', 'tier', 'joined_month', 'email_marketing', 'first_order_month', 'orders_bucket', 'first_order_code'] as const;
-export const CUSTOMER_SORTS = ['newest', 'spend_desc', 'orders_desc', 'last_order_desc', 'last_order_asc'] as const;
+export const CUSTOMER_SORTS = ['newest', 'spend_desc', 'orders_desc', 'last_order_desc', 'last_order_asc', 'contacted_desc', 'last_contacted_asc'] as const;
 /** Closed values for list_crm_customers' min_orders (2 = repeat buyers). */
 export const CUSTOMER_MIN_ORDERS = [0, 1, 2, 3, 4, 5] as const;
 /** The closed outreach audiences and their rules live in src/crm-compute.ts, shared with the Customers tab (RET-04): one implementation. */
@@ -374,10 +374,14 @@ const CUSTOMER_LIST_MEASURES: MeasureDecl[] = [
   {key: 'spend_ytd', label: 'Spent this membership year', kind: 'measured', unit: 'PHP', method: 'Paid website orders since the membership window start: what the Platinum threshold measures.'},
   {key: 'days_since_last_order', label: 'Days since last order', kind: 'derived', unit: 'count', method: 'Philippine days from the last counted order to today.'},
 ];
+/** RET-07: last_contacted (PH day) and last_contact_kind, said once: in the result note and the tool description. */
+export const LAST_CONTACT_TEXT = 'last_contacted = the Philippine day of the newest contact of any kind (cart reminder, win-back, review request, birthday voucher, or a contact logged by hand); last_contact_kind names it ("never" = no contact at all; "unknown" = a source could not be read, never read as never). sort last_contacted_asc lists never-contacted customers first, then the oldest contact; unknown rows go last.';
 const TALLY_MEASURES: MeasureDecl[] = [
   {key: 'emails_sent', label: 'Emails sent', kind: 'derived', unit: 'count', method: 'Automated CRM emails already sent to this email address: reminders + winback + review_requests + birthday_vouchers. Unknown when a source could not be read.'},
   {key: 'manual_contacts', label: 'Manual contacts', kind: 'measured', unit: 'count', method: 'Contacts the team logged by hand for this email (DM, SMS, call, email by hand, other), from Coop\'s contact log. Unknown when the log is not set up or could not be read.'},
-  {key: 'times_contacted', label: 'Times contacted', kind: 'derived', unit: 'count', method: 'emails_sent + manual_contacts. Unknown when either is unknown.'},
+  {key: 'times_contacted', label: 'Times contacted', kind: 'derived', unit: 'count', method: 'emails_sent + manual_contacts. Unknown when either is unknown. sort contacted_desc lists the most contacted first.'},
+];
+const BREAKDOWN_MEASURES: MeasureDecl[] = [
   {key: 'reminders', label: 'Cart reminders', kind: 'measured', unit: 'count', method: 'Abandoned-cart reminders sent, summed over this email\'s checkouts.'},
   {key: 'winback', label: 'Win-back emails', kind: 'measured', unit: 'count', method: 'Checkouts of this email that got the win-back email (1 per cart).'},
   {key: 'review_requests', label: 'Review requests', kind: 'measured', unit: 'count', method: 'Orders of this email that got a review request (1 per order), test orders excluded.'},
@@ -399,6 +403,7 @@ export async function crmContactTally(get: CrmGet, orders: readonly CrmOrderChat
   if (!checkouts) notes.push(unread('cart reminders and win-back emails (checkouts)'));
   if (!vouchers) notes.push(unread('birthday vouchers'));
   if (!manual) notes.push({code: 'partial_coverage', status: 'warn', text: 'The manual contact log is not set up or could not be read, so manual_contacts and times_contacted are unknown (blank) for every row; emails_sent is unaffected. Say so; do not read blank as zero.'});
+  if (!checkouts || !vouchers || !manual) notes.push({code: 'partial_coverage', status: 'warn', text: 'A contact source could not be read, so last_contacted is unknown (blank, last_contact_kind "unknown") for every row. Never say a customer was never contacted.'});
   const capped = [checkouts && capCheck('checkouts', checkouts.length), vouchers && capCheck('birthday vouchers', vouchers.length, VOUCHER_LIST_CAP)].filter((c): c is Check => Boolean(c));
   const tally = contactTally({checkouts: (checkouts ?? []).map(projectCheckoutSafe), orders, birthdayVouchers: (vouchers ?? []).map(projectBirthdayVoucher), manualContacts: manual ?? []});
   return {tally, missing: {checkouts: !checkouts, birthdayVouchers: !vouchers, manual: !manual}, notes: [...notes, ...capped]};
@@ -465,13 +470,21 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const today = phDay(now.getTime());
   const daysSince = (iso: string | null): number | null => phDaysSince(iso, now);
   const matched = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers}, '').filter((c) => c.orderCount >= req.min_orders && (req.joined === null || inDays(c.createdAt, req.joined)) && inAudience(c, req.audience, now));
+  // RET-07: a customer list always carries the contact tally (two more GETs: checkouts, birthday vouchers; plus the manual log,
+  // not a CRM read), read before sorting so the contact sorts can use it. Group counts never need it.
+  const t = req.group_by === 'none' ? await crmContactTally(get, orders, manual) : null;
+  const partialAuto = t !== null && (t.missing.checkouts || t.missing.birthdayVouchers);
+  // the shared row (src/crm-compute.ts customerRows, the Customers tab's own): counts and last contacted, null = unknown
+  const rowsOf = customerRows(matched, t?.tally ?? null, now, {automated: t !== null && !partialAuto, manual: t !== null && !t.missing.manual});
   // customers with no order sort last whichever way the last-order sort runs (shared with the Customers tab)
   const byLast = compareLastOrder;
-  const sorted = [...matched].sort(
+  const sorted = [...rowsOf].sort(
     req.sort === 'spend_desc' ? (a, b) => b.spent - a.spent
     : req.sort === 'orders_desc' ? (a, b) => b.orderCount - a.orderCount
     : req.sort === 'last_order_desc' ? byLast(-1)
     : req.sort === 'last_order_asc' ? byLast(1)
+    : req.sort === 'contacted_desc' ? compareTimesContacted
+    : req.sort === 'last_contacted_asc' ? compareLastContacted
     : (a, b) => instant(b.createdAt) - instant(a.createdAt),
   );
   const days = matched.map((c) => dayOf(c.createdAt));
@@ -491,23 +504,30 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   if (req.group_by === 'none') {
     // an outreach audience is listed whole (staging 2026-11-11: the model asked for 25 and the owner got 25 of 30)
     const {rows, note} = pageOf(sorted, req.audience === 'all' ? req : {...req, limit: Math.max(req.limit, AUDIENCE_PAGE)});
-    // the contact tally is read only for an outreach audience (two more GETs: checkouts, birthday vouchers; plus the manual log, not a CRM read)
-    const t = req.audience === 'all' ? null : await crmContactTally(get, orders, manual);
-    if (t) notes.push(...t.notes);
-    const tallyCols = t ? [col('emails_sent', 'Emails sent', 'count', 'measure'), col('manual_contacts', 'Manual contacts', 'count', 'measure'), col('times_contacted', 'Times contacted', 'count', 'measure'), col('reminders', 'Cart reminders', 'count', 'measure'), col('winback', 'Win-back emails', 'count', 'measure'), col('review_requests', 'Review requests', 'count', 'measure'), col('birthday_vouchers', 'Birthday vouchers', 'count', 'measure')] : [];
+    if (t) notes.push(...t.notes, info(`Contacts (owner rules): ${LAST_CONTACT_TEXT} Nothing is sent from here.`));
+    const audience = req.audience !== 'all';
+    const contactCols = [col('emails_sent', 'Emails sent', 'count', 'measure'), col('manual_contacts', 'Manual contacts', 'count', 'measure'), col('times_contacted', 'Times contacted', 'count', 'measure'), col('last_contacted', 'Last contacted (PH day)', 'date', 'category'), col('last_contact_kind', 'Last contact kind', 'text', 'category')];
+    // the per-source breakdown stays on the outreach audiences only (the plain list would get too wide)
+    const breakdownCols = audience ? [col('reminders', 'Cart reminders', 'count', 'measure'), col('winback', 'Win-back emails', 'count', 'measure'), col('review_requests', 'Review requests', 'count', 'measure'), col('birthday_vouchers', 'Birthday vouchers', 'count', 'measure')] : [];
+    const tallyCols = [...contactCols, ...breakdownCols];
     const columns = [col('name', 'Name', 'text', 'category'), col('email', 'Email', 'text', 'category'), col('phone', 'Phone', 'text', 'category'), col('tier', 'Tier', 'text', 'category'), col('orders', 'Orders', 'count', 'measure'), col('spent', 'Spent', 'PHP', 'measure'), col('spend_ytd', 'Spent this membership year', 'PHP', 'measure'), col('first_order', 'First order (PH day)', 'date', 'category'), col('last_order', 'Last order (PH day)', 'date', 'category'), col('days_since_last_order', 'Days since last order', 'count', 'measure'), ...tallyCols, col('pet', 'Pet', 'text', 'category'), col('pet_birthday', 'Pet birthday', 'text', 'category'), col('email_marketing', 'Email marketing', 'text', 'category'), col('joined', 'Joined (PH day)', 'date', 'category')];
-    const tallyRow = (email: string | null): MetricRow => {
+    const tallyRow = (c: (typeof rows)[number]): MetricRow => {
       if (!t) return {};
-      const k = t.tally.get((email ?? '').trim().toLowerCase()) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0};
-      const partial = t.missing.checkouts || t.missing.birthdayVouchers;
+      const k = t.tally.get((c.email ?? '').trim().toLowerCase());
+      const base: MetricRow = {
+        emails_sent: c.emailsSent,
+        manual_contacts: c.manualContacts,
+        times_contacted: c.timesContacted,
+        last_contacted: dayOf(c.lastContactedAt),
+        last_contact_kind: !c.lastContactKnown ? 'unknown' : c.lastContactKind === null ? 'never' : CONTACT_KIND_LABEL[c.lastContactKind],
+      };
+      if (!audience) return base;
       return {
-        emails_sent: partial ? null : k.automated,
-        manual_contacts: t.missing.manual ? null : k.manual,
-        times_contacted: partial || t.missing.manual ? null : k.total,
-        reminders: t.missing.checkouts ? null : k.reminders,
-        winback: t.missing.checkouts ? null : k.winback,
-        review_requests: k.reviewRequests,
-        birthday_vouchers: t.missing.birthdayVouchers ? null : k.birthdayVouchers,
+        ...base,
+        reminders: t.missing.checkouts ? null : (k?.reminders ?? 0),
+        winback: t.missing.checkouts ? null : (k?.winback ?? 0),
+        review_requests: k?.reviewRequests ?? 0,
+        birthday_vouchers: t.missing.birthdayVouchers ? null : (k?.birthdayVouchers ?? 0),
       };
     };
     const out: MetricRow[] = rows.map((c) => {
@@ -523,14 +543,14 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
         first_order: dayOf(c.firstOrderAt),
         last_order: last,
         days_since_last_order: daysSince(c.lastOrderAt),
-        ...tallyRow(c.email),
+        ...tallyRow(c),
         pet: safeText(c.petName),
         pet_birthday: safeText(c.petBirthday),
         email_marketing: safeText(c.emailMarketingState) ?? 'unknown',
         joined: dayOf(c.createdAt),
       };
     });
-    return finish('crm_customers', 'none', columns, out, {range, measure: 'spent', measures: t ? [...CUSTOMER_LIST_MEASURES, ...TALLY_MEASURES] : CUSTOMER_LIST_MEASURES, notes: note ? [...notes, note] : notes, days});
+    return finish('crm_customers', 'none', columns, out, {range, measure: 'spent', measures: [...CUSTOMER_LIST_MEASURES, ...TALLY_MEASURES, ...(audience ? BREAKDOWN_MEASURES : [])], notes: note ? [...notes, note] : notes, days});
   }
 
   // RET-06: cohorts by the first counted order's discount code (shared core: src/crm-compute.ts codeCohorts, the page's compute too)
