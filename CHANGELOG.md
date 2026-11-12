@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Goldline template-anchored extraction, Phase 0: the form template model
+
+Plan: `knowledge/tasks/2026-11-12-template-anchored-extraction.md`. First step toward reading inventory forms by filling a fixed template instead of re-transcribing every row (to kill the dropped and invented rows the QA found, and cut cost). Adds the structural template model, **derived from real data, not fabricated**: `src/goldline-form-template.ts` (pure) defines `FormTemplate` (per-version column layout, plus rows typed as family-header bands or item rows, in printed order) and `buildFormTemplate`, which joins `MANIFESTS` (per-page printed order) with the catalog (`product_line` becomes a family band, `unit_price` the printed price), emitting a band wherever `product_line` changes, the same way the review grid already groups. `columnsForVersion` encodes V1 (Delivery col 4), V2 (Delivery col 1) and the Legacy 7-column deducted layout. `src/goldline-form-template-data.ts` adds the server loader `getFormTemplate(company, version, page)` (null for the page-6 sales report). Pure and additive, nothing wired into the live read yet; unit-tested (`test/goldline-form-template.test.ts`, 8 cases).
+
 ## 2026-11-12 — Website CRM: everything the storefront admin's CRM page does (RET-09, slice 8A)
 
 The owner wants the team to use one place, so Coop's Website CRM page now does everything Vince's `zoomyforpets.com/admin/crm` does (read from its `origin/main`), with Coop's rules where they differ. Plan: `knowledge/tasks/2026-11-12-customer-profile-stage8.md` (8A); story RET-09.
