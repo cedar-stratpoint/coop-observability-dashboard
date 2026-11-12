@@ -1,4 +1,4 @@
-import {PAGE_COUNT} from './goldline-extract';
+import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
 
@@ -62,6 +62,22 @@ export type AnchoredOutput = {
   extras?: AnchoredExtra[];
   price_notes?: AnchoredPriceNote[];
 };
+
+/**
+ * The minimum classification confidence to trust the detected version enough to anchor to its
+ * template. A template-anchored read fills every cell by the version's column map, so a wrong
+ * version (the QA found V2 pages tagged V1) would read every count from the wrong column. Below
+ * this bar, or for a non-V1/V2 version, we stay on the free read, which maps cells by printed
+ * meaning and is safer when the version is in doubt.
+ */
+export const ANCHOR_MIN_CONFIDENCE = 0.75;
+
+/** The version to anchor to, or null to fall back to the free read: only a confidently-classified
+ *  V1 or V2 (Legacy already reads template-anchored via its own path; unknown never anchors). */
+export function anchorVersion(version: FormVersion, confidence: number): 'v1' | 'v2' | null {
+  if (!(confidence >= ANCHOR_MIN_CONFIDENCE)) return null;
+  return version === 'v1' || version === 'v2' ? version : null;
+}
 
 const COUNT_KEYS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 
