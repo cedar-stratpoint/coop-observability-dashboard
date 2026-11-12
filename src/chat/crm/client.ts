@@ -23,6 +23,8 @@ export const CRM_ENDPOINTS = Object.freeze({
   membership: endpoint('/api/membership-config'),
   /** The birthday voucher ledger (up to 2,000 rows, newest first): read only to count vouchers per email for the outreach lists; the code is never projected. */
   birthdayVouchers: endpoint('/api/birthday-vouchers'),
+  /** The membership email log (RET-07 7C; up to 2,000 rows, newest first): read only to count membership emails per email. A 404 = the route is not deployed yet. */
+  membershipEvents: endpoint('/api/membership-events'),
   catalog: endpoint('/api/catalog'),
   query: endpoint('/api/query', {spec: 'spec'}),
   /** compare_sku's website channel: units and net sales per SKU for a window (zoomy-crm docs/api-sales.md). */

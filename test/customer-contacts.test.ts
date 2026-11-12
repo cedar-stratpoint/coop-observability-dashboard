@@ -146,8 +146,8 @@ describe('S5.0 contactTally with manual contacts: one code path for the page and
   };
   it('manual counts 1 per logged contact, apart from the automated emails; total = automated + manual', () => {
     const t = contactTally({...src, manualContacts: [{email: 'MIA@example.com'}, {email: 'mia@example.com '}, {email: 'leo@example.com'}, {email: null}]});
-    expect(t.get('mia@example.com')).toEqual({reminders: 2, winback: 0, reviewRequests: 1, birthdayVouchers: 0, automated: 3, manual: 2, total: 5, lastAt: null, lastKind: null});
-    expect(t.get('leo@example.com')).toEqual({reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 1, total: 1, lastAt: null, lastKind: null});
+    expect(t.get('mia@example.com')).toEqual({reminders: 2, winback: 0, reviewRequests: 1, birthdayVouchers: 0, membership: 0, automated: 3, manual: 2, total: 5, lastAt: null, lastKind: null});
+    expect(t.get('leo@example.com')).toEqual({reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, membership: 0, automated: 0, manual: 1, total: 1, lastAt: null, lastKind: null});
   });
   it('without manual contacts the tally is the Stage 3 one (manual 0)', () => {
     expect(contactTally(src).get('mia@example.com')).toMatchObject({automated: 3, manual: 0, total: 3});

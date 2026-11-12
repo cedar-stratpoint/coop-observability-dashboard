@@ -2,7 +2,7 @@ import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {CRM_CACHE_REVALIDATE, CRM_TAG, PLAN_WEB_TAG} from './crm-cache';
-import {envelope, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder, type CrmBirthdayVoucherSafe} from './crm-project';
+import {envelope, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrder, readMembershipEvents, type CrmBirthdayVoucherSafe, type MembershipEventsRead} from './crm-project';
 import {collectOrderPages, crmCoverage} from './plan-gmv';
 import type {RemoteSpinLead} from './spin-leads-sync';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from './crm-types';
@@ -39,7 +39,8 @@ async function crmGet<T>(path: string): Promise<T> {
     // also cached — otherwise a revalidation would serve the same stale body.
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error(`CRM ${res.status} for ${path}`);
+  // The status rides on the error so a reader can tell "route not deployed" (404) from a failure (readMembershipEvents).
+  if (!res.ok) throw Object.assign(new Error(`CRM ${res.status} for ${path}`), {status: res.status});
   return res.json() as Promise<T>;
 }
 
@@ -172,6 +173,22 @@ const birthdaysCached = unstable_cache(async (): Promise<CrmBirthdayVoucherSafe[
     return null;
   }
 }, ['crm-birthday-vouchers-safe'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
+
+/**
+ * The membership email log (RET-07 7C), projected on the server to email, tier, event and sentAt. null = not configured or the read
+ * failed (unknown, R3). `{live: false}` = the CRM answered 404: the route is not deployed yet, so membership emails are not counted
+ * (with a note) instead of blanking emails sent for everyone.
+ */
+export const getCrmMembershipEvents = cache((): Promise<MembershipEventsRead | null> =>
+  crmConfigured() ? membershipEventsCached() : Promise.resolve(null),
+);
+
+const membershipEventsCached = unstable_cache(async (): Promise<MembershipEventsRead | null> => {
+  const read = await readMembershipEvents(() => crmGet<unknown>('/api/membership-events'));
+  if (read === null) console.warn('CRM membership events read failed');
+  else if (!read.live) console.warn('CRM /api/membership-events answered 404: membership emails are not counted until the route is live');
+  return read;
+}, ['crm-membership-events'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
 /**
  * Membership settings. Served by the Worker from the same Shopify metafield the

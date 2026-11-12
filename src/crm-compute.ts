@@ -90,19 +90,20 @@ export function enrichCustomers(
 }
 
 /**
- * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The four automated CRM emails,
+ * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The five automated CRM emails (7C added membership),
  * `automated` = their sum, `manual` = contacts the team logged by hand (customer_contacts), `total` = automated + manual.
  * RET-07: `lastAt` / `lastKind` = the newest dated contact of any kind (null when none of its contacts carries a readable date).
  */
-export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
-type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers';
+export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; membership: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
+type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers' | 'membership';
 /** RET-07: what the last contact was. An automated CRM email kind, or the manual log's own channel (the two sets never overlap). */
-export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | ContactChannel;
+export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | 'membership' | ContactChannel;
 export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.freeze({
   reminder: 'Cart reminder',
   winback: 'Win-back email',
   review_request: 'Review request',
   birthday_voucher: 'Birthday voucher',
+  membership: 'Membership email',
   ...CHANNEL_LABEL,
 });
 const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
@@ -113,19 +114,21 @@ const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_
  * summed; win-back = 1 per checkout with winbackSentAt; review requests = 1 per order with reviewRequestSentAt, test orders excluded;
  * birthday vouchers = 1 per voucher row; manual = 1 per logged contact. Rows without an email are skipped. Only addresses with at
  * least one contact are present. RET-07 (2026-11-11): the newest timestamp of a counted contact wins (lastReminderAt, winbackSentAt,
- * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact.
+ * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact. RET-07 7C: membership
+ * emails = 1 per /api/membership-events row (sentAt). `membershipEvents` is empty when that route is not live yet (excluded, not unknown).
  */
 export function contactTally(src: {
   checkouts: readonly (Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'> & Partial<Pick<CrmCheckout, 'lastReminderAt'>>)[];
   orders: readonly Pick<CrmOrder, 'email' | 'reviewRequestSentAt' | 'test'>[];
   birthdayVouchers: readonly {email: string | null; sentAt?: string | null}[];
+  membershipEvents?: readonly {email: string | null; sentAt?: string | null}[];
   manualContacts?: readonly {email: string | null; channel?: string | null; contactedAt?: string | null}[];
 }): Map<string, ContactTally> {
   const out = new Map<string, ContactTally>();
   const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number, at: string | null | undefined, kind: ContactKind) => {
     const key = emailKey(email);
     if (!key || !(n > 0)) return;
-    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
+    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, membership: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
     t[k] += n;
     if (k !== 'manual') t.automated += n;
     t.total += n;
@@ -142,6 +145,7 @@ export function contactTally(src: {
   }
   for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1, o.reviewRequestSentAt, 'review_request');
   for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1, v.sentAt, 'birthday_voucher');
+  for (const e of src.membershipEvents ?? []) add(e.email, 'membership', 1, e.sentAt, 'membership');
   for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1, m.contactedAt, channelKind(m.channel));
   return out;
 }
@@ -192,6 +196,9 @@ export type TimelineEvent = {
   /** Cart reminders: the CRM keeps only the last reminder's date, so `at` is that date and the count is the total. */
   lastDateOnly?: boolean;
   year?: number;
+  /** Membership email (7C): the tier and the CRM's event name. */
+  tier?: string;
+  membershipEvent?: string;
   note?: string | null;
   by?: string;
 };
@@ -214,6 +221,7 @@ export function customerTimeline(
     orders: readonly CrmOrder[];
     checkouts: readonly (Omit<CrmCheckout, 'abandonedCheckoutUrl'> & Partial<Pick<CrmCheckout, 'abandonedCheckoutUrl'>>)[];
     birthdayVouchers: readonly {email: string | null; year?: number; sentAt?: string | null}[];
+    membershipEvents?: readonly {email: string | null; tier?: string; event?: string; sentAt?: string | null}[];
     manualContacts: readonly {id: string; email: string | null; channel?: string | null; note?: string | null; contactedAt?: string | null; createdBy?: string}[];
   },
 ): TimelineEvent[] {
@@ -249,6 +257,9 @@ export function customerTimeline(
   }
   src.birthdayVouchers.forEach((v, i) => {
     if (mailOf(v.email)) push({id: `voucher:${v.year ?? ''}:${i}`, kind: 'birthday_voucher', group: 'emails', at: v.sentAt || null, year: v.year, contact: true, count: 1});
+  });
+  src.membershipEvents?.forEach((e, i) => {
+    if (mailOf(e.email)) push({id: `membership:${i}`, kind: 'membership', group: 'emails', at: e.sentAt || null, tier: e.tier, membershipEvent: e.event, contact: true, count: 1});
   });
   for (const m of src.manualContacts) {
     if (mailOf(m.email)) push({id: `manual:${m.id}`, kind: channelKind(m.channel), group: 'manual', at: m.contactedAt ?? null, note: m.note ?? null, by: m.createdBy, contact: true, count: 1});

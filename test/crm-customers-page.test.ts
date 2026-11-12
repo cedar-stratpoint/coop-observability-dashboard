@@ -19,7 +19,7 @@ import {
   phDaysSince,
   repeatRate,
 } from '../src/crm-compute';
-import {projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectOrder} from '../src/crm-project';
+import {projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembershipEvent, projectOrder} from '../src/crm-project';
 import {fakeCrmClient} from './support/crm-fixtures';
 
 const NOW = new Date('2026-11-10T04:00:00Z'); // PH 2026-11-10 12:00. 30 PH days back = 2026-10-11, 60 = 2026-09-11.
@@ -65,9 +65,11 @@ const ORDERS = [
 const CHECKOUTS = [
   {shopifyCheckoutId: 'k1', email: 'P30@Example.com', totalPrice: '100', currency: 'PHP', createdAt: '2026-10-01T10:00:00Z', updatedAt: null, convertedAt: null, remindersSent: 2, lastReminderAt: null, reachedPaymentAt: null, winbackSentAt: '2026-10-05T10:00:00Z', raw: '{}'},
 ];
+// 7C: one membership email, so the page and the chat must agree on it too.
+const MEMBER_EVENTS = [{id: 3, email: 'p30@example.com', shopifyCustomerId: null, tier: 'gold', event: 'tier_upgrade', sentAt: '2026-06-02T10:00:00Z'}];
 const VOUCHERS = [{id: 1, email: 'p30@example.com', year: 2026, tier: 'gold', code: 'SECRET-VOUCHER', amount: '100', expiresAt: null, sentAt: '2026-06-01T10:00:00Z'}];
 const MEMBERSHIP = {platinumThreshold: 2000, programStart: '2026-07-01'};
-const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: ORDERS}, membership: MEMBERSHIP, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}};
+const BODIES = {customers: {customers: CUSTOMERS}, orders: {orders: ORDERS}, membership: MEMBERSHIP, checkouts: {checkouts: CHECKOUTS}, birthdayVouchers: {birthdayVouchers: VOUCHERS}, membershipEvents: {membershipEvents: MEMBER_EVENTS}};
 
 // ---------- ANSWERS, by hand ----------
 const ANSWER = {
@@ -78,14 +80,14 @@ const ANSWER = {
   win_back: ['w4x', 'w60'], // 08-01, then 09-11
   buckets: [{group: '1', customers: 3}, {group: '2', customers: 2}, {group: '4+', customers: 1}],
   months: [{group: '2026-05', customers: 1}, {group: '2026-07', customers: 1}, {group: '2026-08', customers: 2}, {group: '2026-10', customers: 2}],
-  p30: {orders: 1, days: 30, emailsSent: 5, consent: 'unsubscribed'}, // 2 reminders + 1 winback + 1 review + 1 voucher
+  p30: {orders: 1, days: 30, emailsSent: 6, consent: 'unsubscribed'}, // 2 reminders + 1 winback + 1 review + 1 voucher + 1 membership email (7C)
 };
 
 /** The page: the same projections crm-data.ts applies, then the shared compute. */
 function pageCompute(withTally = true) {
   const enriched = enrichCustomers(CUSTOMERS.map(projectCustomer), ORDERS.map(projectOrder), membershipWindowStart(NOW, MEMBERSHIP.programStart));
   const tally = withTally
-    ? contactTally({checkouts: CHECKOUTS.map(projectCheckoutSafe), orders: ORDERS.map(projectOrder), birthdayVouchers: VOUCHERS.map(projectBirthdayVoucher)})
+    ? contactTally({checkouts: CHECKOUTS.map(projectCheckoutSafe), orders: ORDERS.map(projectOrder), birthdayVouchers: VOUCHERS.map(projectBirthdayVoucher), membershipEvents: MEMBER_EVENTS.map(projectMembershipEvent)})
     : null;
   return customerRows(enriched, tally, NOW);
 }
