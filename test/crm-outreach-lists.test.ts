@@ -114,11 +114,12 @@ describe('S3.1 audience: the owner rules, fixed in code, at the PH-day boundarie
     expect(text).toMatch(/60 or more Philippine days/);
     expect(r.meta.checks.find((c) => c.code === 'reconciles')?.text).toMatch(/^2 website customers match/);
   });
-  it('audience all (the default) leaves the plain list unchanged: no emails columns, three reads', async () => {
+  it('audience all (the default): every customer, the contact columns (RET-07) but not the per-source breakdown; five reads', async () => {
     const {r, gets} = await run({});
     expect(r.rows).toHaveLength(CUSTOMERS.length);
-    expect(r.columns.map((c) => c.key)).not.toContain('emails_sent');
-    expect([...gets].sort()).toEqual(['customers', 'membership', 'orders']);
+    expect(r.columns.map((c) => c.key)).toEqual(expect.arrayContaining(['emails_sent', 'times_contacted', 'last_contacted']));
+    expect(r.columns.map((c) => c.key)).not.toContain('reminders');
+    expect([...gets].sort()).toEqual(['birthdayVouchers', 'checkouts', 'customers', 'membership', 'orders']);
   });
   it('anything else is refused before any read', async () => {
     for (const audience of ['everyone', 'winback', 'REPEAT_PROMO', 1, null]) {
@@ -142,7 +143,7 @@ describe('S3.2 emails sent: one per-email tally, each source counted', () => {
       orders: [{email: 'a@x.com', reviewRequestSentAt: 'x', test: false}, {email: 'a@x.com', reviewRequestSentAt: 'x', test: true}, {email: 'a@x.com', reviewRequestSentAt: null, test: false}],
       birthdayVouchers: [{email: 'a@X.com '}],
     });
-    expect(t.get('a@x.com')).toEqual({reminders: 2, winback: 1, reviewRequests: 1, birthdayVouchers: 1, automated: 5, manual: 0, total: 5}); // Stage 5 added automated + manual
+    expect(t.get('a@x.com')).toEqual({reminders: 2, winback: 1, reviewRequests: 1, birthdayVouchers: 1, automated: 5, manual: 0, total: 5, lastAt: null, lastKind: null}); // Stage 5 added automated + manual; RET-07 lastAt ('x' does not parse, so no date)
     expect(t.size).toBe(1);
   });
   it('consent is shown as is ("unknown" when never set) and never filters anyone out', async () => {
@@ -237,11 +238,13 @@ describe('S5.3 Ask Coop: manual_contacts and times_contacted', () => {
       expect(r.meta.checks.some((c) => c.status === 'warn' && /manual contact log/i.test(c.text) && /not.*zero/i.test(c.text))).toBe(true);
     }
   });
-  it('audience all never reads the log', async () => {
+  it('audience all reads the log once too (RET-07: contact columns on every list); group counts never read it', async () => {
     let reads = 0;
     const {r} = await runManual({}, async () => { reads += 1; return []; });
-    expect(reads).toBe(0);
-    expect(r.columns.map((c) => c.key)).not.toContain('manual_contacts');
+    expect(reads).toBe(1);
+    expect(r.columns.map((c) => c.key)).toContain('manual_contacts');
+    await runManual({group_by: 'tier'}, async () => { reads += 1; return []; });
+    expect(reads).toBe(1);
   });
 });
 
