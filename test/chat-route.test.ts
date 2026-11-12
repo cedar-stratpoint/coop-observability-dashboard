@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   onLoad: null as null | (() => void),
   sdkParams: [] as Record<string, unknown>[],
   sdkKeys: [] as (string | undefined)[],
+  sdkHeaders: [] as (Record<string, string> | undefined)[],
   sdkFail: false,
   loopOpts: [] as {deadlineMs?: number; signal?: AbortSignal; turnBudget?: number}[],
   exploreRuns: [] as string[],
@@ -59,8 +60,9 @@ vi.mock('@/src/chat/server', () => ({
 }));
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class FakeAnthropic {
-    constructor(o: {apiKey?: string}) {
+    constructor(o: {apiKey?: string; defaultHeaders?: Record<string, string>}) {
       h.sdkKeys.push(o.apiKey);
+      h.sdkHeaders.push(o.defaultHeaders);
     }
     messages = {
       stream: (params: Record<string, unknown>) => {
@@ -77,6 +79,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 // the real modules, reached through the alias; the loop is wrapped only so a test can read the options the route passed it
+vi.mock('@/src/chat/anthropic-client', async () => await import('../src/chat/anthropic-client'));
 vi.mock('@/src/chat/context', async () => await import('../src/chat/context'));
 vi.mock('@/src/chat/config', async () => await import('../src/chat/config'));
 vi.mock('@/src/chat/loop', async () => {
@@ -142,6 +145,7 @@ beforeEach(() => {
   h.onLoad = null;
   h.sdkParams.length = 0;
   h.sdkKeys.length = 0;
+  h.sdkHeaders.length = 0;
   h.sdkFail = false;
   h.loopOpts.length = 0;
   h.exploreRuns.length = 0;
@@ -203,6 +207,15 @@ describe('POST /api/chat: sign-in and configuration', () => {
     const ok = await post(ask(), {ip});
     expect(ok.status, 'the 503s were not counted as hits').toBe(200);
     await drain(ok);
+  });
+
+  it('an org-scoped key: the workspace id reaches the SDK as the anthropic-workspace-id header; unset sends none', async () => {
+    await drain(await post(ask()));
+    expect(h.sdkHeaders.at(-1)).toBeUndefined();
+    vi.stubEnv('ANTHROPIC_WORKSPACE_ID', 'wrkspc_test');
+    await drain(await post(ask(), {ip: freshIp()}));
+    expect(h.sdkHeaders.at(-1)).toEqual({'anthropic-workspace-id': 'wrkspc_test'});
+    vi.stubEnv('ANTHROPIC_WORKSPACE_ID', '');
   });
 
   it('the sign-in check comes before the key check: with neither, the answer is 401', async () => {

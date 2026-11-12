@@ -45,6 +45,7 @@ export function describeChatEnv(env: Env) {
     SUPABASE_URL_ARCHIVE: shape('SUPABASE_URL_ARCHIVE', env.SUPABASE_URL_ARCHIVE),
     SUPABASE_SERVICE_ROLE_KEY_ARCHIVE: {set: Boolean(env.SUPABASE_SERVICE_ROLE_KEY_ARCHIVE)},
     ANTHROPIC_API_KEY: {set: Boolean(env.ANTHROPIC_API_KEY)},
+    ANTHROPIC_WORKSPACE_ID: {set: Boolean(env.ANTHROPIC_WORKSPACE_ID?.trim())}, // org-scoped key only; the value is not shown
   };
 }
 
