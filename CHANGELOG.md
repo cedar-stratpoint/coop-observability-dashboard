@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Goldline template-anchored extraction: set-aside retry safety net
+
+A real inventory page misread as "sales"/"blank" is today rejected (set aside) with no retry, so it is silently lost. Adds a second-chance read: `shouldRetrySetAside(kind, confidence)` + `SET_ASIDE_MIN_CONFIDENCE` (0.75) in goldline-anchored-extract.ts; `runInventoryRead` now re-classifies ONCE (a blind second read) when a sales/blank classification is low-confidence, and keeps the retry when it reads as a form or more confidently, before falling through to the set-aside branches. A confident sales/blank (the common blanks and sales pages) never retries, so cost and the correctly-set-aside pages are unaffected. Flag-gated behind `GOLDLINE_TEMPLATE_READ_COMPANIES` (templateReadEnabled), so flag-off is byte-identical; the retry note is stashed in `read_logs.detail.setAsideRetry`. Tests cover the retry gate; full suite no new failures.
+
 ## 2026-11-12 — Goldline template-anchored extraction: version-accuracy safety net
 
 Addresses the QA finding that some V2 pages are tagged V1 (which would make a template-anchored read fill every count from the wrong column map). (1) **Harder classifier cue** (`buildPageClassifyPrompt`): decide V1 vs V2 by ONE thing, the printed Delivery-column position (FIRST = V2; 4th, after the three counts = V1), and lower confidence when it is unclear. (2) **Confidence gate**: `anchorVersion(version, confidence)` + `ANCHOR_MIN_CONFIDENCE` (0.75) in goldline-anchored-extract.ts; `runInventoryRead` now anchors ONLY to a confidently classified V1/V2, otherwise falls back to the free read (which maps cells by printed meaning and is safe when the version is in doubt). So a shaky version tag cannot steer the read to the wrong column map, and flag-off stays byte-identical. Tests cover the prompt cue + the gate; full suite has no new failures.

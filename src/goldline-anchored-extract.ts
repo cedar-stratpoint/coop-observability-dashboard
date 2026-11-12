@@ -79,6 +79,18 @@ export function anchorVersion(version: FormVersion, confidence: number): 'v1' | 
   return version === 'v1' || version === 'v2' ? version : null;
 }
 
+/**
+ * Minimum confidence to accept a "sales"/"blank" classification as final. Below it, a real
+ * inventory page may have been misread as sales/blank and set aside with no retry (the current
+ * pipeline rejects these outright). A low-confidence reject gets one blind re-read first.
+ */
+export const SET_ASIDE_MIN_CONFIDENCE = 0.75;
+
+/** True when a sales/blank classification is uncertain enough to re-read before setting aside. */
+export function shouldRetrySetAside(kind: string, confidence: number): boolean {
+  return (kind === 'sales' || kind === 'blank') && confidence < SET_ASIDE_MIN_CONFIDENCE;
+}
+
 const COUNT_KEYS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 
 /**

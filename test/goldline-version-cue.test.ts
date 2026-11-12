@@ -1,6 +1,11 @@
 import {describe, expect, it} from 'vitest';
 import {buildPageClassifyPrompt} from '../src/goldline-extract';
-import {ANCHOR_MIN_CONFIDENCE, anchorVersion} from '../src/goldline-anchored-extract';
+import {
+  ANCHOR_MIN_CONFIDENCE,
+  SET_ASIDE_MIN_CONFIDENCE,
+  anchorVersion,
+  shouldRetrySetAside,
+} from '../src/goldline-anchored-extract';
 
 // Classification/version-accuracy safety net (QA found V2 pages tagged V1). The classifier is
 // told to decide v1 vs v2 only by the Delivery column position, and the read only anchors to a
@@ -30,5 +35,19 @@ describe('anchorVersion gate', () => {
     expect(anchorVersion('v2', ANCHOR_MIN_CONFIDENCE - 0.01)).toBeNull();
     expect(anchorVersion('legacy', 0.99)).toBeNull(); // Legacy reads via its own path
     expect(anchorVersion('unknown', 0.99)).toBeNull();
+  });
+});
+
+describe('shouldRetrySetAside', () => {
+  it('re-reads only a low-confidence sales/blank page before setting it aside', () => {
+    expect(shouldRetrySetAside('sales', 0.5)).toBe(true);
+    expect(shouldRetrySetAside('blank', SET_ASIDE_MIN_CONFIDENCE - 0.01)).toBe(true);
+  });
+
+  it('does not retry a confident sales/blank, nor an inventory/unknown page', () => {
+    expect(shouldRetrySetAside('sales', SET_ASIDE_MIN_CONFIDENCE)).toBe(false); // confident set-aside
+    expect(shouldRetrySetAside('blank', 0.95)).toBe(false);
+    expect(shouldRetrySetAside('inventory', 0.2)).toBe(false);
+    expect(shouldRetrySetAside('unknown', 0.2)).toBe(false);
   });
 });

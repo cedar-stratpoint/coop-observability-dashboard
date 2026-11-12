@@ -4,7 +4,7 @@ import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatu
 import {classifyPage, extractInventoryPage, extractInventoryPageAnchored, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
 import {templateReadEnabled} from './goldline-anchored-flag';
-import {anchorVersion, type AnchoredMapResult} from './goldline-anchored-extract';
+import {anchorVersion, shouldRetrySetAside, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
@@ -81,8 +81,20 @@ export async function runInventoryRead(args: {
     // page_key, and flag any duplicate / re-upload — all before extraction.
     emit?.({type: 'stage', stage: 'detecting'});
     const classifyStart = Date.now();
-    const cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
     rec.classifyMs = Date.now() - classifyStart;
+    // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
+    // a real inventory page misread. Re-classify once (a blind second read) before setting it
+    // aside; keep the retry when it now reads as a form, or reads more confidently. A confident
+    // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
+    let setAsideRetry: {kind: string; confidence: number} | null = null;
+    if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+      if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
+        setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
+        cls = retry;
+      }
+    }
     const page = cls.page;
     rec.page = page;
     rec.pageKind = cls.kind;
@@ -99,7 +111,7 @@ export async function runInventoryRead(args: {
     }
     const snap = snapStoreCode(cls.store_code, registry);
     rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap};
+    rec.detail = {classify: cls, snap, ...(setAsideRetry ? {setAsideRetry} : {})};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
