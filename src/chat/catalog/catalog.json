@@ -1261,14 +1261,14 @@
   {
    "route": "/customers/website-crm",
    "title": "Website CRM",
-   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership; Customers tab (RET-04) with orders (test excluded), first/last order, PH days since last order, emails sent, manual contacts (RET-05: a Log contact dialog per row records a DM, SMS, call, email by hand or other; only its author can delete it; the log not applied reads Unavailable), email consent, a repeat buyer rate tile (25% shown as a target, never an actual), new buyers per first-order month and buyers by orders charts, Repeat promo / Win-back presets and CSV of the visible rows. A list the CRM could not read shows Unavailable, never 0",
+   "shows": "Website CRM: metrics, customers, orders, abandoned checkouts, birthday vouchers, membership; Customers tab (RET-04) with orders (test excluded), first/last order, PH days since last order, emails sent, manual contacts, last contacted (RET-07: PH date + kind of the newest contact of any kind; \"never\" when every source was read and there is none, \"unknown\" when a source was not; a Sort control: Default, Haven't contacted longest, Most contacted; CSV adds Last contacted (PH) and Last contact kind) (RET-05: a Log contact dialog per row records a DM, SMS, call, email by hand or other; only its author can delete it; the log not applied reads Unavailable), email consent, a repeat buyer rate tile (25% shown as a target, never an actual), new buyers per first-order month and buyers by orders charts, Repeat promo / Win-back presets and CSV of the visible rows. A list the CRM could not read shows Unavailable, never 0",
    "data": "website CRM (API)",
    "domains": [
     "crm-api",
     "booth-leads (customer_contacts)"
    ],
    "fenced": false,
-   "access": "partial: CRM tools (metrics, customers incl. audiences, repeat rate, emails sent, manual contacts and times contacted, orders, checkouts); voucher codes and checkout links withheld",
+   "access": "partial: CRM tools (metrics, customers incl. audiences, repeat rate, emails sent, manual contacts, times contacted and last contacted with the contacted_desc / last_contacted_asc sorts, orders, checkouts); voucher codes and checkout links withheld",
    "redirectTo": null
   },
   {
