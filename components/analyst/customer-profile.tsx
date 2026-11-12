@@ -31,6 +31,7 @@ import {
   cartStatus,
   customerOrders,
   customerTimeline,
+  daysToPetBirthday,
   fmtPh,
   fmtPhDate,
   inAudience,
@@ -49,6 +50,7 @@ import {
 } from '@/src/crm-compute';
 import {parseLineItems, phDay} from '@/src/custom-range';
 import {MEMBERSHIP_EVENTS_NOT_LIVE, type CrmBirthdayVoucherSafe, type MembershipEventsRead} from '@/src/crm-project';
+import {remindersOf} from '@/src/crm-table';
 import type {CheckoutStage, CrmCheckout, CrmMembershipConfig, CrmOrder} from '@/src/crm-types';
 import type {CustomerContact} from '@/src/customer-contacts';
 
@@ -61,7 +63,7 @@ export const STATUS_TONE: Record<CartStatus, string> = {
 export type ProfileTab = 'timeline' | 'orders' | 'checkouts' | 'pets';
 type Filter = 'all' | Exclude<TimelineGroup, 'account'>;
 
-const PET_TONE: Record<PetBirthdayStatus, string> = {
+export const PET_TONE: Record<PetBirthdayStatus, string> = {
   Sent: STATUS_TONE.Recovered,
   Upcoming: 'bg-muted text-muted-foreground',
   Passed: STATUS_TONE.Active,
@@ -79,7 +81,7 @@ const btn =
 const pill = 'rounded-full px-2 py-0.5 text-xs font-medium';
 
 /** Copy text, then say "Copied" for a moment. Nothing else happens: no link is opened, nothing is sent. */
-function CopyButton({text, children, className}: {text: string; children: React.ReactNode; className?: string}) {
+export function CopyButton({text, children, className}: {text: string; children: React.ReactNode; className?: string}) {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
@@ -99,7 +101,7 @@ function CopyButton({text, children, className}: {text: string; children: React.
 }
 
 /** The 3-dot progress stepper: Email → Shipping → Payment, filled as far as the shopper got. */
-function Stepper({stage}: {stage: CheckoutStage}) {
+export function Stepper({stage}: {stage: CheckoutStage}) {
   const n = {Started: 0, Email: 1, Shipping: 2, Payment: 3}[stage] ?? 0;
   return (
     <span className="inline-flex items-center gap-2 text-xs text-muted-foreground" title={`Got as far as ${stage}`}>
@@ -125,18 +127,6 @@ function Stat({title, value, sub, unknown, children}: {title: string; value: str
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
-}
-
-/** PH days until the next birthday (0 = today); null when the birthday does not read as a date. */
-function daysToBirthday(birthday: string | null, now: Date): number | null {
-  const md = /(\d{2})-(\d{2})$/.exec(String(birthday ?? '').trim().slice(0, 10));
-  if (!md) return null;
-  const today = phDay(now.getTime());
-  const year = Number(today.slice(0, 4));
-  const at = (y: number) => Date.parse(`${y}-${md[1]}-${md[2]}T00:00:00Z`);
-  const t0 = Date.parse(`${today}T00:00:00Z`);
-  const next = at(year) >= t0 ? at(year) : at(year + 1);
-  return Number.isFinite(next) ? Math.round((next - t0) / 86_400_000) : null;
 }
 
 function eventText(e: TimelineEvent, viewer: string | null): {title: string; detail: string | null} {
@@ -190,6 +180,7 @@ export function CustomerProfile({
   paused,
   onClose,
   onLogContact,
+  reminderTotal,
 }: {
   /** The Customers tab row (null: the id in the URL matches no customer, or the CRM did not answer). */
   row: CustomerRow | null;
@@ -209,6 +200,8 @@ export function CustomerProfile({
   paused: boolean;
   onClose: () => void;
   onLogContact: (row: CustomerRow) => void;
+  /** RET-09: how many reminders one cart gets (the CRM's reminderStepCount), for "n of N"; absent when the CRM did not say. */
+  reminderTotal?: number;
 }) {
   const titleId = useId();
   const base = useId();
@@ -427,7 +420,7 @@ export function CustomerProfile({
                   (checkouts === null ? (
                     <p className="py-8 text-center text-sm text-muted-foreground">Unavailable: the CRM did not answer.</p>
                   ) : (
-                    <Checkouts carts={data.carts} />
+                    <Checkouts carts={data.carts} reminderTotal={reminderTotal} />
                   ))}
                 {tab === 'pets' && <Pets row={row} vouchers={birthdayVouchers} now={now} />}
               </div>
@@ -440,7 +433,7 @@ export function CustomerProfile({
   );
 }
 
-function PlatinumBar({pct, text}: {pct: number; text: string}) {
+export function PlatinumBar({pct, text}: {pct: number; text: string}) {
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Progress to Platinum">
@@ -622,7 +615,7 @@ function Orders({orders, expanded, onToggle, base}: {orders: CrmOrder[]; expande
   );
 }
 
-function Checkouts({carts}: {carts: CrmCheckout[]}) {
+function Checkouts({carts, reminderTotal}: {carts: CrmCheckout[]; reminderTotal?: number}) {
   if (!carts.length) return <p className="py-8 text-center text-sm text-muted-foreground">No abandoned checkouts.</p>;
   return (
     <ul className="divide-y divide-border rounded-lg border">
@@ -636,7 +629,9 @@ function Checkouts({carts}: {carts: CrmCheckout[]}) {
             </div>
             <Stepper stage={k.stage} />
             <span className="text-xs text-muted-foreground">
-              {k.remindersSent} reminder{k.remindersSent === 1 ? '' : 's'} sent
+              {reminderTotal === undefined
+                ? `${k.remindersSent} reminder${k.remindersSent === 1 ? '' : 's'} sent`
+                : `${remindersOf(k.remindersSent, reminderTotal)} reminder${reminderTotal === 1 ? '' : 's'} sent`}
               {k.lastReminderAt && ` · last ${fmtPh(k.lastReminderAt)}`}
             </span>
             <span className={cn(pill, STATUS_TONE[status])}>{status}</span>
@@ -653,7 +648,7 @@ function Checkouts({carts}: {carts: CrmCheckout[]}) {
 function Pets({row, vouchers, now}: {row: CustomerRow; vouchers: CrmBirthdayVoucherSafe[] | null; now: Date}) {
   if (!row.petName && !row.petBirthday) return <p className="py-8 text-center text-sm text-muted-foreground">No pet profile on this customer.</p>;
   const status = vouchers === null ? null : petBirthdayStatus(row, vouchers, now);
-  const days = daysToBirthday(row.petBirthday, now);
+  const days = daysToPetBirthday(row.petBirthday, now);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-3">
       <div className="flex items-center gap-3">

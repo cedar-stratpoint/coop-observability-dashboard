@@ -1,6 +1,7 @@
 import {TrendingDown, TrendingUp} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
+import {InfoTip} from './info-tip';
 
 // ── The dashboard's one metric-value typography ──────────────────────────────
 // Every KPI / figure / stat number renders in this face so a value reads the
@@ -42,6 +43,7 @@ export function Metric({
   delta,
   sub,
   valueClassName,
+  hint,
 }: {
   icon?: React.ComponentType<{className?: string}>;
   label: string;
@@ -50,6 +52,8 @@ export function Metric({
   delta?: number;
   sub?: React.ReactNode;
   valueClassName?: string;
+  /** How the number is computed, behind an ⓘ next to the label. */
+  hint?: string;
 }) {
   return (
     <Card>
@@ -58,6 +62,7 @@ export function Metric({
           <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {Icon && <Icon className="size-3.5" />}
             {label}
+            {hint && <InfoTip text={hint} />}
           </span>
           {delta != null && <MetricDelta pct={delta} />}
         </div>
