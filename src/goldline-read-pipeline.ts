@@ -4,7 +4,7 @@ import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatu
 import {classifyPage, extractInventoryPage, extractInventoryPageAnchored, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
 import {templateReadEnabled} from './goldline-anchored-flag';
-import type {AnchoredMapResult} from './goldline-anchored-extract';
+import {anchorVersion, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
@@ -162,13 +162,15 @@ export async function runInventoryRead(args: {
     // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
     // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
     const readStart = Date.now();
-    // Template-anchored read (flag-gated, V1/V2 only): fill the page's fixed template with only
-    // the handwritten numbers, so no row is dropped or invented. Falls back to the current free
-    // read when the flag is off for this company, the version is Legacy/unknown, or no template
-    // is available — so flag-off is byte-identical to today.
-    const anchorVersion = cls.version === 'v1' || cls.version === 'v2' ? cls.version : null;
+    // Template-anchored read (flag-gated): fill the page's fixed template with only the
+    // handwritten numbers, so no row is dropped or invented. Anchors ONLY to a confidently
+    // classified V1/V2 (anchorVersion gates on cls.confidence) with a loaded template; otherwise
+    // it falls back to the current free read (flag off, Legacy/unknown, low-confidence version, or
+    // no template). So flag-off is byte-identical to today, and a shaky version tag cannot steer
+    // the read to the wrong column map.
+    const av = anchorVersion(cls.version, cls.confidence);
     const template =
-      templateReadEnabled(companyId) && anchorVersion ? await getFormTemplate(companyId, anchorVersion, page) : null;
+      templateReadEnabled(companyId) && av ? await getFormTemplate(companyId, av, page) : null;
     let extracted: ExtractedPage;
     let anchored: AnchoredMapResult | null = null;
     if (template) {
