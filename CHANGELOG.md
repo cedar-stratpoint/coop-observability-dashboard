@@ -21,6 +21,15 @@ The owner wanted to pick one customer and see their details, orders and every co
 - **Limits shown, never hidden:** cart reminders are one event "Cart reminder ×N" with the last date only, because the CRM keeps only that date. A test order is listed with a "test" tag and counted nowhere, its review request included.
 - **Copy recovery link** comes to Coop on the page only, and only while a checkout is open (never in Ask Coop or a CSV). Log contact reuses the existing dialog; the new contact appears at the top of the timeline after the refresh. Nothing sends.
 - **Not yet:** the checkout list carries no line items, so abandoned checkouts show value and progress but no item list; reminders read "n sent" until 8A brings the reminder step count ("n of N"). Pet birthdays tab, sortable headers and Member since / To Platinum on the list stay in 8A.
+## 2026-11-12 — Customers: Instagram, Facebook and Viber are their own contact channels (RET-07, slice 7B)
+
+Instagram, Facebook and Viber messages were all logged as "DM", so "last contacted" could not say which app the team used. Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (section 7B, rule R6).
+
+- **Decision: new channels, keep `dm` (R6).** `CONTACT_CHANNELS` (`src/customer-contacts.ts`) is now `instagram`, `facebook`, `viber` (listed first in the Log contact dialog: the most used), then `dm`, `sms`, `call`, `email`, `other`. `dm` stays, relabelled "DM (other app)", so rows logged before 7B stay valid and read fine. `tiktok` or any other unknown channel is still refused. The 7A tally keeps each new channel as its own last-contact kind (Last contacted · Instagram), not "other". The dialog renders from the list, so it needed no change.
+- **DB check:** `supabase/customer_contacts.sql` has the wider check for fresh installs plus an idempotent drop/re-add of `customer_contacts_channel_check` (the name Postgres gives an inline column check: `<table>_<column>_check`). The same ALTER is standalone in `supabase/customer_contacts_channels_7b.sql`.
+- **Rollout order: SQL first.** Run `supabase/customer_contacts_channels_7b.sql` on Staging, then PROD, BEFORE deploying this code. Deployed without it, picking Instagram fails the old check (Postgres 23514 on `customer_contacts_channel_check`); the action then says "This channel isn't enabled in the database yet — run the Stage 7B SQL (supabase/customer_contacts_channels_7b.sql)" instead of a generic failure, and saves nothing.
+- **Ask Coop:** the `manual_contacts` method text lists the new channels. Data catalog `customer_contacts` channel values updated.
+- Tests: `test/customer-contacts.test.ts` (S7B: accept the three, refuse `tiktok`, labels, old `dm` rows, tally kinds, the 23514 message, the two SQL files).
 
 ## 2026-11-12 — Ask Coop: works with an org-scoped Anthropic key (ANTHROPIC_WORKSPACE_ID)
 
