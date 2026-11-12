@@ -1,7 +1,7 @@
 // The website CRM field contract (spec 4.4): pure projections of the Worker's /api responses into crm-types.ts. ONE definition for
 // both readers: the pages' live proxy (src/crm-data.ts) and Ask Coop's GET-only client (src/chat/crm/). A field is copied only when
 // it is listed here, so a field the Worker adds later is dropped until someone adds it on purpose.
-// Never projected: `raw` (the Shopify payload; reduced to `stage` on a checkout and to the `test` flag and discount codes on an order, BDAY- codes cut to the prefix), `abandonedCheckoutUrl` (only the pages add it back, in
+// Never projected: a checkout's `lineItems` (reduced to the `items` count), `raw` (the Shopify payload; reduced to `stage` on a checkout and to the `test` flag and discount codes on an order, BDAY- codes cut to the prefix), `abandonedCheckoutUrl` (only the pages add it back, in
 // crm-data.ts), the birthday voucher `code` and `discountNodeId` (projectBirthdayVoucher keeps email, year, tier and sentAt only), and a membership event's `id` and `shopifyCustomerId`. Ask Coop sees none of them.
 import {checkoutStage} from './crm-compute';
 import {parseLineItems} from './custom-range';
@@ -43,6 +43,25 @@ function parseRaw(raw: unknown): unknown {
   }
 }
 
+/** A whole number of minutes or steps, 0 or more; anything else is not a setting. */
+const count = (v: unknown): number | null => {
+  const n = numOrNull(v);
+  return n !== null && n >= 0 ? n : null;
+};
+
+/** RET-09: the CRM's schedule settings, each kept only when it reads as its type (an older Worker sends none: no key, never a default). */
+function scheduleOf(m: Rec): Partial<CrmMetrics> {
+  const out: Partial<CrmMetrics> = {};
+  const steps = count(m.reminderStepCount);
+  if (steps !== null) out.reminderStepCount = steps;
+  if (Array.isArray(m.reminderSteps)) out.reminderSteps = m.reminderSteps.map(count).filter((n): n is number => n !== null);
+  if (typeof m.remindersEnabled === 'boolean') out.remindersEnabled = m.remindersEnabled;
+  const review = count(m.reviewAfterMinutes);
+  if (review !== null) out.reviewAfterMinutes = review;
+  if (typeof m.reviewEmailsEnabled === 'boolean') out.reviewEmailsEnabled = m.reviewEmailsEnabled;
+  return out;
+}
+
 export function projectMetrics(body: unknown): CrmMetrics {
   const m = rec(body);
   return {
@@ -56,6 +75,7 @@ export function projectMetrics(body: unknown): CrmMetrics {
     reminded: num(m.reminded),
     revenueRecovered: num(m.revenueRecovered),
     recoveryRate: num(m.recoveryRate),
+    ...scheduleOf(m),
   };
 }
 
@@ -132,10 +152,18 @@ export function projectOrderChat(o: Rec): CrmOrderChat {
   return {...rest, lineItems: parseLineItems(o.lineItems).map((i) => ({title: i.title.slice(0, 120), quantity: i.quantity, price: i.unitPrice, discount: i.discount}))};
 }
 
-/** A checkout without its recovery link; the progress stage is derived from `raw` here and the blob is dropped. */
+/** How many line items a checkout's lineItems list holds (a JSON string or an array); null when there is no readable list. */
+function itemCount(v: unknown): number | null {
+  const list = typeof v === 'string' ? parseRaw(v) : v;
+  return Array.isArray(list) ? list.length : null;
+}
+
+/** A checkout without its recovery link; the progress stage is derived from `raw` here and the blob is dropped. The line items are
+ * reduced to their count (RET-09 Items column): no title, price or note leaves this function. */
 export function projectCheckoutSafe(c: Rec): CrmCheckoutSafe {
   const email = str(c.email);
   const reachedPaymentAt = str(c.reachedPaymentAt);
+  const items = itemCount(c.lineItems);
   return {
     shopifyCheckoutId: String(c.shopifyCheckoutId),
     email,
@@ -149,6 +177,7 @@ export function projectCheckoutSafe(c: Rec): CrmCheckoutSafe {
     reachedPaymentAt,
     winbackSentAt: str(c.winbackSentAt),
     stage: checkoutStage({email, reachedPaymentAt}, parseRaw(c.raw)),
+    ...(items === null ? {} : {items}),
   };
 }
 

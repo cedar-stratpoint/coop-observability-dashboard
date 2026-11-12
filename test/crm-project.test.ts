@@ -52,4 +52,21 @@ describe('CRM field contract (spec 4.4): an allowlist, so hidden and future fiel
     expect(projectMembership({platinumThreshold: null, programStart: '2026-08-01'})).toEqual({platinumThreshold: MEMBERSHIP_FALLBACK.platinumThreshold, programStart: '2026-08-01'});
     expect(projectMembership('junk')).toEqual(MEMBERSHIP_FALLBACK);
   });
+
+  it('RET-09: metrics keep the CRM schedule settings when sent, typed strictly; absent or junk = no key (the page hides the line)', () => {
+    const m = projectMetrics({reminderStepCount: '1', reminderSteps: [60, '1440', 'x', -5], remindersEnabled: false, reviewAfterMinutes: 10080, reviewEmailsEnabled: true, birthdayCodes: ['SECRET']});
+    expect(m).toMatchObject({reminderStepCount: 1, reminderSteps: [60, 1440], remindersEnabled: false, reviewAfterMinutes: 10080, reviewEmailsEnabled: true});
+    expect(JSON.stringify(m)).not.toMatch(/SECRET/);
+    const none = projectMetrics({reminderStepCount: 'x', reminderSteps: 'x', remindersEnabled: 'no', reviewAfterMinutes: null});
+    for (const k of ['reminderStepCount', 'reminderSteps', 'remindersEnabled', 'reviewAfterMinutes', 'reviewEmailsEnabled']) expect(k in none).toBe(false);
+  });
+
+  it('RET-09: a checkout keeps how many line items it has (a count only, Vince\'s Items column); no list = no key', () => {
+    const c = projectCheckoutSafe({shopifyCheckoutId: 1, lineItems: JSON.stringify([{title: 'SECRET-TITLE', quantity: 2}, {title: 'B', quantity: 1}])});
+    expect(c.items).toBe(2);
+    expect(JSON.stringify(c)).not.toMatch(/SECRET/);
+    expect(projectCheckoutSafe({shopifyCheckoutId: 1, lineItems: [{a: 1}]}).items).toBe(1);
+    expect('items' in projectCheckoutSafe({shopifyCheckoutId: 1})).toBe(false);
+    expect('items' in projectCheckoutSafe({shopifyCheckoutId: 1, lineItems: 'junk'})).toBe(false);
+  });
 });
