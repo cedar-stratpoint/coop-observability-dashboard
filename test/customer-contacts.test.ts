@@ -5,6 +5,7 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 import {
+  CHANNEL_LABEL,
   CONTACT_CHANNELS,
   CONTACT_NOTE_MAX,
   deleteContactWith,
@@ -13,7 +14,7 @@ import {
   readContactInput,
   type ContactLogDeps,
 } from '../src/customer-contacts';
-import {contactTally, customerRows, type EnrichedCustomer} from '../src/crm-compute';
+import {CONTACT_KIND_LABEL, contactTally, customerRows, type EnrichedCustomer} from '../src/crm-compute';
 import {isMissingTable} from '../src/supabase-errors';
 
 const ME = 'ana@zoomy.ph';
@@ -52,8 +53,8 @@ describe('S5.0 logContact: validated in code, stamped with the signed-in email',
     expect(await logContactWith(deps, {email: 'mia@example.com', channel: 'call', note: '   '})).toEqual({ok: true});
     expect(inserted[0].note).toBeNull();
   });
-  it('the channels are closed: dm, sms, call, email, other', () => {
-    expect([...CONTACT_CHANNELS]).toEqual(['dm', 'sms', 'call', 'email', 'other']);
+  it('the channels are closed: instagram, facebook, viber first (most used, Stage 7B), then dm, sms, call, email, other', () => {
+    expect([...CONTACT_CHANNELS]).toEqual(['instagram', 'facebook', 'viber', 'dm', 'sms', 'call', 'email', 'other']);
     expect(CONTACT_NOTE_MAX).toBe(500);
   });
   it.each([
@@ -188,7 +189,7 @@ describe('S5.0 negative: no send path, and the table stays service-role only', (
     expect(sql).toMatch(/create table if not exists public\.customer_contacts/i);
     expect(sql).toMatch(/enable row level security/i);
     expect(sql).not.toMatch(/create policy|grant /i);
-    expect(sql).toMatch(/channel in \('dm', 'sms', 'call', 'email', 'other'\)/);
+    expect(sql).toMatch(/channel in \('dm', 'sms', 'call', 'email', 'other', 'instagram', 'facebook', 'viber'\)/);
     expect(sql).toMatch(/char_length\(note\) <= 500/);
     expect(sql).toMatch(/customer_email = lower\(customer_email\)/);
   });
@@ -200,5 +201,72 @@ describe('writeError: the PostgREST 404-with-empty-body quirk on a missing table
     expect(isMissingTable(writeError({error: {}, status: 404}))).toBe(true);
     expect(isMissingTable(writeError({error: {code: '23514', message: 'check violation'}, status: 400}))).toBe(false);
     expect(writeError({error: null, status: 201})).toBeNull();
+  });
+});
+
+// RET-07 Stage 7B (plan knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md, rule R6): Instagram, Facebook and Viber
+// become their own channels; 'dm' stays (relabelled "DM (other app)") so rows logged before 7B stay valid.
+describe('S7B Instagram / Facebook / Viber channels', () => {
+  it.each(['instagram', 'facebook', 'viber'])('accepts %s and writes it as the channel', async (channel) => {
+    const {deps, inserted} = fakeDeps();
+    expect(await logContactWith(deps, {email: 'mia@example.com', channel, note: ''})).toEqual({ok: true});
+    expect(inserted[0].channel).toBe(channel);
+  });
+  it.each(['tiktok', 'Instagram', 'ig', ''])('still refuses an unknown channel (%j) before any write', async (channel) => {
+    const {deps, inserted} = fakeDeps();
+    const r = await logContactWith(deps, {email: 'mia@example.com', channel, note: ''});
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/channel/i);
+    expect(inserted).toEqual([]);
+  });
+  it('labels: Instagram, Facebook, Viber, and dm reads "DM (other app)"', () => {
+    expect(CHANNEL_LABEL).toEqual({instagram: 'Instagram', facebook: 'Facebook', viber: 'Viber', dm: 'DM (other app)', sms: 'SMS', call: 'Call', email: 'Email (by hand)', other: 'Other'});
+  });
+  it('an old dm row still reads and labels fine', async () => {
+    const page = async () => ({data: [{id: ID, customer_email: 'mia@example.com', channel: 'dm', note: null, contacted_at: '2026-11-01T02:00:00Z', created_by: ME}], error: null});
+    const rows = await loadContactRows(page);
+    expect(rows?.[0].channel).toBe('dm');
+    expect(CHANNEL_LABEL[rows![0].channel]).toBe('DM (other app)');
+  });
+  it('the 7A tally keeps each new channel as its own last-contact kind (not "other"), with its own label', () => {
+    const base = {checkouts: [], orders: [], birthdayVouchers: []};
+    for (const [channel, label] of [['instagram', 'Instagram'], ['facebook', 'Facebook'], ['viber', 'Viber'], ['dm', 'DM (other app)']] as const) {
+      const t = contactTally({...base, manualContacts: [{email: 'a@x.com', channel, contactedAt: '2026-11-05T10:00:00Z'}]});
+      expect(t.get('a@x.com')).toMatchObject({manual: 1, lastAt: '2026-11-05T10:00:00Z', lastKind: channel});
+      expect(CONTACT_KIND_LABEL[channel]).toBe(label);
+    }
+    const t = contactTally({...base, manualContacts: [{email: 'a@x.com', channel: 'tiktok', contactedAt: '2026-11-05T10:00:00Z'}]});
+    expect(t.get('a@x.com')?.lastKind).toBe('other');
+  });
+  it('the old check constraint (Stage 7B SQL not applied) gets a clear "run the SQL" message, nothing else changes', async () => {
+    const inserted: unknown[] = [];
+    const deps: ContactLogDeps = {
+      actor: async () => ME,
+      insert: async (row) => {
+        inserted.push(row);
+        return {code: '23514', message: 'new row for relation "customer_contacts" violates check constraint "customer_contacts_channel_check"'};
+      },
+      deleteOwn: async () => ({error: null, deleted: 0}),
+    };
+    const r = await logContactWith(deps, {email: 'mia@example.com', channel: 'instagram', note: ''});
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/isn't enabled in the database yet/);
+    expect(!r.ok && r.error).toContain('supabase/customer_contacts_channels_7b.sql');
+  });
+  it('a different check violation (e.g. the note length) keeps the generic failure message', async () => {
+    const deps: ContactLogDeps = {
+      actor: async () => ME,
+      insert: async () => ({code: '23514', message: 'new row for relation "customer_contacts" violates check constraint "customer_contacts_note_check"'}),
+      deleteOwn: async () => ({error: null, deleted: 0}),
+    };
+    const r = await logContactWith(deps, {email: 'mia@example.com', channel: 'viber', note: 'x'});
+    expect(!r.ok && r.error).toMatch(/Saving the contact failed/);
+  });
+  it('the DDL widens the existing constraint idempotently, and the standalone 7B file carries the same ALTER', () => {
+    const widen = /alter table public\.customer_contacts drop constraint if exists customer_contacts_channel_check;\s*alter table public\.customer_contacts add constraint customer_contacts_channel_check\s+check \(channel in \('dm', 'sms', 'call', 'email', 'other', 'instagram', 'facebook', 'viber'\)\);/;
+    expect(readFileSync('supabase/customer_contacts.sql', 'utf8')).toMatch(widen);
+    const sql7b = readFileSync('supabase/customer_contacts_channels_7b.sql', 'utf8');
+    expect(sql7b).toMatch(widen);
+    expect(sql7b).toMatch(/BEFORE deploying/);
   });
 });

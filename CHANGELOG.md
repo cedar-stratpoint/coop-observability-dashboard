@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Customers: Instagram, Facebook and Viber are their own contact channels (RET-07, slice 7B)
+
+Instagram, Facebook and Viber messages were all logged as "DM", so "last contacted" could not say which app the team used. Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (section 7B, rule R6).
+
+- **Decision: new channels, keep `dm` (R6).** `CONTACT_CHANNELS` (`src/customer-contacts.ts`) is now `instagram`, `facebook`, `viber` (listed first in the Log contact dialog: the most used), then `dm`, `sms`, `call`, `email`, `other`. `dm` stays, relabelled "DM (other app)", so rows logged before 7B stay valid and read fine. `tiktok` or any other unknown channel is still refused. The 7A tally keeps each new channel as its own last-contact kind (Last contacted · Instagram), not "other". The dialog renders from the list, so it needed no change.
+- **DB check:** `supabase/customer_contacts.sql` has the wider check for fresh installs plus an idempotent drop/re-add of `customer_contacts_channel_check` (the name Postgres gives an inline column check: `<table>_<column>_check`). The same ALTER is standalone in `supabase/customer_contacts_channels_7b.sql`.
+- **Rollout order: SQL first.** Run `supabase/customer_contacts_channels_7b.sql` on Staging, then PROD, BEFORE deploying this code. Deployed without it, picking Instagram fails the old check (Postgres 23514 on `customer_contacts_channel_check`); the action then says "This channel isn't enabled in the database yet — run the Stage 7B SQL (supabase/customer_contacts_channels_7b.sql)" instead of a generic failure, and saves nothing.
+- **Ask Coop:** the `manual_contacts` method text lists the new channels. Data catalog `customer_contacts` channel values updated.
+- Tests: `test/customer-contacts.test.ts` (S7B: accept the three, refuse `tiktok`, labels, old `dm` rows, tally kinds, the 23514 message, the two SQL files).
+
 ## 2026-11-12 — Ask Coop: works with an org-scoped Anthropic key (ANTHROPIC_WORKSPACE_ID)
 
 The owner's new Anthropic key was created at organization level, not inside a workspace. Anthropic answers every call made with such a key with 400 "This API key is not scoped to a workspace" unless the request names the workspace. Ask Coop sent only the key, so the chat failed with it.
