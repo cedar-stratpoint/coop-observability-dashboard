@@ -378,7 +378,7 @@ const CUSTOMER_LIST_MEASURES: MeasureDecl[] = [
 export const LAST_CONTACT_TEXT = 'last_contacted = the Philippine day of the newest contact of any kind (cart reminder, win-back, review request, birthday voucher, or a contact logged by hand); last_contact_kind names it ("never" = no contact at all; "unknown" = a source could not be read, never read as never). sort last_contacted_asc lists never-contacted customers first, then the oldest contact; unknown rows go last.';
 const TALLY_MEASURES: MeasureDecl[] = [
   {key: 'emails_sent', label: 'Emails sent', kind: 'derived', unit: 'count', method: 'Automated CRM emails already sent to this email address: reminders + winback + review_requests + birthday_vouchers. Unknown when a source could not be read.'},
-  {key: 'manual_contacts', label: 'Manual contacts', kind: 'measured', unit: 'count', method: 'Contacts the team logged by hand for this email (DM, SMS, call, email by hand, other), from Coop\'s contact log. Unknown when the log is not set up or could not be read.'},
+  {key: 'manual_contacts', label: 'Manual contacts', kind: 'measured', unit: 'count', method: 'Contacts the team logged by hand for this email (Instagram, Facebook, Viber, DM on another app, SMS, call, email by hand, other), from Coop\'s contact log. Unknown when the log is not set up or could not be read.'},
   {key: 'times_contacted', label: 'Times contacted', kind: 'derived', unit: 'count', method: 'emails_sent + manual_contacts. Unknown when either is unknown. sort contacted_desc lists the most contacted first.'},
 ];
 const BREAKDOWN_MEASURES: MeasureDecl[] = [
