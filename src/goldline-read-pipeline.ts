@@ -1,7 +1,10 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
-import {classifyPage, extractInventoryPage, type ExtractedPage} from './goldline-extract-run';
+import {classifyPage, extractInventoryPage, extractInventoryPageAnchored, type ExtractedPage} from './goldline-extract-run';
+import {getFormTemplate} from './goldline-form-template-data';
+import {templateReadEnabled} from './goldline-anchored-flag';
+import type {AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
@@ -159,8 +162,30 @@ export async function runInventoryRead(args: {
     // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
     // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
     const readStart = Date.now();
-    const extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+    // Template-anchored read (flag-gated, V1/V2 only): fill the page's fixed template with only
+    // the handwritten numbers, so no row is dropped or invented. Falls back to the current free
+    // read when the flag is off for this company, the version is Legacy/unknown, or no template
+    // is available — so flag-off is byte-identical to today.
+    const anchorVersion = cls.version === 'v1' || cls.version === 'v2' ? cls.version : null;
+    const template =
+      templateReadEnabled(companyId) && anchorVersion ? await getFormTemplate(companyId, anchorVersion, page) : null;
+    let extracted: ExtractedPage;
+    let anchored: AnchoredMapResult | null = null;
+    if (template) {
+      anchored = await withHeartbeat(emit, reading, () => extractInventoryPageAnchored(extractB64, template, profile));
+      extracted = anchored.page;
+    } else {
+      extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+    }
     rec.readMs = Date.now() - readStart;
+    if (anchored) {
+      // Keep the anchored read's signals (rows kept blank, write-ins, price overrides) in the
+      // read log so they are debuggable without re-running.
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        anchored: {filledBlanks: anchored.filledBlanks, extras: anchored.extras, priceNotes: anchored.priceNotes},
+      };
+    }
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(storeScope, [extracted.store_code]);
     if (outPdf.length) {

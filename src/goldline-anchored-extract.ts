@@ -108,6 +108,17 @@ export function buildAnchoredPrompt(template: FormTemplate): string {
   ].join('\n');
 }
 
+/** The fixed system role for a template-anchored read (prompt-cached). */
+export function buildAnchoredSystemPrompt(): string {
+  return [
+    'You read NICHIDO COSMETICS "Semi-Monthly Inventory" form pages by FILLING A FIXED TEMPLATE.',
+    "You are given the page's exact printed rows in order. Transcribe only the handwritten count",
+    'cells for each row and return them by row index. Never re-type the codes or product names,',
+    'never add, drop, reorder, or rename a row, and never infer, estimate, average, or fill a blank.',
+    'Return JSON only.',
+  ].join('\n');
+}
+
 /** Structured-output schema for the numbers-only anchored read (three-location V1/V2). */
 export const ANCHORED_EXTRACTION_SCHEMA = {
   type: 'object',

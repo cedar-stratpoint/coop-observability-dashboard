@@ -3,6 +3,7 @@ import {buildFormTemplate} from '../src/goldline-form-template';
 import {
   ANCHORED_EXTRACTION_SCHEMA,
   buildAnchoredPrompt,
+  buildAnchoredSystemPrompt,
   mapAnchoredToExtractedPage,
   type AnchoredOutput,
 } from '../src/goldline-anchored-extract';
@@ -29,6 +30,15 @@ describe('buildAnchoredPrompt', () => {
     expect(p).toContain('delivery (col 4'); // V1: Delivery is column 4
     expect(p).toContain('Return exactly one entry for each of the 2 item rows');
     expect(p).toContain('do not\n  compute or overwrite it with a sum');
+  });
+});
+
+describe('buildAnchoredSystemPrompt', () => {
+  it('tells the model to fill a fixed template, not re-type codes/names or change the row set', () => {
+    const s = buildAnchoredSystemPrompt();
+    expect(s).toMatch(/FILLING A FIXED TEMPLATE/);
+    expect(s).toMatch(/Never re-type the codes or product names/);
+    expect(s).toMatch(/never add, drop, reorder, or rename a row/);
   });
 });
 
