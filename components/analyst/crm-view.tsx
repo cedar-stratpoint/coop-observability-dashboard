@@ -19,9 +19,14 @@
 // RET-07 (7A): a Last contacted column (PH date + kind) from the same customerRows the chat uses; "never" when every source was
 // read and there is no contact, "unknown" when any source was not (never claimed as never). The sort control reuses the chat's
 // comparators (compareLastContacted, compareTimesContacted).
+//
+// RET-08 (8B/8C): a customer's name or email (Customers, Cart recovery, Orders) opens their profile drawer (customer-profile.tsx),
+// built from the lists already on this page. `?customer=<shopifyCustomerId>` is written with the native History API, which Next's
+// router syncs with useSearchParams without a server round trip, so a refresh reopens it and Back closes it.
 import {downloadCsv} from '@/src/csv';
 import dynamic from 'next/dynamic';
-import {useMemo, useState} from 'react';
+import {useSearchParams} from 'next/navigation';
+import {useCallback, useMemo, useRef, useState} from 'react';
 import {
   AlertTriangle,
   Crown,
@@ -41,6 +46,7 @@ import {cn} from '@/lib/utils';
 import {Metric} from './metric';
 import {RefreshControl} from './refresh-control';
 import {ContactLogDialog} from './contact-log-dialog';
+import {CustomerProfile, STATUS_TONE, type ProfileTab} from './customer-profile';
 import {Eyebrow} from './sections';
 import {Pagination} from './pagination';
 import type {ChartBlock} from '@/src/chat/block-types';
@@ -64,14 +70,15 @@ import {
   fmtPhDate,
   lastContactLabel,
   membershipWindowStart,
+  money,
   newBuyersByMonth,
+  peso,
   repeatRate,
   tierCounts,
   turnaround,
   EMPTY_CART_FILTER,
   EMPTY_CUSTOMER_FILTER,
   EMPTY_ORDER_FILTER,
-  type CartStatus,
   type CustomerAudience,
   type CustomerRow,
 } from '@/src/crm-compute';
@@ -141,22 +148,6 @@ function presetRule(a: Exclude<CustomerAudience, 'all'>): string {
   return `${orders}, the last one ${r.minDays}+ days ago (PH time). Test orders never count.`;
 }
 
-const peso = (n: number) =>
-  `₱${Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-
-/** A money string straight off the API, which may carry its own currency. */
-const money = (amount: string | null, currency?: string | null) => {
-  const n = Number(amount ?? 0);
-  const sym = !currency || currency === 'PHP' ? '₱' : `${currency} `;
-  return `${sym}${n.toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-};
-
-const STATUS_TONE: Record<CartStatus, string> = {
-  Active: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-  Recovered: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
-  Converted: 'bg-muted text-muted-foreground',
-};
-
 type Tab = 'carts' | 'orders' | 'customers';
 
 const TABS: Array<{key: Tab; label: string; icon: React.ComponentType<{className?: string}>}> = [
@@ -197,6 +188,35 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/** A name, email or order number that opens the profile; plain text when no customer matches. Module-level so a re-render (the URL
+ * changing on open) keeps the same buttons, and focus can return to the one that opened the drawer. */
+function ProfileLink({
+  owner,
+  onOpen,
+  tab = 'timeline',
+  orderId = null,
+  className,
+  children,
+}: {
+  owner: CustomerRow | null;
+  onOpen: (owner: CustomerRow, tab: ProfileTab, orderId: string | null) => void;
+  tab?: ProfileTab;
+  orderId?: string | null;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  if (!owner) return <span className={className}>{children}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(owner, tab, orderId)}
+      className={cn('max-w-full truncate text-left underline-offset-2 transition-colors hover:text-primary hover:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-none', className)}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -242,6 +262,30 @@ export function CrmView({
   const [customerSort, setCustomerSort] = useState<CustomerSort>('all');
   const [logFor, setLogFor] = useState<CustomerRow | null>(null);
   const needle = q.trim().toLowerCase();
+  // The open profile lives in the URL; the tab and order it opens on are this page's state.
+  const searchParams = useSearchParams();
+  const profileId = searchParams.get('customer');
+  const [profileAt, setProfileAt] = useState<{tab: ProfileTab; orderId: string | null}>({tab: 'timeline', orderId: null});
+  const pushedProfile = useRef(false);
+  const withCustomer = (id: string | null): string => {
+    const p = new URLSearchParams(window.location.search);
+    if (id === null) p.delete('customer');
+    else p.set('customer', id);
+    const qs = p.toString();
+    return `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+  };
+  const openProfile = (id: string, tab: ProfileTab = 'timeline', orderId: string | null = null) => {
+    setProfileAt({tab, orderId});
+    // A new history entry the first time (Back closes it), then replace while it stays open.
+    window.history[profileId === null ? 'pushState' : 'replaceState'](null, '', withCustomer(id));
+    if (profileId === null) pushedProfile.current = true;
+  };
+  const closeProfile = useCallback(() => {
+    if (pushedProfile.current) {
+      pushedProfile.current = false;
+      window.history.back();
+    } else window.history.replaceState(null, '', withCustomer(null));
+  }, []);
 
   const activeFilter =
     tab === 'carts' ? cartFilter : tab === 'orders' ? orderFilter : customerFilter;
@@ -273,6 +317,21 @@ export function CrmView({
     for (const c of contacts ?? []) m.set(c.email, [...(m.get(c.email) ?? []), c]);
     return m;
   }, [contacts]);
+  // Who a cart or an order belongs to, the way enrichCustomers matches: the customer id first, else the email.
+  const customerIndex = useMemo(() => {
+    const byId = new Map<string, CustomerRow>();
+    const byEmail = new Map<string, CustomerRow>();
+    for (const c of all) {
+      byId.set(c.shopifyCustomerId, c);
+      const e = (c.email ?? '').trim().toLowerCase();
+      if (e && !byEmail.has(e)) byEmail.set(e, c);
+    }
+    return {byId, byEmail};
+  }, [all]);
+  const ownerOf = (customerId: string | null | undefined, email: string | null): CustomerRow | null =>
+    (customerId ? customerIndex.byId.get(customerId) : undefined) ?? customerIndex.byEmail.get((email ?? '').trim().toLowerCase()) ?? null;
+  const profileRow = profileId === null ? null : (customerIndex.byId.get(profileId) ?? null);
+  const open = (owner: CustomerRow, tab: ProfileTab, orderId: string | null) => openProfile(owner.shopifyCustomerId, tab, orderId);
   const historyOf = (c: CustomerRow): CustomerContact[] | null =>
     contacts === null ? null : (contactsByEmail.get((c.email ?? '').trim().toLowerCase()) ?? []);
   const nameOf = (c: CustomerRow): string => [c.firstName, c.lastName].filter(Boolean).join(' ');
@@ -768,7 +827,9 @@ export function CrmView({
                         const status = cartStatus(c);
                         return (
                           <tr key={c.shopifyCheckoutId} className="border-b last:border-0">
-                            <td className="px-4 py-2.5">{c.email ?? '—'}</td>
+                            <td className="px-4 py-2.5">
+                              <ProfileLink onOpen={open} owner={ownerOf(null, c.email)} tab="checkouts">{c.email ?? '—'}</ProfileLink>
+                            </td>
                             <td className="px-4 py-2.5 tabular-nums">{money(c.totalPrice, c.currency)}</td>
                             <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.stage}</td>
                             <td className="px-4 py-2.5">
@@ -792,8 +853,16 @@ export function CrmView({
                     {tab === 'orders' &&
                       (shown as CrmOrder[]).map((o) => (
                         <tr key={o.shopifyOrderId} className="border-b last:border-0">
-                          <td className="px-4 py-2.5 font-medium">{o.orderNumber ?? o.shopifyOrderId}</td>
-                          <td className="px-4 py-2.5">{o.email ?? '—'}</td>
+                          <td className="px-4 py-2.5 font-medium">
+                            <ProfileLink onOpen={open} owner={ownerOf(o.shopifyCustomerId, o.email)} tab="orders" orderId={o.shopifyOrderId}>
+                              {o.orderNumber ?? o.shopifyOrderId}
+                            </ProfileLink>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <ProfileLink onOpen={open} owner={ownerOf(o.shopifyCustomerId, o.email)} tab="orders" orderId={o.shopifyOrderId}>
+                              {o.email ?? '—'}
+                            </ProfileLink>
+                          </td>
                           <td className="px-4 py-2.5 tabular-nums">{money(o.totalPrice, o.currency)}</td>
                           <td className="px-4 py-2.5">
                             <Badge variant={o.financialStatus === 'paid' ? 'default' : 'secondary'}>
@@ -810,9 +879,11 @@ export function CrmView({
                       (shown as CustomerRow[]).map((c) => (
                         <tr key={c.shopifyCustomerId} className="border-b last:border-0">
                           <td className="px-4 py-2.5">
-                            {[c.firstName, c.lastName].filter(Boolean).join(' ') || '—'}
+                            <ProfileLink onOpen={open} owner={c} className="font-medium">{nameOf(c) || '—'}</ProfileLink>
                           </td>
-                          <td className="px-4 py-2.5">{c.email ?? '—'}</td>
+                          <td className="px-4 py-2.5">
+                            <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
+                          </td>
                           <td className="px-4 py-2.5">
                             <span className="text-xs capitalize text-muted-foreground">
                               {c.membershipTier ?? 'guest'}
@@ -861,7 +932,9 @@ export function CrmView({
                     return (
                       <li key={c.shopifyCheckoutId} className="px-4 py-3">
                         <div className="flex items-start justify-between gap-3">
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.email ?? '—'}</span>
+                          <ProfileLink onOpen={open} owner={ownerOf(null, c.email)} tab="checkouts" className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {c.email ?? '—'}
+                          </ProfileLink>
                           <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-xs font-medium', STATUS_TONE[status])}>
                             {status}
                           </span>
@@ -894,7 +967,9 @@ export function CrmView({
                   (shown as CrmOrder[]).map((o) => (
                     <li key={o.shopifyOrderId} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
-                        <span className="text-sm font-medium">{o.orderNumber ?? o.shopifyOrderId}</span>
+                        <ProfileLink onOpen={open} owner={ownerOf(o.shopifyCustomerId, o.email)} tab="orders" orderId={o.shopifyOrderId} className="text-sm font-medium">
+                          {o.orderNumber ?? o.shopifyOrderId}
+                        </ProfileLink>
                         <Badge variant={o.financialStatus === 'paid' ? 'default' : 'secondary'}>
                           {o.financialStatus ?? 'unknown'}
                         </Badge>
@@ -903,7 +978,11 @@ export function CrmView({
                       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div className="col-span-2 flex justify-between gap-2">
                           <dt>Email</dt>
-                          <dd className="min-w-0 truncate text-foreground">{o.email ?? '—'}</dd>
+                          <dd className="min-w-0 truncate text-foreground">
+                            <ProfileLink onOpen={open} owner={ownerOf(o.shopifyCustomerId, o.email)} tab="orders" orderId={o.shopifyOrderId}>
+                              {o.email ?? '—'}
+                            </ProfileLink>
+                          </dd>
                         </div>
                         <div className="flex justify-between gap-2">
                           <dt>Placed</dt>
@@ -920,12 +999,14 @@ export function CrmView({
                   (shown as CustomerRow[]).map((c) => (
                     <li key={c.shopifyCustomerId} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {[c.firstName, c.lastName].filter(Boolean).join(' ') || '—'}
-                        </span>
+                        <ProfileLink onOpen={open} owner={c} className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {nameOf(c) || '—'}
+                        </ProfileLink>
                         <span className="shrink-0 text-xs capitalize text-muted-foreground">{c.membershipTier ?? 'guest'}</span>
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{c.email ?? '—'}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
+                      </div>
                       <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div className="flex flex-col">
                           <dt>Orders</dt>
@@ -991,6 +1072,23 @@ export function CrmView({
         </div>
       </section>
 
+      {profileId !== null && (
+        <CustomerProfile
+          row={profileRow}
+          orders={orders}
+          checkouts={checkouts}
+          birthdayVouchers={birthdayVouchers}
+          contacts={contacts}
+          membership={membership}
+          now={nowDate}
+          viewer={viewer}
+          initialTab={profileAt.tab}
+          openOrderId={profileAt.orderId}
+          paused={logFor !== null}
+          onClose={closeProfile}
+          onLogContact={setLogFor}
+        />
+      )}
       {logFor && <ContactLogDialog name={nameOf(logFor)} email={logFor.email} history={historyOf(logFor)} viewer={viewer} onClose={() => setLogFor(null)} />}
     </div>
   );

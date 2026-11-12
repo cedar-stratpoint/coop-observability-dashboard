@@ -510,6 +510,13 @@ export function fmtPh(iso: string | null | undefined): string {
   });
 }
 
+const pesoDigits = {minimumFractionDigits: 2, maximumFractionDigits: 2} as const;
+/** Pesos with centavos ("₱1,234.50"). */
+export const peso = (n: number): string => `₱${Number(n || 0).toLocaleString('en-PH', pesoDigits)}`;
+/** A money string straight off the API, which may carry its own currency. */
+export const money = (amount: string | null | undefined, currency?: string | null): string =>
+  `${!currency || currency === 'PHP' ? '₱' : `${currency} `}${Number(amount ?? 0).toLocaleString('en-PH', pesoDigits)}`;
+
 /** A PH calendar date ("Oct 11, 2026") for day-level columns; '—' when absent. */
 export function fmtPhDate(iso: string | null | undefined): string {
   if (!iso) return '—';
