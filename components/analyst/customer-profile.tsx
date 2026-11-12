@@ -372,7 +372,7 @@ export function CustomerProfile({
                   title="Times contacted"
                   value={row.timesContacted === null ? 'unknown' : String(row.timesContacted)}
                   unknown={row.timesContacted === null}
-                  sub={`${row.emailsSent ?? 'unknown'} emails · ${row.manualContacts ?? 'unknown'} by hand`}
+                  sub={`${row.emailsSent ?? 'unknown'} ${row.emailsSent === 1 ? 'email' : 'emails'} · ${row.manualContacts ?? 'unknown'} by hand`}
                 />
                 <Stat
                   title="Last contacted"
