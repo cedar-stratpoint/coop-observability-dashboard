@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-12 — Ask Coop: works with an org-scoped Anthropic key (ANTHROPIC_WORKSPACE_ID)
+
+The owner's new Anthropic key was created at organization level, not inside a workspace. Anthropic answers every call made with such a key with 400 "This API key is not scoped to a workspace" unless the request names the workspace. Ask Coop sent only the key, so the chat failed with it.
+
+- **Decision:** keep the key and name the workspace, rather than ask for a workspace-scoped key. New optional env var `ANTHROPIC_WORKSPACE_ID`; when set, Ask Coop's Claude client sends it as the `anthropic-workspace-id` header (`src/chat/anthropic-client.ts`). It's the same rule Goldline already uses (`GOLDLINE_ANTHROPIC_WORKSPACE_ID`). Unset changes nothing, so a workspace-scoped key keeps working as before.
+- `/api/chat/health` reports whether it is set, never its value. `.env.example` now documents `ANTHROPIC_API_KEY` and `ANTHROPIC_WORKSPACE_ID`.
+- **To roll out:** set `ANTHROPIC_WORKSPACE_ID` next to the key in Vercel (Staging, then Production) and redeploy.
+
 ## 2026-11-12 — Customers: last contacted per customer, on the page and in Ask Coop (RET-07, slice 7A)
 
 Syl asked (2026-11-10) to see when each customer was last contacted, and the staging check (2026-11-11) found Ask Coop could not answer "who did we contact most" or "who haven't we talked to longest": the contact columns were only on the repeat-promo and win-back lists, and the tally kept no dates. Plan: `knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md` (rules R1 to R7).
