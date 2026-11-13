@@ -354,9 +354,12 @@ export async function extractInventoryPageAnchored(
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const params = {
     model: EXTRACT_MODEL,
-    // Numbers-only output (index + a few integers per row) — far smaller than the free-read
-    // schema, which is where the cost saving and the end of truncation come from.
-    max_tokens: 8000,
+    // Numbers-only output is far smaller than the free-read schema, but the densest pages (form
+    // page 2 = 71 rows, page 4 = 68) can still exceed a small cap and truncate — observed failing on
+    // the live 98-page run at 8000. Match the free read's cap for this branch (non-streaming here, so
+    // it cannot go higher without switching to the streaming path staging uses). Billed on actual
+    // output, not the cap.
+    max_tokens: 16000,
     system: [{type: 'text', text: buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
     output_config: {format: {type: 'json_schema', schema: ANCHORED_EXTRACTION_SCHEMA}},
     messages: [
