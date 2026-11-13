@@ -1,7 +1,10 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
-import {classifyPage, extractInventoryPage, readUsageSnapshot, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {getFormTemplate} from './goldline-form-template-data';
+import {templateReadEnabled} from './goldline-anchored-flag';
+import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
@@ -81,8 +84,20 @@ export async function runInventoryRead(args: {
     // page_key, and flag any duplicate / re-upload — all before extraction.
     emit?.({type: 'stage', stage: 'detecting'});
     const classifyStart = Date.now();
-    const cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
     rec.classifyMs = Date.now() - classifyStart;
+    // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
+    // a real inventory page misread. Re-classify once (a blind second read) before setting it
+    // aside; keep the retry when it now reads as a form, or reads more confidently. A confident
+    // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
+    let setAsideRetry: {kind: string; confidence: number} | null = null;
+    if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+      if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
+        setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
+        cls = retry;
+      }
+    }
     const page = cls.page;
     rec.page = page;
     rec.pageKind = cls.kind;
@@ -99,7 +114,7 @@ export async function runInventoryRead(args: {
     }
     const snap = snapStoreCode(cls.store_code, registry);
     rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap};
+    rec.detail = {classify: cls, snap, ...(setAsideRetry ? {setAsideRetry} : {})};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
@@ -162,8 +177,78 @@ export async function runInventoryRead(args: {
     // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
     // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
     const readStart = Date.now();
-    const extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+    // Template-anchored read (flag-gated): fill the page's fixed template with only the handwritten
+    // numbers, so no row is dropped or invented.
+    //
+    // Safeguard (B): the anchor VERSION comes from an unbiased read of where the "Delivery" column
+    // is physically printed (locateDeliveryColumn), NOT from the classifier. V1 and V2 differ only
+    // by that position (V1 = col 4, V2 = col 1), and the classifier confidently mis-reads some V2
+    // pages as V1 (QA page 16 at 0.90) — which would make the anchored read fill every count from
+    // the wrong column. The layout read gets the position right, so it decides the version; only
+    // when it is inconclusive do we fall back to the confidence-gated classifier version, and when
+    // that too is unsure we stay on the free read (which maps cells by printed meaning). Flag-off is
+    // byte-identical to today.
+    let av: 'v1' | 'v2' | null = null;
+    let versionSource: 'locator' | 'classify' | null = null;
+    let deliveryColumn: number | null = null;
+    if (templateReadEnabled(companyId)) {
+      deliveryColumn = await locateDeliveryColumn(extractB64);
+      const located = versionFromDeliveryColumn(deliveryColumn);
+      if (located) {
+        av = located;
+        versionSource = 'locator';
+      } else {
+        av = anchorVersion(cls.version, cls.confidence);
+        if (av) versionSource = 'classify';
+      }
+    }
+    const template = av ? await getFormTemplate(companyId, av, page) : null;
+    // The layout proved the version; if it differs from the classifier's, correct the persisted tag
+    // + page key so the triage board and the eventual commit carry the right version.
+    if (template && av && av !== cls.version) {
+      rec.formVersion = av;
+      const correctedPk = inv
+        ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: av, page})
+        : null;
+      await saveClassification({
+        uploadId,
+        pageNo: page,
+        pageKind: cls.kind,
+        orientation: cls.orientation,
+        formVersion: av,
+        pageKey: correctedPk,
+        classification: {...cls, version: av, version_corrected_from: cls.version, version_source: versionSource, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
+      }).catch((e) => console.error('goldline read: saveClassification (version correction) failed', msg(e)));
+    }
+    let extracted: ExtractedPage;
+    let anchored: AnchoredMapResult | null = null;
+    if (template) {
+      const useTemplate = template;
+      anchored = await withHeartbeat(emit, reading, () => extractInventoryPageAnchored(extractB64, useTemplate, profile));
+      extracted = anchored.page;
+    } else {
+      extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+    }
     rec.readMs = Date.now() - readStart;
+    if (anchored) {
+      // Keep the anchored read's signals + the version self-check in the read log so they are
+      // debuggable without re-running.
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        anchored: {
+          version: av,
+          versionSource,
+          deliveryColumn,
+          classifyVersion: cls.version,
+          filledBlanks: anchored.filledBlanks,
+          extras: anchored.extras,
+          priceNotes: anchored.priceNotes,
+          deliverySeen: anchored.deliverySeen,
+          deliveryExpected: anchored.deliveryExpected,
+          versionMismatch: anchored.versionMismatch,
+        },
+      };
+    }
     // Same store-scope fence for the scanned form's store.
     const outPdf = outOfScopeStores(storeScope, [extracted.store_code]);
     if (outPdf.length) {

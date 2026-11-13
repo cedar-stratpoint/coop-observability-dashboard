@@ -21,6 +21,19 @@ import {
 } from './goldline-legacy-extract';
 import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
+import {
+  ANCHORED_EXTRACTION_SCHEMA,
+  DELIVERY_LOCATOR_SCHEMA,
+  buildAnchoredPrompt,
+  buildAnchoredSystemPrompt,
+  buildDeliveryLocatorPrompt,
+  deliveryColumnFromLocator,
+  mapAnchoredToExtractedPage,
+  type AnchoredMapResult,
+  type AnchoredOutput,
+  type DeliveryLocatorOutput,
+} from './goldline-anchored-extract';
+import type {FormTemplate} from './goldline-form-template';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
 // GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
@@ -386,6 +399,63 @@ export async function extractInventoryPage(
     store_code: typeof parsed.store_code === 'string' ? parsed.store_code : '',
     reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
   };
+}
+
+/**
+ * Template-anchored read of ONE scanned inventory page (V1/V2 only; Legacy already reads this
+ * way via its own path). The model is given the page's fixed template rows and returns only the
+ * handwritten numbers by row index; `mapAnchoredToExtractedPage` then rebuilds the full page from
+ * the template, so no row is dropped or invented. Numbers-only output, so `max_tokens` is small.
+ * Throws on no key or an empty read, like `extractInventoryPage`.
+ */
+export async function extractInventoryPageAnchored(
+  pdfBase64: string,
+  template: FormTemplate,
+  profile?: WriterProfile,
+): Promise<AnchoredMapResult> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const params = {
+    model: EXTRACT_MODEL,
+    // Numbers-only output (index + a few integers per row) — far smaller than the free-read
+    // schema, which is where the cost saving and the end of truncation come from.
+    max_tokens: 8000,
+    system: [{type: 'text', text: buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
+    output_config: {format: {type: 'json_schema', schema: ANCHORED_EXTRACTION_SCHEMA}},
+    messages: [
+      {
+        role: 'user',
+        content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: buildAnchoredPrompt(template)}],
+      },
+    ],
+  };
+  const parsed = (await visionJson(params, {timeout: 150_000})) as AnchoredOutput;
+  if (!parsed || !Array.isArray(parsed.rows)) {
+    throw new Error('Anchored read returned no rows');
+  }
+  return mapAnchoredToExtractedPage(template, parsed);
+}
+
+/**
+ * Safeguard (B): read ONLY where the "Delivery" column is physically printed, with no expected
+ * column order stated, and return its 1-based position (or null if it can't be read). The caller
+ * turns that into the anchor version (col 1 -> v2, col 4 -> v1). This is the reliable version
+ * signal: the classifier confidently mis-reads some V2 pages as V1 (QA page 16), but asked this way
+ * the model reads the Delivery position correctly. Degrades to null (caller falls back to the
+ * classify-based gate) rather than throwing. Cheap: a tiny header-only read.
+ */
+export async function locateDeliveryColumn(pdfBase64: string): Promise<number | null> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const params = {
+    model: EXTRACT_MODEL,
+    max_tokens: 500,
+    output_config: {format: {type: 'json_schema', schema: DELIVERY_LOCATOR_SCHEMA}},
+    messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: buildDeliveryLocatorPrompt()}]}],
+  };
+  try {
+    return deliveryColumnFromLocator((await visionJson(params, {timeout: 30_000})) as DeliveryLocatorOutput);
+  } catch {
+    return null;
+  }
 }
 
 /** The writer's reference page (an earlier confirmed scan of the same page + its
