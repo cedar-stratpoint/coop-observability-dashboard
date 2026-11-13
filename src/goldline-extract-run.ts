@@ -23,11 +23,15 @@ import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 import {
   ANCHORED_EXTRACTION_SCHEMA,
+  DELIVERY_LOCATOR_SCHEMA,
   buildAnchoredPrompt,
   buildAnchoredSystemPrompt,
+  buildDeliveryLocatorPrompt,
+  deliveryColumnFromLocator,
   mapAnchoredToExtractedPage,
   type AnchoredMapResult,
   type AnchoredOutput,
+  type DeliveryLocatorOutput,
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
 
@@ -429,6 +433,29 @@ export async function extractInventoryPageAnchored(
     throw new Error('Anchored read returned no rows');
   }
   return mapAnchoredToExtractedPage(template, parsed);
+}
+
+/**
+ * Safeguard (B): read ONLY where the "Delivery" column is physically printed, with no expected
+ * column order stated, and return its 1-based position (or null if it can't be read). The caller
+ * turns that into the anchor version (col 1 -> v2, col 4 -> v1). This is the reliable version
+ * signal: the classifier confidently mis-reads some V2 pages as V1 (QA page 16), but asked this way
+ * the model reads the Delivery position correctly. Degrades to null (caller falls back to the
+ * classify-based gate) rather than throwing. Cheap: a tiny header-only read.
+ */
+export async function locateDeliveryColumn(pdfBase64: string): Promise<number | null> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const params = {
+    model: EXTRACT_MODEL,
+    max_tokens: 500,
+    output_config: {format: {type: 'json_schema', schema: DELIVERY_LOCATOR_SCHEMA}},
+    messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: buildDeliveryLocatorPrompt()}]}],
+  };
+  try {
+    return deliveryColumnFromLocator((await visionJson(params, {timeout: 30_000})) as DeliveryLocatorOutput);
+  } catch {
+    return null;
+  }
 }
 
 /** The writer's reference page (an earlier confirmed scan of the same page + its
