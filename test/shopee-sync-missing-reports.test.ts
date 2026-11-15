@@ -19,7 +19,8 @@ const WK1 = range('2026-10-12', 7);
 const WK2 = range('2026-10-19', 7);
 const ads = (from: string, to: string): ReportPeriod => ({reportType: 'ads', periodFrom: from, periodTo: to});
 const sku = (from: string, to: string): ReportPeriod => ({reportType: 'sku_detail', periodFrom: from, periodTo: to});
-const WK1_REPORTS = exactReports(WK1);
+// Traffic and product fully covered everywhere, so the Ads/SKU tests below test only Ads/SKU.
+const WK1_REPORTS = [...exactReports(WK1), ...exactReports(ALL, ['traffic', 'product_overview'])];
 const WORKER = 'worker-secret-for-tests';
 
 describe('missingReportWeeks', () => {
@@ -43,6 +44,28 @@ describe('missingReportWeeks', () => {
   it('a week older than the 35-day reach is left for the Monday import', () => {
     const old = range('2026-08-31', 7);
     expect(missingReportWeeks([...old, ...ALL], exactReports(ALL), NOW)).toEqual([]);
+  });
+});
+
+describe('traffic and product_overview: Sync fills them too (owner 2026-11-16: no Monday-import dependency)', () => {
+  const tr = (from: string, to: string): ReportPeriod => ({reportType: 'traffic', periodFrom: from, periodTo: to});
+  const pr = (from: string, to: string): ReportPeriod => ({reportType: 'product_overview', periodFrom: from, periodTo: to});
+  const adsSku = exactReports(ALL, ['ads', 'sku_detail']);
+  it('a loaded week with Ads and SKU but no traffic or product is requested, and only those two files go to the worker', () => {
+    expect(missingReportWeeks(ALL, adsSku, NOW)).toEqual(['2026-10-12', '2026-10-19']);
+    expect(wireWindows(windowsFor(WK2, NOW), ALL, adsSku)[0].files).toEqual(['traffic', 'product_overview']);
+  });
+  it('per-day reports: a window covering only part of the week still asks for the week (newest per day wins, so no double count)', () => {
+    const periods = [...exactReports(ALL), tr('2026-10-22', '2026-10-28'), pr('2026-10-22', '2026-10-28')].filter((p) => !(p.periodFrom === '2026-10-19' && (p.reportType === 'traffic' || p.reportType === 'product_overview')));
+    expect(missingReportWeeks(ALL, periods, NOW)).toEqual(['2026-10-19']);
+    expect(wireWindows(windowsFor(WK2, NOW), ALL, periods)[0].files).toEqual(['traffic', 'product_overview']);
+  });
+  it('a week fully covered by traffic and product (any windows) is not requested', () => {
+    const periods = [...exactReports(ALL, ['ads', 'sku_detail']), tr('2026-10-12', '2026-10-21'), tr('2026-10-22', '2026-10-28'), pr('2026-10-12', '2026-10-28')];
+    expect(missingReportWeeks(ALL, periods, NOW)).toEqual([]);
+  });
+  it('the Done check names a still-missing traffic file', () => {
+    expect(remainingReports(WK2, ALL, adsSku, NOW)).toEqual(['2026-10-19..2026-10-25/traffic', '2026-10-19..2026-10-25/product_overview']);
   });
 });
 

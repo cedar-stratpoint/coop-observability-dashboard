@@ -7,19 +7,21 @@ import type {ReportType} from '../shopee-import/types';
 import {finalFrom, oldestReachable, yesterdayPh} from './missing-days';
 import type {SyncWindow} from './windows';
 
-/** The weekly reports a sync can load for a week whose sales are already in. Traffic and Product Overview stay with the Monday import. */
-export const REPORT_FILES = ['ads', 'sku_detail'] as const satisfies readonly ReportType[];
+/** The weekly reports a sync loads for a week whose sales are already in: all four, so no week waits for a manual Monday run (owner 2026-11-16). */
+export const REPORT_FILES = ['ads', 'sku_detail', 'traffic', 'product_overview'] as const satisfies readonly ReportType[];
+/** Stored per day, newest run wins, so an overlapping export never double counts: requested until every day of the week is covered. */
+const PER_DAY: ReadonlySet<ReportType> = new Set(['traffic', 'product_overview']);
 const DAY = 86_400_000;
 const shift = (d: string, n: number): string => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 export const weekDays = (monday: string): string[] => Array.from({length: 7}, (_, i) => shift(monday, i));
 
-/** The report files of a week that no accepted window touches yet. */
+/** The report files a week still needs: Ads/SKU when no accepted window touches it (exact windows), traffic/product until all 7 days are covered. */
 export function missingWeekReports(monday: string, periods: readonly ReportPeriod[]): ReportType[] {
   const r = reportsByWeek(periods, [monday])[monday];
-  return REPORT_FILES.filter((t) => r[t] === 'missing');
+  return REPORT_FILES.filter((t) => (PER_DAY.has(t) ? r[t] !== 'full' : r[t] === 'missing'));
 }
 
-/** Mondays (oldest first) of closed, final, reachable weeks with all 7 sales days loaded and an Ads or SKU file missing. */
+/** Mondays (oldest first) of closed, final, reachable weeks with all 7 sales days loaded and a weekly report (Ads, SKU, Traffic, Product Overview) missing. */
 export function missingReportWeeks(loadedDays: readonly string[], periods: readonly ReportPeriod[], now: Date): string[] {
   const oldest = oldestReachable(now);
   return weeksCoverage(loadedDays, yesterdayPh(now))

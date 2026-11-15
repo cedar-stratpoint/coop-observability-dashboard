@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## Unreleased (2026-11-16): Shopee Sync also fills Traffic and Product Overview for a loaded week
+- **Decision (owner):** Sync must do the whole weekly job, so a week never depends on the manual Monday export (Vince's run). Before, a closed week whose
+  sales days were already loaded got only Ads and SKU from Sync; Traffic and Product Overview "stayed with the Monday import", so a skipped Monday lost them
+  for good and nothing flagged it (seen on PROD for Nov 9-15).
+- `src/shopee-sync/missing-reports.ts`: `REPORT_FILES` now holds all four weekly reports. Detection, the files sent to the worker and the Done check all read it.
+  Traffic and Product Overview are stored per day (newest run wins), so they are requested until all 7 days are covered; Ads and SKU keep the
+  exact-window rule (an overlapping window is never re-requested).
+- Backend only: the card copy is unchanged for now (owner: card later). Plan: `knowledge/tasks/2026-11-16-sync-fills-all-weekly-files-plan.md`.
+
 ## v1.23.0 (2026-11-11): Website customers in Ask Coop and on the Website CRM page, plus Business Health Report Refresh sync (prod release)
 Ships, on top of `main` (staging and main have diverged by ~550 commits):
 - the customer retention and outreach work (#584 → staging #585), its two follow-up fixes (#595 → #596, #599 → #600);
