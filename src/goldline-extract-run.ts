@@ -279,6 +279,25 @@ function readThinkingOff(effort: string | undefined): boolean {
 }
 
 /**
+ * L2 + L3 cost levers for the cheap vision calls (classify + detect) — flagged, default OFF,
+ * and never touching the inventory read's numbers (that call stays on EXTRACT_MODEL / Sonnet).
+ *  - L3: GOLDLINE_CHEAP_READ_MODEL (e.g. "claude-haiku-5-5") runs classify + detect on a cheaper
+ *    model; unset = EXTRACT_MODEL (today's behavior).
+ *  - L2: GOLDLINE_CACHE_CHEAP_READS=1 caches their (identical-every-page) system prompt via
+ *    cache_control — a free input-token win, ignored by the API if the prompt is under the
+ *    cacheable minimum, so it is harmless when it does not help.
+ */
+function cheapReadModel(): string {
+  const v = (process.env.GOLDLINE_CHEAP_READ_MODEL ?? '').trim();
+  return v || EXTRACT_MODEL;
+}
+function cheapSystem(text: string): string | Array<{type: string; text: string; cache_control?: {type: string}}> {
+  return (process.env.GOLDLINE_CACHE_CHEAP_READS ?? '').trim() === '1'
+    ? [{type: 'text', text, cache_control: {type: 'ephemeral'}}]
+    : text;
+}
+
+/**
  * Identify which page of the Nichido form a scan is, from its footer. Returns 1–6,
  * or 0 if it isn't a recognizable form page. A cheap, low-token call so the route can
  * pick the right manifest without asking the user which page they uploaded.
@@ -286,9 +305,9 @@ function readThinkingOff(effort: string | undefined): boolean {
 export async function detectPage(pdfBase64: string): Promise<number> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const params = {
-    model: EXTRACT_MODEL,
+    model: cheapReadModel(),
     max_tokens: 300,
-    system: buildPageDetectPrompt(),
+    system: cheapSystem(buildPageDetectPrompt()),
     output_config: {format: {type: 'json_schema', schema: PAGE_DETECT_SCHEMA}},
     // The user turn MUST include a text block alongside the document — a document-only
     // message is rejected (a 400 that broke ALL PDF extraction, incl. page 1).
@@ -312,11 +331,11 @@ export async function detectPage(pdfBase64: string): Promise<number> {
 export async function classifyPage(pdfBase64: string): Promise<PageClassification> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const params = {
-    model: EXTRACT_MODEL,
+    model: cheapReadModel(),
     // 800 (not 500): a truncated response yields unterminated JSON, which we'd rather
     // not hit at all — the classify output is tiny, so the headroom is cheap.
     max_tokens: 800,
-    system: buildPageClassifyPrompt(),
+    system: cheapSystem(buildPageClassifyPrompt()),
     output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
     // A document-only user turn is rejected (400); always pair the PDF with text.
     messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: 'Classify this page. Return JSON only.'}]}],
