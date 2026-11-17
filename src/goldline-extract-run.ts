@@ -204,6 +204,26 @@ async function visionJson(params: unknown, opts: {timeout: number; tries?: numbe
 }
 
 /**
+ * L1 cost lever (flagged, default OFF). GOLDLINE_READ_EFFORT ∈ low|medium|high|xhigh|max
+ * sets output_config.effort on the inventory read (Sonnet 5.5 defaults to high), so the
+ * read "thinks less" and bills fewer output tokens — output is ~68% of the per-run cost.
+ * GOLDLINE_READ_THINKING=between_tools additionally turns thinking off (Sonnet 5.5 rejects
+ * {type:'disabled'}; between_tools is accepted only at effort high or below). Unset = today's
+ * behavior, so a cost A/B is a pure env toggle that reverts instantly. Scoped to
+ * extractInventoryPage, the output-heavy call.
+ */
+const READ_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+function readEffort(): string | undefined {
+  const v = (process.env.GOLDLINE_READ_EFFORT ?? '').trim().toLowerCase();
+  return READ_EFFORTS.has(v) ? v : undefined;
+}
+/** between_tools is valid only at effort high or below, so refuse it at xhigh/max (would 400). */
+function readThinkingOff(effort: string | undefined): boolean {
+  const on = (process.env.GOLDLINE_READ_THINKING ?? '').trim().toLowerCase() === 'between_tools';
+  return on && effort !== 'xhigh' && effort !== 'max';
+}
+
+/**
  * Identify which page of the Nichido form a scan is, from its footer. Returns 1–6,
  * or 0 if it isn't a recognizable form page. A cheap, low-token call so the route can
  * pick the right manifest without asking the user which page they uploaded.
@@ -282,6 +302,9 @@ export async function extractInventoryPage(
     ? buildLegacyManifestPrompt(page)
     : buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1');
 
+  // L1 cost lever (flagged, default off): lower effort / thinking off to cut output tokens.
+  const effort = readEffort();
+  const thinkingOff = readThinkingOff(effort);
   const params = {
     model: EXTRACT_MODEL,
     // Pages 2 & 4 have ~67–68 rows; 8000 tokens truncated the JSON. 16000 covers the
@@ -291,10 +314,16 @@ export async function extractInventoryPage(
     // under the model's minimum cacheable size, which is harmless).
     system: [{type: 'text', text: system, cache_control: {type: 'ephemeral'}}],
     // Structured output — the first text block is valid JSON matching the schema.
-    output_config: {format: {type: 'json_schema', schema: isLegacy ? LEGACY_EXTRACTION_SCHEMA : EXTRACTION_SCHEMA}},
-    // Note: no `thinking` param. Sonnet 5 rejects `{type:'disabled'}` with a 400
-    // ("send {type:'between_tools'} instead"); for a pure, no-tools extraction we
-    // just omit it and let the model default. Keep it omitted unless we add tools.
+    // output_config.effort is added only when GOLDLINE_READ_EFFORT is set (L1); otherwise
+    // the model's default effort (high) stands, i.e. today's behavior.
+    output_config: {
+      format: {type: 'json_schema', schema: isLegacy ? LEGACY_EXTRACTION_SCHEMA : EXTRACTION_SCHEMA},
+      ...(effort ? {effort} : {}),
+    },
+    // No `thinking` param by default. Sonnet 5.5 rejects `{type:'disabled'}` with a 400
+    // ("send {type:'between_tools'} instead"); the L1 thinking-off path sends between_tools,
+    // which readThinkingOff() only allows at effort high or below. Omitted otherwise.
+    ...(thinkingOff ? {thinking: {type: 'between_tools'}} : {}),
     messages: [{role: 'user', content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: readText(manifest, profile)}]}],
   };
 
