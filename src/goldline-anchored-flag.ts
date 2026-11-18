@@ -8,9 +8,23 @@
  * company is listed, and off for an empty company id.
  */
 export function templateReadEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_TEMPLATE_READ_COMPANIES);
+}
+
+/**
+ * L7 batch mode (plan: knowledge/tasks/2026-11-18-l7-batch-mode-scope.md). True when a company's
+ * anchored read should be deferred to the Anthropic Message Batches API (50% off, async) instead of
+ * read inline, via the comma-separated `GOLDLINE_BATCH_READ_COMPANIES` env. Fail-closed: off unless
+ * listed. Only the template (anchored) path batches, so this is effective only where
+ * `templateReadEnabled` is also on; off is byte-identical to the synchronous read.
+ */
+export function batchReadEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_BATCH_READ_COMPANIES);
+}
+
+function companyInEnv(companyId: string, raw: string | undefined): boolean {
   if (!companyId) return false;
-  const raw = process.env.GOLDLINE_TEMPLATE_READ_COMPANIES ?? '';
-  return raw
+  return (raw ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)

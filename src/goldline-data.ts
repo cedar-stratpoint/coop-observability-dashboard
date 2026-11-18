@@ -4,6 +4,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
+import type {FormVersion} from './goldline-extract';
 import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
@@ -47,7 +48,12 @@ const SALES_CHUNK = 2000;
 // 'queued' is the server-driven path's pre-read state: the page is split + stored, waiting for
 // the pump to read it. The pump claims it (→ 'processing') before calling the reader, so a
 // 'queued' row is never mid-read (and the stale-processing reaper only ever sees 'processing').
-export type UploadStatus = 'queued' | 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
+// 'queued_batch' (L7 batch mode, flag-gated) is set after classify+locate run but the expensive
+// anchored read was submitted to the Anthropic Message Batches API instead of read inline; the
+// batch poller (goldline-batch-read.ts) later ingests the result and advances it to needs_review /
+// rejected / failed. Like 'queued', it is NOT mid-read, so the stale-'processing' reaper ignores it;
+// the poller owns its lifecycle.
+export type UploadStatus = 'queued' | 'queued_batch' | 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
 export type UploadRow = {
@@ -139,7 +145,7 @@ export async function createUpload(input: {
 export async function setUploadStatus(
   id: string,
   status: UploadStatus,
-  extra?: {rejectReason?: string; pageCount?: number; errorDetail?: string | null},
+  extra?: {rejectReason?: string; pageCount?: number; errorDetail?: string | null; anthropicBatchId?: string | null},
 ): Promise<void> {
   const supa = db();
   const patch: Record<string, unknown> = {status};
@@ -147,8 +153,54 @@ export async function setUploadStatus(
   if (extra?.pageCount !== undefined) patch.page_count = extra.pageCount;
   // Scrubbed technical detail for diagnosis (never shown prominently in the UI).
   if (extra?.errorDetail !== undefined) patch.error_detail = extra.errorDetail?.slice(0, 500) ?? null;
+  // L7 batch mode: the Anthropic Message Batch id this page's anchored read was submitted in, so
+  // the poller can find and ingest it. Cleared (null) once the page leaves 'queued_batch'.
+  if (extra?.anthropicBatchId !== undefined) patch.anthropic_batch_id = extra.anthropicBatchId;
   const res = await supa.from('uploads').update(patch).eq('id', id);
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
+}
+
+/**
+ * L7 batch mode: the pages waiting on a Message Batch to return. One row per 'queued_batch' upload
+ * with the batch id and the (version, page) the poller needs to rebuild the template and map the
+ * result. Oldest first, bounded, so one poll cycle ingests a steady slice. `submittedAt` =
+ * claimed_at (when the batch was submitted) for the stale-batch fallback.
+ */
+export type QueuedBatchUpload = {
+  uploadId: string;
+  companyId: string;
+  filename: string;
+  anthropicBatchId: string;
+  version: FormVersion | null;
+  page: number | null;
+  submittedAt: string | null;
+};
+export async function listQueuedBatchUploads(limit = 200): Promise<QueuedBatchUpload[]> {
+  if (!goldlineConfigured()) return [];
+  const res = await db()
+    .from('uploads')
+    .select('id, company_id, filename, anthropic_batch_id, form_version, page_no, claimed_at')
+    .eq('status', 'queued_batch')
+    .eq('kind', 'inventory_pdf')
+    .not('anthropic_batch_id', 'is', null)
+    .order('claimed_at', {ascending: true, nullsFirst: true})
+    .limit(limit);
+  if (res.error) {
+    console.error('listQueuedBatchUploads', res.error.message);
+    return [];
+  }
+  return (res.data ?? []).map((r) => {
+    const row = r as {id: string; company_id: string; filename: string; anthropic_batch_id: string; form_version: string | null; page_no: number | null; claimed_at: string | null};
+    return {
+      uploadId: row.id,
+      companyId: row.company_id,
+      filename: row.filename,
+      anthropicBatchId: row.anthropic_batch_id,
+      version: (row.form_version as FormVersion | null) ?? null,
+      page: row.page_no,
+      submittedAt: row.claimed_at,
+    };
+  });
 }
 
 // A read cannot outlive the read-page route's maxDuration (600s), so an inventory page still

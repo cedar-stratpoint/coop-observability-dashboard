@@ -36,6 +36,7 @@ type KindFilter = 'all' | UploadKind;
 
 const STATUS_META: Record<UploadStatus, {label: string; cls: string; Icon: typeof Clock}> = {
   queued: {label: 'Queued', cls: 'text-muted-foreground bg-muted', Icon: Clock},
+  queued_batch: {label: 'Processing', cls: 'text-muted-foreground bg-muted', Icon: Loader2},
   processing: {label: 'Processing', cls: 'text-muted-foreground bg-muted', Icon: Loader2},
   needs_review: {label: 'Needs review', cls: 'text-amber-700 bg-amber-500/15 dark:text-amber-400', Icon: AlertTriangle},
   committed: {label: 'Committed', cls: 'text-emerald-700 bg-emerald-500/15 dark:text-emerald-400', Icon: CheckCircle2},
