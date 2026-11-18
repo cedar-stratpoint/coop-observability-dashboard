@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Environments: recognise the Pro Supabase projects (migration in progress)
+
+The Coop archive Supabase is moving to new Pro-plan projects: Staging `syxw…wdvw` to `aufe…vsps`, Production `qkxb…wipi` to `sdws…trow`. `src/coop-env.ts` now names the Pro refs as each environment's `dbRef`. The old refs move to a new `legacyDbRefs` list, so a deployment not yet repointed (or rolled back) keeps its env pill and the fail-closed production guard still classifies it correctly. Without this, Staging pointed at the new project would read as an unknown database and be treated as Production.
+
+**Decisions.** Env var names stay the same (`SUPABASE_URL_ARCHIVE`, `SUPABASE_SERVICE_ROLE_KEY_ARCHIVE`, `EXPLORE_DATABASE_URL`, `CHAT_RO_JWT_SECRET`); only their values change, per Vercel environment. Legacy `gl_*` tables and the `goldline-uploads` bucket are not copied, because Goldline data lives in Nichido. Staging is cut over first, with the old project left running as the rollback. Production follows only after an explicit go-ahead. The POS side is in `../zoomy-pos/CHANGELOG.md`.
+
 ## 2026-11-12 — Goldline template-anchored extraction: set-aside retry safety net
 
 A real inventory page misread as "sales"/"blank" is today rejected (set aside) with no retry, so it is silently lost. Adds a second-chance read: `shouldRetrySetAside(kind, confidence)` + `SET_ASIDE_MIN_CONFIDENCE` (0.75) in goldline-anchored-extract.ts; `runInventoryRead` now re-classifies ONCE (a blind second read) when a sales/blank classification is low-confidence, and keeps the retry when it reads as a form or more confidently, before falling through to the set-aside branches. A confident sales/blank (the common blanks and sales pages) never retries, so cost and the correctly-set-aside pages are unaffected. Flag-gated behind `GOLDLINE_TEMPLATE_READ_COMPANIES` (templateReadEnabled), so flag-off is byte-identical; the retry note is stashed in `read_logs.detail.setAsideRetry`. Tests cover the retry gate; full suite no new failures.

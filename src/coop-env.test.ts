@@ -31,10 +31,12 @@ describe('coop environments', () => {
 });
 
 describe('environment from the database (not the address)', () => {
-  const STG = 'https://syxwixxzmytvhwhkwdvw.supabase.co';
-  const PROD = 'https://qkxbwzdxhwcbwgriwipi.supabase.co';
+  const STG = 'https://aufeohbqrxpvylfdvsps.supabase.co';
+  const PROD = 'https://sdwspafqbalwzwiutrow.supabase.co';
+  const OLD_STG = 'https://syxwixxzmytvhwhkwdvw.supabase.co';
+  const OLD_PROD = 'https://qkxbwzdxhwcbwgriwipi.supabase.co';
   it('reads the project ref from the database URL', () => {
-    expect(dbRefOf(PROD)).toBe('qkxbwzdxhwcbwgriwipi');
+    expect(dbRefOf(PROD)).toBe('sdwspafqbalwzwiutrow');
     expect(dbRefOf('not a url')).toBeNull();
     expect(dbRefOf(undefined)).toBeNull();
   });
@@ -53,14 +55,20 @@ describe('environment from the database (not the address)', () => {
     expect(guardEnvKey(undefined)).toBe('production');
     expect(guardEnvKey('https://other.supabase.co')).toBe('production');
   });
+  it('still recognises the pre-Pro databases (repoint/rollback window)', () => {
+    expect(resolveEnv(OLD_STG, 'coop-brand-os.vercel.app').key).toBe('staging');
+    expect(resolveEnv(OLD_PROD, 'localhost:3000').key).toBe('production');
+    expect(guardEnvKey(OLD_STG)).toBe('staging');
+    expect(guardEnvKey(OLD_PROD)).toBe('production');
+  });
   it('uses the first value of a forwarded host list', () => {
     expect(envForHost('coop-brand-os.vercel.app, proxy.internal').key).toBe('production');
   });
 });
 
 describe('Nichido (Goldline) project pairs with the archive', () => {
-  const STG = 'https://syxwixxzmytvhwhkwdvw.supabase.co';
-  const PROD = 'https://qkxbwzdxhwcbwgriwipi.supabase.co';
+  const STG = 'https://aufeohbqrxpvylfdvsps.supabase.co';
+  const PROD = 'https://sdwspafqbalwzwiutrow.supabase.co';
   const N_STG = 'https://jcqlnrvplaapvcxyhcns.supabase.co';
   const N_PROD = 'https://pfwrkqsjmetibslltmok.supabase.co';
   it('accepts each environment with its own Nichido project', () => {

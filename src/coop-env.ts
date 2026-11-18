@@ -14,6 +14,9 @@ export type CoopEnvKey = 'staging' | 'production';
 export type CoopEnv = {
   key: CoopEnvKey;
   dbRef: string; // the Supabase project ref this environment's database has
+  // Earlier databases of the same environment (the pre-Pro projects, Nov 2026), still
+  // recognised so a deployment not yet repointed, or rolled back, keeps its label/guard.
+  legacyDbRefs: readonly string[];
   nichidoRef: string; // the Nichido project that holds this environment's Goldline data
   label: string;
   url: string; // canonical origin
@@ -28,20 +31,22 @@ export const COOP_ENVS: readonly CoopEnv[] = [
     label: 'Staging',
     url: 'https://coop-brand-os-staging.vercel.app',
     host: 'coop-brand-os-staging.vercel.app',
-    dbRef: 'syxwixxzmytvhwhkwdvw',
+    dbRef: 'aufeohbqrxpvylfdvsps',
+    legacyDbRefs: ['syxwixxzmytvhwhkwdvw'],
     nichidoRef: 'jcqlnrvplaapvcxyhcns',
     tone: 'oklch(0.62 0.15 250)', // blue
-    dbLabel: 'Staging Supabase (syxw…wdvw)',
+    dbLabel: 'Staging Supabase (aufe…vsps)',
   },
   {
     key: 'production',
     label: 'Production',
     url: 'https://coop-brand-os.vercel.app',
     host: 'coop-brand-os.vercel.app',
-    dbRef: 'qkxbwzdxhwcbwgriwipi',
+    dbRef: 'sdwspafqbalwzwiutrow',
+    legacyDbRefs: ['qkxbwzdxhwcbwgriwipi'],
     nichidoRef: 'pfwrkqsjmetibslltmok',
     tone: 'oklch(0.6 0.2 305)', // purple
-    dbLabel: 'Coop production Supabase (qkxb…wipi)',
+    dbLabel: 'Coop production Supabase (sdws…trow)',
   },
 ] as const;
 
@@ -57,7 +62,8 @@ export function dbRefOf(url: string | null | undefined): string | null {
 }
 
 /** The environment a database belongs to, or null if it's neither known database. */
-export const envForDbRef = (ref: string | null | undefined): CoopEnv | null => COOP_ENVS.find((e) => e.dbRef === ref) ?? null;
+export const envForDbRef = (ref: string | null | undefined): CoopEnv | null =>
+  ref ? (COOP_ENVS.find((e) => e.dbRef === ref || e.legacyDbRefs.includes(ref)) ?? null) : null;
 
 /**
  * Which environment this deployment is — from its database. For the label only, an
