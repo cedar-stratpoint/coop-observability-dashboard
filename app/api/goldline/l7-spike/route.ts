@@ -58,10 +58,13 @@ export async function POST(req: Request): Promise<Response> {
     company?: unknown;
     pages?: unknown;
     batchId?: unknown;
+    detail?: unknown;
   } | null;
   const action = typeof body?.action === 'string' ? body.action : '';
   const company = typeof body?.company === 'string' && body.company ? body.company : 'goldline';
   const pages = parsePages(body?.pages);
+  // detail:'full' also returns every page's cell values (for a row/column verification diff).
+  const detail = body?.detail === 'full';
 
   if (action === 'submit') {
     if (pages.length === 0) return json({error: 'pages[] is required for submit.'}, 400);
@@ -103,10 +106,15 @@ export async function POST(req: Request): Promise<Response> {
       store: string;
       rows: number;
       filledBlanks: number;
+      blankRows: number;
       extras: number;
       input: number;
       output: number;
     }> = [];
+    // Every page's cell values (only when detail:'full'): {pdfPage, item_code, the five count
+    // columns, off_manifest, confidence} per row, so a row/column diff can line them up by code.
+    const cells: Array<{pdfPage: number; rows: unknown[]}> = [];
+    const COUNT_COLS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
     for (const r of results) {
       if (r.error || !r.output) {
         errors.push({custom_id: r.custom_id, error: r.error ?? 'no output'});
@@ -125,16 +133,35 @@ export async function POST(req: Request): Promise<Response> {
         continue;
       }
       const mapped = mapAnchoredToExtractedPage(template, r.output);
+      const rows = mapped.page.rows as Array<Record<string, unknown>>;
+      // A row is "blank" when all five count columns are null (the form row had no numbers).
+      const blankRows = rows.filter((row) => COUNT_COLS.every((c) => row[c] === null || row[c] === undefined)).length;
       summaries.push({
         pdfPage: p.pdfPage,
         version: p.version,
         store: mapped.page.store_code,
-        rows: mapped.page.rows.length,
+        rows: rows.length,
         filledBlanks: mapped.filledBlanks,
+        blankRows,
         extras: mapped.extras,
         input: r.usage?.input ?? 0,
         output: r.usage?.output ?? 0,
       });
+      if (detail) {
+        cells.push({
+          pdfPage: p.pdfPage,
+          rows: rows.map((row) => ({
+            item_code: row.item_code,
+            stockroom: row.stockroom ?? null,
+            drawer: row.drawer ?? null,
+            selling_area: row.selling_area ?? null,
+            delivery: row.delivery ?? null,
+            ending_on_hand: row.ending_on_hand ?? null,
+            off_manifest: row.off_manifest ?? false,
+            confidence: row.confidence ?? null,
+          })),
+        });
+      }
     }
     summaries.sort((a, b) => a.pdfPage - b.pdfPage);
     return json({
@@ -142,6 +169,7 @@ export async function POST(req: Request): Promise<Response> {
       status,
       totals: {pages: summaries.length, input, output, errors: errors.length},
       pages: summaries,
+      ...(detail ? {cells} : {}),
       errors,
     });
   }
