@@ -1,9 +1,9 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
-import {classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {buildAnchoredParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {templateReadEnabled} from './goldline-anchored-flag';
+import {batchReadEnabled, templateReadEnabled} from './goldline-anchored-flag';
 import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
@@ -67,8 +67,12 @@ export async function runInventoryRead(args: {
   storeScope: string[] | null | undefined;
   batchStore: string | null;
   emit?: Emit;
+  // L7 batch mode: when true, read the anchored page INLINE even if batch mode is enabled for the
+  // company. The batch poller sets this on its fallback path (a batch slot that errored/expired), so
+  // a failed batch read is retried synchronously instead of being re-submitted to a batch forever.
+  forceSync?: boolean;
 }): Promise<ReadResult> {
-  const {companyId, uploadId, filename, fileSize, storeScope, batchStore, emit} = args;
+  const {companyId, uploadId, filename, fileSize, storeScope, batchStore, emit, forceSync} = args;
   const bytes = args.bytes instanceof Uint8Array ? args.bytes : new Uint8Array(args.bytes);
   const pdfBase64 = Buffer.from(bytes).toString('base64');
   // Accumulates what we learn about this page so the read_logs row is complete no matter
@@ -219,6 +223,19 @@ export async function runInventoryRead(args: {
         pageKey: correctedPk,
         classification: {...cls, version: av, version_corrected_from: cls.version, version_source: versionSource, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
       }).catch((e) => console.error('goldline read: saveClassification (version correction) failed', msg(e)));
+    }
+    // L7 batch mode (flag-gated): the fast classify + locate are done and the version/template are
+    // known, so instead of running the expensive anchored read inline, submit it to the Anthropic
+    // Message Batches API (50% off) and leave the page 'queued_batch' for the poller to ingest. Only
+    // the template (anchored) path batches; the free read and forceSync (the poller's fallback) stay
+    // inline. Classify + locate usage is already tallied; the anchored read's usage is recorded by
+    // the poller when the batch returns. Flag-off is byte-identical to the synchronous read below.
+    if (template && !forceSync && batchReadEnabled(companyId)) {
+      const batchParams = buildAnchoredParams(extractB64, template, profile);
+      const anthropicBatchId = await submitAnchoredBatch([{custom_id: uploadId, params: batchParams}]);
+      await setUploadStatus(uploadId, 'queued_batch', {pageCount: page, anthropicBatchId});
+      await logReadEvent({...rec, status: 'queued_batch', stage: 'submitted', usage: readUsageSnapshot()});
+      return {http: 202, body: {uploadId, status: 'queued_batch', page, batchId: anthropicBatchId, formVersion: av}};
     }
     let extracted: ExtractedPage;
     let anchored: AnchoredMapResult | null = null;
