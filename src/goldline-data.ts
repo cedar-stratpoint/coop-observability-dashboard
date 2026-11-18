@@ -459,6 +459,60 @@ export async function deleteScanGroup(companyId: string, source: string): Promis
   return scoped.length;
 }
 
+/** Delete ONE upload batch (a single drop), not the whole scan source. Used by a duplicate
+ *  tile so removing a re-upload leaves the original drop (and any other re-uploads) intact.
+ *  Same irreversible cascade as deleteScanGroup: committed data first (fail loud), then
+ *  extractions, then stored files, then the rows. Company-scoped. */
+export async function deleteBatch(companyId: string, batchId: string): Promise<number> {
+  if (!goldlineConfigured() || !batchId) return 0;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,batch_id,storage_path').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; batch_id: string | null; storage_path: string | null}>;
+  if (!rows.length) return 0;
+  const pathById = new Map(rows.map((r) => [r.id, r.storage_path]));
+  for (let i = 0; i < rows.length; i += 100) {
+    const ids = rows.slice(i, i + 100).map((r) => r.id);
+    const inv = await supa.from('inventory').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (inv.error) throw new Error(`inventory delete failed: ${inv.error.message}`);
+    const sales = await supa.from('sales').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (sales.error) throw new Error(`sales delete failed: ${sales.error.message}`);
+    const ext = await supa.from('extractions').delete().eq('company_id', companyId).in('upload_id', ids);
+    if (ext.error) throw new Error(`extractions delete failed: ${ext.error.message}`);
+    const paths = ids.map((id) => pathById.get(id)).filter((p): p is string => typeof p === 'string');
+    if (paths.length) {
+      const rm = await supa.storage.from(GOLDLINE_BUCKET).remove(paths);
+      if (rm.error) console.error('deleteBatch: storage remove failed', rm.error.message);
+    }
+    const del = await supa.from('uploads').delete().eq('company_id', companyId).in('id', ids);
+    if (del.error) throw new Error(`uploads delete failed: ${del.error.message}`);
+  }
+  return rows.length;
+}
+
+/** What deleting ONE batch (a single drop) will take with it — shown in the duplicate tile's
+ *  delete confirmation, scoped to the batch instead of the whole scan source. */
+export async function scanBatchSummary(companyId: string, batchId: string): Promise<ScanGroupSummary> {
+  if (!goldlineConfigured() || !batchId) return {files: 0, pages: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  const scoped = (await fetchAllRows('uploads', (from, to) =>
+    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
+  const stores = new Set<string>();
+  const bas = new Set<string>();
+  const byStatus = pagesByStatus(scoped);
+  const committed = byStatus.committed ?? 0;
+  const needsReview = byStatus.needs_review ?? 0;
+  const issues = (byStatus.failed ?? 0) + (byStatus.rejected ?? 0);
+  for (const r of scoped) {
+    const c = (r.classification ?? {}) as Record<string, unknown>;
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const store = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    if (store) stores.add(store);
+    if (typeof c.consultant === 'string' && c.consultant.trim()) bas.add(c.consultant.trim());
+  }
+  return {files: scoped.length, pages: distinctPages(scoped.map((r) => r.filename)), committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
+}
+
 /** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
  *  Goes through the upsert_sales RPC, which encrypts the peso figures and units into
  *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql,
@@ -754,7 +808,7 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
       (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
-          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_name,form_version,page_kind')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind')
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})

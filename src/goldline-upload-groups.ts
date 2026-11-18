@@ -7,7 +7,7 @@
 
 import {scanPosition} from './upload-batch';
 
-export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null};
+export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null};
 
 export type UploadGroup = {
   key: string;
@@ -34,6 +34,13 @@ export type UploadGroup = {
   byStatus: Record<string, number>;
   /** True when this group is a split multi-page scan (not a lone file). */
   isSplit: boolean;
+  /** The upload batch this tile is one drop of, when the drop was batched (a multi-file
+   *  upload). Null for legacy / un-batched rows, which still group by source + day. */
+  batchId: string | null;
+  /** Set when this drop is a RE-UPLOAD of a scan already uploaded earlier (same source,
+   *  later firstAt): points at the first / canonical drop so the tile can badge "Duplicate"
+   *  and name the original. Null for the first (canonical) drop and for lone files. */
+  duplicateOf: {key: string; name: string | null; day: string} | null;
 };
 
 /** The source name a filename groups under: the scan name for a split page, else the
@@ -42,8 +49,11 @@ export function uploadSource(filename: string): string {
   return scanPosition(filename)?.source ?? filename;
 }
 
-/** The group key for one upload: `source|YYYY-MM-DD` (day from created_at). */
-export function uploadGroupKey(u: Pick<GroupableUpload, 'filename' | 'created_at'>): string {
+/** The group key for one upload: the batch id when the drop was batched (so each drop is its
+ *  own group, even re-uploads of the same scan), else `source|YYYY-MM-DD` (legacy / un-batched). */
+export function uploadGroupKey(u: Pick<GroupableUpload, 'filename' | 'created_at' | 'batch_id'>): string {
+  const batchId = u.batch_id?.trim();
+  if (batchId) return `b|${batchId}`;
   return `${uploadSource(u.filename)}|${(u.created_at ?? '').slice(0, 10)}`;
 }
 
@@ -116,6 +126,8 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
         firstAt: at,
         lastAt: at,
         isSplit: false,
+        batchId: u.batch_id?.trim() || null,
+        duplicateOf: null,
         _files: 0,
         _pageStatus: new Map<string, string>(),
       };
@@ -130,11 +142,25 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
     if (at && at > g.lastAt) g.lastAt = at;
     if (scanPosition(u.filename)) g.isSplit = true;
   }
-  return [...map.values()]
-    .map(({_files, _pageStatus, ...g}) => {
-      const byStatus: Record<string, number> = {};
-      for (const s of _pageStatus.values()) byStatus[s] = (byStatus[s] ?? 0) + 1;
-      return {...g, files: _files, pages: _pageStatus.size, byStatus};
-    })
-    .sort((a, b) => b.lastAt.localeCompare(a.lastAt) || a.source.localeCompare(b.source));
+  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, ...g}) => {
+    const byStatus: Record<string, number> = {};
+    for (const s of _pageStatus.values()) byStatus[s] = (byStatus[s] ?? 0) + 1;
+    return {...g, files: _files, pages: _pageStatus.size, byStatus};
+  });
+  // Mark re-uploads: among groups that share a source (the same scan uploaded more than once),
+  // the earliest drop by firstAt is canonical; the rest point at it as duplicates, so a
+  // re-upload shows as its own tile badged "Duplicate" instead of silently merging. Groups
+  // with a unique source (the common case) stay duplicateOf = null.
+  const bySource = new Map<string, UploadGroup[]>();
+  for (const g of groups) {
+    const list = bySource.get(g.source);
+    if (list) list.push(g);
+    else bySource.set(g.source, [g]);
+  }
+  for (const list of bySource.values()) {
+    if (list.length < 2) continue;
+    const [first, ...rest] = [...list].sort((a, b) => a.firstAt.localeCompare(b.firstAt));
+    for (const g of rest) g.duplicateOf = {key: first.key, name: first.name, day: first.day};
+  }
+  return groups.sort((a, b) => b.lastAt.localeCompare(a.lastAt) || a.source.localeCompare(b.source));
 }

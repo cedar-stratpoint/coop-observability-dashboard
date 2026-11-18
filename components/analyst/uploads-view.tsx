@@ -108,11 +108,18 @@ function GroupTile({
             {fmtDay(g.day)} · {g.pages}{' '}
             {g.isSplit ? (g.pages === 1 ? 'page' : 'pages') : g.pages === 1 ? 'file' : 'files'}
           </div>
+          {g.duplicateOf && (
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-400">Duplicate</span>
+              <span className="ml-1.5">of {g.duplicateOf.name ?? g.source} · {fmtDay(g.duplicateOf.day)}</span>
+            </div>
+          )}
         </div>
         {canEdit && (
           <DeleteScanDialog
             company={company}
             source={g.source}
+            batchId={g.batchId ?? undefined}
             onDeleted={onDeleted}
             trigger={
               <Button

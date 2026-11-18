@@ -84,3 +84,51 @@ describe('groupUploads', () => {
     expect(groups.map((g) => g.source)).toEqual(['B', 'A']);
   });
 });
+
+describe('groupUploads — per-batch tiles + duplicates', () => {
+  const ub = (filename: string, created_at: string, batch_id: string, batch_name: string | null = null, status = 'needs_review'): GroupableUpload => ({
+    filename,
+    created_at,
+    status,
+    batch_id,
+    batch_name,
+  });
+
+  it('uploadGroupKey uses the batch id when batched, else source + day', () => {
+    expect(uploadGroupKey({filename: 'Scan_X (page 1 of 2).pdf', created_at: '2026-11-17T10:00:00Z', batch_id: 'b1'})).toBe('b|b1');
+    expect(uploadGroupKey({filename: 'Scan_X (page 1 of 2).pdf', created_at: '2026-11-17T10:00:00Z'})).toBe('Scan_X|2026-11-17');
+  });
+
+  it('splits re-uploads of one scan on the same day into one tile per batch, newest first', () => {
+    const groups = groupUploads([
+      ub('Scan_X (page 1 of 2).pdf', '2026-11-17T10:00:00Z', 'b1', 'cost test 1'),
+      ub('Scan_X (page 2 of 2).pdf', '2026-11-17T10:00:05Z', 'b1', 'cost test 1'),
+      ub('Scan_X (page 1 of 2).pdf', '2026-11-17T12:00:00Z', 'b2', 'cost test 2'),
+      ub('Scan_X (page 2 of 2).pdf', '2026-11-17T12:00:05Z', 'b2', 'cost test 2'),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({batchId: 'b2', name: 'cost test 2', pages: 2}); // newest first
+    expect(groups[1]).toMatchObject({batchId: 'b1', name: 'cost test 1', pages: 2});
+    // the earliest drop (b1) is canonical; the re-upload (b2) points at it
+    expect(groups[1].duplicateOf).toBeNull();
+    expect(groups[0].duplicateOf).toMatchObject({name: 'cost test 1', day: '2026-11-17'});
+  });
+
+  it('a single batched drop is one tile, not a duplicate', () => {
+    const groups = groupUploads([
+      ub('Scan_Y (page 1 of 2).pdf', '2026-11-18T10:00:00Z', 'b9', 'the only one'),
+      ub('Scan_Y (page 2 of 2).pdf', '2026-11-18T10:00:05Z', 'b9', 'the only one'),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({batchId: 'b9', duplicateOf: null, pages: 2});
+  });
+
+  it('legacy un-batched rows still group by source + day', () => {
+    const groups = groupUploads([
+      u('Scan_Z (page 1 of 2).pdf', '2026-11-10T09:00:00Z'),
+      u('Scan_Z (page 2 of 2).pdf', '2026-11-10T09:00:05Z'),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({batchId: null, duplicateOf: null, pages: 2});
+  });
+});

@@ -20,11 +20,15 @@ const STEPS = ['Checking the scan', 'Removing the pages', 'Clearing their readin
 export function DeleteScanDialog({
   company,
   source,
+  batchId,
   trigger,
   onDeleted,
 }: {
   company: string;
   source: string;
+  /** When set, this tile is one batch (a re-upload), so the confirm + delete are scoped to
+   *  that batch only, leaving the original drop and any other re-uploads intact. */
+  batchId?: string | null;
   /** Custom trigger element (e.g. an icon button on a tile). Defaults to a "Delete scan" button. */
   trigger?: ReactElement;
   /** Called once the scan is gone. When set, the dialog stays on the page (toast + refresh is
@@ -46,13 +50,13 @@ export function DeleteScanDialog({
     setSummary('loading');
     setError(null);
     let live = true;
-    scanGroupSummaryAction({company, source})
+    scanGroupSummaryAction({company, source, batchId})
       .then((r) => live && setSummary(r.ok ? r.summary : 'error'))
       .catch(() => live && setSummary('error'));
     return () => {
       live = false;
     };
-  }, [open, company, source]);
+  }, [open, company, source, batchId]);
 
   useEffect(() => () => timers.current.forEach(clearInterval), []);
 
@@ -73,7 +77,7 @@ export function DeleteScanDialog({
       setStep(STEPS[Math.min(STEPS.length - 1, Math.floor(elapsed / (MIN / STEPS.length)))]);
     }, 70);
     timers.current.push(iv);
-    const res = await deleteScanGroupAction({company, source});
+    const res = await deleteScanGroupAction({company, source, batchId});
     clearInterval(iv);
     if (!res.ok) {
       setPhase('error');
