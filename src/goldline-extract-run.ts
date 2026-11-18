@@ -298,6 +298,49 @@ function cheapSystem(text: string): string | Array<{type: string; text: string; 
 }
 
 /**
+ * L6 (safe variant) cost lever — flagged, default OFF. GOLDLINE_CHEAP_READ_DOWNSCALE = a render
+ * scale (e.g. "1.4") sends the CHEAP calls (classify + locator) a downscaled PNG of the page
+ * instead of the full PDF. Those calls read PRINTED text (page number, store header, column
+ * labels), which survives a smaller image; the handwriting read keeps the full-resolution PDF, so
+ * digit accuracy is untouched. Scans carry no text layer, so an image loses nothing vs the PDF.
+ * Fail-safe: any render error returns null and the caller falls back to the PDF block, so a bad
+ * render never breaks a read.
+ */
+function cheapDownscaleScale(): number | null {
+  const v = parseFloat((process.env.GOLDLINE_CHEAP_READ_DOWNSCALE ?? '').trim());
+  return Number.isFinite(v) && v > 0 && v <= 4 ? v : null;
+}
+
+function imageDoc(base64: string, mediaType: string) {
+  return {type: 'image', source: {type: 'base64', media_type: mediaType, data: base64}};
+}
+
+/** Render a single-page PDF to a downscaled PNG block for a cheap call, or null on any failure
+ *  (caller falls back to the full PDF). Dynamic import so the renderer only loads when the lever
+ *  is on, and never breaks the build or a flag-off read. */
+async function cheapPageImage(pdfBase64: string): Promise<ReturnType<typeof imageDoc> | null> {
+  const scale = cheapDownscaleScale();
+  if (!scale) return null;
+  try {
+    const {pdf} = await import('pdf-to-img');
+    const doc = await pdf(Buffer.from(pdfBase64, 'base64'), {scale});
+    for await (const page of doc) {
+      return imageDoc(page.toString('base64'), 'image/png');
+    }
+    return null;
+  } catch (e) {
+    console.error('goldline: cheap-read downscale render failed, using full PDF', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+/** The page content block for a cheap call: a downscaled PNG when the lever is on and rendering
+ *  succeeds, else the full PDF document block (today's behavior). */
+async function cheapPageBlock(pdfBase64: string): Promise<ReturnType<typeof imageDoc> | ReturnType<typeof pdfDoc>> {
+  return (await cheapPageImage(pdfBase64)) ?? pdfDoc(pdfBase64);
+}
+
+/**
  * Identify which page of the Nichido form a scan is, from its footer. Returns 1–6,
  * or 0 if it isn't a recognizable form page. A cheap, low-token call so the route can
  * pick the right manifest without asking the user which page they uploaded.
@@ -330,6 +373,7 @@ export async function detectPage(pdfBase64: string): Promise<number> {
  */
 export async function classifyPage(pdfBase64: string): Promise<PageClassification> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
     model: cheapReadModel(),
     // 800 (not 500): a truncated response yields unterminated JSON, which we'd rather
@@ -338,7 +382,7 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
     system: cheapSystem(buildPageClassifyPrompt()),
     output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
     // A document-only user turn is rejected (400); always pair the PDF with text.
-    messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: 'Classify this page. Return JSON only.'}]}],
+    messages: [{role: 'user', content: [pageBlock, {type: 'text', text: 'Classify this page. Return JSON only.'}]}],
   };
   // Same 20s budget as detectPage — it replaces detect in the Phase 0 path, so the
   // request timeout math (classify + extract < route maxDuration) is unchanged.
@@ -495,11 +539,12 @@ export async function extractInventoryPageAnchored(
  */
 export async function locateDeliveryColumn(pdfBase64: string): Promise<number | null> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
     model: EXTRACT_MODEL,
     max_tokens: 500,
     output_config: {format: {type: 'json_schema', schema: DELIVERY_LOCATOR_SCHEMA}},
-    messages: [{role: 'user', content: [pdfDoc(pdfBase64), {type: 'text', text: buildDeliveryLocatorPrompt()}]}],
+    messages: [{role: 'user', content: [pageBlock, {type: 'text', text: buildDeliveryLocatorPrompt()}]}],
   };
   try {
     return deliveryColumnFromLocator((await visionJson(params, {timeout: 30_000})) as DeliveryLocatorOutput);
