@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — CI: one-way mirror to GitLab
+
+Adds `.github/workflows/mirror-gitlab.yml`, which pushes every branch and tag to `gitlab.stratpoint.dev/cedar-tree-brands/coop-observability-dashboard` on each push or delete, hourly via cron (`:17`) as a safety net, and on manual dispatch. A failed run posts to Google Chat (`GCHAT_WEBHOOK_URL`).
+
+**Decisions.** GitLab Free has no pull mirroring, so GitHub pushes. The mirror is strict and one-way: GitHub is the source of truth, `--force` overwrites GitLab and `--prune` deletes refs removed here, so nobody should commit on GitLab. Only `refs/heads/*` and `refs/tags/*` are pushed (`refs/pull/*` is skipped). The credential is a GitLab project access token (Maintainer, `write_repository`) in the repo secret `GITLAB_MIRROR_TOKEN`, with the target URL in the repo variable `GITLAB_MIRROR_URL`. The token expires, so rotate it before then. GitLab's protected branches must let Maintainers push and allow force push. Before the first sync, a preflight confirmed the earlier GitLab import had no refs or commits missing from GitHub (it was only behind).
+
 ## 2026-11-19 — Environments: recognise the Pro Supabase projects (migration in progress)
 
 The Coop archive Supabase is moving to new Pro-plan projects: Staging `syxw…wdvw` to `aufe…vsps`, Production `qkxb…wipi` to `sdws…trow`. `src/coop-env.ts` now names the Pro refs as each environment's `dbRef`. The old refs move to a new `legacyDbRefs` list, so a deployment not yet repointed (or rolled back) keeps its env pill and the fail-closed production guard still classifies it correctly. Without this, Staging pointed at the new project would read as an unknown database and be treated as Production.
