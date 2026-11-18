@@ -506,12 +506,23 @@ export async function extractInventoryPageAnchored(
   profile?: WriterProfile,
 ): Promise<AnchoredMapResult> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
-  const params = {
+  const params = buildAnchoredParams(pdfBase64, template, profile);
+  const parsed = (await visionJson(params, {timeout: 150_000})) as AnchoredOutput;
+  if (!parsed || !Array.isArray(parsed.rows)) {
+    throw new Error('Anchored read returned no rows');
+  }
+  return mapAnchoredToExtractedPage(template, parsed);
+}
+
+/** The request body for ONE anchored read (model, system, numbers-only schema, page + prompt).
+ *  Extracted so the same body can be sent synchronously (above) or packed into a Message Batch
+ *  (L7 cost spike below) with no difference in what the model sees. */
+export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile) {
+  return {
     model: EXTRACT_MODEL,
     // Numbers-only output is far smaller than the free-read schema, but the densest pages (form
     // page 2 = 71 rows, page 4 = 68) can still exceed a small cap and truncate — observed failing on
-    // the live 98-page run at 8000. Stream with the same high cap as the free read; the model stops
-    // when done, so this only lifts the truncation ceiling (billed on actual output, not the cap).
+    // the live 98-page run at 8000. Same high cap as the free read; billed on actual output.
     max_tokens: 64000,
     system: [{type: 'text', text: buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
     output_config: {format: {type: 'json_schema', schema: ANCHORED_EXTRACTION_SCHEMA}},
@@ -522,11 +533,64 @@ export async function extractInventoryPageAnchored(
       },
     ],
   };
-  const parsed = (await visionJson(params, {timeout: 150_000})) as AnchoredOutput;
-  if (!parsed || !Array.isArray(parsed.rows)) {
-    throw new Error('Anchored read returned no rows');
+}
+
+// ============================================================================================
+// L7 BATCH-MODE COST SPIKE (removable). A one-off measurement: submit the anchored reads of a
+// known scan as a single Anthropic Message Batch (50% off, async) and read the results back, to
+// confirm on OUR data that batch billing halves the anchored-read cost and the output stays
+// within the reader's noise floor. Not wired into the pump; driven only by /api/goldline/l7-spike
+// behind GOLDLINE_L7_SPIKE_SECRET. Delete this block and the route once the number is recorded.
+// ============================================================================================
+
+export type AnchoredBatchResult = {
+  custom_id: string;
+  output?: AnchoredOutput | null;
+  usage?: {input: number; output: number};
+  error?: string;
+};
+
+/** Submit anchored-read requests as one Message Batch; returns the batch id. Primary key only
+ *  (a spike does not need the fallback-key dance). */
+export async function submitAnchoredBatch(requests: {custom_id: string; params: unknown}[]): Promise<string> {
+  const creds = goldlineCreds();
+  if (creds.length === 0) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const client = clientFor(creds[0]);
+  const batch = await client.messages.batches.create({
+    requests: requests as unknown as Parameters<typeof client.messages.batches.create>[0]['requests'],
+  });
+  return batch.id;
+}
+
+/** Poll a batch; when `ended`, decode every result (parsed JSON output + per-request usage). */
+export async function fetchAnchoredBatch(batchId: string): Promise<{status: string; results: AnchoredBatchResult[]}> {
+  const creds = goldlineCreds();
+  if (creds.length === 0) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const client = clientFor(creds[0]);
+  const batch = await client.messages.batches.retrieve(batchId);
+  if (batch.processing_status !== 'ended') return {status: batch.processing_status, results: []};
+  const results: AnchoredBatchResult[] = [];
+  for await (const entry of await client.messages.batches.results(batchId)) {
+    const r = entry.result;
+    if (r.type === 'succeeded') {
+      const msg = r.message as {content?: Array<{type: string; text?: string}>; usage?: {input_tokens?: number; output_tokens?: number}};
+      const text = msg.content?.find((b) => b.type === 'text' && typeof b.text === 'string')?.text;
+      let output: AnchoredOutput | null = null;
+      try {
+        output = text ? (JSON.parse(text) as AnchoredOutput) : null;
+      } catch {
+        output = null;
+      }
+      results.push({
+        custom_id: entry.custom_id,
+        output,
+        usage: {input: msg.usage?.input_tokens ?? 0, output: msg.usage?.output_tokens ?? 0},
+      });
+    } else {
+      results.push({custom_id: entry.custom_id, error: r.type});
+    }
   }
-  return mapAnchoredToExtractedPage(template, parsed);
+  return {status: 'ended', results};
 }
 
 /**
