@@ -21,12 +21,14 @@ import {
   deleteImpact,
   deleteUpload,
   deleteScanGroup,
+  deleteBatch,
   getBatch,
   getBatchPages,
   getUpload,
   latestActiveScan,
   listStores,
   scanGroupSummary,
+  scanBatchSummary,
   setUploadsBa,
   setUploadsStore,
   splitBatchIntoForms,
@@ -452,11 +454,15 @@ export async function activeScanProgressAction(input: {
 }
 
 /** What deleting a whole scan drop would remove — for the confirmation before the user commits. */
-export async function scanGroupSummaryAction(input: {company: string | null; source: string}): Promise<{ok: true; summary: ScanGroupSummary} | {ok: false; error: string}> {
+export async function scanGroupSummaryAction(input: {company: string | null; source: string; batchId?: string | null}): Promise<{ok: true; summary: ScanGroupSummary} | {ok: false; error: string}> {
   const ctx = await getDataContext(input.company);
   if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
   try {
-    return {ok: true, summary: await scanGroupSummary(ctx.companyId, (input.source ?? '').trim())};
+    const batchId = (input.batchId ?? '').trim();
+    const summary = batchId
+      ? await scanBatchSummary(ctx.companyId, batchId)
+      : await scanGroupSummary(ctx.companyId, (input.source ?? '').trim());
+    return {ok: true, summary};
   } catch (e) {
     console.error('scanGroupSummaryAction', e);
     return {ok: false, error: 'Couldn’t read this scan.'};
@@ -464,14 +470,17 @@ export async function scanGroupSummaryAction(input: {company: string | null; sou
 }
 
 /** Delete a whole scan drop and everything it produced. Irreversible — the UI confirms first. */
-export async function deleteScanGroupAction(input: {company: string | null; source: string}): Promise<{ok: true; deleted: number} | {ok: false; error: string}> {
+export async function deleteScanGroupAction(input: {company: string | null; source: string; batchId?: string | null}): Promise<{ok: true; deleted: number} | {ok: false; error: string}> {
   const ctx = await getDataContext(input.company);
   if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
   if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot delete uploads.'};
+  const batchId = (input.batchId ?? '').trim();
   const source = (input.source ?? '').trim();
-  if (!source) return {ok: false, error: 'No scan to delete.'};
+  if (!batchId && !source) return {ok: false, error: 'No scan to delete.'};
   try {
-    const deleted = await deleteScanGroup(ctx.companyId, source);
+    const deleted = batchId
+      ? await deleteBatch(ctx.companyId, batchId)
+      : await deleteScanGroup(ctx.companyId, source);
     revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath('/uploads/forms');
