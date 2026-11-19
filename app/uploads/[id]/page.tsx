@@ -101,15 +101,24 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const files = scopedIds ? allFiles.filter((u) => scopedIds.has(u.id)) : allFiles;
     const {prev, next} = fileNeighbours(files, filter, upload.id);
     const enc = encodeURIComponent;
-    const scanHref = `/uploads/scan/${enc(source)}`;
+    const scanBase = `/uploads/scan/${enc(source)}`;
+    // Keep the scan detail scoped to THIS upload drop (its batch) across Back and the breadcrumb,
+    // so returning from a page review lands on this batch's scan — not every re-upload of the same
+    // filename merged back together (PR #639's `?batch=` scope). upload.batch_id is the drop here.
+    const batchQ = upload.batch_id ? `batch=${enc(upload.batch_id)}` : '';
+    const scanWith = (qs: string) => {
+      const parts = [batchQ, qs].filter(Boolean);
+      return parts.length ? `${scanBase}?${parts.join('&')}` : scanBase;
+    };
+    const scanHref = scanWith('');
     const back = fileListParams(filter, version);
     // Back / the breadcrumb's scope link return to the board the way the reviewer left it: the
     // store (or BA) filtered view, or the Per file list with its filters when there's no scope.
     const scopeLabel = scope ? (scope.kind === 'ba' ? scope.name : stores.find((s) => s.code === scope.code)?.name ?? `Store ${scope.code}`) : null;
     const scopeHref = scope
-      ? `${scanHref}?${scope.kind === 'ba' ? `view=store&ba=${enc(scope.name)}` : `view=store&store=${enc(scope.code)}`}`
+      ? scanWith(scope.kind === 'ba' ? `view=store&ba=${enc(scope.name)}` : `view=store&store=${enc(scope.code)}`)
       : null;
-    const backHref = scopeHref ?? `${scanHref}?${back.toString()}`;
+    const backHref = scopeHref ?? scanWith(back.toString());
     nav = {
       source,
       label: scanPageLabel(upload.filename).title,
