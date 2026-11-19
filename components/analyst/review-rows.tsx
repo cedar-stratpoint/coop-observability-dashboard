@@ -9,6 +9,7 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
+import {COLS, colsForVersion, type ColKey} from './review-grid-cols';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -17,14 +18,10 @@ import {cn} from '@/lib/utils';
 //    printed family headings with their price, flagged rows still highlighted.
 // Commit is gated by the parent until every flag is resolved.
 
-export const COLS = [
-  {key: 'stockroom', label: 'Stk', title: 'Bilang sa stockroom / steel cabinet'},
-  {key: 'drawer', label: 'Drw', title: 'Bilang sa drawer ng module'},
-  {key: 'selling_area', label: 'Sell', title: 'Bilang sa selling area'},
-  {key: 'delivery', label: 'Dlv', title: 'Delivery'},
-  {key: 'ending_on_hand', label: 'End', title: 'Ending inventory (stock on hand)'},
-] as const;
-export type ColKey = (typeof COLS)[number]['key'];
+// COLS / ColKey / colsForVersion live in the pure, testable ./review-grid-cols module;
+// re-exported here so existing importers (batch-review) keep working unchanged.
+export {COLS, colsForVersion};
+export type {ColKey};
 
 /** Full field names for the phone layout (the table uses the short form labels). */
 const MOBILE_LABEL: Record<ColKey, string> = {stockroom: 'Stockroom', drawer: 'Drawer', selling_area: 'Selling', delivery: 'Delivery', ending_on_hand: 'Ending'};
@@ -71,6 +68,9 @@ type Props = {
   resolved: ReadonlySet<number>;
   active: number | null; // the flag the navigator is on
   view: ReviewView;
+  /** The page's detected form version (legacy/v1/v2), so the count columns render in the
+   *  version's printed left-to-right order. Display only; absent falls back to V1 order. */
+  version?: string | null;
   query: string;
   onQuery: (q: string) => void;
   editable: boolean;
@@ -109,6 +109,7 @@ export function ReviewRows({
   resolved,
   active,
   view,
+  version,
   query,
   onQuery,
   editable,
@@ -119,6 +120,8 @@ export function ReviewRows({
   onLocate,
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
+  // Count columns in this version's printed order (V2 leads with Delivery); display only.
+  const cols = useMemo(() => colsForVersion(version), [version]);
   const q = query.trim().toLowerCase();
   const indexed = useMemo(() => rows.map((r, i) => ({...r, i})), [rows]);
   const matches = (r: (typeof indexed)[number]) =>
@@ -131,7 +134,7 @@ export function ReviewRows({
   const header = (
     <tr className="border-b border-border text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
       <th className="py-2 pr-3 font-medium">Item</th>
-      {COLS.map((c) => (
+      {cols.map((c) => (
         <th key={c.key} className="py-2 pr-2 text-right font-medium" title={c.title}>
           {c.label}
         </th>
@@ -193,7 +196,7 @@ export function ReviewRows({
             )}
           </div>
         </td>
-        {COLS.map((col) => (
+        {cols.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
             <input
               inputMode="numeric"
@@ -268,7 +271,7 @@ export function ReviewRows({
           </span>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
-          {COLS.map((col) => (
+          {cols.map((col) => (
             <label key={col.key} className="flex min-w-0 flex-col gap-1">
               <span className="truncate text-[10.5px] text-muted-foreground">{MOBILE_LABEL[col.key]}</span>
               <input
