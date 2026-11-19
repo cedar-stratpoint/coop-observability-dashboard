@@ -1176,13 +1176,14 @@ export async function latestActiveScan(
 ): Promise<{batchId: string; filename: string | null; statuses: string[]} | null> {
   if (!goldlineConfigured()) return null;
   const supa = db();
-  // The newest batch with at least one page still waiting or being read.
+  // The newest batch with at least one page still waiting or being read (queued_batch = its read
+  // is out in a Message Batch under L7, still in flight until the poller ingests it).
   const head = await supa
     .from('uploads')
     .select('batch_id')
     .eq('company_id', companyId)
     .eq('kind', 'inventory_pdf')
-    .in('status', ['queued', 'processing'])
+    .in('status', ['queued', 'queued_batch', 'processing'])
     .not('batch_id', 'is', null)
     .order('created_at', {ascending: false})
     .limit(1)

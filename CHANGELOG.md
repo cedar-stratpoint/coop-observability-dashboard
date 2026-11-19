@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Goldline OCR L7: fix the upload progress freezing on the batched tail
+
+With L7 batch mode on, the live upload progress ("N of 98 read") froze near the end (e.g. "85 of 98 · 13 waiting") even though the server finished every page, because the new `queued_batch` status fell through the three status helpers that drive progress: `isSettledStatus` treated it as settled (so the uploader stopped polling), `summarizeScanRows` counted it as neither done nor in-flight (so it showed as "waiting" via total − done), and `latestActiveScan` looked only for `queued`/`processing` (so the refresh-surviving indicator stopped). Now `queued_batch` is handled everywhere as **in flight** (shown as "Processing"): the uploader keeps polling until the batch poller ingests each page and it reaches a terminal state. Cosmetic only, no data was ever lost (the DB always completed); a refresh already showed the true state. Tests added for the `queued_batch` path.
+
 ## 2026-11-19 — CI: one-way mirror to GitLab
 
 Adds `.github/workflows/mirror-gitlab.yml`, which pushes every branch and tag to `gitlab.stratpoint.dev/cedar-tree-brands/coop-observability-dashboard` on each push or delete, hourly via cron (`:17`) as a safety net, and on manual dispatch. A failed run posts to Google Chat (`GCHAT_WEBHOOK_URL`).

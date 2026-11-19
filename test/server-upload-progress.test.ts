@@ -5,6 +5,7 @@ describe('serverPageState', () => {
   it('maps in-flight statuses to live item states', () => {
     expect(serverPageState('queued')).toBe('queued');
     expect(serverPageState('processing')).toBe('running');
+    expect(serverPageState('queued_batch')).toBe('running'); // L7: read is out in a batch
   });
   it('maps every terminal read to done, including a set-aside page', () => {
     expect(serverPageState('needs_review')).toBe('done');
@@ -18,8 +19,9 @@ describe('serverPageState', () => {
 });
 
 describe('isSettledStatus', () => {
-  it('is false only while queued or processing', () => {
+  it('is false while queued, queued_batch (L7), or processing', () => {
     expect(isSettledStatus('queued')).toBe(false);
+    expect(isSettledStatus('queued_batch')).toBe(false);
     expect(isSettledStatus('processing')).toBe(false);
   });
   it('is true for every terminal status', () => {

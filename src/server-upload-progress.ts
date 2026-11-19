@@ -8,7 +8,7 @@
 export type ServerPageProgress = {
   uploadId: string;
   filename: string;
-  status: string; // queued | processing | needs_review | committed | rejected | failed
+  status: string; // queued | queued_batch | processing | needs_review | committed | rejected | failed
   page: number | null;
   formVersion: string | null;
   pageKind: string | null;
@@ -24,9 +24,11 @@ export type ServerBatchProgress = {
   settled: boolean;
 };
 
-/** A page is still in flight while it's queued (waiting for the pump) or processing (reading). */
+/** A page is still in flight while it's queued (waiting for the pump), queued_batch (its read is
+ *  out in a Message Batch, L7), or processing (reading). Until it reaches a terminal state the
+ *  uploader must keep polling — a queued_batch page finishes later via the batch poller. */
 export function isSettledStatus(status: string): boolean {
-  return status !== 'queued' && status !== 'processing';
+  return status !== 'queued' && status !== 'queued_batch' && status !== 'processing';
 }
 
 /**
@@ -39,6 +41,9 @@ export function serverPageState(status: string): 'queued' | 'running' | 'done' |
     case 'queued':
       return 'queued';
     case 'processing':
+      return 'running';
+    // L7: the page's read is out in a Message Batch — still in flight, shown as "Processing".
+    case 'queued_batch':
       return 'running';
     case 'needs_review':
     case 'committed':

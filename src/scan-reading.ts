@@ -15,7 +15,7 @@ export type ScanReadingSummary = {
   total: number;
   /** Settled pages: read (needs_review / committed), set aside (rejected), or failed. */
   done: number;
-  /** Pages the pump is actively reading right now. */
+  /** Pages in flight right now: being read by the pump, or (L7) out in a Message Batch. */
   reading: number;
   /** Pages still waiting for the pump. */
   queued: number;
@@ -39,6 +39,11 @@ export function summarizeScanRows(
   for (const r of rows) {
     switch (r.status) {
       case 'processing':
+        reading++;
+        break;
+      // L7: the page's read is out in a Message Batch — still in flight (shown as "Processing"),
+      // so it counts toward "reading", never "done", until the batch poller brings it back.
+      case 'queued_batch':
         reading++;
         break;
       case 'queued':
