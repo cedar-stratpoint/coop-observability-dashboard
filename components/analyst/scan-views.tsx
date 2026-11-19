@@ -482,12 +482,16 @@ export function BaCards({
   knownBas = [],
   canEdit = false,
   company,
+  batchId = null,
 }: {
   data: TriageResult;
   source: string;
   knownBas?: string[];
   canEdit?: boolean;
   company: string;
+  /** The upload drop the scan is scoped to, kept on the BA drill-down link so Per BA → a BA
+   *  stays on this one drop instead of re-merging every re-upload of the filename. */
+  batchId?: string | null;
 }) {
   const [editCard, setEditCard] = useState<{name: string; items: TriageForm[]} | null>(null);
   const groups = useMemo(() => {
@@ -542,7 +546,7 @@ export function BaCards({
                 </span>
                 <div className="min-w-0">
                   <Link
-                    href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}`}
+                    href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}${batchId ? `&batch=${encodeURIComponent(batchId)}` : ''}`}
                     replace
                     className="block truncate font-heading text-[15px] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
                     title={g.name}

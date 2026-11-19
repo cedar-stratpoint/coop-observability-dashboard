@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Uploads: Per BA drill-down keeps the scan scoped to its upload drop
+
+Following #639/#643's `?batch=` scope: on the scan detail, the version cards, view toggle, and per-file Back all preserved the batch, but the **BA cards** (Per BA view) did not. Clicking a BA linked to `/uploads/scan/[source]?view=store&ba=...` with no `batch`, so the store view re-merged every re-upload of the filename (the "337 forms" inflation). `BaCards` now takes `batchId` and appends `&batch=${batchId}` to the drill-down link, so Per BA → a BA stays on the one drop. Navigation only; no data change.
+
 ## 2026-11-19 — Uploads: drop the "Set aside" page-number list from the scan detail
 
 The scan detail (Per store view) ended with a **Set aside** card listing every sales-report, blank and needs-placing page as a page-number chip. On a 98-page scan re-uploaded several times that became hundreds of repeated chips (377 on the Oct 30 scan) and the owner found no value in it: the chips weren't clickable and the counts already show on the Uploads card. Removed the section (and its `PARKED_GROUPS` / `parkedPageNo` helpers) from `components/analyst/triage-board.tsx`. `data.parked` is still loaded, so the empty-state copy and anything else reading it are unaffected. UI only; no data change.
