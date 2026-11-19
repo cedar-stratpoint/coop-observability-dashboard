@@ -656,6 +656,7 @@ export function BatchReview({
                   resolved={curState.resolved}
                   active={curState.active}
                   view={curState.view}
+                  version={cur.upload.form_version}
                   query={curState.query}
                   onQuery={(q) => setCur({query: q})}
                   editable={editable && cur.upload.status === 'needs_review'}

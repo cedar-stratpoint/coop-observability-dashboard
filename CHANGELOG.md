@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Goldline review grid: count columns follow the form version's printed order
+
+The scan review grid (`ReviewRows`, the "form grid") always painted its five count columns in one fixed order, `Stk · Drw · Sell · Dlv · End` (V1's layout), for every version. On a **V2** form that doesn't match the paper, which prints **Delivery first** (`Dlv · Stk · Drw · Sell · End`). This was **display only**: the reads were correct (each count is stored by field, not by column position), so totals, commit, and the saved data were never affected, the columns were just drawn in the wrong left-to-right order for V2.
+
+Now the grid orders its columns by the page's detected `form_version`: V2 leads with Delivery, V1 and Legacy keep the default (V1 already matches; Legacy's deducted model doesn't map to these three-location columns). Column order logic moved to a pure, tested `components/analyst/review-grid-cols.ts` (`colsForVersion`); `review-rows.tsx` re-exports `COLS`/`ColKey` unchanged and takes a new optional `version` prop, passed from `batch-review` as `cur.upload.form_version`. No value moves; cells stay keyed by field. Tests cover the V2 reorder, the V1/Legacy default, and that the column set is only reordered (never added to or dropped from).
+
 ## 2026-11-19 — Goldline OCR: version-faithful form templates (the reader anchors per version, not per page)
 
 The template-anchored read pinned each page to a **page-only** manifest (`MANIFESTS[page]`), shared across every form version. But the three form layouts (Legacy, V1, V2) carry the same catalog **paginated differently** (e.g. Trulashes De Luxe is on V1 page 4 but V2 page 5; Tinted Brow Gel / Clear Mascara / Length & Curl are on V1 page 3 but V2 page 4; V2 trimmed the eyeshadow shade list V1/Legacy keep full), so a page-only template made the reader flag real printed rows (De Luxe) as "handwritten".
