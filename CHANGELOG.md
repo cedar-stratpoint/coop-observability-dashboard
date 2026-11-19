@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Goldline review grid: apply the version column order to the per-file review too
+
+Follow-up: the column reorder was wired into the batch review but not the **per-file one-page review** (`UploadReview`, `app/uploads/[id]`), the surface a reviewer lands on from a scan tile. So a V2 page still showed `Stk · Drw · Sell · Dlv · End` there. `UploadReview` now passes `version={upload.form_version}` to `ReviewRows` as well, so both review surfaces order columns by the form version (V2 leads with Delivery). Display only; no data change.
+
 ## 2026-11-19 — Goldline review grid: count columns follow the form version's printed order
 
 The scan review grid (`ReviewRows`, the "form grid") always painted its five count columns in one fixed order, `Stk · Drw · Sell · Dlv · End` (V1's layout), for every version. On a **V2** form that doesn't match the paper, which prints **Delivery first** (`Dlv · Stk · Drw · Sell · End`). This was **display only**: the reads were correct (each count is stored by field, not by column position), so totals, commit, and the saved data were never affected, the columns were just drawn in the wrong left-to-right order for V2.
