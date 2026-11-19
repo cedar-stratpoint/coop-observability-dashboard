@@ -41,6 +41,12 @@ describe('isScanActive', () => {
     expect(isScanActive(summarizeScanRows(rows({queued: 1}), 'b', 's'))).toBe(true);
     expect(isScanActive(summarizeScanRows(rows({processing: 1}), 'b', 's'))).toBe(true);
   });
+  it('stays active while a page is out in a batch (L7 queued_batch), counted in flight not done', () => {
+    const s = summarizeScanRows(rows({needs_review: 3, queued_batch: 2}), 'b', 's');
+    expect(isScanActive(s)).toBe(true);
+    expect(s.reading).toBe(2); // the batched pages are in flight
+    expect(s.done).toBe(3); // and not counted as done until the poller ingests them
+  });
   it('is settled once nothing is queued or processing', () => {
     expect(isScanActive(summarizeScanRows(rows({needs_review: 3, rejected: 1}), 'b', 's'))).toBe(false);
   });
