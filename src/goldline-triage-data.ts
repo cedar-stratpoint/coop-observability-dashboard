@@ -134,16 +134,19 @@ function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds:
  * Build the triage board for a company from its classified inventory-PDF uploads.
  * With `source` given, scopes to one scan drop (every page whose filename shares that
  * source name) — the per-scan "forms found" view. The company-wide inbox omits it.
+ * With `batchId` also given, scopes to ONE upload of that scan (one drop), so re-uploads of
+ * the same file don't aggregate into one inflated view; omit it for the legacy by-filename view.
  */
-export async function triageBoard(companyId: string, opts?: {source?: string}): Promise<TriageResult> {
+export async function triageBoard(companyId: string, opts?: {source?: string; batchId?: string}): Promise<TriageResult> {
   if (!nichidoConfigured()) return mockTriage();
   const source = opts?.source ?? null;
+  const batchId = opts?.batchId ?? null;
   // Cached so back-navigation and repeat opens don't re-read + re-segment every time. Any
   // write to uploads (upload, assign, re-read, delete) revalidates glTags.uploads, so an
   // edit still shows immediately; the 30s window only covers idle repeat views.
   return unstable_cache(
-    () => loadTriageBoard(companyId, source),
-    ['gl-triage', companyId, source ?? 'all'],
+    () => loadTriageBoard(companyId, source, batchId),
+    ['gl-triage', companyId, source ?? 'all', batchId ?? 'all'],
     {tags: [glTags.uploads(companyId)], revalidate: 30},
   )();
 }
@@ -191,7 +194,7 @@ async function loadBatchKinds(
   return out;
 }
 
-async function loadTriageBoard(companyId: string, source: string | null): Promise<TriageResult> {
+async function loadTriageBoard(companyId: string, source: string | null, batchId: string | null = null): Promise<TriageResult> {
   const supa = nichidoDb();
   // Scope the read to one scan at the DB so opening a scan reads its own pages, not the
   // whole company's classified pages. The pages are "<source> (page N of M).pdf", so a
@@ -207,9 +210,13 @@ async function loadTriageBoard(companyId: string, source: string | null): Promis
       .eq('kind', 'inventory_pdf')
       .not('classified_at', 'is', null);
     if (likePrefix) q = q.like('filename', likePrefix);
+    if (batchId) q = q.eq('batch_id', batchId);
     return q.order('created_at', {ascending: false}).range(from, to);
   })) as unknown as UploadClsRow[];
-  const rows = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
+  const bySource = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
+  // batchId (when the view is scoped to one upload drop) pins it to that single batch, so
+  // re-uploads of the same scan file don't pile into one view.
+  const rows = batchId ? bySource.filter((r) => r.batch_id === batchId) : bySource;
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Re-snap store codes against the current registry, then reconcile OCR year noise
