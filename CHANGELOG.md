@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Goldline OCR: version-faithful form templates (the reader anchors per version, not per page)
+
+The template-anchored read pinned each page to a **page-only** manifest (`MANIFESTS[page]`), shared across every form version. But the three form layouts (Legacy, V1, V2) carry the same catalog **paginated differently** (e.g. Trulashes De Luxe is on V1 page 4 but V2 page 5; Tinted Brow Gel / Clear Mascara / Length & Curl are on V1 page 3 but V2 page 4; V2 trimmed the eyeshadow shade list V1/Legacy keep full), so a page-only template made the reader flag real printed rows (De Luxe) as "handwritten".
+
+- **Source of truth:** `docs/form-templates/{Legacy,V1,V2}/INV_FORM_*.xlsx` — one workbook per (version, page), transcribed cell-for-cell from the `public/form-versions` reference scans (real `ITEM # / PRODUCT / PRICE` + the version's count columns, section bands, merged per-family totals, `PAGE #/TOTAL` footer). 808 rows across 15 pages.
+- **Generated module:** `scripts/gen-form-templates.py` emits `src/goldline-form-templates.generated.ts` (each version's printed row list with its family band + printed price). Regenerate with `python3 scripts/gen-form-templates.py`.
+- **Wiring:** `getFormTemplate(companyId, version, page)` now builds from the generated per-version rows when `templateReadEnabled(companyId)` is on, reusing `buildFormTemplate` (grouping + price come straight from the form, so a code the catalog is missing still carries its printed band + price, no catalog join). **Flag-off, or any version/page with no generated data, falls through to the original `MANIFESTS` + catalog path byte-identically.** Legacy still reads via its own path; the generated V1/V2 rows are what the anchored reader now anchors to.
+
+Staging only (gated by `GOLDLINE_TEMPLATE_READ_COMPANIES`). Typecheck clean on the changed files; new tests cover the De Luxe placement, the trimmed-vs-full eyeshadow list, Legacy-only SKUs, and the page-1 row count.
+
 ## 2026-11-19 — Uploads: scan detail is one upload drop, not every re-upload of the filename
 
 The scan detail page (`/uploads/scan/[source]`) grouped by the file's **name**, so re-uploading the same scan (e.g. the OCR A/B runs) piled every upload into one view — the version summary cards showed, say, "315 forms" across 13 uploads while the page below showed the single upload's 98 pages. Now the Uploads list tiles link with the drop's `batch_id` (`?batch=`), and the scan page scopes its board, version cards, file list, name, and delete to that one upload when the param is present. `triageBoard` takes an optional `batchId`; `loadTriageBoard` filters to it (and the DB read narrows by `batch_id`). **Back-compatible:** without `?batch` (old links/bookmarks), the page keeps its legacy by-filename behavior. Known follow-up: the per-file review ‹ › stepper (`scanScopeIds`) still steps by source, not batch. Typecheck clean; full suite green.

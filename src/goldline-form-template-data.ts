@@ -1,6 +1,8 @@
 import 'server-only';
 import {catalogForCodes} from './goldline-data';
 import {buildFormTemplate, isTemplatePage, templateManifest, type FormTemplate} from './goldline-form-template';
+import {templateReadEnabled} from './goldline-anchored-flag';
+import {generatedTemplateItems} from './goldline-form-templates.generated';
 import type {FormVersion} from './goldline-extract';
 
 // Server-side loader for the Phase 0 form template (plan:
@@ -22,6 +24,25 @@ export async function getFormTemplate(
   page: number,
 ): Promise<FormTemplate | null> {
   if (!isTemplatePage(page)) return null;
+
+  // Version-faithful template from the authored xlsx (docs/form-templates, generated into
+  // goldline-form-templates.generated.ts), flag-gated by templateReadEnabled. Each form version
+  // gets its OWN printed row list, bands, and prices — the versions share one catalog but paginate
+  // differently (e.g. Trulashes De Luxe is on V1 page 4 but V2 page 5), which the page-only
+  // MANIFESTS cannot represent and which made the reader flag real printed rows as handwritten.
+  // The grouping + printed price come straight from the form (no catalog join, so a code the
+  // catalog is missing still carries its printed band + price). Flag-off, or a version/page with no
+  // generated data, falls through to the original manifest + catalog path below (byte-identical).
+  if (templateReadEnabled(companyId)) {
+    const gen = generatedTemplateItems(version, page);
+    if (gen) {
+      const items = gen.map((g) => ({code: g.code, product: g.product}));
+      const catalog: Record<string, {productLine: string | null; unitPrice: number | null}> =
+        Object.fromEntries(gen.map((g) => [g.code, {productLine: g.group, unitPrice: g.price}]));
+      return buildFormTemplate(page, version, items, catalog);
+    }
+  }
+
   const items = templateManifest(page);
   const catalog = await catalogForCodes(
     companyId,
