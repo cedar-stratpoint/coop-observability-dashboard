@@ -12,6 +12,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Following #639/#643's `?batch=` scope: on the scan detail, the version cards, view toggle, and per-file Back all preserved the batch, but the **BA cards** (Per BA view) did not. Clicking a BA linked to `/uploads/scan/[source]?view=store&ba=...` with no `batch`, so the store view re-merged every re-upload of the filename (the "337 forms" inflation). `BaCards` now takes `batchId` and appends `&batch=${batchId}` to the drill-down link, so Per BA → a BA stays on the one drop. Navigation only; no data change.
 
+## 2026-11-19 — Goldline review: "Paper reads" hint ignores a dropped family prefix
+
+The review grid shows `Paper reads: "..."` when a row's transcribed name differs from the catalog name, to catch a misread code or a stale label. But catalog names carry a family/type prefix the paper omits (catalog "Lip Stain Caramel Swirl" vs paper "Caramel Swirl"), so the hint fired on nearly every row as noise. `printedNameConflict` now treats a pure whole-word prefix/suffix difference (and a `(Bestseller)` tag) as the same product, so the hint stays quiet for those and still flags a genuine mismatch like "BB 03 Beige" vs "BB 04 Beige". Display heuristic only; tests added.
+
 ## 2026-11-19 — Goldline: load form_version with the upload so the per-version column order actually applies
 
 The review grid's version-aware column order (the two entries below) was a no-op in practice: neither query that feeds a review surface selected `form_version`. `getUpload` (per-file review) and `getBatchPages` (batch review) both left it off their `select(...)`, so `upload.form_version` was `undefined` and `colsForVersion(undefined)` always returned the default order, a V2 page still showed `Stk · Drw · Sell · Dlv · End`. Both selects now include `form_version`, so the grid orders columns by the page's real version (V2 leads with Delivery). Data/query change only; no schema change.
