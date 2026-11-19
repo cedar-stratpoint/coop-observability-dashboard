@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Uploads: per-file review Back keeps the scan scoped to its upload drop
+
+Going into a page's per-file review and hitting **Back** (or the breadcrumb) landed on the scan detail **without** the `?batch=` scope, so it re-merged every re-upload of the same filename (e.g. "337 forms" across all drops instead of this drop's pages). `app/uploads/[id]` built its `scanHref` / `backHref` / `scopeHref` from `/uploads/scan/[source]` with no batch param, even though `upload.batch_id` is on hand. Now those links carry `batch=${upload.batch_id}`, so Back returns to the same single-drop scan view the reviewer came from (PR #639's scope, preserved through the round trip). Navigation only; no data change.
+
 ## 2026-11-19 — Goldline review grid: apply the version column order to the per-file review too
 
 Follow-up: the column reorder was wired into the batch review but not the **per-file one-page review** (`UploadReview`, `app/uploads/[id]`), the surface a reviewer lands on from a scan tile. So a V2 page still showed `Stk · Drw · Sell · Dlv · End` there. `UploadReview` now passes `version={upload.form_version}` to `ReviewRows` as well, so both review surfaces order columns by the form version (V2 leads with Delivery). Display only; no data change.
