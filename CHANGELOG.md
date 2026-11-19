@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-19 — CI: one-way mirror to GitLab
+
+Adds `.github/workflows/mirror-gitlab.yml`, which pushes every branch and tag to `gitlab.stratpoint.dev/cedar-tree-brands/coop-observability-dashboard` on each push or delete, hourly via cron (`:17`) as a safety net, and on manual dispatch. A failed run posts to Google Chat (`GCHAT_WEBHOOK_URL`).
+
+**Decisions.** GitLab Free has no pull mirroring, so GitHub pushes. The mirror is strict and one-way: GitHub is the source of truth, `--force` overwrites GitLab and `--prune` deletes refs removed here, so nobody should commit on GitLab. Only `refs/heads/*` and `refs/tags/*` are pushed (`refs/pull/*` is skipped). The credential is a GitLab project access token (Maintainer, `write_repository`) in the repo secret `GITLAB_MIRROR_TOKEN`, with the target URL in the repo variable `GITLAB_MIRROR_URL`. The token expires, so rotate it before then. GitLab's protected branches must let Maintainers push and allow force push. Before the first sync, a preflight confirmed the earlier GitLab import had no refs or commits missing from GitHub (it was only behind).
+
 ## Unreleased (2026-11-16): Shopee Sync also fills Traffic and Product Overview for a loaded week
 - **Decision (owner):** Sync must do the whole weekly job, so a week never depends on the manual Monday export (Vince's run). Before, a closed week whose
   sales days were already loaded got only Ads and SKU from Sync; Traffic and Product Overview "stayed with the Monday import", so a skipped Monday lost them
