@@ -31,9 +31,11 @@ const VIEWS: Array<{key: View; label: string; Icon: typeof LayoutGrid}> = [
 const VERSION_ORDER: FormVersion[] = ['legacy', 'v1', 'v2', 'unknown'];
 const isVersion = (v: string | undefined): v is FormVersion => !!v && (VERSION_ORDER as string[]).includes(v);
 
-/** Build a scan URL, keeping the params that still apply. */
-function scanHref(source: string, p: {view: View; ba?: string | null; version?: FormVersion | null}) {
+/** Build a scan URL, keeping the params that still apply. `batch` pins the view to one upload
+ *  drop (so re-uploads of the same file don't aggregate); it is preserved across every link. */
+function scanHref(source: string, p: {view: View; ba?: string | null; version?: FormVersion | null; batch?: string | null}) {
   const qs = new URLSearchParams({view: p.view});
+  if (p.batch) qs.set('batch', p.batch);
   if (p.ba) qs.set('ba', p.ba);
   if (p.version) qs.set('version', p.version);
   return `/uploads/scan/${encodeURIComponent(source)}?${qs.toString()}`;
@@ -42,13 +44,16 @@ function scanHref(source: string, p: {view: View; ba?: string | null; version?: 
 // One scan drop: its pages sorted into store forms, grouped by BA, or listed as plain
 // files — one toggle, all on this route so Back returns here. Company-scoped like the
 // rest of /uploads.
-export default async function Page({params, searchParams}: {params: Promise<{source: string}>; searchParams: Promise<{view?: string; ba?: string; version?: string}>}) {
+export default async function Page({params, searchParams}: {params: Promise<{source: string}>; searchParams: Promise<{view?: string; ba?: string; version?: string; batch?: string}>}) {
   const {source: raw} = await params;
-  const {view: viewRaw, ba: baRaw, version: versionRaw} = await searchParams;
+  const {view: viewRaw, ba: baRaw, version: versionRaw, batch: batchRaw} = await searchParams;
   const source = decodeURIComponent(raw);
   const view: View = viewRaw === 'ba' || viewRaw === 'file' ? viewRaw : 'store';
   const ba = typeof baRaw === 'string' ? baRaw : null;
   const version = isVersion(versionRaw) ? versionRaw : null;
+  // One upload drop of this scan (set by the Uploads list tile). Without it, the page keeps its
+  // legacy behavior: every upload whose filename shares this source name.
+  const batchId = typeof batchRaw === 'string' && batchRaw ? batchRaw : null;
 
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
@@ -70,7 +75,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   // forms per layout even on the file view; stores/BAs are only needed off the file view.
   const needBas = view !== 'file';
   const [rawBoard, stores, uploads, baReg] = await Promise.all([
-    triageBoard(companyId, {source}),
+    triageBoard(companyId, {source, batchId: batchId ?? undefined}),
     view === 'file' ? Promise.resolve([]) : listStores(companyId),
     // Always listed (cached, shared with the Uploads page) so every view can read the
     // optional upload name the user gave this scan; `files` below still only uses it on the file view.
@@ -80,7 +85,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   // The name the user typed for this drop (same on every page of the batch), shown as the
   // scan's title with the file name as a quiet subtitle. Null when they named nothing.
-  const scanName = uploads.find((u) => uploadSource(u.filename) === source && u.batch_name?.trim())?.batch_name?.trim() ?? null;
+  const scanName = uploads.find((u) => uploadSource(u.filename) === source && (!batchId || u.batch_id === batchId) && u.batch_name?.trim())?.batch_name?.trim() ?? null;
 
   // How many forms of each layout are in this scan — the summary cards, and a filter.
   const versionCounts = rawBoard.forms.reduce((m, f) => ((m[f.version] = (m[f.version] ?? 0) + 1), m), {} as Partial<Record<FormVersion, number>>);
@@ -88,7 +93,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   const files =
     view === 'file'
-      ? uploads.filter((u) => uploadSource(u.filename) === source && (!version || (u.form_version ?? 'unknown') === version))
+      ? uploads.filter((u) => uploadSource(u.filename) === source && (!batchId || u.batch_id === batchId) && (!version || (u.form_version ?? 'unknown') === version))
       : [];
   // The same person is written many ways; reconcile to one canonical BA (a registry name
   // when known) so every card reads it the same way and a BA card groups all their forms.
@@ -101,7 +106,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       ? {...board, forms: board.forms.filter((f) => (!ba || baOf(f.consultant) === ba) && (!version || f.version === version))}
       : board;
 
-  const href = (v: View) => scanHref(source, {view: v, version});
+  const href = (v: View) => scanHref(source, {view: v, version, batch: batchId});
 
   return (
     <div className={GL_PAGE}>
@@ -125,11 +130,11 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
       {/* Form-version summary: how many forms of each layout, and a one-click filter. */}
       {totalForms > 0 && (
         <div className="flex flex-wrap items-stretch gap-2.5" role="group" aria-label="Filter by form version">
-          <VersionCard href={scanHref(source, {view, ba, version: null})} label="All versions" count={totalForms} color={null} active={!version} />
+          <VersionCard href={scanHref(source, {view, ba, version: null, batch: batchId})} label="All versions" count={totalForms} color={null} active={!version} />
           {VERSION_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0).map((v) => (
             <VersionCard
               key={v}
-              href={scanHref(source, {view, ba, version: version === v ? null : v})}
+              href={scanHref(source, {view, ba, version: version === v ? null : v, batch: batchId})}
               label={VERSION_LABEL[v]}
               count={versionCounts[v] ?? 0}
               color={VERSION_COLOR[v]}
@@ -172,7 +177,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
         )}
         {canEdit && (
           <div className="ml-auto">
-            <DeleteScanDialog company={companyId} source={source} />
+            <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
           </div>
         )}
       </div>

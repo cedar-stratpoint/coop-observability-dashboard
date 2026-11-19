@@ -94,7 +94,7 @@ function GroupTile({
         </span>
         <div className="min-w-0 flex-1">
           <Link
-            href={`/uploads/scan/${encodeURIComponent(g.source)}`}
+            href={`/uploads/scan/${encodeURIComponent(g.source)}${g.batchId ? `?batch=${encodeURIComponent(g.batchId)}` : ''}`}
             title={g.name ?? g.source}
             className="block truncate text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
           >
@@ -304,7 +304,7 @@ export function UploadsView({
             <div className="flex items-center gap-3">
               {selectedGroup && (
                 <Link
-                  href={`/uploads/scan/${encodeURIComponent(selectedGroup.source)}`}
+                  href={`/uploads/scan/${encodeURIComponent(selectedGroup.source)}${selectedGroup.batchId ? `?batch=${encodeURIComponent(selectedGroup.batchId)}` : ''}`}
                   className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:border-foreground/25"
                 >
                   <LayoutGrid className="size-3.5 text-muted-foreground" /> See forms in this scan

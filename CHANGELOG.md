@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-19 — Uploads: scan detail is one upload drop, not every re-upload of the filename
+
+The scan detail page (`/uploads/scan/[source]`) grouped by the file's **name**, so re-uploading the same scan (e.g. the OCR A/B runs) piled every upload into one view — the version summary cards showed, say, "315 forms" across 13 uploads while the page below showed the single upload's 98 pages. Now the Uploads list tiles link with the drop's `batch_id` (`?batch=`), and the scan page scopes its board, version cards, file list, name, and delete to that one upload when the param is present. `triageBoard` takes an optional `batchId`; `loadTriageBoard` filters to it (and the DB read narrows by `batch_id`). **Back-compatible:** without `?batch` (old links/bookmarks), the page keeps its legacy by-filename behavior. Known follow-up: the per-file review ‹ › stepper (`scanScopeIds`) still steps by source, not batch. Typecheck clean; full suite green.
+
 ## 2026-11-19 — Goldline OCR L7: fix the upload progress freezing on the batched tail
 
 With L7 batch mode on, the live upload progress ("N of 98 read") froze near the end (e.g. "85 of 98 · 13 waiting") even though the server finished every page, because the new `queued_batch` status fell through the three status helpers that drive progress: `isSettledStatus` treated it as settled (so the uploader stopped polling), `summarizeScanRows` counted it as neither done nor in-flight (so it showed as "waiting" via total − done), and `latestActiveScan` looked only for `queued`/`processing` (so the refresh-surviving indicator stopped). Now `queued_batch` is handled everywhere as **in flight** (shown as "Processing"): the uploader keeps polling until the batch poller ingests each page and it reaches a terminal state. Cosmetic only, no data was ever lost (the DB always completed); a refresh already showed the true state. Tests added for the `queued_batch` path.
