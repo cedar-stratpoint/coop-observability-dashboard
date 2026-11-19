@@ -683,6 +683,7 @@ export function UploadReview({
             rows={rows}
             query={query}
             onQuery={setQuery}
+            version={upload.form_version}
             productNames={productNames}
             onLocate={
               scanUrl && extraction.page
