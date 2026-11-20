@@ -10,7 +10,7 @@ import {
 } from './goldline-data';
 import {fetchAnchoredBatch} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {mapAnchoredToExtractedPage} from './goldline-anchored-extract';
+import {mapAnchoredOutput} from './goldline-anchored-extract';
 import {avgConfidence, runInventoryRead} from './goldline-read-pipeline';
 import {logReadEvent} from './goldline-read-log';
 import {uploadSource} from './goldline-upload-groups';
@@ -108,7 +108,7 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
         out.fellBack++;
         continue;
       }
-      const mapped = mapAnchoredToExtractedPage(template, r.output);
+      const mapped = mapAnchoredOutput(template, r.output);
       const extracted = mapped.page;
       const docConfidence = avgConfidence(extracted);
       await saveExtraction({companyId: p.companyId, uploadId: p.uploadId, page: p.page, extracted, docConfidence});
