@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-20 — Goldline OCR: V2 pages stop losing their count columns; flagged P1 read places numbers on the right row
+
+Measured against a hand-checked answer key (11 scan pages of the Oct 30 98-page scan; plan `knowledge/tasks/2026-11-19-handwriting-read-accuracy.md`).
+
+- **V2 fix (always on).** The template read's structured output listed each row's fields in V1's printed order (stockroom, drawer, selling, delivery, ending). Structured outputs emit properties in schema order, and on V2 the paper prints Delivery first, so the model wrote `delivery` first and was then locked out of Stockroom / Drawer / Selling: V2 pages came back with only Delivery + Ending (48 to 116 numbers lost per page on staging). `anchoredSchemaFor` now orders the fields by each version's printed columns. V2 filled cells read right: 45% to 92% on the answer key. V1 is unchanged (same order as before).
+- **P1 read (flag `GOLDLINE_READ_P1=1`, off by default; off = today's read).** Rows are keyed by the printed ITEM# read on the same line as the handwriting instead of a counted index; the writer's consistent per-family offset decides numbers that straddle a ruled line; the reader re-checks row math and the handwritten per-family peso total before answering (still reports only what is written), and the mapper lowers `confidence` where those checks still fail. V1: 78% to 87% of filled cells right, rows with an error 27% to 16%, numbers on the wrong row 10.2 to 5.4 per page. V2 (with the fix): 92% to 94%, wrong-row numbers 1.8 to 0. Cost: about 65% more output tokens on the anchored read (it checks its work).
+- Same `ExtractedPage` output and fields; no review-UI or schema changes. The batch poller maps either output shape (`mapAnchoredOutput`), so a batch submitted before a flag flip still ingests.
+
 ## 2026-11-19 — Uploads: Per BA drill-down keeps the scan scoped to its upload drop
 
 Following #639/#643's `?batch=` scope: on the scan detail, the version cards, view toggle, and per-file Back all preserved the batch, but the **BA cards** (Per BA view) did not. Clicking a BA linked to `/uploads/scan/[source]?view=store&ba=...` with no `batch`, so the store view re-merged every re-upload of the filename (the "337 forms" inflation). `BaCards` now takes `batchId` and appends `&batch=${batchId}` to the drill-down link, so Per BA → a BA stays on the one drop. Navigation only; no data change.

@@ -417,3 +417,270 @@ export function mapAnchoredToExtractedPage(template: FormTemplate, out: Anchored
     versionMismatch,
   };
 }
+
+/* ============================================================================================
+ * P1 read-accuracy variant (plan: knowledge/tasks/2026-11-19-handwriting-read-accuracy.md).
+ * Flag-gated by GOLDLINE_READ_P1=1 at the call site; flag-off is byte-identical to the read above.
+ *
+ * Measured on a hand-checked answer key: the index-only read places ~37 numbers per 8 pages on
+ * the wrong row. Two causes: (1) it COUNTS rows down the page to find index i, so one slip moves a
+ * whole family; (2) writers sit consistently low or high, so a number straddling a ruled line is
+ * judged one number at a time and often lands on the row below. P1 changes how a number is placed:
+ *  - rows are keyed by the printed ITEM# the model reads on the SAME LINE as the numbers (look
+ *    left), never by a counted index;
+ *  - the writer's consistent per-family offset decides straddling numbers;
+ *  - the paper's own checks (row math, the handwritten per-family peso total) send it back to look
+ *    again before answering — it still reports only what is written.
+ * The mapper then lowers confidence (existing field) where those checks still fail. Same
+ * ExtractedPage output; nothing new is stored or shown.
+ * ========================================================================================== */
+
+/** One P1 row: the printed row key the model read beside the numbers, plus the numbers. */
+export type AnchoredRowP1 = CountCols & {row: string; confidence?: number};
+export type FamilyTotal = {family: string; amount: number};
+export type AnchoredOutputP1 = Omit<AnchoredOutput, 'rows'> & {rows: AnchoredRowP1[]; family_totals?: FamilyTotal[]};
+
+/** The row key shown to (and returned by) the model: the printed ITEM#, plus the product name
+ *  only when the code repeats on the page (accessories reuse codes like "ACCS 288"). */
+export function p1RowKeys(template: FormTemplate): string[] {
+  const items = templateItems(template);
+  const counts = new Map<string, number>();
+  for (const it of items) counts.set(it.itemCode, (counts.get(it.itemCode) ?? 0) + 1);
+  return items.map((it) => ((counts.get(it.itemCode) ?? 0) > 1 ? `${it.itemCode} | ${it.product}` : it.itemCode));
+}
+
+const normKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9|#]+/g, '');
+
+/** How to find the count columns, described the way the paper prints them. V2 prints its own
+ *  1-to-5 numbering over the count box (Stockroom 1 ... Ending 4, Total Amount 5) with Delivery in
+ *  a separate box to the left; describing V2 as "delivery col 1 ... ending col 5" contradicts those
+ *  printed numbers and the read then leaves Stockroom / Drawer / Selling empty (measured: ~50 to 80
+ *  missed numbers per V2 page). V1 prints 1 to 5 in the same order as its keys, so it is unchanged. */
+function columnsTextP1(template: FormTemplate): string[] {
+  if (template.version === 'v2') {
+    return [
+      'Columns (this is the V2 layout): DELIVERY is its own box on the LEFT, headed "Delivery MM/DD"; read it as',
+      '"delivery". To its right, after a gap, is the COUNT BOX, whose columns carry their own printed numbers 1 to 5:',
+      '  1 = stockroom ("Bilang sa Stockroom / Steelcab"), 2 = drawer ("Bilang sa Drawer ng Module"),',
+      '  3 = selling_area ("Bilang sa Selling Area"), 4 = ending_on_hand ("Ending Inventory / Stock on Hand"),',
+      '  5 = "Total Amount of Ending Inventory" (pesos: never a count; its per-family amounts go in family_totals).',
+      'Those printed numbers 1 to 5 are the count box\'s own numbering, not positions across the whole page. Read every',
+      'count column; ending_on_hand is normally stockroom + drawer + selling_area, so an ending with nothing written',
+      'beside it in the count box usually means those cells were missed.',
+    ];
+  }
+  const cols = columnsForVersion(template.version);
+  return [`Columns to read, left to right (handwritten integer): ${cols.map((c) => `${c.key} (col ${c.position}, "${c.label}")`).join(' · ')}.`];
+}
+
+export function buildAnchoredPromptP1(template: FormTemplate): string {
+  const keys = p1RowKeys(template);
+  const lines: string[] = [];
+  let idx = 0;
+  for (const r of template.rows) {
+    if (r.kind === 'group') {
+      const price = r.unitPrice == null ? '' : ` (printed ₱${r.unitPrice})`;
+      lines.push(`  [FAMILY] ${r.line}${price}`);
+    } else {
+      lines.push(`  row "${keys[idx]}" · ${r.product}`);
+      idx++;
+    }
+  }
+  return [
+    `PAGE ${template.page} of ${PAGE_COUNT}. Form version ${template.version.toUpperCase()}.`,
+    'FILL IN THE FORM. The rows below are the fixed, printed rows of this page, in printed order. Read ONLY the',
+    'handwritten count cells and return them per row, identified by the row key. Do NOT decide the row set.',
+    ...columnsTextP1(template),
+    '',
+    'PLACING EACH NUMBER ON THE RIGHT ROW (most errors are numbers put on the row above or below):',
+    '- Find a row by looking LEFT along the same horizontal line from the handwriting to the printed ITEM# and',
+    '  product. Never find a row by counting lines down the page.',
+    '- Handwriting rarely sits centred in its cell. A writer is usually consistently LOW (on or across the ruled',
+    '  line below the row) or HIGH. Before filling a family, look at all of its handwritten numbers together and',
+    '  work out this writer\'s offset from the printed rows, then place every number in the family with that',
+    '  same offset. A number that straddles a line belongs to the row the offset points to; it does not',
+    '  automatically belong to the lower row.',
+    '- One row\'s numbers are written side by side at about the same height across the columns, so they move',
+    '  together. Two rows never share the same written numbers.',
+    '',
+    'CHECKS before you answer (they tell you where to LOOK AGAIN; still return only what is written):',
+    '- Row math: ending_on_hand = stockroom + drawer + selling_area (delivery is NOT part of it). If a row you',
+    '  placed does not add up, a number is probably misread or sitting on the neighbouring row: re-check it.',
+    '- Family totals: the far-right "Total Amount of Ending Inventory" column has a handwritten peso amount per',
+    '  family (often with a bracket spanning the family). Transcribe each into "family_totals" with the family',
+    '  name as listed. It should equal (sum of the family\'s ending_on_hand) x the printed price. If it does not,',
+    '  look again in that family for a missed number, a misread digit, or a number on the wrong row.',
+    '',
+    'Rules:',
+    `- Return one entry for every row below (${idx} rows), with "row" set to the row key exactly as listed.`,
+    '  A row with no counts (blank, or only an "O/S" mark) is still returned, with no count fields.',
+    '- OMIT a blank cell entirely; only a written "0" is 0. Read the WRITTEN ending_on_hand; never compute it.',
+    '- Map each cell by the PRINTED column header described above, not by any handwritten sub-label.',
+    '- Also transcribe the printed DATA-column header labels into "column_headers", left to right, exactly as',
+    '  printed on THIS page (do not reorder them to match the list above).',
+    '- Read the header once: store code + name, period (MM/DD to MM/DD), beauty consultant.',
+    '- A handwritten row that is NOT one of the rows below goes in "extras" with its printed code/name.',
+    '- A handwritten price that differs from a family\'s printed price goes in "price_notes". Never change a count.',
+    '- Give each row a confidence 0 to 1. Return JSON only.',
+    'ROWS (family bands are context only; do NOT return a row for a [FAMILY] line):',
+    ...lines,
+  ].join('\n');
+}
+
+export function buildAnchoredSystemPromptP1(): string {
+  return [
+    'You read NICHIDO COSMETICS "Semi-Monthly Inventory" form pages by FILLING A FIXED TEMPLATE.',
+    "You are given the page's exact printed rows. Transcribe only the handwritten count cells and return them",
+    'per row, keyed by the printed row you see on the same line as the handwriting. Never add, drop or rename a',
+    'row, and never infer, estimate, average, or fill a blank. Return JSON only.',
+  ].join('\n');
+}
+
+/** P1 schema: rows keyed by `row` (required string, no new optional params) + required
+ *  `family_totals` (required inner fields). Same header / extras / price_notes / column_headers. */
+export const ANCHORED_EXTRACTION_SCHEMA_P1 = {
+  ...ANCHORED_EXTRACTION_SCHEMA,
+  properties: {
+    ...ANCHORED_EXTRACTION_SCHEMA.properties,
+    rows: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          row: {type: 'string'},
+          stockroom: {type: 'integer'},
+          drawer: {type: 'integer'},
+          selling_area: {type: 'integer'},
+          delivery: {type: 'integer'},
+          ending_on_hand: {type: 'integer'},
+          confidence: {type: 'number'},
+        },
+        required: ['row', 'confidence'],
+      },
+    },
+    family_totals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {family: {type: 'string'}, amount: {type: 'number'}},
+        required: ['family', 'amount'],
+      },
+    },
+  },
+  required: ['rows', 'family_totals'],
+} as const;
+
+export type P1Signals = {
+  unmatchedRows: number;
+  duplicateRows: number;
+  rowMathOff: number;
+  familyChecked: number;
+  familyMismatch: number;
+};
+
+/** Reconstruct the page from a P1 output: place each returned row by its key (never by position),
+ *  then lower confidence where the paper's own checks still fail. */
+export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: AnchoredOutputP1): AnchoredMapResult & {p1: P1Signals} {
+  const items = templateItems(template);
+  const keys = p1RowKeys(template).map(normKey);
+  const codeOnly = items.map((it) => normKey(it.itemCode));
+  const claimed: (AnchoredRowP1 | null)[] = items.map(() => null);
+  const strays: AnchoredRowP1[] = [];
+  let duplicateRows = 0;
+
+  for (const r of out.rows ?? []) {
+    const k = normKey(String(r.row ?? ''));
+    let j = keys.indexOf(k);
+    // A bare repeated code ("ACCS 288" without the product): first unclaimed occurrence, in order.
+    if (j < 0) j = codeOnly.findIndex((c, i) => c === k && !claimed[i]);
+    if (j < 0) { strays.push(r); continue; }
+    if (claimed[j]) { duplicateRows++; continue; }
+    claimed[j] = r;
+  }
+
+  // Reuse the index mapper for row reconstruction, extras, header and the version self-check.
+  const asIndexed: AnchoredOutput = {
+    ...out,
+    rows: claimed.flatMap((r, i) => (r ? [{...r, i}] : [])),
+    extras: [
+      ...(out.extras ?? []),
+      ...strays.filter((s) => COUNT_KEYS.some((c) => typeof s[c] === 'number')).map((s) => ({...s, code: s.row, name: null})),
+    ],
+  };
+  const base = mapAnchoredToExtractedPage(template, asIndexed);
+  const rows = base.page.rows;
+
+  // Row math: ending = stockroom + drawer + selling_area. A mismatch keeps the written values but
+  // drops confidence so the row is looked at.
+  let rowMathOff = 0;
+  for (let i = 0; i < items.length; i++) {
+    const r = rows[i];
+    const parts = [r.stockroom, r.drawer, r.selling_area].filter((x): x is number => typeof x === 'number');
+    if (typeof r.ending_on_hand === 'number' && parts.length && parts.reduce((a, b) => a + b, 0) !== r.ending_on_hand) {
+      rowMathOff++;
+      r.confidence = Math.min(r.confidence ?? 1, 0.5);
+      r.alt = r.alt ?? 'row does not add up (stockroom + drawer + selling area vs ending)';
+    }
+  }
+
+  // Family totals: compare the handwritten peso amount with sum(ending) x printed price, for
+  // families with one printed price (accessories carry per-item prices, so they are skipped).
+  let familyChecked = 0, familyMismatch = 0;
+  const totals = (out.family_totals ?? []).map((f) => ({k: normKey(f.family), amount: f.amount}));
+  const groups = new Map<string, number[]>();
+  items.forEach((it, i) => { if (it.group && it.unitPrice != null) (groups.get(it.group) ?? groups.set(it.group, []).get(it.group)!).push(i); });
+  for (const [group, idxs] of groups) {
+    if (idxs.length < 2) continue;
+    const gk = normKey(group);
+    const paper = totals.find((t) => t.k === gk || t.k.includes(gk) || gk.includes(t.k));
+    if (!paper) continue;
+    familyChecked++;
+    const price = items[idxs[0]].unitPrice as number;
+    const sum = idxs.reduce((a, i) => a + (rows[i].ending_on_hand ?? 0), 0) * price;
+    if (Math.abs(sum - paper.amount) > 1) {
+      familyMismatch++;
+      for (const i of idxs) {
+        rows[i].confidence = Math.min(rows[i].confidence ?? 1, 0.6);
+        rows[i].alt = rows[i].alt ?? `family total on paper ₱${paper.amount}, rows add to ₱${sum}`;
+      }
+    }
+  }
+
+  return {...base, p1: {unmatchedRows: strays.length, duplicateRows, rowMathOff, familyChecked, familyMismatch}};
+}
+
+/** Map either output shape: P1 rows carry `row`, the original carries `i`. Lets a batch submitted
+ *  under one flag setting be ingested after the flag flips. */
+export function mapAnchoredOutput(template: FormTemplate, out: AnchoredOutput | AnchoredOutputP1): AnchoredMapResult {
+  const first = (out.rows ?? [])[0] as {row?: unknown} | undefined;
+  return first && typeof first.row === 'string'
+    ? mapAnchoredP1ToExtractedPage(template, out as AnchoredOutputP1)
+    : mapAnchoredToExtractedPage(template, out as AnchoredOutput);
+}
+
+/**
+ * The anchored-read schema with each row's count fields in the version's PRINTED column order.
+ *
+ * Structured outputs make the model emit an object's properties in schema order, and once a property
+ * is written the ones declared before it can no longer be emitted. The base schemas list
+ * stockroom, drawer, selling_area, delivery, ending_on_hand (V1's printed order). On V2 the paper
+ * prints Delivery first, so the model writes `delivery` first and is then locked out of stockroom /
+ * drawer / selling_area: measured on V2 pages, the read returned only delivery + ending (dozens of
+ * numbers lost per page), while the same prompt without the schema returned every column. Ordering
+ * the fields by the printed layout removes the lock-out; V1 (and Legacy, not anchored) are unchanged.
+ */
+export function anchoredSchemaFor<S extends typeof ANCHORED_EXTRACTION_SCHEMA | typeof ANCHORED_EXTRACTION_SCHEMA_P1>(schema: S, version: FormVersion): S {
+  const order = columnsForVersion(version).map((c) => c.key as string);
+  const props = schema.properties.rows.items.properties as Record<string, unknown>;
+  const keys = Object.keys(props);
+  const counts = keys.filter((k) => order.includes(k)).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const lead = keys.filter((k) => !order.includes(k) && k !== 'confidence');
+  const ordered: Record<string, unknown> = {};
+  for (const k of [...lead, ...counts, ...keys.filter((k) => k === 'confidence')]) ordered[k] = props[k];
+  return {
+    ...schema,
+    properties: {...schema.properties, rows: {...schema.properties.rows, items: {...schema.properties.rows.items, properties: ordered}}},
+  } as S;
+}

@@ -22,6 +22,15 @@ export function batchReadEnabled(companyId: string): boolean {
   return companyInEnv(companyId, process.env.GOLDLINE_BATCH_READ_COMPANIES);
 }
 
+/**
+ * P1 read-accuracy variant (plan: knowledge/tasks/2026-11-19-handwriting-read-accuracy.md): rows
+ * keyed by the printed ITEM# read on the same line, writer-offset placement, and the paper's own
+ * checks. Process-wide `GOLDLINE_READ_P1=1`; off (unset) is byte-identical to the current read.
+ */
+export function readP1Enabled(): boolean {
+  return (process.env.GOLDLINE_READ_P1 ?? '').trim() === '1';
+}
+
 function companyInEnv(companyId: string, raw: string | undefined): boolean {
   if (!companyId) return false;
   return (raw ?? '')

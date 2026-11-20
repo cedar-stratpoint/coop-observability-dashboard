@@ -23,17 +23,22 @@ import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 import {
   ANCHORED_EXTRACTION_SCHEMA,
+  ANCHORED_EXTRACTION_SCHEMA_P1,
   DELIVERY_LOCATOR_SCHEMA,
   buildAnchoredPrompt,
   buildAnchoredSystemPrompt,
+  buildAnchoredPromptP1,
+  buildAnchoredSystemPromptP1,
   buildDeliveryLocatorPrompt,
+  anchoredSchemaFor,
   deliveryColumnFromLocator,
-  mapAnchoredToExtractedPage,
+  mapAnchoredOutput,
   type AnchoredMapResult,
   type AnchoredOutput,
   type DeliveryLocatorOutput,
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
+import {readP1Enabled} from './goldline-anchored-flag';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
 // GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
@@ -511,25 +516,26 @@ export async function extractInventoryPageAnchored(
   if (!parsed || !Array.isArray(parsed.rows)) {
     throw new Error('Anchored read returned no rows');
   }
-  return mapAnchoredToExtractedPage(template, parsed);
+  return mapAnchoredOutput(template, parsed);
 }
 
 /** The request body for ONE anchored read (model, system, numbers-only schema, page + prompt).
  *  Extracted so the same body can be sent synchronously (above) or packed into a Message Batch
  *  (L7 cost spike below) with no difference in what the model sees. */
 export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile) {
+  const p1 = readP1Enabled();
   return {
     model: EXTRACT_MODEL,
     // Numbers-only output is far smaller than the free-read schema, but the densest pages (form
     // page 2 = 71 rows, page 4 = 68) can still exceed a small cap and truncate — observed failing on
     // the live 98-page run at 8000. Same high cap as the free read; billed on actual output.
     max_tokens: 64000,
-    system: [{type: 'text', text: buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
-    output_config: {format: {type: 'json_schema', schema: ANCHORED_EXTRACTION_SCHEMA}},
+    system: [{type: 'text', text: p1 ? buildAnchoredSystemPromptP1() : buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
+    output_config: {format: {type: 'json_schema', schema: anchoredSchemaFor(p1 ? ANCHORED_EXTRACTION_SCHEMA_P1 : ANCHORED_EXTRACTION_SCHEMA, template.version)}},
     messages: [
       {
         role: 'user',
-        content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: buildAnchoredPrompt(template)}],
+        content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: p1 ? buildAnchoredPromptP1(template) : buildAnchoredPrompt(template)}],
       },
     ],
   };
