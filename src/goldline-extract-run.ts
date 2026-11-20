@@ -28,6 +28,7 @@ import {
   buildAnchoredPrompt,
   buildAnchoredSystemPrompt,
   buildAnchoredPromptP1,
+  withUnsureSchema,
   buildAnchoredSystemPromptP1,
   buildDeliveryLocatorPrompt,
   anchoredSchemaFor,
@@ -39,7 +40,7 @@ import {
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
 import type {PageBlock} from './goldline-page-bands';
-import {readP1Enabled} from './goldline-anchored-flag';
+import {readP1Enabled, readUnsureEnabled} from './goldline-anchored-flag';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
 // GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
@@ -548,6 +549,7 @@ export async function extractInventoryPageAnchored(
  *  (L7 cost spike below) with no difference in what the model sees. */
 export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile, pageBlocks?: PageBlock[] | null) {
   const p1 = readP1Enabled();
+  const unsure = p1 && readUnsureEnabled();
   return {
     model: EXTRACT_MODEL,
     // Numbers-only output is far smaller than the free-read schema, but the densest pages (form
@@ -555,11 +557,11 @@ export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, p
     // the live 98-page run at 8000. Same high cap as the free read; billed on actual output.
     max_tokens: 64000,
     system: [{type: 'text', text: p1 ? buildAnchoredSystemPromptP1() : buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
-    output_config: {format: {type: 'json_schema', schema: anchoredSchemaFor(p1 ? ANCHORED_EXTRACTION_SCHEMA_P1 : ANCHORED_EXTRACTION_SCHEMA, template.version)}},
+    output_config: {format: {type: 'json_schema', schema: anchoredSchemaFor(p1 ? (unsure ? withUnsureSchema(ANCHORED_EXTRACTION_SCHEMA_P1) : ANCHORED_EXTRACTION_SCHEMA_P1) : ANCHORED_EXTRACTION_SCHEMA, template.version)}},
     messages: [
       {
         role: 'user',
-        content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: p1 ? buildAnchoredPromptP1(template) : buildAnchoredPrompt(template)}],
+        content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: p1 ? buildAnchoredPromptP1(template, {unsure}) : buildAnchoredPrompt(template)}],
       },
     ],
   };

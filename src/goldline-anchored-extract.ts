@@ -436,7 +436,8 @@ export function mapAnchoredToExtractedPage(template: FormTemplate, out: Anchored
  * ========================================================================================== */
 
 /** One P1 row: the printed row key the model read beside the numbers, plus the numbers. */
-export type AnchoredRowP1 = CountCols & {row: string; confidence?: number};
+export type UnsureCell = {col: string; alt: number};
+export type AnchoredRowP1 = CountCols & {row: string; confidence?: number; unsure?: UnsureCell[]};
 export type FamilyTotal = {family: string; amount: number};
 export type AnchoredOutputP1 = Omit<AnchoredOutput, 'rows'> & {rows: AnchoredRowP1[]; family_totals?: FamilyTotal[]};
 
@@ -473,7 +474,7 @@ function columnsTextP1(template: FormTemplate): string[] {
   return [`Columns to read, left to right (handwritten integer): ${cols.map((c) => `${c.key} (col ${c.position}, "${c.label}")`).join(' · ')}.`];
 }
 
-export function buildAnchoredPromptP1(template: FormTemplate): string {
+export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: boolean} = {}): string {
   const keys = p1RowKeys(template);
   const lines: string[] = [];
   let idx = 0;
@@ -521,10 +522,48 @@ export function buildAnchoredPromptP1(template: FormTemplate): string {
     '- Read the header once: store code + name, period (MM/DD to MM/DD), beauty consultant.',
     '- A handwritten row that is NOT one of the rows below goes in "extras" with its printed code/name.',
     '- A handwritten price that differs from a family\'s printed price goes in "price_notes". Never change a count.',
+    ...(opts.unsure
+      ? [
+          '- DOUBTFUL CELLS: if a written number could honestly be read two ways (4 or 9, 1 or 7, 3 or 8, 5 or 6, 0 or 6,',
+          '  29 or 39, a dropped or extra leading digit), or a faint mark might or might not be a number, list that cell in the',
+          '  row\'s "unsure" with the column and your SECOND reading ("alt"; use -1 when the second reading is blank). Also',
+          '  list a cell you placed on this row when the writing sits between this row and the next. Leave "unsure" out for',
+          '  a row whose numbers are clear. Never change your main reading because of this list.',
+        ]
+      : []),
     '- Give each row a confidence 0 to 1. Return JSON only.',
     'ROWS (family bands are context only; do NOT return a row for a [FAMILY] line):',
     ...lines,
   ].join('\n');
+}
+
+/** P1 schema + an optional per-row `unsure` list (one optional param; enum column + integer second reading). */
+export function withUnsureSchema<S extends typeof ANCHORED_EXTRACTION_SCHEMA_P1>(schema: S): S {
+  const items = schema.properties.rows.items;
+  return {
+    ...schema,
+    properties: {
+      ...schema.properties,
+      rows: {
+        ...schema.properties.rows,
+        items: {
+          ...items,
+          properties: {
+            ...items.properties,
+            unsure: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {col: {type: 'string', enum: [...COUNT_KEYS]}, alt: {type: 'integer'}},
+                required: ['col', 'alt'],
+              },
+            },
+          },
+        },
+      },
+    },
+  } as S;
 }
 
 export function buildAnchoredSystemPromptP1(): string {
@@ -573,6 +612,7 @@ export const ANCHORED_EXTRACTION_SCHEMA_P1 = {
 } as const;
 
 export type P1Signals = {
+  unsureRows: number;
   unmatchedRows: number;
   duplicateRows: number;
   rowMathOff: number;
@@ -612,6 +652,19 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
   const base = mapAnchoredToExtractedPage(template, asIndexed);
   const rows = base.page.rows;
 
+  // Doubtful cells the reader named itself: the strongest evidence a row needs a look, and it carries the
+  // second reading so the reviewer can decide at a glance.
+  let unsureRows = 0;
+  for (let i = 0; i < items.length; i++) {
+    const u = (claimed[i]?.unsure ?? []).filter((c) => c && typeof c.col === 'string');
+    if (!u.length) continue;
+    unsureRows++;
+    const r = rows[i];
+    r.confidence = Math.min(r.confidence ?? 1, 0.45);
+    const say = u.map((c) => `${c.col.replace(/_/g, ' ')} could be ${c.alt < 0 ? 'blank' : c.alt}`).join('; ');
+    r.alt = r.alt ? `${r.alt}; ${say}` : say;
+  }
+
   // Row math: ending = stockroom + drawer + selling_area. A mismatch keeps the written values but
   // drops confidence so the row is looked at.
   let rowMathOff = 0;
@@ -648,7 +701,7 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
     }
   }
 
-  return {...base, p1: {unmatchedRows: strays.length, duplicateRows, rowMathOff, familyChecked, familyMismatch}};
+  return {...base, p1: {unsureRows, unmatchedRows: strays.length, duplicateRows, rowMathOff, familyChecked, familyMismatch}};
 }
 
 /** Map either output shape: P1 rows carry `row`, the original carries `i`. Lets a batch submitted
@@ -676,9 +729,10 @@ export function anchoredSchemaFor<S extends typeof ANCHORED_EXTRACTION_SCHEMA | 
   const props = schema.properties.rows.items.properties as Record<string, unknown>;
   const keys = Object.keys(props);
   const counts = keys.filter((k) => order.includes(k)).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  const lead = keys.filter((k) => !order.includes(k) && k !== 'confidence');
+  const tail = ['unsure', 'confidence'];
+  const lead = keys.filter((k) => !order.includes(k) && !tail.includes(k));
   const ordered: Record<string, unknown> = {};
-  for (const k of [...lead, ...counts, ...keys.filter((k) => k === 'confidence')]) ordered[k] = props[k];
+  for (const k of [...lead, ...counts, ...tail.filter((k) => keys.includes(k))]) ordered[k] = props[k];
   return {
     ...schema,
     properties: {...schema.properties, rows: {...schema.properties.rows, items: {...schema.properties.rows.items, properties: ordered}}},

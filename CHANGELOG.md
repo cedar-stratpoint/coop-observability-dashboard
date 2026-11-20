@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-20 — Goldline OCR: the reader names the numbers it is unsure of (flagged)
+
+Measured on the hand-checked answer key, the read's confidence did not point at its mistakes: with sharper images on, rows at confidence <= 0.6 held only 26% of the wrong rows on the V1/V2 key pages (the model's single per-row score, the paper family-total check and row math together). With `GOLDLINE_READ_UNSURE=1` (needs `GOLDLINE_READ_P1=1`), each row may also list the cells the reader is genuinely unsure of and its second reading (`unsure: [{col, alt}]`, alt -1 = blank). The mapper drops those rows to confidence <= 0.45 and writes the second reading into the existing `alt` note ("ending on hand could be 39"); values are never changed. A/B on 7 V1/V2 key pages, 2 reads each, with bands: wrong rows caught at <= 0.6 went 11/42 (26%) to 30/42 (71%), rows flagged 89 to 131 of 714, accuracy unchanged (96.9%), output tokens unchanged. Several of the remaining misses are answer-key rows whose numbers do not add up, now sent back for re-check.
+
 ## 2026-11-20 — Goldline OCR: ship the page renderer's files with the read routes (bands actually render on Vercel)
 
 The first staging run with `GOLDLINE_READ_BANDS_COMPANIES` on (#651) read every page from the PDF: on Vercel each render failed with `Cannot find module 'pdfjs-dist/package.json'` and fell back silently. `pdf-to-img` finds its own nested `pdfjs-dist` with `require.resolve('pdfjs-dist/package.json')` and loads fonts, cmaps and wasm by path, and the crop code loads `@napi-rs/canvas`'s native binary; the file trace follows none of that. `outputFileTracingIncludes` now ships `pdf-to-img/**` and `@napi-rs/**` with `/api/goldline/*` (verified in the `read-page`, `upload` and `batch-poll` `.nft.json` traces). This also means the earlier L6 downscale lever, which renders through the same library, could never have run on Vercel.
