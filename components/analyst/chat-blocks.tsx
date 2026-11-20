@@ -6,7 +6,7 @@
 import {useState} from 'react';
 import dynamic from 'next/dynamic';
 import {ChevronRight, FlaskConical, TriangleAlert} from 'lucide-react';
-import type {ChartBlock, ChatBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
+import type {ChartBlock, ChatBlock, CohortDraftBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
 import type {MetricRow, ResultColumn} from '@/src/chat/result-types';
 import {cn} from '@/lib/utils';
 import {formatCategory, formatValue} from './chat-blocks-format';
@@ -200,6 +200,9 @@ function ChartCard({block}: {block: ChartBlock}) {
   );
 }
 
+// RET-10 9B: Ask Coop's cohort draft, loaded with the first draft (it carries the Save action) like ChartView below.
+const CohortDraftView = dynamic(() => import('./cohort-draft-card').then((m) => m.CohortDraftBlockView), {ssr: false}) as React.ComponentType<{block: CohortDraftBlock}>;
+
 /** Renders blocks in order. Adjacent stat tiles become ONE responsive row. */
 export function ChatBlocks({blocks}: {blocks: ChatBlock[]}) {
   const out: React.ReactNode[] = [];
@@ -214,6 +217,10 @@ export function ChatBlocks({blocks}: {blocks: ChatBlock[]}) {
       continue;
     }
     flush();
+    if (b.kind === 'cohort_draft') {
+      out.push(<CohortDraftView key={b.id} block={b} />);
+      continue;
+    }
     out.push(
       b.kind === 'chart' ? (
         <ChartCard key={b.id} block={b} />

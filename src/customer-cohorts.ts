@@ -12,7 +12,7 @@
  */
 import {fetchAllRows, type MakePage} from './pos-fetch-paginate';
 import {isMissingTable, type DbError} from './supabase-errors';
-import {matchesCohort, readCohortRule, type CohortRow, type CohortRule} from './crm-compute';
+import {BIRTHDAY_COHORT, BUNDLE_COHORT, NO_CODE, codeCohorts, matchesCohort, readCohortRule, repeatRate, type CohortRow, type CohortRule, type EnrichedCustomer} from './crm-compute';
 
 /** Characters; the table checks the same limits. */
 export const COHORT_GROUP_MAX = 24;
@@ -180,4 +180,64 @@ export async function loadCohortRows(makePage: MakePage): Promise<CustomerCohort
     if (!isMissingTable(lastError)) console.warn(`customer_cohorts read failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
+}
+
+/* ---------- RET-10 Stage 9B: what a draft shows, shared by the Website CRM page and Ask Coop (knowledge/best-practices/chat-proposed-writes.md) ---------- */
+
+/** Code's preview of a draft: members now, buyers and repeat buyers (repeatRate), and a few FIRST names (never a last name or email). */
+export type CohortPreview = {customers: number; buyers: number; repeat: number; ratePct: number | null; names: string[]};
+export const PREVIEW_NAMES = 5;
+
+/** The preview, with THE evaluator (matchesCohort) over the same rows the page lists, so the page and Ask Coop cannot disagree. */
+export function cohortPreview(rows: readonly (CohortRow & {firstName?: string | null})[], rule: CohortRule): CohortPreview {
+  const members = rows.filter((r) => matchesCohort(r, rule));
+  const {buyers, repeat, ratePct} = repeatRate(members.map((r) => r.orderCount));
+  const names: string[] = [];
+  for (const m of members) {
+    const n = (m.firstName ?? '').trim().replace(/\s+/g, ' ');
+    if (n && names.length < PREVIEW_NAMES) names.push(n.slice(0, 40));
+  }
+  return {customers: members.length, buyers, repeat, ratePct, names};
+}
+
+/** True when the rule reads last contacted or times contacted: those need every contact source read, or they match nobody. */
+export const ruleUsesContact = (rule: CohortRule): boolean => rule.all.some((c) => c.f === 'lcdays' || c.f === 'times');
+
+export type CohortDraftInput = CohortLabel & {rule: CohortRule};
+export type CohortSuggestion = {code: string; buyers: number; repeat: number; ratePct: number; small: boolean; draft: CohortDraftInput};
+
+const SUGGEST_NAME: Readonly<Record<string, string>> = Object.freeze({[BIRTHDAY_COHORT]: 'Birthday voucher', [BUNDLE_COHORT]: 'Bundle code'});
+
+/**
+ * RET-06 → RET-10 suggestions: first-order codes with buyers (codeCohorts, biggest first) that no saved cohort covers yet ("code is X" in
+ * its rule, any case). "no code" is never a suggestion. Each comes as a ready draft: group Promo, name = the code. Which code was which
+ * event is the owner's to say, so the group stays Promo until they rename it.
+ */
+export function cohortSuggestions(rows: readonly Pick<EnrichedCustomer, 'orderCount' | 'firstOrderCode'>[], saved: readonly {rule: CohortRule}[]): CohortSuggestion[] {
+  const covered = new Set(saved.flatMap((c) => c.rule.all.filter((k) => k.f === 'code' && k.op === 'is').map((k) => String(k.v).toUpperCase())));
+  return codeCohorts(rows)
+    .filter((c) => c.group !== NO_CODE && !covered.has(c.group.toUpperCase()))
+    .map((c) => ({
+      code: c.group,
+      buyers: c.buyers,
+      repeat: c.repeat,
+      ratePct: c.ratePct,
+      small: c.small,
+      draft: {group: 'Promo', name: (SUGGEST_NAME[c.group] ?? c.group).slice(0, COHORT_NAME_MAX), rule: {all: [{f: 'code', op: 'is', v: c.group.toUpperCase()}]}},
+    }));
+}
+
+const fold = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/**
+ * A saved cohort by what the owner (or the model) typed: "Event · Circuit Makati", "event: circuit makati", even the under-the-hood
+ * "event:circuit-makati" (punctuation and case ignored). The name alone works when exactly one cohort has it. Null when unknown.
+ */
+export function findCohort<C extends CohortLabel>(saved: readonly C[], text: string): C | null {
+  const q = fold(text);
+  if (!q) return null;
+  const full = saved.find((c) => fold(`${c.group} ${c.name}`) === q);
+  if (full) return full;
+  const byName = saved.filter((c) => fold(c.name) === q);
+  return byName.length === 1 ? byName[0] : null;
 }

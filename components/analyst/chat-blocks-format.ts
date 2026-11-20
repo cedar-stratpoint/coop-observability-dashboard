@@ -112,6 +112,9 @@ export function ariaSummary(block: ChatBlock, top = 3): string {
   if (block.kind === 'kpi') {
     return `${block.title}: ${block.label} ${formatValue(block.value, block.format)}${block.sub ? `, ${block.sub}` : ''}.`;
   }
+  if (block.kind === 'cohort_draft') {
+    return `Draft cohort ${block.title}: ${block.sentences.join(', and ')}. ${block.preview.customers} customers match now. Not saved.`;
+  }
   if (block.kind === 'table') {
     return `${block.title}: table with ${block.rows.length} ${block.rows.length === 1 ? 'row' : 'rows'} and ${block.columns.length} columns.`;
   }
@@ -139,6 +142,12 @@ export function isRenderableBlock(v: unknown): v is ChatBlock {
   if (!Array.isArray(v.caveats)) return false;
   if (v.kind === 'kpi') return typeof v.label === 'string' && typeof v.format === 'string';
   if (v.kind === 'table') return Array.isArray(v.columns) && Array.isArray(v.rows);
+  if (v.kind === 'cohort_draft') {
+    // RET-10 9B: the card re-validates the rule itself (readCohortRule) before it shows or saves anything.
+    const d = v.draft;
+    const p = v.preview;
+    return isObj(d) && typeof d.group === 'string' && typeof d.name === 'string' && isObj(d.rule) && Array.isArray(v.sentences) && isObj(p) && typeof p.customers === 'number' && typeof p.buyers === 'number' && typeof p.repeat === 'number' && (p.ratePct === null || typeof p.ratePct === 'number') && Array.isArray(p.names) && p.names.every((n) => typeof n === 'string');
+  }
   if (v.kind === 'chart') {
     const c = v.chart;
     if (!isObj(c) || !Array.isArray(c.series) || !Array.isArray(c.rows) || !isObj(c.x) || typeof c.x.key !== 'string') return false;

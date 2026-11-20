@@ -10,6 +10,7 @@ import {
   LEADS_SEAM,
   SKU_SEAM,
   CONTACTS_LOG_SEAM,
+  COHORTS_SEAM,
   forbiddenInClosure,
   impureInClosure,
   importersOf,
@@ -39,7 +40,7 @@ describe('real tree', () => {
   });
 
   it('the only legacy exception is the old digest import, and it is not traversed (Train 4 removed the CRM one)', () => {
-    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/contacts-log-seam.ts', 'app/api/chat/leads-seam.ts', 'app/api/chat/sku-seam.ts', 'src/data.ts']);
+    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/cohorts-seam.ts', 'app/api/chat/contacts-log-seam.ts', 'app/api/chat/leads-seam.ts', 'app/api/chat/sku-seam.ts', 'src/data.ts']);
     expect(closure.files.has('src/data.ts')).toBe(false);
     expect(closure.files.has('src/crm-data.ts')).toBe(false);
   });
@@ -50,6 +51,19 @@ describe('real tree', () => {
 
   it('the contact-log seam reaches only the Customers tab\'s read of the log, never its actions (RET-05)', () => {
     expect(extractImports(files[CONTACTS_LOG_SEAM] ?? '').sort()).toEqual(['@/src/customer-contacts-data']);
+  });
+
+  it('the cohorts seam reaches only the Website CRM page\'s read of saved cohorts, never their actions (RET-10 9B)', () => {
+    expect(extractImports(files[COHORTS_SEAM] ?? '').sort()).toEqual(['@/src/customer-cohorts-data']);
+  });
+
+  it('RET-10 9B: nothing under src/chat or the chat route reaches the cohort actions or the cohort read seam; no chat file names a cohort write', () => {
+    expect(closure.files.has('src/customer-cohorts-actions.ts')).toBe(false);
+    expect(closure.files.has('src/customer-cohorts-data.ts')).toBe(false);
+    const hits = Object.keys(files)
+      .filter((f) => (f.startsWith('src/chat/') || f.startsWith('app/api/chat/')) && !/\.(test|spec)\./.test(f))
+      .filter((f) => /\b(createCohort|updateCohort|deleteCohort|createCohortWith|updateCohortWith|deleteCohortWith)\b|customer-cohorts-actions/.test(strip(files[f], true)));
+    expect(hits).toEqual([]);
   });
 
   it('the SKU seam reaches only the two loaders behind the comparison (compare_sku)', () => {

@@ -29,8 +29,8 @@ import {createCohort, updateCohort} from '@/src/customer-cohorts-actions';
 import {ModalShell, useModalExit} from './modal-shell';
 
 type DraftCond = {f: CohortField; op: CohortOp; v: string};
-/** What the builder opens with: an edit (id), a 9B draft to adjust, or a blank cohort. */
-export type CohortDraft = {id?: string; group: string; name: string; conds: DraftCond[]};
+/** What the builder opens with: an edit (id), a 9B draft to adjust (origin ask_coop, for the audit line), or a blank cohort. */
+export type CohortDraft = {id?: string; group: string; name: string; conds: DraftCond[]; origin?: 'builder' | 'ask_coop'};
 
 const label = 'mb-1.5 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground';
 const control = 'h-8 min-w-0 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus-visible:border-primary';
@@ -41,6 +41,16 @@ const blankCond = (f: CohortField): DraftCond => {
 };
 export const blankDraft = (): CohortDraft => ({group: '', name: '', conds: [blankCond('code')]});
 export const draftOf = (c: CustomerCohort): CohortDraft => ({id: c.id, group: c.group, name: c.name, conds: c.rule.all.map((k) => ({f: k.f, op: k.op, v: String(k.v)}))});
+/** 9B "Adjust the rule": an Ask Coop draft (or a suggestion) opened in the builder. Anything that is not a valid rule opens blank conditions. */
+export function draftFromProposal(d: {group?: unknown; name?: unknown; rule?: unknown}): CohortDraft {
+  const r = readCohortRule(d.rule);
+  return {
+    group: typeof d.group === 'string' ? d.group.slice(0, COHORT_GROUP_MAX) : '',
+    name: typeof d.name === 'string' ? d.name.slice(0, COHORT_NAME_MAX) : '',
+    conds: 'rule' in r ? r.rule.all.map((k) => ({f: k.f, op: k.op, v: String(k.v)})) : [blankCond('code')],
+    origin: 'ask_coop',
+  };
+}
 
 export function CohortBuilderDialog({
   initial,
@@ -103,7 +113,7 @@ export function CohortBuilderDialog({
     setError(null);
     const input = {group: labelRead.group, name: labelRead.name, rule: ruleRead.rule};
     startTransition(async () => {
-      const res = draft.id ? await updateCohort(draft.id, input) : await createCohort(input);
+      const res = draft.id ? await updateCohort(draft.id, input) : await createCohort(input, draft.origin ?? 'builder');
       if (res.ok) {
         onSaved(res.id);
         router.refresh();

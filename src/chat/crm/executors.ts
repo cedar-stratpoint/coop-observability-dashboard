@@ -11,9 +11,10 @@ import {runQuery} from './query-run';
 import {describeCatalog} from './query-shape';
 import {isErr, readQueryInput} from './query-spec';
 import {isIdentityDenied, readShopifyInput, shopifyResult} from './shopify-query';
-import {crmCheckoutsResult, crmCustomersResult, crmMetricsResult, crmOrdersResult, crmRangeOrders, isMetricError, readCheckoutsInput, readCustomersInput, readMetricsInput, readOrdersInput, type CrmGet, type ManualContactsRead} from './tools';
+import {COHORTS_UNAVAILABLE, crmCheckoutsResult, crmCohortRows, crmCustomersResult, crmMetricsResult, crmOrdersResult, crmRangeOrders, isMetricError, readCheckoutsInput, readCustomersInput, readMetricsInput, readOrdersInput, resolveCohortScope, type CrmCustomersRequest, type CrmGet, type ManualContactsRead, type SavedCohortsRead} from './tools';
+import {readProposeInput, runPropose} from './cohorts';
 
-export const CRM_TOOL_NAMES = ['get_crm_metrics', 'crm_query', 'shopify_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts'] as const;
+export const CRM_TOOL_NAMES = ['get_crm_metrics', 'crm_query', 'shopify_query', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'propose_crm_cohort'] as const;
 export type CrmToolName = (typeof CRM_TOOL_NAMES)[number];
 
 const SAY = 'Say so plainly and give no website figure; do not guess, and do not use another source in its place.';
@@ -90,12 +91,15 @@ export interface CrmExecutorDeps extends CrmDeps {
   emitBlock?: (block: ChatBlock) => void;
   /** The manual contact log for the audience lists (RET-05), from the route's server seam; absent: manual_contacts reads unknown, never 0. */
   manualContacts?: ManualContactsRead;
+  /** RET-10 9B: the saved cohorts (rules only), from the route's server seam (app/api/chat/cohorts-seam.ts). Absent or null: "not set up". Read only. */
+  cohorts?: SavedCohortsRead;
 }
 
 export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (input: unknown) => Promise<unknown>> {
   let calls = 0;
   let refused = 0;
   let tables = 0;
+  let drafts = 0;
   const max = deps.maxCalls ?? CRM_LIMITS.maxToolCallsPerTurn;
   const maxRefused = deps.maxRefused ?? CRM_LIMITS.maxToolCallsPerTurn;
   const refusedLine = (tool: CrmToolName, input: unknown, code: string): void =>
@@ -202,7 +206,37 @@ export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (
       return deps.keep(out.result);
     },
     list_crm_orders: tool('list_crm_orders', readOrdersInput, crmOrdersResult),
-    list_crm_customers: tool('list_crm_customers', readCustomersInput, (req, get) => crmCustomersResult(req, get, deps.now, deps.manualContacts)),
+    // RET-10 9B: a saved cohort (or a group of them) is resolved before any CRM read; an unknown one is refused with the valid labels.
+    list_crm_customers: async (input: unknown): Promise<unknown> => {
+      const req = readCustomersInput(input);
+      const scope = isMetricError(req) ? null : await resolveCohortScope(req, deps.cohorts);
+      const reader = (): CrmCustomersRequest | MetricError => (isMetricError(req) ? req : scope && isMetricError(scope) ? scope : req);
+      return tool('list_crm_customers', reader, (r, get) => crmCustomersResult(r, get, deps.now, deps.manualContacts, scope && !isMetricError(scope) ? scope : undefined))(input);
+    },
+    // RET-10 9B: drafts only. Validated and counted in code; drawn as a block a PERSON saves (Save cohort → the 9A create action). No write path here.
+    propose_crm_cohort: async (input: unknown): Promise<unknown> => {
+      const req = readProposeInput(input);
+      if (isMetricError(req)) {
+        if (refused >= maxRefused) {
+          refusedLine('propose_crm_cohort', input, 'refused_cap');
+          return {error: CRM_ERROR_TEXT.refused_cap};
+        }
+        refused += 1;
+        refusedLine('propose_crm_cohort', input, 'input');
+        return req;
+      }
+      const saved = deps.cohorts ? await deps.cohorts().catch(() => null) : null;
+      if (saved === null) return {error: `${COHORTS_UNAVAILABLE} Nothing was drafted, and no cohort can be saved here yet.`};
+      if (calls >= max) {
+        refusedLine('propose_crm_cohort', input, 'call_cap');
+        return {error: CRM_ERROR_TEXT.call_cap};
+      }
+      calls += 1;
+      const out = await tracked(deps, 'propose_crm_cohort', {kind: req.kind}, (get) => crmCohortRows(get, deps.now, deps.manualContacts), (r) => r.rows.length);
+      if (isMetricError(out)) return out;
+      const emit = deps.emitBlock;
+      return runPropose(req, {rows: out.rows, contactKnown: out.contactKnown, saved, emit: emit ? (b) => emit(b) : undefined, nextId: () => `cd${++drafts}`});
+    },
     list_crm_checkouts: tool('list_crm_checkouts', readCheckoutsInput, crmCheckoutsResult),
   };
 }
