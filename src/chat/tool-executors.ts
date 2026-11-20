@@ -68,7 +68,7 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...createReportExecutors(ctx, session, data),
     ...(ctx.explore ? {run_query: ctx.explore} : {}),
     ...(ctx.exploreSchema ? {list_tables: ctx.exploreSchema.list_tables, describe_table: ctx.exploreSchema.describe_table} : {}),
-    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true, manualContacts: ctx.manualContacts}) : {}),
+    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true, manualContacts: ctx.manualContacts, cohorts: ctx.cohorts}) : {}),
     // One product across POS, Shopee and the website (src/sku-compare.ts). Not strict: validated in code. The website channel reads the CRM once per week through the
     // same client (one chat_crm_call line for the whole call); a CRM failure makes that channel "failed" in the result, never a silent zero.
     ...(ctx.sku
@@ -274,6 +274,7 @@ export function statusFor(name: string, input: unknown): string {
   if (name === 'list_crm_orders') return 'Looking up website orders';
   if (name === 'list_crm_customers') return 'Looking up website customers';
   if (name === 'list_crm_checkouts') return 'Looking up abandoned checkouts';
+  if (name === 'propose_crm_cohort') return 'Drafting a cohort';
   if (name === 'lookup_product') return 'Looking up a product';
   if (name === 'contacts') return 'Looking up contacts';
   if (name === 'ask_owner') return 'Checking what you mean';

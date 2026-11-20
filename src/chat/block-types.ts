@@ -3,6 +3,7 @@
 // A block carries the DATA the server bound from a stored result: the model only ever names a result id and field
 // names, it never types a value (the model-never-types-numbers rule).
 import type {ColumnUnit, MetricRow, ResultColumn} from './result-types';
+import type {CohortRule} from '../crm-compute';
 
 export type ChartForm = 'bar' | 'grouped_bar' | 'stacked_bar' | 'stacked_bar_100' | 'small_multiples' | 'line' | 'area' | 'pie' | 'diverging_bar';
 export type Orientation = 'vertical' | 'horizontal';
@@ -102,4 +103,16 @@ export interface ChartBlock extends BlockBase {
   twin: {columns: ResultColumn[]; rows: MetricRow[]};
 }
 
-export type ChatBlock = KpiBlock | ChartBlock | TableBlock;
+/**
+ * RET-10 Stage 9B: a cohort DRAFT from propose_crm_cohort (knowledge/best-practices/chat-proposed-writes.md). Code validated the
+ * draft and counted the preview; the block is the only way to save it, by a person clicking Save cohort (the 9A create action, as the
+ * signed-in user). The model never saves. `sentences` are condText() lines: no field code ever reaches the screen.
+ */
+export interface CohortDraftBlock extends BlockBase {
+  kind: 'cohort_draft';
+  draft: {group: string; name: string; rule: CohortRule};
+  sentences: string[];
+  preview: {customers: number; buyers: number; repeat: number; ratePct: number | null; names: string[]};
+}
+
+export type ChatBlock = KpiBlock | ChartBlock | TableBlock | CohortDraftBlock;
