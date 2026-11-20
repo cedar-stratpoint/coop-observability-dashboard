@@ -15,6 +15,8 @@ export type FileMap = Record<string, string>; // repo-relative posix path -> sou
 export const LEADS_SEAM = 'app/api/chat/leads-seam.ts';
 export const SKU_SEAM = 'app/api/chat/sku-seam.ts';
 export const CONTACTS_LOG_SEAM = 'app/api/chat/contacts-log-seam.ts';
+/** RET-10 9B: saved cohorts (rules only) for list_crm_customers and propose_crm_cohort. Read only. */
+export const COHORTS_SEAM = 'app/api/chat/cohorts-seam.ts';
 export const LEGACY_ALLOWED_IMPORTS: readonly string[] = ['src/data.ts'];
 export const LEGACY_ROUTE = 'app/api/chat/route.ts';
 
@@ -89,7 +91,7 @@ export type Closure = {files: Set<string>; bare: Map<string, Set<string>>; legac
 export function buildClosure(
   entries: string[],
   files: FileMap,
-  legacy: {from: string; allowed: readonly string[]} = {from: LEGACY_ROUTE, allowed: [...LEGACY_ALLOWED_IMPORTS, LEADS_SEAM, SKU_SEAM, CONTACTS_LOG_SEAM]},
+  legacy: {from: string; allowed: readonly string[]} = {from: LEGACY_ROUTE, allowed: [...LEGACY_ALLOWED_IMPORTS, LEADS_SEAM, SKU_SEAM, CONTACTS_LOG_SEAM, COHORTS_SEAM]},
 ): Closure {
   const seen = new Set<string>();
   const bare = new Map<string, Set<string>>();

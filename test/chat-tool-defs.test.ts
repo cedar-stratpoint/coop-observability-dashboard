@@ -17,7 +17,7 @@ describe('CHAT_TOOLS', () => {
 
   it('with Explore and the CRM on, only crm_query, shopify_query, compare_sku, the three list_crm_* tools, ask_owner, get_digest and lookup_product are not strict (the API grammar cap), and no more than 20 are strict', () => {
     const all = chatTools({explore: true, crm: true, sku: true});
-    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'compare_sku', 'crm_query', 'get_digest', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'lookup_product', 'shopify_query']);
+    expect(all.filter((t) => !t.strict).map((t) => t.name).sort()).toEqual(['ask_owner', 'compare_sku', 'crm_query', 'get_digest', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'lookup_product', 'propose_crm_cohort', 'shopify_query']);
     expect(all.filter((t) => t.strict).length).toBeLessThanOrEqual(20);
   });
 
@@ -223,7 +223,7 @@ describe('crm_query, shopify_query, compare_sku and the compiled-grammar cap (kn
     expect(strict).toHaveLength(13);
     expect(JSON.stringify(strict.map((t) => t.input_schema)).length).toBe(8099); // the last size that ran on PROD (10,375 broke it)
     for (const name of ['crm_query', 'shopify_query', 'compare_sku']) expect(all.find((t) => t.name === name)?.strict, name).toBe(false);
-    expect(all).toHaveLength(23);
+    expect(all).toHaveLength(24); // RET-10 9B added propose_crm_cohort (not strict): the total now sits AT the ceiling below
     expect(all.length).toBeLessThanOrEqual(24); // our own sanity ceiling on the total, not Anthropic's
   });
 });

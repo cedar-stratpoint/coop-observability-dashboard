@@ -62,6 +62,8 @@ export interface ChatToolContext {
   leads?: () => Promise<import('./contacts/leads').LeadsSource>;
   /** The manual contact log for list_crm_customers' audiences (RET-05), read by the route's server seam (app/api/chat/contacts-log-seam.ts). Absent: manual_contacts reads unknown. */
   manualContacts?: import('./crm/tools').ManualContactsRead;
+  /** RET-10 9B: the saved cohorts (rules only) for list_crm_customers' cohort filters and propose_crm_cohort, read by the route's server seam (app/api/chat/cohorts-seam.ts). Absent: cohorts read "not set up". */
+  cohorts?: import('./crm/tools').SavedCohortsRead;
   /** compare_sku: the server seam's loaders for the alias table and the Shopee weekly SKU rows (app/api/chat/sku-seam.ts). Absent means the tool is not registered. */
   sku?: {aliases: () => Promise<import('../sku-compare').AliasRow[]>; shopee: (from: string, to: string) => Promise<import('../sku-compare-readers').ShopeeSkuRow[]>};
   /** The user may read customer identity (names, contact, pets) through crm_query: the same EXPLORE_ALLOWED_EMAILS decision that registers `contacts`. Absent means false. */
