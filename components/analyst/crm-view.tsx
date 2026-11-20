@@ -30,25 +30,36 @@
 // Customers: the header sort IS the order, and 7A's Sort select is a shortcut that writes the same state ("Haven't contacted longest"
 // = Last contacted ascending, "Most contacted" = times contacted descending); a header click shows "By column" in the select. The
 // recovery link is copyable on every cart on this page only: never in a CSV, never in Ask Coop.
+//
+// RET-10 (9A): the Cohort menu replaces the preset buttons. Built in (All, Repeat promo, Win-back) still list through inAudience,
+// exactly as before; saved cohorts (customer_cohorts) are grouped by their group with live counts, and members come from
+// matchesCohort on these same rows, every render (nothing stored, nothing tagged by hand). The cohort bar says the rule as a
+// sentence, the repeat buyer rate against the 25% target and who saved it; the Cohorts column and the profile show each
+// customer's labels with the rule on hover. cohorts null (table not applied, mock mode) = saved cohorts "unavailable".
 import {downloadCsv} from '@/src/csv';
 import dynamic from 'next/dynamic';
-import {useSearchParams} from 'next/navigation';
-import {useCallback, useMemo, useRef, useState} from 'react';
+import {useRouter, useSearchParams} from 'next/navigation';
+import {useCallback, useMemo, useRef, useState, useTransition} from 'react';
 import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CircleAlert,
+  CircleCheck,
   Clock,
   Crown,
   Mail,
   MailCheck,
   MessageSquarePlus,
+  Pencil,
   PawPrint,
+  Plus,
   Receipt,
   Repeat2,
   RotateCcw,
   ShoppingCart,
+  Trash2,
   Users,
 } from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
@@ -57,13 +68,14 @@ import {cn} from '@/lib/utils';
 import {Metric} from './metric';
 import {RefreshControl} from './refresh-control';
 import {ContactLogDialog} from './contact-log-dialog';
-import {CopyButton, CustomerProfile, PET_TONE, PlatinumBar, STATUS_TONE, Stepper, type ProfileTab} from './customer-profile';
+import {CohortBuilderDialog, blankDraft, draftOf, type CohortDraft} from './cohort-builder-dialog';
+import {CohortChip, CopyButton, CustomerProfile, PET_TONE, PlatinumBar, STATUS_TONE, Stepper, type ProfileTab} from './customer-profile';
 import {InfoPop, InfoTip} from './info-tip';
 import {Eyebrow} from './sections';
 import {Pagination} from './pagination';
 import type {ChartBlock} from '@/src/chat/block-types';
 import {
-  AUDIENCE_RULES,
+  BUILTIN_COHORT_RULES,
   CONTACT_KIND_LABEL,
   REPEAT_TARGET_PCT,
   audienceRows,
@@ -79,11 +91,13 @@ import {
   fmtPh,
   fmtPhDate,
   lastContactLabel,
+  matchesCohort,
   membershipWindowStart,
   money,
   newBuyersByMonth,
   peso,
   repeatRate,
+  ruleText,
   textMatch,
   tierCounts,
   toPlatinum,
@@ -120,6 +134,8 @@ import {
 import type {CrmBirthdayVoucherSafe, MembershipEventsRead} from '@/src/crm-project';
 import {phDay} from '@/src/custom-range';
 import type {CustomerContact} from '@/src/customer-contacts';
+import {cohortLabel, cohortsOf, compareCohorts, type CustomerCohort} from '@/src/customer-cohorts';
+import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
 
@@ -177,18 +193,15 @@ function sortChoiceOf(s: Sort<CustomerSortKey> | null): SortChoice {
   return 'column';
 }
 
-const PRESETS: Array<{key: CustomerAudience; label: string}> = [
-  {key: 'all', label: 'All'},
+/** The built-in cohorts (RET-03 audiences), listed through inAudience exactly as before 9A. */
+const BUILTINS: Array<{key: Exclude<CustomerAudience, 'all'>; label: string}> = [
   {key: 'repeat_promo', label: 'Repeat promo'},
   {key: 'win_back', label: 'Win-back'},
 ];
+/** The Cohort menu's value: 'all', a built-in audience, or `cohort:<id>` for a saved one. */
+type CohortSel = 'all' | Exclude<CustomerAudience, 'all'> | `cohort:${string}`;
+const savedSel = (id: string): CohortSel => `cohort:${id}`;
 
-/** The preset rule in words, built from AUDIENCE_RULES so the copy cannot drift from the code. */
-function presetRule(a: Exclude<CustomerAudience, 'all'>): string {
-  const r = AUDIENCE_RULES[a];
-  const orders = r.maxOrders === r.minOrders ? `exactly ${r.minOrders} order` : `${r.minOrders} or more orders`;
-  return `${orders}, the last one ${r.minDays}+ days ago (PH time). Test orders never count.`;
-}
 
 type Tab = 'customers' | 'carts' | 'orders' | 'pets';
 
@@ -354,6 +367,7 @@ export function CrmView({
   membershipEvents,
   membership,
   contacts,
+  cohorts,
   viewer,
   configured,
   now,
@@ -369,6 +383,8 @@ export function CrmView({
   membership: CrmMembershipConfig;
   /** The manual contact log, newest first; null when it is not set up here or could not be read (RET-05). */
   contacts: CustomerContact[] | null;
+  /** RET-10 saved cohorts (rules only); null when the table is not set up here or could not be read: shown as unavailable. */
+  cohorts: CustomerCohort[] | null;
   /** The signed-in email: the log shows Delete only on this person's own contacts. */
   viewer: string | null;
   configured: boolean;
@@ -388,7 +404,11 @@ export function CrmView({
   const [orderFilter, setOrderFilter] = useState(EMPTY_ORDER_FILTER);
   const [customerFilter, setCustomerFilter] = useState(EMPTY_CUSTOMER_FILTER);
   const [petFilter, setPetFilter] = useState('all');
-  const [preset, setPreset] = useState<CustomerAudience>('all');
+  const [cohortSel, setCohortSel] = useState<CohortSel>('all');
+  const [builder, setBuilder] = useState<CohortDraft | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cohortMsg, setCohortMsg] = useState<string | null>(null);
+  const [deleting, startDelete] = useTransition();
   // Vince's defaults: newest abandoned and newest placed first, soonest birthday first. Customers keep their list order until sorted.
   const [cartSort, setCartSort] = useState<Sort<CartSortKey> | null>({key: 'abandoned', dir: 'desc'});
   const [orderSort, setOrderSort] = useState<Sort<OrderSortKey> | null>({key: 'placed', dir: 'desc'});
@@ -398,6 +418,7 @@ export function CrmView({
   const needle = q.trim().toLowerCase();
   // The open profile lives in the URL; the tab and order it opens on are this page's state.
   const searchParams = useSearchParams();
+  const router = useRouter();
   const profileId = searchParams.get('customer');
   const [profileAt, setProfileAt] = useState<{tab: ProfileTab; orderId: string | null}>({tab: 'timeline', orderId: null});
   const pushedProfile = useRef(false);
@@ -421,20 +442,24 @@ export function CrmView({
     } else window.history.replaceState(null, '', withCustomer(null));
   }, []);
 
+  // A saved cohort that is gone (deleted, or the read failed) falls back to All rather than an empty list.
+  const savedCohort = cohortSel.startsWith('cohort:') ? (cohorts?.find((c) => savedSel(c.id) === cohortSel) ?? null) : null;
+  const preset: CustomerAudience = cohortSel === 'repeat_promo' || cohortSel === 'win_back' ? cohortSel : 'all';
+  const cohortOn = preset !== 'all' || savedCohort !== null;
   const filtersOn =
     tab === 'carts'
       ? filterActive(cartFilter)
       : tab === 'orders'
         ? filterActive(orderFilter)
         : tab === 'customers'
-          ? filterActive(customerFilter) || preset !== 'all'
+          ? filterActive(customerFilter) || cohortOn
           : petFilter !== 'all';
   const clearFilters = () => {
     if (tab === 'carts') setCartFilter(EMPTY_CART_FILTER);
     else if (tab === 'orders') setOrderFilter(EMPTY_ORDER_FILTER);
     else if (tab === 'customers') {
       setCustomerFilter(EMPTY_CUSTOMER_FILTER);
-      setPreset('all');
+      setCohortSel('all');
     } else setPetFilter('all');
     setPage(1);
   };
@@ -506,15 +531,56 @@ export function CrmView({
     }),
     [all, nowDate],
   );
+  // Saved cohorts, sorted for the menu; their live counts; and each customer's labels (one evaluator: matchesCohort).
+  const savedCohorts = useMemo(() => [...(cohorts ?? [])].sort(compareCohorts), [cohorts]);
+  const cohortGroups = useMemo(() => {
+    const m = new Map<string, CustomerCohort[]>();
+    for (const c of savedCohorts) m.set(c.group, [...(m.get(c.group) ?? []), c]);
+    return [...m.entries()];
+  }, [savedCohorts]);
+  const cohortCounts = useMemo(() => new Map(savedCohorts.map((c) => [c.id, all.filter((r) => matchesCohort(r, c.rule)).length])), [savedCohorts, all]);
+  const cohortsByCustomer = useMemo(() => new Map(all.map((r) => [r.shopifyCustomerId, cohortsOf(r, savedCohorts)])), [all, savedCohorts]);
+  const cohortsOfRow = (r: CustomerRow): CustomerCohort[] => cohortsByCustomer.get(r.shopifyCustomerId) ?? [];
   // Pets need only the customer list (one pet per customer, as the CRM projects it).
   const pets = useMemo(() => petRows(customers ?? [], birthdayVouchers, nowDate), [customers, birthdayVouchers, nowDate]);
 
   const cartRows = useMemo(() => sortRows(filterCarts(checkouts ?? [], cartFilter, needle), cartSort, CART_SORT), [checkouts, cartFilter, needle, cartSort]);
   const orderRows = useMemo(() => sortRows(filterOrders(orders ?? [], orderFilter, needle), orderSort, ORDER_SORT), [orders, orderFilter, needle, orderSort]);
   const customerList = useMemo(() => {
-    const listed = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
+    const audience = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
+    const listed = savedCohort ? audience.filter((r) => matchesCohort(r, savedCohort.rule)) : audience;
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
-  }, [all, customerFilter, needle, preset, nowDate, customerSort]);
+  }, [all, customerFilter, needle, preset, savedCohort, nowDate, customerSort]);
+  // The cohort bar: everyone in the selected cohort (search and the other filters aside), their repeat buyer rate and the rule.
+  const cohortBar = useMemo(() => {
+    if (!cohortOn) return null;
+    const members = savedCohort ? all.filter((r) => matchesCohort(r, savedCohort.rule)) : audienceRows(all, preset, nowDate);
+    const builtin = BUILTINS.find((b) => b.key === preset);
+    return {
+      label: savedCohort ? cohortLabel(savedCohort) : `Built in · ${builtin?.label ?? ''}`,
+      count: members.length,
+      rate: repeatRate(members.map((r) => r.orderCount)),
+      sentence: ruleText(savedCohort ? savedCohort.rule : BUILTIN_COHORT_RULES[preset as Exclude<CustomerAudience, 'all'>]),
+    };
+  }, [cohortOn, savedCohort, all, preset, nowDate]);
+  const cohortName = savedCohort ? cohortLabel(savedCohort) : preset;
+  const removeCohort = () => {
+    if (!savedCohort) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setCohortMsg(null);
+    startDelete(async () => {
+      const res = await deleteCohort(savedCohort.id);
+      setConfirmDelete(false);
+      if (res.ok) {
+        setCohortSel('all');
+        setCohortMsg(`${cohortLabel(savedCohort)} deleted.`);
+        router.refresh();
+      } else setCohortMsg(res.error);
+    });
+  };
   const petList = useMemo(
     () => sortRows(pets.filter((p) => textMatch(needle, [p.email, p.petName]) && (petFilter === 'all' || p.status === petFilter)), petSort, PET_SORT),
     [pets, needle, petFilter, petSort],
@@ -547,8 +613,8 @@ export function CrmView({
       const note = filterNote([['Payment', orderFilter.payment], ['Fulfillment', orderFilter.fulfillment], ['Reviewed', orderFilter.reviewed]], q);
       downloadCsv(`crm-orders (${orderRows.length}).csv`, orderCsv(orderRows, asOf, note));
     } else if (tab === 'customers') {
-      const name = preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
-      const note = filterNote([['Audience', preset], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers]], q);
+      const name = savedCohort ? 'crm-customers-cohort' : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
+      const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers]], q);
       downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name));
     } else {
       const note = filterNote([['Voucher', petFilter]], q);
@@ -570,8 +636,8 @@ export function CrmView({
     : needle
       ? 'Nothing matches that search.'
       : filtersOn
-        ? tab === 'customers' && preset !== 'all' && !filterActive(customerFilter)
-          ? 'No one fits this audience right now.'
+        ? tab === 'customers' && cohortOn && !filterActive(customerFilter)
+          ? 'No one fits this cohort right now.'
           : 'Nothing matches these filters.'
         : tab === 'pets'
           ? 'No pets on file yet.'
@@ -847,25 +913,57 @@ export function CrmView({
           )}
           {tab === 'customers' && (
             <>
-              <div className="flex items-center gap-1 rounded-lg border border-border p-0.5" role="group" aria-label="Audience preset">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    aria-pressed={preset === p.key}
-                    onClick={() => onFilter(setPreset, p.key)}
-                    className={cn(
-                      'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97]',
-                      preset === p.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-primary',
-                    )}
-                  >
-                    {p.label}
-                    {p.key !== 'all' && customerRead && (
-                      <span className="tabular-nums opacity-70">{presetCounts[p.key]}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              {/* The Cohort menu (RET-10): native select with a group per cohort group, like the other filters, so it works on a phone. */}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                Cohort
+                <select
+                  value={savedCohort || preset !== 'all' ? cohortSel : 'all'}
+                  onChange={(e) => {
+                    setConfirmDelete(false);
+                    setCohortMsg(null);
+                    onFilter(setCohortSel, e.target.value as CohortSel);
+                  }}
+                  className={cn(
+                    'h-8 max-w-[16rem] rounded-lg border bg-background px-2 text-xs text-foreground outline-none focus-visible:border-primary',
+                    cohortOn ? 'border-primary text-primary' : 'border-border',
+                  )}
+                >
+                  <optgroup label="Built in">
+                    <option value="all">All customers</option>
+                    {BUILTINS.map((b) => (
+                      <option key={b.key} value={b.key}>
+                        {b.label}
+                        {customerRead ? ` (${presetCounts[b.key]})` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {cohorts === null ? (
+                    <optgroup label="Saved cohorts">
+                      <option disabled value="unavailable">Unavailable here</option>
+                    </optgroup>
+                  ) : (
+                    cohortGroups.map(([group, list]) => (
+                      <optgroup key={group} label={group}>
+                        {list.map((c) => (
+                          <option key={c.id} value={savedSel(c.id)}>
+                            {c.name}
+                            {customerRead ? ` (${cohortCounts.get(c.id) ?? 0})` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  )}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => setBuilder(blankDraft())}
+                disabled={cohorts === null || !customerRead}
+                title={cohorts === null ? 'Saved cohorts are unavailable: cohorts are not set up in this environment' : !customerRead ? 'Unavailable: the CRM did not answer' : 'Save a rule as a cohort'}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-primary/60 px-2.5 text-xs font-medium text-primary transition-[color,border-color,background-color,transform] duration-150 hover:bg-accent active:scale-[0.97] disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground disabled:hover:bg-transparent"
+              >
+                <Plus className="size-3.5" /> New cohort
+              </button>
               <FilterSelect
                 label="Tier"
                 value={customerFilter.tier}
@@ -924,11 +1022,80 @@ export function CrmView({
           )}
           {tab === 'carts' && <span className="sm:ml-auto"><ScheduleLine text={reminderSchedule(metrics)} /></span>}
           {tab === 'orders' && <span className="sm:ml-auto"><ScheduleLine text={reviewSchedule(metrics)} /></span>}
-          {tab === 'customers' && preset !== 'all' && (
-            <p className="basis-full text-xs text-muted-foreground">
-              {PRESETS.find((p) => p.key === preset)?.label}: {presetRule(preset)}{customerSort === null ? ' Listed by last order, oldest first.' : ''}
-              Check email consent before contacting anyone. Nothing is sent from here.
+          {tab === 'customers' && cohortBar && (
+            <div className="basis-full rounded-xl border border-border bg-[var(--card-warm)] px-4 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{cohortBar.label}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {cohortBar.sentence}. Philippine days; test orders never count.
+                    {savedCohort && <> Saved by {viewer !== null && savedCohort.createdBy === viewer ? 'you' : savedCohort.createdBy}.</>}
+                  </p>
+                </div>
+                {savedCohort && viewer !== null && savedCohort.createdBy === viewer && (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setBuilder(draftOf(savedCohort))}
+                      className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium text-muted-foreground transition-[color,border-color,transform] duration-150 hover:border-primary hover:text-foreground active:scale-[0.97]"
+                    >
+                      <Pencil className="size-3.5" /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={removeCohort}
+                      onBlur={() => setConfirmDelete(false)}
+                      disabled={deleting}
+                      aria-label={confirmDelete ? 'Confirm delete' : 'Delete this cohort'}
+                      className={cn(
+                        'inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium transition-[color,background-color,transform] duration-150 active:scale-[0.97] disabled:opacity-50',
+                        confirmDelete ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground hover:text-destructive',
+                      )}
+                    >
+                      <Trash2 className="size-3.5" />
+                      {confirmDelete ? 'Delete?' : null}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  <b className="font-semibold tabular-nums text-foreground">{cohortBar.count.toLocaleString()}</b> customer{cohortBar.count === 1 ? '' : 's'}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  {cohortBar.rate.ratePct === null ? (
+                    <>Repeat buyer rate: no buyers yet</>
+                  ) : (
+                    <>
+                      {cohortBar.rate.ratePct >= REPEAT_TARGET_PCT ? (
+                        <CircleCheck className="size-3.5 text-[var(--status-good)]" aria-hidden />
+                      ) : (
+                        <CircleAlert className="size-3.5 text-[var(--status-warn)]" aria-hidden />
+                      )}
+                      <span>
+                        Repeat buyer rate{' '}
+                        <b className="font-semibold tabular-nums text-foreground">
+                          {cohortBar.rate.repeat} of {cohortBar.rate.buyers} buyers ({cohortBar.rate.ratePct.toFixed(1)}%)
+                        </b>
+                        , {cohortBar.rate.ratePct >= REPEAT_TARGET_PCT ? 'at or above' : 'below'} the {REPEAT_TARGET_PCT}% target
+                      </span>
+                    </>
+                  )}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {preset !== 'all' && customerSort === null ? 'Listed by last order, oldest first. ' : ''}
+                Check email consent before contacting anyone. Nothing is sent from here.
+              </p>
+            </div>
+          )}
+          {tab === 'customers' && cohortMsg && (
+            <p role="status" className="basis-full text-xs text-muted-foreground">
+              {cohortMsg}
             </p>
+          )}
+          {tab === 'customers' && cohorts === null && configured && (
+            <p className="basis-full text-xs text-muted-foreground">Saved cohorts are unavailable here (not set up in this environment). The built-in lists still work.</p>
           )}
         </div>
 
@@ -1007,6 +1174,7 @@ export function CrmView({
                       <tr>
                         <SortTh label="Name" k="name" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Email" k="email" sort={customerSort} onSort={sortCustomers} />
+                        <th className={th} title="Saved cohorts this customer matches right now. Hover a label for its rule">Cohorts</th>
                         <SortTh label="Member since" k="memberSince" sort={customerSort} onSort={sortCustomers} title="When the customer record was created (PH date)" />
                         <SortTh
                           label="Tier"
@@ -1134,6 +1302,17 @@ export function CrmView({
                           </td>
                           <td className="px-4 py-2.5">
                             <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
+                          </td>
+                          <td className="px-4 py-2.5" title={cohorts === null ? 'Unavailable: saved cohorts are not set up here' : undefined}>
+                            {cohortsOfRow(c).length ? (
+                              <span className="flex max-w-[16rem] flex-wrap gap-1">
+                                {cohortsOfRow(c).map((k) => (
+                                  <CohortChip key={k.id} cohort={k} why={ruleText(k.rule)} />
+                                ))}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
                           </td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.createdAt)}</td>
                           <td className="px-4 py-2.5">
@@ -1287,6 +1466,13 @@ export function CrmView({
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
                         <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
                       </div>
+                      {cohortsOfRow(c).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {cohortsOfRow(c).map((k) => (
+                            <CohortChip key={k.id} cohort={k} why={ruleText(k.rule)} />
+                          ))}
+                        </div>
+                      )}
                       {(c.membershipTier === 'gold' || c.membershipTier === 'platinum') && (
                         <div className="mt-2"><ToPlatinum row={c} threshold={membership.platinumThreshold} /></div>
                       )}
@@ -1398,6 +1584,7 @@ export function CrmView({
           birthdayVouchers={birthdayVouchers}
           membershipEvents={membershipEvents}
           contacts={contacts}
+          cohorts={profileRow ? cohortsOfRow(profileRow) : cohorts === null ? null : []}
           membership={membership}
           now={nowDate}
           viewer={viewer}
@@ -1407,6 +1594,19 @@ export function CrmView({
           onClose={closeProfile}
           onLogContact={setLogFor}
           reminderTotal={reminderTotal}
+        />
+      )}
+      {builder && (
+        <CohortBuilderDialog
+          initial={builder}
+          existing={savedCohorts}
+          rows={all}
+          onClose={() => setBuilder(null)}
+          onSaved={(id) => {
+            setCohortSel(savedSel(id));
+            setCohortMsg(null);
+            setPage(1);
+          }}
         />
       )}
       {logFor && <ContactLogDialog name={nameOf(logFor)} email={logFor.email} history={historyOf(logFor)} viewer={viewer} onClose={() => setLogFor(null)} />}

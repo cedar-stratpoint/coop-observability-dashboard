@@ -3,7 +3,8 @@
 // RET-08 (8B + 8C): one website customer's profile, a right-side drawer over the Website CRM page (full screen on phones). Built
 // client-side from the lists the page already read: no new fetch. The header, stat strip and tabs reuse the Customers tab's row
 // (customerRows) and the same compute as Ask Coop, so the profile can never disagree with the table:
-//  - audience chips: inAudience (the presets' and the chat's rule); stat strip: the row's counts, "unknown" when a source is unread;
+//  - audience chips: inAudience (the presets' and the chat's rule); RET-10 cohort labels: the saved cohorts this customer matches
+//    (matchesCohort via the page's cohortsOf), the rule sentence on hover; stat strip: the row's counts, "unknown" when a source is unread;
 //  - Timeline: customerTimeline (8C), whose contact events are 7A's ContactKind, so its newest contact IS Last contacted.
 // Read-only: Log contact records a contact made by hand (the existing dialog) and Copy email copies. Nothing sends. The recovery
 // link is shown on this page only (never in Ask Coop or a CSV) and only for a checkout still open.
@@ -35,6 +36,7 @@ import {
   fmtPh,
   fmtPhDate,
   inAudience,
+  ruleText,
   lastContactLabel,
   money,
   peso,
@@ -53,6 +55,7 @@ import {MEMBERSHIP_EVENTS_NOT_LIVE, type CrmBirthdayVoucherSafe, type Membership
 import {remindersOf} from '@/src/crm-table';
 import type {CheckoutStage, CrmCheckout, CrmMembershipConfig, CrmOrder} from '@/src/crm-types';
 import type {CustomerContact} from '@/src/customer-contacts';
+import type {CustomerCohort} from '@/src/customer-cohorts';
 
 export const STATUS_TONE: Record<CartStatus, string> = {
   Active: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
@@ -165,6 +168,20 @@ function eventText(e: TimelineEvent, viewer: string | null): {title: string; det
 
 const tabId = (base: string, t: ProfileTab) => `${base}-tab-${t}`;
 
+/** A cohort label as a two-part chip: the group quiet, the name in ink. `why` (the rule sentence) is the hover. */
+export function CohortChip({cohort, why}: {cohort: {group: string; name: string}; why?: string}) {
+  return (
+    <span
+      title={why ? `Because: ${why}` : undefined}
+      className="inline-flex max-w-full items-center overflow-hidden rounded-md border border-border bg-card text-[11px] leading-5 whitespace-nowrap"
+    >
+      <span className="bg-muted px-1.5 text-muted-foreground">{cohort.group}</span>
+      <span className="truncate px-1.5 text-foreground">{cohort.name}</span>
+      {why && <span className="sr-only">: {why}</span>}
+    </span>
+  );
+}
+
 export function CustomerProfile({
   row,
   orders,
@@ -172,6 +189,7 @@ export function CustomerProfile({
   birthdayVouchers,
   membershipEvents,
   contacts,
+  cohorts,
   membership,
   now,
   viewer,
@@ -190,6 +208,8 @@ export function CustomerProfile({
   /** RET-07 7C: null = unread; live false = the CRM route is not deployed yet (not counted, with a note). */
   membershipEvents: MembershipEventsRead | null;
   contacts: CustomerContact[] | null;
+  /** RET-10: the saved cohorts this customer matches now, by group then name; null = saved cohorts unavailable here. */
+  cohorts?: CustomerCohort[] | null;
   membership: CrmMembershipConfig;
   now: Date;
   viewer: string | null;
@@ -325,6 +345,15 @@ export function CustomerProfile({
                 {inAudience(row, 'win_back', now) && <span className={cn(pill, 'bg-destructive/10 text-destructive')}>Win-back list</span>}
                 {row.orderCount === 0 && <span className={cn(pill, 'bg-muted text-muted-foreground')}>Never ordered</span>}
               </div>
+              {cohorts && cohorts.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Cohorts</span>
+                  {cohorts.map((c) => (
+                    <CohortChip key={c.id} cohort={c} why={ruleText(c.rule)} />
+                  ))}
+                  <span className="text-xs text-muted-foreground">· by rule, hover for why</span>
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
