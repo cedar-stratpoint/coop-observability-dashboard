@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-20 — Goldline OCR: ship the page renderer's files with the read routes (bands actually render on Vercel)
+
+The first staging run with `GOLDLINE_READ_BANDS_COMPANIES` on (#651) read every page from the PDF: on Vercel each render failed with `Cannot find module 'pdfjs-dist/package.json'` and fell back silently. `pdf-to-img` finds its own nested `pdfjs-dist` with `require.resolve('pdfjs-dist/package.json')` and loads fonts, cmaps and wasm by path, and the crop code loads `@napi-rs/canvas`'s native binary; the file trace follows none of that. `outputFileTracingIncludes` now ships `pdf-to-img/**` and `@napi-rs/**` with `/api/goldline/*` (verified in the `read-page`, `upload` and `batch-poll` `.nft.json` traces). This also means the earlier L6 downscale lever, which renders through the same library, could never have run on Vercel.
+
 ## 2026-11-20 — Goldline OCR: sharper page images (300 dpi bands) and batched Legacy reads (both flagged, staging)
 
 Measured against the hand-checked answer key (plan `knowledge/tasks/2026-11-19-handwriting-read-accuracy.md`).
