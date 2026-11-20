@@ -27,6 +27,15 @@ export function batchReadEnabled(companyId: string): boolean {
  * keyed by the printed ITEM# read on the same line, writer-offset placement, and the paper's own
  * checks. Process-wide `GOLDLINE_READ_P1=1`; off (unset) is byte-identical to the current read.
  */
+/**
+ * Per-cell doubt (plan: knowledge/tasks/2026-11-19-handwriting-read-accuracy.md, backlog item 3): with P1, each row also
+ * lists the cells the reader is genuinely unsure of and its second reading, so confidence comes from evidence the
+ * reviewer can check ("29, or 39?") instead of one per-row guess. Process-wide `GOLDLINE_READ_UNSURE=1`; off = P1 as is.
+ */
+export function readUnsureEnabled(): boolean {
+  return (process.env.GOLDLINE_READ_UNSURE ?? '').trim() === '1';
+}
+
 export function readP1Enabled(): boolean {
   return (process.env.GOLDLINE_READ_P1 ?? '').trim() === '1';
 }
