@@ -39,7 +39,7 @@
 import {downloadCsv} from '@/src/csv';
 import dynamic from 'next/dynamic';
 import {useRouter, useSearchParams} from 'next/navigation';
-import {useCallback, useMemo, useRef, useState, useTransition} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {
   AlertTriangle,
   ArrowDown,
@@ -59,6 +59,7 @@ import {
   Repeat2,
   RotateCcw,
   ShoppingCart,
+  Sparkles,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -68,7 +69,9 @@ import {cn} from '@/lib/utils';
 import {Metric} from './metric';
 import {RefreshControl} from './refresh-control';
 import {ContactLogDialog} from './contact-log-dialog';
-import {CohortBuilderDialog, blankDraft, draftOf, type CohortDraft} from './cohort-builder-dialog';
+import {CohortBuilderDialog, blankDraft, draftFromProposal, draftOf, type CohortDraft} from './cohort-builder-dialog';
+import {CohortDraftCard, type CohortDraftValue} from './cohort-draft-card';
+import {useCoopChat} from './coop-chat';
 import {CohortChip, CopyButton, CustomerProfile, PET_TONE, PlatinumBar, STATUS_TONE, Stepper, type ProfileTab} from './customer-profile';
 import {InfoPop, InfoTip} from './info-tip';
 import {Eyebrow} from './sections';
@@ -134,7 +137,7 @@ import {
 import type {CrmBirthdayVoucherSafe, MembershipEventsRead} from '@/src/crm-project';
 import {phDay} from '@/src/custom-range';
 import type {CustomerContact} from '@/src/customer-contacts';
-import {cohortLabel, cohortsOf, compareCohorts, type CustomerCohort} from '@/src/customer-cohorts';
+import {cohortLabel, cohortPreview, cohortSuggestions, cohortsOf, compareCohorts, type CustomerCohort} from '@/src/customer-cohorts';
 import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
@@ -406,6 +409,10 @@ export function CrmView({
   const [petFilter, setPetFilter] = useState('all');
   const [cohortSel, setCohortSel] = useState<CohortSel>('all');
   const [builder, setBuilder] = useState<CohortDraft | null>(null);
+  // RET-10 9B: a one-click suggestion opened as a draft on the page, and the "Describe a cohort" sentence for Ask Coop.
+  const [pageDraft, setPageDraft] = useState<CohortDraftValue | null>(null);
+  const [describe, setDescribe] = useState('');
+  const {ask} = useCoopChat();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [cohortMsg, setCohortMsg] = useState<string | null>(null);
   const [deleting, startDelete] = useTransition();
@@ -441,6 +448,39 @@ export function CrmView({
       window.history.back();
     } else window.history.replaceState(null, '', withCustomer(null));
   }, []);
+
+  // RET-10 9B: Ask Coop's draft block links here. `?cohort_draft=` (Adjust the rule) opens the builder on that draft; `?cohort=<id>` (after
+  // Save) selects the saved cohort. Both are read once and removed from the address, so a refresh does not reopen them. The draft is
+  // untrusted input: draftFromProposal re-validates the rule, and the save action validates everything again.
+  const draftParam = searchParams.get('cohort_draft');
+  const cohortParam = searchParams.get('cohort');
+  useEffect(() => {
+    if (draftParam === null && cohortParam === null) return;
+    if (draftParam !== null) {
+      try {
+        setTab('customers');
+        setBuilder(draftFromProposal(JSON.parse(draftParam) as Record<string, unknown>));
+      } catch {
+        /* a broken link opens nothing */
+      }
+    }
+    if (cohortParam !== null && (cohorts ?? []).some((c) => c.id === cohortParam)) {
+      setTab('customers');
+      setCohortSel(savedSel(cohortParam));
+      setPage(1);
+    }
+    const p = new URLSearchParams(window.location.search);
+    p.delete('cohort_draft');
+    p.delete('cohort');
+    const qs = p.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+  }, [draftParam, cohortParam, cohorts]);
+  const askCoop = () => {
+    const text = describe.trim();
+    if (!text) return;
+    ask(`Make a cohort: ${text}`);
+    setDescribe('');
+  };
 
   // A saved cohort that is gone (deleted, or the read failed) falls back to All rather than an empty list.
   const savedCohort = cohortSel.startsWith('cohort:') ? (cohorts?.find((c) => savedSel(c.id) === cohortSel) ?? null) : null;
@@ -541,6 +581,9 @@ export function CrmView({
   const cohortCounts = useMemo(() => new Map(savedCohorts.map((c) => [c.id, all.filter((r) => matchesCohort(r, c.rule)).length])), [savedCohorts, all]);
   const cohortsByCustomer = useMemo(() => new Map(all.map((r) => [r.shopifyCustomerId, cohortsOf(r, savedCohorts)])), [all, savedCohorts]);
   const cohortsOfRow = (r: CustomerRow): CustomerCohort[] => cohortsByCustomer.get(r.shopifyCustomerId) ?? [];
+  // RET-10 9B: first-order codes with buyers no saved cohort covers yet (RET-06's codeCohorts), as one-click drafts. Code counts the preview.
+  const suggestions = useMemo(() => (cohorts === null ? [] : cohortSuggestions(all, savedCohorts).slice(0, 4)), [cohorts, all, savedCohorts]);
+  const pagePreview = useMemo(() => (pageDraft ? cohortPreview(all, pageDraft.rule) : null), [pageDraft, all]);
   // Pets need only the customer list (one pet per customer, as the CRM projects it).
   const pets = useMemo(() => petRows(customers ?? [], birthdayVouchers, nowDate), [customers, birthdayVouchers, nowDate]);
 
@@ -1022,6 +1065,70 @@ export function CrmView({
           )}
           {tab === 'carts' && <span className="sm:ml-auto"><ScheduleLine text={reminderSchedule(metrics)} /></span>}
           {tab === 'orders' && <span className="sm:ml-auto"><ScheduleLine text={reviewSchedule(metrics)} /></span>}
+          {tab === 'customers' && cohorts !== null && customerRead && (
+            <div className="flex basis-full flex-col gap-2">
+              {/* RET-10 9B: describe it, don't build it. Ask Coop drafts the rule (propose_crm_cohort); the owner saves from its answer. */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  askCoop();
+                }}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <input
+                  value={describe}
+                  onChange={(e) => setDescribe(e.target.value)}
+                  maxLength={300}
+                  placeholder="Describe a cohort, e.g. Circuit Makati buyers who haven't reordered"
+                  aria-label="Describe a cohort for Ask Coop"
+                  className="h-8 min-w-0 flex-[1_1_16rem] rounded-lg border border-dashed border-primary/60 bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={!describe.trim()}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary/90 active:scale-[0.97] disabled:opacity-50"
+                >
+                  <Sparkles className="size-3.5" aria-hidden /> Ask Coop
+                </button>
+              </form>
+              {suggestions.length > 0 && !pageDraft && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    <Sparkles className="size-3.5 text-primary" aria-hidden /> First-order codes not in a cohort yet:
+                  </span>
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.code}
+                      type="button"
+                      onClick={() => setPageDraft(s.draft)}
+                      className="inline-flex h-7 items-center rounded-md border border-dashed border-primary/60 bg-accent px-2 text-[11.5px] font-medium text-accent-foreground transition-[background-color,transform] duration-150 hover:bg-accent/70 active:scale-[0.97]"
+                    >
+                      {cohortLabel(s.draft)} · {s.buyers} buyer{s.buyers === 1 ? '' : 's'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {pageDraft && pagePreview && (
+                <CohortDraftCard
+                  key={cohortLabel(pageDraft)}
+                  draft={pageDraft}
+                  preview={pagePreview}
+                  intro="Suggested from a first-order code no cohort covers yet. Rename it (which event was it?), then save."
+                  onAdjust={(d) => {
+                    setPageDraft(null);
+                    setBuilder(draftFromProposal(d));
+                  }}
+                  onDismiss={() => setPageDraft(null)}
+                  onSaved={(id) => {
+                    setPageDraft(null);
+                    setCohortSel(savedSel(id));
+                    setCohortMsg(null);
+                    setPage(1);
+                  }}
+                />
+              )}
+            </div>
+          )}
           {tab === 'customers' && cohortBar && (
             <div className="basis-full rounded-xl border border-border bg-[var(--card-warm)] px-4 py-3">
               <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
