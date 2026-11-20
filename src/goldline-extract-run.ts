@@ -38,6 +38,7 @@ import {
   type DeliveryLocatorOutput,
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
+import type {PageBlock} from './goldline-page-bands';
 import {readP1Enabled} from './goldline-anchored-flag';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
@@ -411,13 +412,16 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
  * manifest, no text/invalid JSON, or an `{error}` response. The caller marks the
  * upload failed and surfaces the reason to the reviewer.
  */
-export async function extractInventoryPage(
+/** The request body for one free (non-anchored) inventory read: Legacy, or V1/V2 when the template
+ *  read is off. Extracted so the same body can be sent inline or packed into a Message Batch.
+ *  `pageBlocks` (sharper page images) replace the PDF block when given; absent = the PDF, as before. */
+export function buildInventoryReadParams(
   pdfBase64: string,
   page: number,
   profile?: WriterProfile,
   version: FormVersion = 'v1',
-): Promise<ExtractedPage> {
-  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  pageBlocks?: PageBlock[] | null,
+) {
   const isLegacy = version === 'legacy';
   const system = buildSystemPrompt();
   // Unknown version falls back to v1 (the current default three-location layout).
@@ -454,14 +458,33 @@ export async function extractInventoryPage(
     // ("send {type:'between_tools'} instead"); the L1 thinking-off path sends between_tools,
     // which readThinkingOff() only allows at effort high or below. Omitted otherwise.
     ...(thinkingOff ? {thinking: {type: 'between_tools'}} : {}),
-    messages: [{role: 'user', content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: readText(manifest, profile)}]}],
+    messages: [{role: 'user', content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: readText(manifest, profile)}]}],
   };
+  return params;
+}
+
+export async function extractInventoryPage(
+  pdfBase64: string,
+  page: number,
+  profile?: WriterProfile,
+  version: FormVersion = 'v1',
+  pageBlocks?: PageBlock[] | null,
+): Promise<ExtractedPage> {
+  if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
+  const params = buildInventoryReadParams(pdfBase64, page, profile, version, pageBlocks);
 
   // 150s (was 85s): the densest pages — page 4, the accessories list — measured ~85s to
   // read and were timing out at the old cap, so dense pages need more room. 20s (classify)
   // + 150s (extract) = 170s, under the route's 300s maxDuration, so a hung call throws here
   // and the route's catch marks the upload failed — never a hard platform kill.
   const parsed = await visionJson(params, {timeout: 150_000});
+  return mapInventoryRead(parsed, page, profile, version);
+}
+
+/** Validate + map one free-read output to an ExtractedPage (Legacy rows mapped to the core shape).
+ *  Shared by the inline read and the batch poller. */
+export function mapInventoryRead(parsed: unknown, page: number, profile?: WriterProfile, version: FormVersion = 'v1'): ExtractedPage {
+  const isLegacy = version === 'legacy';
   if (parsed && typeof parsed === 'object' && 'error' in parsed) {
     throw new Error(`Extraction declined: ${String((parsed as {error: unknown}).error)}`);
   }
@@ -509,9 +532,10 @@ export async function extractInventoryPageAnchored(
   pdfBase64: string,
   template: FormTemplate,
   profile?: WriterProfile,
+  pageBlocks?: PageBlock[] | null,
 ): Promise<AnchoredMapResult> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
-  const params = buildAnchoredParams(pdfBase64, template, profile);
+  const params = buildAnchoredParams(pdfBase64, template, profile, pageBlocks);
   const parsed = (await visionJson(params, {timeout: 150_000})) as AnchoredOutput;
   if (!parsed || !Array.isArray(parsed.rows)) {
     throw new Error('Anchored read returned no rows');
@@ -522,7 +546,7 @@ export async function extractInventoryPageAnchored(
 /** The request body for ONE anchored read (model, system, numbers-only schema, page + prompt).
  *  Extracted so the same body can be sent synchronously (above) or packed into a Message Batch
  *  (L7 cost spike below) with no difference in what the model sees. */
-export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile) {
+export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile, pageBlocks?: PageBlock[] | null) {
   const p1 = readP1Enabled();
   return {
     model: EXTRACT_MODEL,
@@ -535,7 +559,7 @@ export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, p
     messages: [
       {
         role: 'user',
-        content: [...referenceBlocks(profile), pdfDoc(pdfBase64), {type: 'text', text: p1 ? buildAnchoredPromptP1(template) : buildAnchoredPrompt(template)}],
+        content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: p1 ? buildAnchoredPromptP1(template) : buildAnchoredPrompt(template)}],
       },
     ],
   };
