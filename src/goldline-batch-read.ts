@@ -8,7 +8,7 @@ import {
   setUploadStatus,
   type QueuedBatchUpload,
 } from './goldline-data';
-import {fetchAnchoredBatch} from './goldline-extract-run';
+import {fetchAnchoredBatch, mapInventoryRead, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
 import {mapAnchoredOutput} from './goldline-anchored-extract';
 import {avgConfidence, runInventoryRead} from './goldline-read-pipeline';
@@ -102,14 +102,29 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
         out.fellBack++;
         continue;
       }
-      const template = await getFormTemplate(p.companyId, p.version, p.page);
-      if (!template) {
-        await fallbackSync(p);
-        out.fellBack++;
-        continue;
+      // Legacy pages (batched only when GOLDLINE_BATCH_LEGACY_COMPANIES is on) come back in the free
+      // read's shape; everything else is the anchored template read.
+      let extracted: ExtractedPage;
+      let anchoredDetail: Record<string, unknown> | null = null;
+      if (p.version === 'legacy') {
+        extracted = mapInventoryRead(r.output, p.page, undefined, 'legacy');
+      } else {
+        const template = await getFormTemplate(p.companyId, p.version, p.page);
+        if (!template) {
+          await fallbackSync(p);
+          out.fellBack++;
+          continue;
+        }
+        const mapped = mapAnchoredOutput(template, r.output);
+        extracted = mapped.page;
+        anchoredDetail = {
+          version: p.version,
+          filledBlanks: mapped.filledBlanks,
+          extras: mapped.extras,
+          priceNotes: mapped.priceNotes,
+          versionMismatch: mapped.versionMismatch,
+        };
       }
-      const mapped = mapAnchoredOutput(template, r.output);
-      const extracted = mapped.page;
       const docConfidence = avgConfidence(extracted);
       await saveExtraction({companyId: p.companyId, uploadId: p.uploadId, page: p.page, extracted, docConfidence});
       await setUploadStatus(p.uploadId, 'needs_review', {pageCount: p.page, anthropicBatchId: null});
@@ -122,16 +137,7 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
         status: 'needs_review',
         rowCount: extracted.rows.length,
         docConfidence,
-        detail: {
-          batch: true,
-          anchored: {
-            version: p.version,
-            filledBlanks: mapped.filledBlanks,
-            extras: mapped.extras,
-            priceNotes: mapped.priceNotes,
-            versionMismatch: mapped.versionMismatch,
-          },
-        },
+        detail: {batch: true, ...(anchoredDetail ? {anchored: anchoredDetail} : {legacy: true})},
         // The anchored read's Claude usage, now billed at the 50% batch rate — recorded so a run's
         // cost is still summable from the DB (classify + locate were logged at submit time).
         usage: {input: r.usage?.input ?? 0, output: r.usage?.output ?? 0, cacheRead: 0, cacheCreate: 0, calls: 1},

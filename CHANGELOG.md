@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-20 — Goldline OCR: sharper page images (300 dpi bands) and batched Legacy reads (both flagged, staging)
+
+Measured against the hand-checked answer key (plan `knowledge/tasks/2026-11-19-handwriting-read-accuracy.md`).
+
+- **Sharper page images (`GOLDLINE_READ_BANDS_COMPANIES`, off by default; off = the PDF as today).** Sent as a PDF, a scan page reaches the model at roughly 90 dpi (~1,600 tokens), so dense handwriting blurs. A whole page sent as one 300 dpi image is shrunk by the API to ~180 dpi, but horizontal bands of the page are kept at full 300 dpi. The read now gets a 1600 px page image (layout, row alignment) plus ~5 overlapping full-width 300 dpi bands (digits), rendered server-side with `pdf-to-img` + `@napi-rs/canvas` (`src/goldline-page-bands.ts`, ~5 s per page). Render failure falls back to the PDF. On the four hardest answer-key pages: filled cells read right 82.6% (PDF) to 94.1%, rows with an error 21.5% to 9.6%; ~+18k input tokens and slightly fewer output tokens per page (~+$1 to $1.50 per 98-page scan in batch mode).
+- **Batched Legacy reads (`GOLDLINE_BATCH_LEGACY_COMPANIES`, needs `GOLDLINE_BATCH_READ_COMPANIES`).** L7 batched only the template read, so ~10 Legacy pages per scan still read inline at full price. They can now go through the Message Batches API too; the poller maps them with the shared `mapInventoryRead`. Saves roughly $0.30 to $0.40 per scan.
+- `extractInventoryPage` split into `buildInventoryReadParams` + `mapInventoryRead` (same behaviour) so the Legacy body can be batched.
+
 ## 2026-11-20 — Goldline OCR: V2 pages stop losing their count columns; flagged P1 read places numbers on the right row
 
 Measured against a hand-checked answer key (11 scan pages of the Oct 30 98-page scan; plan `knowledge/tasks/2026-11-19-handwriting-read-accuracy.md`).

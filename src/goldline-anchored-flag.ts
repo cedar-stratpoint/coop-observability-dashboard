@@ -31,6 +31,24 @@ export function readP1Enabled(): boolean {
   return (process.env.GOLDLINE_READ_P1 ?? '').trim() === '1';
 }
 
+/**
+ * Sharper page images (plan: knowledge/tasks/2026-11-19-handwriting-read-accuracy.md): send the read a
+ * 1600 px page image + overlapping 300 dpi bands instead of the PDF (~90 dpi as rendered by the API).
+ * Comma-separated `GOLDLINE_READ_BANDS_COMPANIES`; fail-closed, off is byte-identical (PDF).
+ */
+export function readBandsEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_READ_BANDS_COMPANIES);
+}
+
+/**
+ * Batch the Legacy read too (L7 batched only the template read, so Legacy pages still read inline at
+ * full price). Comma-separated `GOLDLINE_BATCH_LEGACY_COMPANIES`; effective only where
+ * `batchReadEnabled` is also on. Off is byte-identical (inline Legacy read).
+ */
+export function batchLegacyEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_BATCH_LEGACY_COMPANIES);
+}
+
 function companyInEnv(companyId: string, raw: string | undefined): boolean {
   if (!companyId) return false;
   return (raw ?? '')

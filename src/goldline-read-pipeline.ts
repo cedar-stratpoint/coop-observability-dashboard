@@ -1,9 +1,10 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
-import {buildAnchoredParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {batchReadEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {renderBandBlocks} from './goldline-page-bands';
 import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
@@ -230,8 +231,21 @@ export async function runInventoryRead(args: {
     // the template (anchored) path batches; the free read and forceSync (the poller's fallback) stay
     // inline. Classify + locate usage is already tallied; the anchored read's usage is recorded by
     // the poller when the batch returns. Flag-off is byte-identical to the synchronous read below.
-    if (template && !forceSync && batchReadEnabled(companyId)) {
-      const batchParams = buildAnchoredParams(extractB64, template, profile);
+    // Sharper page images (flag-gated): a 1600 px page + 300 dpi bands replace the PDF for the read.
+    // Best-effort: null (render failed or flag off) sends the PDF exactly as before.
+    const pageBlocks = readBandsEnabled(companyId) ? await renderBandBlocks(extractB64) : null;
+    if (pageBlocks) {
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        bands: pageBlocks.filter((b) => b.type === 'image').length - 1,
+      };
+    }
+    // Legacy has no template, so L7 left it inline at full price; batch it too when its flag is on.
+    const batchLegacy = !template && cls.version === 'legacy' && batchLegacyEnabled(companyId);
+    if ((template || batchLegacy) && !forceSync && batchReadEnabled(companyId)) {
+      const batchParams = template
+        ? buildAnchoredParams(extractB64, template, profile, pageBlocks)
+        : buildInventoryReadParams(extractB64, page, profile, 'legacy', pageBlocks);
       const anthropicBatchId = await submitAnchoredBatch([{custom_id: uploadId, params: batchParams}]);
       await setUploadStatus(uploadId, 'queued_batch', {pageCount: page, anthropicBatchId});
       await logReadEvent({...rec, status: 'queued_batch', stage: 'submitted', usage: readUsageSnapshot()});
@@ -241,10 +255,10 @@ export async function runInventoryRead(args: {
     let anchored: AnchoredMapResult | null = null;
     if (template) {
       const useTemplate = template;
-      anchored = await withHeartbeat(emit, reading, () => extractInventoryPageAnchored(extractB64, useTemplate, profile));
+      anchored = await withHeartbeat(emit, reading, () => extractInventoryPageAnchored(extractB64, useTemplate, profile, pageBlocks));
       extracted = anchored.page;
     } else {
-      extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version));
+      extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version, pageBlocks));
     }
     rec.readMs = Date.now() - readStart;
     if (anchored) {
