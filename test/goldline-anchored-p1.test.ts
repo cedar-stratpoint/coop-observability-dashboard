@@ -8,6 +8,7 @@ import {
   mapAnchoredOutput,
   mapAnchoredP1ToExtractedPage,
   p1RowKeys,
+  withUnsureSchema,
   type AnchoredOutputP1,
 } from '../src/goldline-anchored-extract';
 
@@ -91,5 +92,28 @@ describe('mapAnchoredOutput', () => {
   it('maps the original index-keyed output unchanged', () => {
     const m = mapAnchoredOutput(v1, {rows: [{i: 1, stockroom: 5, ending_on_hand: 6, confidence: 0.9}]});
     expect(m.page.rows[1]).toMatchObject({item_code: 'TLGL4469', ending_on_hand: 6});
+  });
+});
+
+describe('per-cell doubt (unsure)', () => {
+  it('adds an optional unsure list after the counts, before confidence', () => {
+    const keys = keysOf(anchoredSchemaFor(withUnsureSchema(ANCHORED_EXTRACTION_SCHEMA_P1), 'v2'));
+    expect(keys).toEqual(['row', 'delivery', 'stockroom', 'drawer', 'selling_area', 'ending_on_hand', 'unsure', 'confidence']);
+  });
+  it('asks for doubtful cells only when enabled', () => {
+    expect(buildAnchoredPromptP1(v1, {unsure: true})).toMatch(/DOUBTFUL CELLS/);
+    expect(buildAnchoredPromptP1(v1)).not.toMatch(/DOUBTFUL CELLS/);
+  });
+  it('lowers confidence and names the second reading, without changing the value', () => {
+    const m = mapAnchoredP1ToExtractedPage(v1, {
+      rows: [{row: 'TLGL4469', stockroom: 5, selling_area: 1, ending_on_hand: 6, confidence: 0.9, unsure: [{col: 'ending_on_hand', alt: 8}, {col: 'stockroom', alt: -1}]}],
+      family_totals: [],
+    });
+    const r = m.page.rows.find((x) => x.item_code === 'TLGL4469')!;
+    expect(r.ending_on_hand).toBe(6);
+    expect(r.confidence).toBeLessThanOrEqual(0.45);
+    expect(r.alt).toMatch(/ending on hand could be 8/);
+    expect(r.alt).toMatch(/stockroom could be blank/);
+    expect(m.p1.unsureRows).toBe(1);
   });
 });
