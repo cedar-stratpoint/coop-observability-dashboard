@@ -43,9 +43,11 @@ export type EnrichedCustomer = CrmCustomer & {
   lastOrderAt: string | null;
   /** RET-06: the cohort key of the first counted order's discount code (firstOrderCode); null when there is no counted order. */
   firstOrderCode: string | null;
+  /** RET-12: every code key (firstOrderCode's keys) used on any counted order, deduped; null when there is no counted order (unknown, never "none"). */
+  codesUsed: string[] | null;
 };
 
-type Stats = {count: number; spent: number; spentYtd: number; first: string | null; last: string | null; firstCodes: readonly string[]};
+type Stats = {count: number; spent: number; spentYtd: number; first: string | null; last: string | null; firstCodes: readonly string[]; codes: Set<string>};
 const ms = (iso: string | null): number => Date.parse(String(iso ?? ''));
 
 /**
@@ -65,8 +67,12 @@ export function enrichCustomers(
     if (o.test === true) continue;
     const key = o.shopifyCustomerId || (o.email ?? '').toLowerCase();
     if (!key) continue;
-    const s = stats.get(key) ?? {count: 0, spent: 0, spentYtd: 0, first: null, last: null, firstCodes: []};
+    const s = stats.get(key) ?? {count: 0, spent: 0, spentYtd: 0, first: null, last: null, firstCodes: [], codes: new Set()};
     s.count += 1;
+    for (const code of o.discountCodes ?? []) {
+      const k = firstOrderCode([code]);
+      if (k !== NO_CODE) s.codes.add(k);
+    }
     if (o.financialStatus === 'paid') {
       const amt = Number(o.totalPrice) || 0;
       s.spent += amt;
@@ -84,8 +90,8 @@ export function enrichCustomers(
   }
   return customers.map((c) => {
     const s = stats.get(c.shopifyCustomerId) ?? stats.get((c.email ?? '').toLowerCase());
-    if (!s) return {...c, orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null};
-    return {...c, orderCount: s.count, spent: s.spent, spendYtd: s.spentYtd, firstOrderAt: s.first, lastOrderAt: s.last, firstOrderCode: s.count > 0 ? firstOrderCode(s.firstCodes) : null};
+    if (!s) return {...c, orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null};
+    return {...c, orderCount: s.count, spent: s.spent, spendYtd: s.spentYtd, firstOrderAt: s.first, lastOrderAt: s.last, firstOrderCode: s.count > 0 ? firstOrderCode(s.firstCodes) : null, codesUsed: s.count > 0 ? [...s.codes] : null};
   });
 }
 
@@ -379,6 +385,13 @@ export function firstOrderCode(codes: readonly string[]): string {
   return code;
 }
 
+/** RET-12: every code key with buyers (any counted order), most buyers first, ties by name: the builder's "Used code (any order)" suggestions. */
+export function codesUsedList(rows: readonly Pick<EnrichedCustomer, 'orderCount' | 'codesUsed'>[]): string[] {
+  const acc = new Map<string, number>();
+  for (const c of rows) if (c.orderCount >= 1) for (const k of c.codesUsed ?? []) acc.set(k, (acc.get(k) ?? 0) + 1);
+  return [...acc.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([k]) => k);
+}
+
 export type CodeCohort = {group: string; buyers: number; repeat: number; ratePct: number; small: boolean};
 
 /** Buyers per first-order code, with repeat buyers (2+ counted orders) and the repeat rate (repeatRate), biggest first, ties by name. Non-buyers are in no cohort. */
@@ -515,7 +528,7 @@ export function audienceRows<T extends Pick<EnrichedCustomer, 'orderCount' | 'la
  * rule is always read back as sentences (condText / ruleText). Adding a field = a new entry here, a case in cohortValue and in
  * condText, and a test; 9B's tool schema enumerates the same list.
  */
-export const COHORT_FIELDS = ['code', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
+export const COHORT_FIELDS = ['code', 'anycode', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
 export type CohortField = (typeof COHORT_FIELDS)[number];
 export const COHORT_OPS = ['is', 'is_not', 'on_or_after', 'on_or_before', 'gte', 'lte', 'eq'] as const;
 export type CohortOp = (typeof COHORT_OPS)[number];
@@ -540,6 +553,7 @@ const TIER_VALUES = Object.freeze({platinum: 'Platinum', gold: 'Gold', guest: 'G
 const CONSENT_VALUES = Object.freeze({subscribed: 'Subscribed', not_subscribed: 'Not subscribed'});
 export const COHORT_FIELD_SPEC: Readonly<Record<CohortField, FieldSpec>> = Object.freeze({
   code: {label: 'First-order code', type: 'text', ops: ['is', 'is_not']},
+  anycode: {label: 'Used code (any order)', type: 'text', ops: ['is', 'is_not']},
   first: {label: 'First order date', type: 'date', ops: ['on_or_after', 'on_or_before']},
   orders: {label: 'Orders', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
   days: {label: 'Days since last order', type: 'num', integer: true, ops: ['gte', 'lte']},
@@ -626,6 +640,7 @@ export type CohortRow = Pick<
   CustomerRow,
   | 'orderCount'
   | 'firstOrderCode'
+  | 'codesUsed'
   | 'firstOrderAt'
   | 'daysSinceLastOrder'
   | 'spent'
@@ -645,10 +660,12 @@ const tierOf = (t: string | null | undefined): string => (t === 'platinum' || t 
  * order and days since are null (both "is" and "is not" fail: there is no first order to compare). Last contacted: a source unread
  * is null; known and never contacted is +Infinity, so it counts as "not contacted in N+ days" for any N, never as "in the last N".
  */
-function cohortValue(r: CohortRow, f: CohortField): string | number | null {
+function cohortValue(r: CohortRow, f: CohortField): string | number | ReadonlySet<string> | null {
   switch (f) {
     case 'code':
       return r.orderCount >= 1 && r.firstOrderCode !== null ? r.firstOrderCode.toUpperCase() : null;
+    case 'anycode':
+      return r.orderCount >= 1 && r.codesUsed !== null ? new Set(r.codesUsed.map((k) => k.toUpperCase())) : null;
     case 'first':
       return r.orderCount >= 1 ? phDayOf(r.firstOrderAt) : null;
     case 'orders':
@@ -673,6 +690,11 @@ function cohortValue(r: CohortRow, f: CohortField): string | number | null {
 function condHolds(r: CohortRow, c: CohortCond): boolean {
   const x = cohortValue(r, c.f);
   if (x === null) return false;
+  if (typeof x === 'object') {
+    // anycode: the set of code keys on any counted order. "no code" = the set is empty (NO_CODE is never a member: it is the absence).
+    const has = String(c.v) === NO_CODE.toUpperCase() ? x.size === 0 : x.has(String(c.v));
+    return c.op === 'is' ? has : !has;
+  }
   switch (c.op) {
     case 'is':
       return x === c.v;
@@ -735,6 +757,12 @@ export function condText(c: CohortCond): string {
       const words = CODE_WORDS[v.toUpperCase()];
       if (words) return c.op === 'is' ? `First order used ${words}` : `First order did not use ${words}`;
       return c.op === 'is' ? `First order used code ${v}` : `First order did not use code ${v}`;
+    }
+    case 'anycode': {
+      const words = CODE_WORDS[v.toUpperCase()];
+      if (v.toUpperCase() === NO_CODE.toUpperCase()) return c.op === 'is' ? 'Never used any code' : 'Used a code on some order';
+      if (words) return c.op === 'is' ? `Used ${words} on some order` : `Never used ${words}`;
+      return c.op === 'is' ? `Used code ${v} on any order` : `Never used code ${v}`;
     }
     case 'first':
       return `First order ${c.op === 'on_or_after' ? 'on or after' : 'on or before'} ${fmtPhDate(`${v}T00:00:00+08:00`)}`;

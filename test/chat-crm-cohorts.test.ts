@@ -118,7 +118,7 @@ describe('9B propose_crm_cohort: drafts', () => {
 
   it('an invalid draft is refused in plain words: no CRM read, no block', async () => {
     const cases: [unknown, RegExp][] = [
-      [{group: 'Event', name: 'X', rule: {all: [{f: 'pet_name', op: 'is', v: 'Mochi'}]}}, /field Coop does not know\. Use one of: First-order code, First order date, Orders/],
+      [{group: 'Event', name: 'X', rule: {all: [{f: 'pet_name', op: 'is', v: 'Mochi'}]}}, /field Coop does not know\. Use one of: First-order code, Used code \(any order\), First order date, Orders/],
       [{group: 'Event', name: 'X', rule: {all: [{f: 'orders', op: 'is', v: '1'}]}}, /Orders takes the operator "at least" or "at most" or "exactly"/],
       [{group: 'Event', name: 'X', rule: {all: []}}, /at least one condition/],
       [{group: '', name: 'X', rule: {all: [{f: 'orders', op: 'eq', v: 1}]}}, /Give the cohort a group/],
@@ -162,6 +162,26 @@ describe('9B propose_crm_cohort: drafts', () => {
     const out = (await ex.propose_crm_cohort(NOT_REORDERED)) as Record<string, unknown>;
     expect(out).toMatchObject({shown: false});
     expect(String(out.note)).toMatch(/cannot be saved from this chat/);
+  });
+});
+
+describe('RET-12 anycode through Ask Coop', () => {
+  // by hand: Ben's 2nd order and Fay's 2nd order carry no code in this fixture, so use a rule every CIRCUIT10 first-order buyer holds.
+  const RULE: CohortRule = {all: [{f: 'anycode', op: 'is', v: 'circuit10'}, {f: 'orders', op: 'eq', v: 1}]};
+  it('a draft previews the same count as matchesCohort over the page rows', async () => {
+    const {ex, blocks} = exec();
+    await ex.propose_crm_cohort({group: 'Promo', name: 'Circuit, no reorder', rule: RULE});
+    const members = pageRows().filter((r) => matchesCohort(r, RULE));
+    expect(members.length).toBe(4); // Ana, Cy, Dee, Eve
+    expect(drafts(blocks)[0].preview.customers).toBe(members.length);
+    expect(drafts(blocks)[0].sentences).toEqual(['Used code CIRCUIT10 on any order', 'Has exactly 1 order']);
+  });
+  it('a saved anycode cohort lists through list_crm_customers cohort', async () => {
+    const CUS = {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', min_orders: 0, audience: 'all', limit: 25, offset: 0};
+    const saved = cohort('Promo', 'Ever Circuit', {all: [{f: 'anycode', op: 'is', v: 'CIRCUIT10'}]});
+    const {ex, kept} = exec({saved: [saved]});
+    await ex.list_crm_customers({...CUS, cohort: 'Promo · Ever Circuit'});
+    expect(kept[0].rows.map((r) => String(r.name).split(' ')[0]).sort()).toEqual(['Ana', 'Ben', 'Cy', 'Dee', 'Eve', 'Fay']);
   });
 });
 

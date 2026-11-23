@@ -40,7 +40,7 @@ const order = (id: string, over: Partial<CrmOrder> = {}): CrmOrder => ({
 const row = (id: string, over: Partial<CustomerRow> = {}): CustomerRow => ({
   shopifyCustomerId: id, email: `${id}@example.com`, firstName: id, lastName: null, phone: null, ordersCount: null, totalSpent: null,
   membershipTier: 'gold', petName: null, petBirthday: null, emailMarketingState: null, createdAt: '2026-07-02T00:00:00Z', updatedAt: null,
-  orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, daysSinceLastOrder: null,
+  orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null, daysSinceLastOrder: null,
   emailsSent: 0, manualContacts: 0, timesContacted: 0, lastContactedAt: null, lastContactKind: null, lastContactKnown: true, daysSinceLastContact: null,
   consent: 'unknown', ...over,
 });
