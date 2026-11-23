@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Scan page: Per store and Per BA cards match the Per file list
+
+The store and BA cards now speak the same visual language as the refreshed Per file list. Card titles use the sans face (the serif stays on the page title only), and period and BA sit on one quiet line with small icons instead of a mono date. Page coverage (pages 1 to 5) sits in the same tray as the view tabs and pager, and the form version uses the coloured Legacy / V1 / V2 pill. Store section headings drop the rule and serif for a sans title with a count pill. "Confirm store" is a calmer 36px button with press feedback, and the hover-only "Review →" becomes an always-visible "Review ›". BA cards get the rounded initials tile from the Per file rows, a chevron to show they open, "no store yet" instead of "0 stores", and Change BA in a footer only when it applies (no empty strip on "No BA on the form").
+
 ## 2026-11-23 — Scan page: refreshed Per file list and pager
 
 The Per file list on the scan page now leads with the page number: each row has a numbered tile, "Page 7 of 30" with the total quieter, and the page's type ("Inventory form", "Sales report", "Blank page") instead of the generic "Inventory scan". The scan-name pill on every row is gone unless the list mixes scans (the header already names the scan). Delete shows on hover on mouse devices (always on touch), and a chevron marks each row as opening its review. The range, per-page switch and pager now sit in a footer inside the list card, styled as the same segmented trays as the view tabs: the current page is raised in the tray instead of a filled green square. The shared `Pagination` component gains this as an opt-in `variant="segmented"`; its other 19 uses keep the boxed look.
