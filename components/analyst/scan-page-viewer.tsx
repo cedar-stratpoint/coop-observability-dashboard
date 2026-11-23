@@ -10,8 +10,9 @@ if (typeof window !== 'undefined') {
 }
 
 export type ScanHighlight = {top: number; height: number; label: string; approximate?: boolean};
-/** A light box on the row the reviewer is pointing at in the rows beside the scan (page fractions). */
-export type ScanPointBox = {top: number; height: number};
+/** A light box on the row the reviewer is pointing at in the rows beside the scan (page fractions).
+ *  `angle`/`px` tilt it with a slanted page around the ITEM# column; `label` is a small tag on it. */
+export type ScanPointBox = {top: number; height: number; angle?: number; px?: number; label?: string};
 
 const ZMIN = 1;
 const ZMAX = 4;
@@ -277,14 +278,32 @@ export function ScanPageViewer({
             {pointBox && size && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute right-0 left-0 rounded-[3px] transition-[top,height] duration-150 ease-out motion-reduce:transition-none"
+                className="pointer-events-none absolute right-0 left-0 rounded-[3px] transition-[top,height,transform] duration-150 ease-out motion-reduce:transition-none"
                 style={{
                   top: `${Math.max(0, pointBox.top - 0.002) * 100}%`,
                   height: `${(pointBox.height + 0.004) * 100}%`,
                   background: 'color-mix(in oklab, var(--primary) 14%, transparent)',
                   boxShadow: 'inset 0 0 0 1.5px color-mix(in oklab, var(--primary) 70%, transparent)',
+                  ...(pointBox.angle && Math.abs(pointBox.angle) > 0.05
+                    ? {transformOrigin: `${((pointBox.px ?? 0.1) * 100).toFixed(2)}% 50%`, transform: `rotate(${pointBox.angle}deg)`}
+                    : {}),
                 }}
-              />
+              >
+                {pointBox.label && (
+                  // The tag sits in the page's left margin, ending at the ITEM# column, so it never covers
+                  // the neighbouring rows' codes; with no margin to speak of it goes past the row's right end.
+                  <span
+                    className="absolute top-1/2 -translate-y-1/2 truncate rounded bg-[color:var(--primary)] px-1.5 py-0.5 text-[10px] leading-tight font-semibold whitespace-nowrap text-white shadow-sm"
+                    style={
+                      (pointBox.px ?? 0) >= 0.12
+                        ? {right: `${(1 - (pointBox.px ?? 0.1)) * 100 + 3.5}%`, maxWidth: `${(pointBox.px ?? 0.1) * 100 - 4}%`}
+                        : {right: '0.5%', maxWidth: '30%', transform: 'translate(0, -50%)'}
+                    }
+                  >
+                    {pointBox.label}
+                  </span>
+                )}
+              </div>
             )}
             {highlight && size && (
               <div

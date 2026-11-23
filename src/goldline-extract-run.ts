@@ -97,6 +97,9 @@ export type ExtractedPage = {
   /** How this page was read (stamped by us, not the model): which writer profile was
    *  used, so reader accuracy can be compared before and after it. */
   reader?: {profile: boolean; reference_upload_id: string | null; notes: boolean};
+  /** The page's slant (degrees, and the pivot as a fraction of the width), stored with the row boxes
+   *  so review tilts the box with the paper. Absent on pages read without boxes. Cosmetic only. */
+  slant?: {angle: number; px: number} | null;
 };
 
 /** True when extraction is configured (a primary OR fallback key is set). */

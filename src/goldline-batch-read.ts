@@ -134,8 +134,9 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
       let boxesSet: number | null = null;
       if (boxResult) {
         try {
-          const h = parseBoxCustomId(boxResult.custom_id, p.uploadId) ?? 0;
-          boxesSet = boxResult.output ? applyRowBoxes(extracted.rows, locateRowsFor(template, p.page), boxResult.output as unknown as LocateOutput, h) : 0;
+          const meta = parseBoxCustomId(boxResult.custom_id, p.uploadId);
+          boxesSet = boxResult.output && meta ? applyRowBoxes(extracted.rows, locateRowsFor(template, p.page), boxResult.output as unknown as LocateOutput, meta.h) : 0;
+          if (boxesSet && meta?.slant) extracted.slant = meta.slant;
         } catch (e) {
           console.error('goldline batch-poll: row boxes skipped', p.uploadId, msg(e));
           boxesSet = 0;

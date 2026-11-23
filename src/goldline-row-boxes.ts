@@ -7,9 +7,10 @@
 import {EXTRACT_MODEL, MANIFESTS} from './goldline-extract';
 import type {ExtractedRow} from './goldline-extract-run';
 import type {FormTemplate} from './goldline-form-template';
+import type {Slant} from './goldline-slant';
 
 export type LocateRow = {code: string; product: string};
-export type LocateImage = {data: string; w: number; h: number};
+export type LocateImage = {data: string; w: number; h: number; slant?: Slant | null};
 export type LocateOutput = {rows?: {i?: number; top?: number; bottom?: number}[]};
 
 const BOX_SUFFIX = '_box_';
@@ -21,18 +22,24 @@ export function locateRowsFor(template: FormTemplate | null, page: number): Loca
   return (MANIFESTS[page] ?? []).map((m) => ({code: m.code, product: m.product}));
 }
 
-/** custom_id of a page's box request in its batch (the image height rides along: the batch API only
- *  allows [A-Za-z0-9_-], and the poller needs it to turn pixels into page fractions). */
-export function boxCustomId(uploadId: string, imageHeight: number): string {
-  return `${uploadId}${BOX_SUFFIX}${Math.round(imageHeight)}`;
+/** custom_id of a page's box request in its batch. The image height and the page's slant ride along
+ *  (the batch API only allows [A-Za-z0-9_-]; the poller needs the height to turn pixels into page
+ *  fractions and stores the slant on the page): `<uploadId>_box_<h>[_<angle x100>_<px x1000>]`. */
+export function boxCustomId(uploadId: string, imageHeight: number, slant?: Slant | null): string {
+  const base = `${uploadId}${BOX_SUFFIX}${Math.round(imageHeight)}`;
+  return slant ? `${base}_${Math.round(slant.angle * 100)}_${Math.round(slant.px * 1000)}` : base;
 }
 
-/** The image height from a box custom_id, or null when the id is not this page's box request. */
-export function parseBoxCustomId(customId: string, uploadId: string): number | null {
+/** The image height (and slant, when sent) from a box custom_id; null when it isn't this page's. */
+export function parseBoxCustomId(customId: string, uploadId: string): {h: number; slant: Slant | null} | null {
   const prefix = `${uploadId}${BOX_SUFFIX}`;
   if (!customId.startsWith(prefix)) return null;
-  const h = Number(customId.slice(prefix.length));
-  return Number.isFinite(h) && h > 0 ? h : null;
+  const [hs, as, ps] = customId.slice(prefix.length).split('_');
+  const h = Number(hs);
+  if (!Number.isFinite(h) || h <= 0) return null;
+  const a = Number(as), x = Number(ps);
+  const slant = as !== undefined && ps !== undefined && Number.isFinite(a) && Number.isFinite(x) ? {angle: a / 100, px: x / 1000} : null;
+  return {h, slant};
 }
 
 export function isBoxCustomId(customId: string): boolean {

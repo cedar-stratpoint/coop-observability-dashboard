@@ -253,7 +253,7 @@ export async function runInventoryRead(args: {
       const requests: {custom_id: string; params: unknown}[] = [{custom_id: uploadId, params: batchParams}];
       const locateRows = images && readBoxesEnabled(companyId) ? locateRowsFor(template, page) : [];
       if (images && locateRows.length) {
-        requests.push({custom_id: boxCustomId(uploadId, images.locate.h), params: buildLocateParams(images.locate, locateRows)});
+        requests.push({custom_id: boxCustomId(uploadId, images.locate.h, images.locate.slant), params: buildLocateParams(images.locate, locateRows)});
         rec.detail = {...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}), boxes: locateRows.length};
       }
       const anthropicBatchId = await submitAnchoredBatch(requests);
