@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {useCallback, useMemo, useState, useTransition} from 'react';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, Check, Loader2, MapPin, Pencil, Search, Store, User} from 'lucide-react';
+import {AlertTriangle, CalendarDays, Check, ChevronRight, Loader2, MapPin, Pencil, Search, Store, User} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
@@ -14,6 +14,7 @@ import type {StoreOption} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {fmtTriagePeriod, FLAG_LABEL, flagTone, VERSION_LABEL} from '@/src/goldline-triage-format';
 import {assignFormStoreAction} from '@/app/uploads/actions';
+import {VersionPill} from '@/components/analyst/version-pill';
 
 const INVENTORY_PAGES = [1, 2, 3, 4, 5];
 const TONE_VAR = {good: 'var(--status-good)', warn: 'var(--status-warn)', crit: 'var(--status-crit)', info: 'var(--primary)'} as const;
@@ -48,12 +49,24 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
   return (
     <>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={cn('font-heading text-[15px] font-semibold leading-snug tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className={cn('text-[0.9375rem] leading-snug font-semibold tracking-tight', unreadable && 'text-[color:var(--status-crit)]')}>
             {form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'Store not readable')}
-            {form.storeName && form.storeCode ? <span className="font-mono text-xs font-normal text-muted-foreground"> · {form.storeCode}</span> : null}
+            {form.storeName && form.storeCode ? <span className="font-normal whitespace-nowrap text-muted-foreground tabular-nums"> · {form.storeCode}</span> : null}
           </div>
-          <div className="mt-1.5 font-mono text-[11.5px] text-muted-foreground tabular-nums">{fmtTriagePeriod(form.periodStart, form.periodEnd)}</div>
+          {/* Period and BA on one quiet line, the same weight as the Per file meta line. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <CalendarDays aria-hidden className="size-3 shrink-0 opacity-70" />
+              {fmtTriagePeriod(form.periodStart, form.periodEnd)}
+            </span>
+            {form.consultant ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <User aria-hidden className="size-3 shrink-0 opacity-70" />
+                <span className="truncate">{form.consultant}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={tint(s.tone)}>
           <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE_VAR[s.tone]}} />
@@ -61,14 +74,9 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
         </span>
       </div>
 
-      {form.consultant ? (
-        <div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-          <User className="size-3 shrink-0 opacity-70" /> {form.consultant}
-        </div>
-      ) : null}
-
-      {/* Page coverage: 5 cells, filled = present, dashed = missing, ring = duplicate. */}
-      <div className="flex items-center gap-1.5" aria-label="Page coverage">
+      {/* Page coverage: pages 1 to 5 in one tray (the same tray as the view tabs and pager).
+          Came through = green, missing = faded, duplicate = red ring. */}
+      <div className="grid grid-cols-5 gap-1 rounded-xl bg-muted/70 p-1 ring-1 ring-border/70 ring-inset" aria-label={`Pages ${form.present.length} of 5 came through`}>
         {INVENTORY_PAGES.map((p) => {
           const present = form.present.includes(p);
           const dup = dupPages.has(p);
@@ -76,13 +84,13 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
             <span
               key={p}
               title={`Page ${p}${dup ? ' (duplicate)' : present ? '' : ' (missing)'}`}
-              className="flex h-7 min-w-0 flex-1 items-center justify-center rounded-md font-mono text-[11px] font-medium tabular-nums"
+              className={cn('flex h-7 min-w-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums', !present && !dup && 'text-muted-foreground/45')}
               style={
                 dup
                   ? {...tint('crit'), boxShadow: `inset 0 0 0 1.5px ${TONE_VAR.crit}`}
                   : present
-                    ? {background: 'color-mix(in oklab, var(--status-good) 16%, transparent)', color: toneText(TONE_VAR.good)}
-                    : {color: 'var(--muted-foreground)', boxShadow: 'inset 0 0 0 1px var(--border)', opacity: 0.6}
+                    ? {background: 'color-mix(in oklab, var(--status-good) 18%, var(--background))', color: toneText(TONE_VAR.good), boxShadow: '0 1px 2px rgb(0 0 0 / 0.06)'}
+                    : undefined
               }
             >
               {p}
@@ -93,7 +101,7 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
 
       {(VERSION_LABEL[form.version] || extraFlags.length > 0) && (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">{VERSION_LABEL[form.version]}</span>
+          <VersionPill version={form.version} />
           {extraFlags.map((fl) => (
             <span key={fl} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium" style={tint(flagTone(fl))}>
               {FLAG_LABEL[fl] ?? fl}
@@ -132,7 +140,7 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:border-[color:var(--status-crit)] hover:shadow-md active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[color:var(--status-crit)]/35 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+        className="group inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm font-semibold transition-[transform,border-color,background-color] duration-150 ease-out hover:border-[color:var(--status-crit)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[color:var(--status-crit)]/35 motion-reduce:transition-none"
         style={{...tint('crit'), borderColor: 'color-mix(in oklab, var(--status-crit) 28%, transparent)'}}
       >
         <MapPin className="size-3.5 transition-transform duration-150 ease-out group-hover:-rotate-6 motion-reduce:transition-none" /> Confirm store
@@ -348,7 +356,7 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
   // whole form is filed with one tap instead of opening the batch to type a store.
   if (needsStore && canEdit && stores.length > 0) {
     return (
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
         <CardBody form={form} s={s} />
         <StorePicker company={company} form={form} stores={stores} />
       </div>
@@ -357,10 +365,13 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
   return (
     <Link
       href={href}
-      className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+      className="group flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
     >
       <CardBody form={form} s={s} />
-      <span className="self-end whitespace-nowrap text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">Review →</span>
+      <span className="inline-flex items-center gap-0.5 self-end text-xs font-medium text-muted-foreground transition-colors duration-150 group-hover:text-foreground">
+        Review
+        <ChevronRight aria-hidden className="size-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none" />
+      </span>
     </Link>
   );
 }
@@ -600,26 +611,23 @@ export function TriageBoard({
 function FormGrid({children}: {children: React.ReactNode}) {
   // Max 3 across (not 4) so each card is wide enough to show the full store name without
   // truncating, with generous whitespace between.
-  return <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
+  return <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
 }
 
 /** A store (or triage bucket) heading above its cards: the store name once, its code, and
  *  how many forms sit under it — so repeated periods of one store read as one store. */
 function GroupHeading({title, code, count, countLabel = 'form', tone, onEditStore, linked}: {title: string; code?: string; count: number; countLabel?: string; tone?: Tone; onEditStore?: () => void; linked?: boolean}) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-border pb-1.5">
-      <h3 className="flex min-w-0 items-baseline gap-2">
-        <span
-          className={cn('truncate font-heading text-sm font-semibold tracking-tight', tone === 'crit' && 'text-[color:var(--status-crit)]')}
-        >
-          {title}
-        </span>
-        {code && <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">· {code}</span>}
-      </h3>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="text-xs text-muted-foreground tabular-nums">
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="flex min-w-0 items-center gap-2">
+        {tone === 'crit' && <span aria-hidden className="size-2 shrink-0 rounded-full" style={{background: TONE_VAR.crit}} />}
+        <span className={cn('truncate text-sm font-semibold tracking-tight', tone === 'crit' && 'text-[color:var(--status-crit)]')}>{title}</span>
+        {code && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">· {code}</span>}
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
           {count} {count === 1 ? countLabel.replace(/s$/, '') : countLabel.endsWith('s') ? countLabel : `${countLabel}s`}
         </span>
+      </h3>
+      <div className="flex shrink-0 items-center gap-3">
         {onEditStore &&
           (linked ? (
             <button

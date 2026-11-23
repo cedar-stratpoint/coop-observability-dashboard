@@ -567,25 +567,39 @@ export function BaCards({
           return (
             <div
               key={g.name}
-              className="group relative flex flex-col gap-3.5 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
+              className="group relative flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md has-[a:active]:scale-[0.99] motion-reduce:transition-none sm:p-5"
             >
-              <div className="flex items-center gap-2.5">
-                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold text-muted-foreground">
-                  {initials || '?'}
+              <div className="flex items-center gap-3">
+                {/* Initials tile, the same shape as the Per file page tile. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    'flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-sm font-semibold ring-1 ring-border/60 ring-inset transition-colors duration-150 group-hover:bg-background',
+                    !g.hasName && 'text-muted-foreground',
+                  )}
+                >
+                  {g.hasName ? initials || '?' : '?'}
                 </span>
-                <div className="min-w-0">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <Link
                     href={`/uploads/scan/${encodeURIComponent(source)}?view=store&ba=${encodeURIComponent(g.name)}${batchId ? `&batch=${encodeURIComponent(batchId)}` : ''}`}
                     replace
-                    className="block truncate font-heading text-[15px] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
+                    className={cn(
+                      "block truncate text-[0.9375rem] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40",
+                      !g.hasName && 'text-muted-foreground',
+                    )}
                     title={g.name}
                   >
                     {g.name}
                   </Link>
-                  <div className="font-mono text-[11.5px] text-muted-foreground tabular-nums">
-                    {g.forms} {g.forms === 1 ? 'form' : 'forms'} · {g.stores} {g.stores === 1 ? 'store' : 'stores'}
+                  <div className="text-xs text-muted-foreground tabular-nums">
+                    {g.forms} {g.forms === 1 ? 'form' : 'forms'} · {g.stores === 0 ? 'no store yet' : `${g.stores} ${g.stores === 1 ? 'store' : 'stores'}`}
                   </div>
                 </div>
+                <ChevronRight
+                  aria-hidden
+                  className="size-4 shrink-0 text-muted-foreground/50 transition-[color,transform] duration-150 ease-out group-hover:translate-x-0.5 group-hover:text-foreground motion-reduce:transition-none"
+                />
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {g.needsStore > 0 && <Pill tone="crit" n={g.needsStore} label="need a store" />}
@@ -594,23 +608,19 @@ export function BaCards({
                 {g.committed > 0 && (
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">{g.committed} done</span>
                 )}
+                {attention === 0 && g.ready === 0 && g.committed === 0 && <span className="text-[11px] text-muted-foreground">Nothing to do</span>}
               </div>
-              <div className="flex items-center justify-between gap-2">
-                {canEdit && g.hasName ? (
+              {canEdit && g.hasName && (
+                <div className="-mx-1.5 -mb-1 flex items-center border-t border-border/70 pt-2.5">
                   <button
                     type="button"
                     onClick={() => setEditCard({name: g.name, items: g.items})}
-                    className="relative z-10 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className="relative z-10 inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97] motion-reduce:transition-none"
                   >
-                    <UserPen className="size-3" /> Change BA
+                    <UserPen className="size-3.5" /> Change BA
                   </button>
-                ) : (
-                  <span />
-                )}
-                <span className="text-[11px] font-medium text-[color:var(--primary)] opacity-0 transition-opacity group-hover:opacity-100">
-                  {attention > 0 ? 'Open forms →' : 'View forms →'}
-                </span>
-              </div>
+                </div>
+              )}
             </div>
           );
         })}
