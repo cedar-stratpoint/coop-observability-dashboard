@@ -16,6 +16,7 @@ import {
   COHORT_RULE_MAX_CONDS,
   REPEAT_TARGET_PCT,
   codeCohorts,
+  codesUsedList,
   matchesCohort,
   readCohortRule,
   repeatRate,
@@ -87,6 +88,9 @@ export function CohortBuilderDialog({
   const groups = useMemo(() => [...new Set(existing.map((c) => c.group))].sort((a, b) => a.localeCompare(b)), [existing]);
   // First-order codes with buyers, biggest first: suggestions for the code field (the owner maps codes to events, never Coop).
   const codes = useMemo(() => codeCohorts(rows).map((c) => c.group), [rows]);
+  // RET-12: every code with buyers on any order, for "Used code (any order)".
+  const usedCodes = useMemo(() => codesUsedList(rows), [rows]);
+  const anyCodeList = useId();
 
   const labelRead = readCohortLabel(draft);
   const ruleRead = readCohortRule({all: draft.conds});
@@ -225,7 +229,7 @@ export function CohortBuilderDialog({
                       inputMode={spec.type === 'num' ? (spec.integer ? 'numeric' : 'decimal') : undefined}
                       min={spec.type === 'num' ? 0 : undefined}
                       step={spec.type === 'num' ? (spec.integer ? 1 : 0.01) : undefined}
-                      list={spec.type === 'text' ? codeList : undefined}
+                      list={spec.type === 'text' ? (c.f === 'anycode' ? anyCodeList : codeList) : undefined}
                       placeholder={spec.type === 'num' ? '0' : spec.type === 'text' ? 'e.g. CIRCUIT10' : undefined}
                       className={cn(control, 'col-start-2 sm:col-start-auto', spec.type === 'text' && 'uppercase')}
                     />
@@ -236,6 +240,11 @@ export function CohortBuilderDialog({
           </ul>
           <datalist id={codeList}>
             {codes.map((k) => (
+              <option key={k} value={k} />
+            ))}
+          </datalist>
+          <datalist id={anyCodeList}>
+            {usedCodes.map((k) => (
               <option key={k} value={k} />
             ))}
           </datalist>

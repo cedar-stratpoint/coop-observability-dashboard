@@ -1,16 +1,31 @@
 'use client';
 
 import {useMemo, useRef, useState} from 'react';
-import {Check, Copy, Info} from 'lucide-react';
+import {Check, Copy, Download, Info, MessageSquarePlus} from 'lucide-react';
 import type {SpinLead} from '@/src/spin-leads-types';
 import {matchesLeadSearch, prizeTally} from '@/src/spin-leads-types';
 import {leadKey, treatPhrase, type LeadMatch} from '@/src/lead-order-match';
 import {formatPeso} from '@/src/pos-format';
+import {contactTally, emailKey, fmtPhDate} from '@/src/crm-compute';
+import {downloadCsv} from '@/src/csv';
+import {isVoucherPrize} from '@/src/spin-leads-sync';
+import {spinVoucherCsv, type SpinVoucherInfo} from '@/src/spin-voucher';
+import type {CustomerContact} from '@/src/customer-contacts';
+import {ContactLogDialog} from './contact-log-dialog';
 import {manilaDayKey} from '@/src/pos-sales-compute';
 import {Pagination} from './pagination';
 import {cn} from '@/lib/utils';
 
 const PAGE_SIZE = 10;
+
+/** RET-13B: only the leads page passes this; the event page's lead block stays as it was. */
+export type VoucherProps = {
+  /** Per lead (leadKey): whether a website order followed the spin. Computed on the server; null state = orders unread. */
+  vouchers: Record<string, SpinVoucherInfo>;
+  /** The manual contact log (RET-05); null = not set up here. */
+  contacts: CustomerContact[] | null;
+  viewer: string | null;
+};
 
 /** What the lead gave us to reach them: an email, or (Sep 27 onwards) an Instagram handle. */
 const contactOf = (l: SpinLead) => l.email ?? (l.instagram ? `@${l.instagram}` : '—');
@@ -36,12 +51,35 @@ function stamp(iso: string): string {
  * many left a number worth texting, and which prizes the wheel actually paid out.
  * Scoped by the day toggle above it, same as every other block on the card.
  */
-export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders: number; matches?: Record<string, LeadMatch>}) {
+export function LeadCapture({leads, orders, matches, voucher}: {leads: SpinLead[]; orders: number; matches?: Record<string, LeadMatch>; voucher?: VoucherProps}) {
   const [page, setPage] = useState(1);
   const [copied, setCopied] = useState(false);
   const [prize, setPrize] = useState('all');
   const [collectedOn, setCollectedOn] = useState('all');
   const [q, setQ] = useState('');
+  const [unused, setUnused] = useState(false);
+  const [logFor, setLogFor] = useState<SpinLead | null>(null);
+
+  const infoOf = (l: SpinLead): SpinVoucherInfo => voucher?.vouchers[leadKey(l)] ?? {state: null, orderAt: null};
+  const voucherStats = useMemo(() => {
+    const s = {winners: 0, ordered: 0, noEmail: 0, notUsed: 0, unknown: 0};
+    if (!voucher) return s;
+    for (const l of leads) {
+      const st = voucher.vouchers[leadKey(l)]?.state;
+      if (!isVoucherPrize(l.prize)) continue;
+      s.winners++;
+      if (st === 'ordered') s.ordered++;
+      else if (st === 'no_email') s.noEmail++;
+      else if (st === 'not_used') s.notUsed++;
+      else s.unknown++;
+    }
+    return s;
+  }, [leads, voucher]);
+  // Last logged contact per email, through the same tally the Website CRM uses (manual log only here).
+  const lastContact = useMemo(
+    () => contactTally({checkouts: [], orders: [], birthdayVouchers: [], manualContacts: voucher?.contacts ?? []}),
+    [voucher?.contacts],
+  );
 
   const prizes = useMemo(() => prizeTally(leads), [leads]);
   const withMobile = leads.filter((l) => l.mobile).length;
@@ -67,13 +105,14 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
     () =>
       leads.filter(
         (l) =>
+          (!unused || voucher?.vouchers[leadKey(l)]?.state === 'not_used') &&
           (prize === 'all' || l.prize === prize) &&
           (collectedOn === 'all' || manilaDayKey(l.collectedAt) === collectedOn) &&
           matchesLeadSearch(l, q),
       ),
-    [leads, prize, collectedOn, q],
+    [leads, prize, collectedOn, q, unused, voucher],
   );
-  const filtering = prize !== 'all' || collectedOn !== 'all' || q.trim() !== '';
+  const filtering = prize !== 'all' || collectedOn !== 'all' || q.trim() !== '' || unused;
 
   // Clamp rather than reset: a filter change rewinds to page 1 through its own
   // handler, and this keeps the view valid if the list shrinks under it anyway.
@@ -92,6 +131,15 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
     } catch {
       /* clipboard blocked (no https / denied) — the table is still there to read */
     }
+  };
+
+  const lastOf = (l: SpinLead): string | null => lastContact.get(emailKey(l.email))?.lastAt ?? null;
+  const downloadVoucherCsv = () => {
+    const csvRows = spinVoucherCsv(
+      filtered.map((l) => ({lead: l, state: infoOf(l).state, orderAt: infoOf(l).orderAt, lastContactAt: lastOf(l)})),
+      new Date().toISOString(),
+    );
+    downloadCsv(`spin-voucher-winners (${filtered.length}).csv`, csvRows);
   };
 
   if (leads.length === 0) {
@@ -155,6 +203,30 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
                 options={[{value: 'all', label: 'All dates'}, ...days.map((d) => ({value: d, label: dayShort(d)}))]}
               />
             )}
+            {voucher && (
+              <button
+                type="button"
+                aria-pressed={unused}
+                onClick={() => { setUnused((v) => !v); setPage(1); }}
+                className={cn(
+                  'inline-flex items-center rounded-md border px-2 py-1 text-xs transition-colors',
+                  unused ? 'border-primary text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Won a voucher, no website order since ({voucherStats.notUsed})
+              </button>
+            )}
+            {voucher && unused && (
+              <button
+                type="button"
+                onClick={downloadVoucherCsv}
+                disabled={filtered.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                <Download className="size-3" />
+                Download CSV
+              </button>
+            )}
             <button
               type="button"
               onClick={copyEmails}
@@ -166,6 +238,13 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
             </button>
           </div>
         </div>
+        {voucher && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            {voucherStats.winners} voucher winners &middot; {voucherStats.ordered} ordered on the website since &middot; {voucherStats.noEmail} Instagram-only (no email, can&rsquo;t check)
+            {voucherStats.unknown > 0 && <> &middot; {voucherStats.unknown} unknown (website orders unavailable)</>}
+            . Any website order after the spin counts as used, because the lead has no code to match.
+          </p>
+        )}
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-xs">
             <thead className="bg-muted/40 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -181,7 +260,10 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
                     <span className="inline-flex items-center gap-1">Bought <BoughtHelp /></span>
                   </th>
                 )}
+                {voucher && unused && <th className="px-3 py-2 text-left font-semibold">Website order since spin</th>}
+                {voucher && unused && <th className="px-3 py-2 text-left font-semibold">Last logged contact</th>}
                 <th className="px-3 py-2 text-right font-semibold">Collected</th>
+                {voucher && unused && <th className="px-3 py-2 text-right font-semibold"><span className="sr-only">Log contact</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -194,7 +276,31 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{l.mobile ?? '—'}</td>
                   <td className="px-3 py-2 text-muted-foreground">{l.prize}</td>
                   {matches && <BoughtCell match={matches[leadKey(l)]} />}
+                  {voucher && unused && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {infoOf(l).state === 'ordered' ? fmtPhDate(infoOf(l).orderAt) : infoOf(l).state === 'not_used' ? 'No' : 'Unknown'}
+                    </td>
+                  )}
+                  {voucher && unused && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {voucher.contacts === null ? 'Unavailable' : lastOf(l) ? fmtPhDate(lastOf(l)) : 'Never'}
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{stamp(l.collectedAt)}</td>
+                  {voucher && unused && (
+                    <td className="px-3 py-2 text-right">
+                      {l.email && (
+                        <button
+                          type="button"
+                          onClick={() => setLogFor(l)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <MessageSquarePlus className="size-3" />
+                          Log contact
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -210,6 +316,20 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
             </span>
             <Pagination page={current} pageCount={pageCount} onPage={setPage} label="Contacts pagination" />
           </div>
+        )}
+        {voucher && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Public codes like GRAND300 have no recipient list: Coop can only show who used them (Website CRM &rarr; Used code (any order)).
+          </p>
+        )}
+        {voucher && logFor && (
+          <ContactLogDialog
+            name={logFor.name ?? logFor.email ?? ''}
+            email={logFor.email}
+            history={voucher.contacts === null ? null : voucher.contacts.filter((c) => emailKey(c.email) === emailKey(logFor.email))}
+            viewer={voucher.viewer}
+            onClose={() => setLogFor(null)}
+          />
         )}
       </div>
     </div>
