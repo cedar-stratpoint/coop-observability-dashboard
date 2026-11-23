@@ -1,9 +1,10 @@
 'use client';
 
 import {useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, RefreshCw, RotateCw, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -448,67 +449,34 @@ export function UploadReview({
         {/* Left: scan preview, pinned under the app header while the rows scroll (desktop);
             sized to the viewport so it's always fully in view. Click to enlarge. */}
         {scanUrl && (
-          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[28%]' : 'lg:w-[17rem]')}>
+          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%]' : 'lg:w-[17rem]')}>
             <Card>
               <CardHeader className="gap-0">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="inline-flex items-center gap-2 text-sm">
                     <FileText className="size-3.5 text-muted-foreground" /> Scan
                   </CardTitle>
-                  <span className="flex items-center gap-0.5">
-                    <Button variant="ghost" size="xs" onClick={rot.toggle} aria-pressed={rot.flipped} title="Turn this scan upside down" className="max-md:hidden">
-                      <RotateCw className="size-3.5" /> Rotate 180°
+                  <a href={scanUrl} target="_blank" rel="noopener noreferrer">
+                    <Button variant="ghost" size="xs">
+                      <ExternalLink className="size-3.5" /> Open
                     </Button>
-                    <a href={scanUrl} target="_blank" rel="noopener noreferrer">
-                      <Button variant="ghost" size="xs">
-                        <ExternalLink className="size-3.5" /> Open
-                      </Button>
-                    </a>
-                  </span>
+                  </a>
                 </div>
               </CardHeader>
               <CardContent>
-                {/* Click the thumbnail to enlarge. The iframe is pointer-events-none so the
-                    click lands on the button overlay, not the embedded PDF viewer. */}
-{/* Phones can't show a PDF inside the page — open it in the phone's viewer instead. */}
-                <a
-                  href={scanUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm transition-colors active:bg-muted md:hidden"
-                >
-                  <FileText aria-hidden className="size-5 shrink-0 text-muted-foreground" />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="font-medium">View the scan</span>
-                    <span className="text-xs text-muted-foreground">Opens the PDF to compare with the rows below</span>
-                  </span>
-                  <ExternalLink aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
+                {/* The scan beside the numbers: pinch or the buttons to zoom, drag to pan, click to enlarge
+                    (centered, fit to the screen). Upside-down pages show upright; Rotate fixes a wrong guess.
+                    Phones get the same pane stacked above the rows. */}
+                <ScanPageViewer
+                  url={scanUrl}
+                  rotation={rot.deg}
+                  onRotate={rot.toggle}
+                  onEnlarge={() => {
                     setLightboxHighlight(undefined);
                     setLightboxOpen(true);
                   }}
-                  className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
-                  aria-label="Enlarge scan"
-                >
-                  {/* Turned with CSS: the browser PDF viewer can't be told to rotate. Its toolbar is hidden
-                      while turned so it isn't shown upside down. */}
-                  <iframe
-                    key={rot.deg}
-                    src={rot.deg === 180 ? `${scanUrl}#toolbar=0&navpanes=0` : scanUrl}
-                    title="Scanned inventory form"
-                    tabIndex={-1}
-                    style={rot.deg === 180 ? {transform: 'rotate(180deg)'} : undefined}
-                    className={cn('pointer-events-none w-full', extraction ? 'h-[360px] lg:h-[min(640px,calc(100dvh-12rem))]' : 'h-[20rem]')}
-                  />
-                  <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
-                      <Maximize2 className="size-3" /> Click to enlarge
-                    </span>
-                  </span>
-                </button>
+                  className={cn('rounded-md border border-border', extraction ? 'h-[45dvh] lg:h-[calc(100dvh-12rem)]' : 'h-[20rem]')}
+                />
               </CardContent>
             </Card>
           </div>
@@ -760,7 +728,7 @@ export function UploadReview({
       </div>
 
       {/* Enlarged scan — full-screen lightbox. Escape / click backdrop / × to close. */}
-      {scanUrl && lightboxOpen && (
+      {scanUrl && lightboxOpen && createPortal(
         <div
           className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8"
           role="dialog"
@@ -793,7 +761,7 @@ export function UploadReview({
           {/* The page rendered to a canvas with the approximate row band drawn in the page's own
               coordinate space (same viewer the batch review uses), so the band stays locked on. */}
           <div className="min-h-0 w-full flex-1">
-            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} rotation={rot.deg} onRotate={rot.toggle} className="h-full" />
+            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
           </div>
           <button
             type="button"
@@ -801,7 +769,8 @@ export function UploadReview({
             onClick={() => setLightboxOpen(false)}
             className="absolute inset-0 -z-10 cursor-default"
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
