@@ -124,6 +124,9 @@ export function UploadReview({
   const [rereading, setRereading] = useState(false);
   // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
   const rot = useScanRotation(upload.id, upload.orientation);
+  // The row the reviewer points at (hover or focus): boxed on the scan beside the rows when the read
+  // located it.
+  const [pointRow, setPointRow] = useState<number | null>(null);
   const rereadPage = () => {
     setRereading(true);
     sendReread({company, uploadId: upload.id})
@@ -475,6 +478,10 @@ export function UploadReview({
                     setLightboxHighlight(undefined);
                     setLightboxOpen(true);
                   }}
+                  pointBox={(() => {
+                    const b = pointRow != null ? rows[pointRow]?.box : null;
+                    return b && b.y_bottom > b.y_top ? {top: b.y_top, height: b.y_bottom - b.y_top} : null;
+                  })()}
                   className={cn('rounded-md border border-border', extraction ? 'h-[45dvh] lg:h-[calc(100dvh-12rem)]' : 'h-[20rem]')}
                 />
               </CardContent>
@@ -661,6 +668,7 @@ export function UploadReview({
 
           <ReviewRows
             rows={rows}
+            onPoint={scanUrl ? setPointRow : undefined}
             query={query}
             onQuery={setQuery}
             version={upload.form_version}

@@ -54,6 +54,20 @@ const jpeg = (data: Buffer): ImageBlock => ({type: 'image', source: {type: 'base
  * PDF). Server-only in practice (native canvas), loaded lazily so tests and the client never import it.
  */
 export async function renderBandBlocks(pdfBase64: string): Promise<PageBlock[] | null> {
+  return (await renderReadImages(pdfBase64))?.blocks ?? null;
+}
+
+/** Width of the page image sent with the row-box request (the answer-key test located rows well at
+ *  1000 px; the API keeps an image this size as is). */
+export const LOCATE_IMAGE_WIDTH = 1000;
+
+/**
+ * One render, two uses: the read's content blocks (as `renderBandBlocks`) and a 1000 px page image
+ * for the row-box request, with its pixel size. Null on any failure (caller keeps the PDF, no boxes).
+ */
+export async function renderReadImages(
+  pdfBase64: string,
+): Promise<{blocks: PageBlock[]; locate: {data: string; w: number; h: number}} | null> {
   try {
     const {pdf} = await import('pdf-to-img');
     const {createCanvas, loadImage} = await import('@napi-rs/canvas');
@@ -84,7 +98,11 @@ export async function renderBandBlocks(pdfBase64: string): Promise<PageBlock[] |
     }
     if (bands.length === 0) return null;
     blocks.push({type: 'text', text: bandsNote(bands.length)}, ...bands);
-    return blocks;
+    const lw = LOCATE_IMAGE_WIDTH, lh = Math.round((h * LOCATE_IMAGE_WIDTH) / w);
+    const lc = createCanvas(lw, lh);
+    lc.getContext('2d').drawImage(img, 0, 0, lw, lh);
+    const locate = {data: (await lc.encode('jpeg', 85)).toString('base64'), w: lw, h: lh};
+    return {blocks, locate};
   } catch (e) {
     console.error('goldline: band render failed, sending the PDF', e instanceof Error ? e.message : String(e));
     return null;
