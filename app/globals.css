@@ -287,6 +287,29 @@ html.coop-splash-seen .coop-splash { display: none; }
   animation: coop-shine 3.4s ease-in-out infinite;
 }
 
+/* "Back keeps your place": the row you came back to gets an accent rail + tint for ~1.4s, then
+   fades (components/analyst/back-nav.tsx sets data-kept on → fading → removed). It appears
+   instantly (the "on" state has a 0s transition) and only the fade-out animates. Color only, no
+   movement, so it stays as-is under reduced motion. !important beats a row's own
+   transition-colors duration so the fade is never a 150ms snap. */
+[data-kept],
+[data-kept] > td:first-child {
+  transition-property: background-color, box-shadow !important;
+  transition-duration: 900ms !important;
+  transition-timing-function: ease-out !important;
+}
+[data-kept='on'],
+[data-kept='on'] > td:first-child {
+  transition-duration: 0s !important;
+}
+[data-kept='on'] {
+  background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+[data-kept='on']:not(tr),
+[data-kept='on'] > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .coop-intro-rise,
   .coop-app-in,
