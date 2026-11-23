@@ -71,6 +71,7 @@ export type UploadRow = {
   batch_name?: string | null; // optional name the user gave this upload at drop time (else filename)
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
   page_kind?: string | null; // inventory | sales | blank | unknown, once classified
+  orientation?: number | null; // 180 when the classifier found the page upside down (the stored file is never turned)
 };
 
 /**
@@ -626,7 +627,7 @@ export async function getUpload(companyId: string, id: string): Promise<UploadRo
   const supa = db();
   const res = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,orientation')
     .eq('company_id', companyId)
     .eq('id', id)
     .maybeSingle();
@@ -860,7 +861,7 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
       (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
-          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation')
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})
@@ -1211,7 +1212,7 @@ export async function getBatchPages(companyId: string, batchId: string): Promise
   const supa = db();
   const ups = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,classification,form_version')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,classification,form_version,orientation')
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})

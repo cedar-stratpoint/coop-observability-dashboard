@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Scan review: upside-down pages show upright, with a Rotate 180° button
+
+Step 1 of the scan-review plan (side by side with a row pointer, like the answer-key checking page). The reader turns an upside-down page only in memory while it reads; the stored file keeps the scanner's orientation, so review showed those pages upside down (28 of 98 on the October scan). Review now turns each page by the orientation the classifier saved (`uploads.orientation`, now selected with the upload row): the page renderer in the enlarged view rotates the page itself (pdf.js viewport rotation, so the approximate row band, which is in upright coordinates, still lands right), and the small preview is turned with CSS with the browser PDF toolbar hidden while turned. A Rotate 180° button (next to Open, and in the enlarged view's toolbar) flips any page the detection got wrong; the flip is remembered per upload in that browser only. "Open in new tab" still serves the raw file. Both review screens (one page at a time, and a single upload). Note for prod promotion: Nichido prod's `uploads` has no `orientation` column yet.
+
 ## 2026-11-23 — Upload form: the "ready to upload" list comes into view when files are added
 
 Reported on staging: after typing a name in "Name this upload" and then dropping a scan, nothing seemed to happen, so it looked like the file could not be uploaded. The staged list always rendered, but below the tall drop zone; the name field pushes it further down, off the first screen. Now, whenever files are added the list scrolls into view (`block: 'nearest'`, instant under reduced motion), its count is announced politely to screen readers, and while files are staged the drop zone shrinks to a one-line "Drop more files here or browse" (no illustration or file-type legend) so the list sits right under it. Upload flow, confirm dialog and naming are unchanged.

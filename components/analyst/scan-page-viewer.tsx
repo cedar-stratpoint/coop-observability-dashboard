@@ -2,7 +2,7 @@
 
 import {useEffect, useRef, useState} from 'react';
 import * as pdfjs from 'pdfjs-dist';
-import {Loader2, Minus, Plus} from 'lucide-react';
+import {Loader2, Minus, Plus, RotateCw} from 'lucide-react';
 
 // pdfjs runs its parser in a worker; self-hosted from /public so there's no CDN/CSP hop.
 if (typeof window !== 'undefined') {
@@ -16,8 +16,23 @@ export type ScanHighlight = {top: number; height: number; label: string; approxi
  * own coordinate space — so it stays locked on the right band while you zoom and pan
  * (the old iframe overlay drifted because the browser PDF viewer zoomed independently).
  * Falls back to the browser PDF viewer if the page can't be rendered.
+ *
+ * `rotation` turns the page (180 for a scan the reader found upside down); the highlight is in
+ * upright-page coordinates, so it needs no flipping. `onRotate` adds a Rotate 180° button.
  */
-export function ScanPageViewer({url, highlight, className}: {url: string; highlight?: ScanHighlight; className?: string}) {
+export function ScanPageViewer({
+  url,
+  highlight,
+  className,
+  rotation = 0,
+  onRotate,
+}: {
+  url: string;
+  highlight?: ScanHighlight;
+  className?: string;
+  rotation?: 0 | 180;
+  onRotate?: () => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -36,11 +51,12 @@ export function ScanPageViewer({url, highlight, className}: {url: string; highli
         const doc = await Promise.race([pdfjs.getDocument({url}).promise, timeout]);
         const page = await doc.getPage(1);
         if (cancelled) return;
-        const base = page.getViewport({scale: 1});
+        const turn = ((page.rotate ?? 0) + rotation) % 360;
+        const base = page.getViewport({scale: 1, rotation: turn});
         const wrapW = Math.min(scrollRef.current?.clientWidth ?? 760, 1000);
         const fit = wrapW / base.width; // fit the page width to the panel
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const vp = page.getViewport({scale: fit * 2 * dpr}); // render at 2x for crispness up to ~2x zoom
+        const vp = page.getViewport({scale: fit * 2 * dpr, rotation: turn}); // render at 2x for crispness up to ~2x zoom
         const canvas = canvasRef.current;
         if (!canvas) return;
         canvas.width = Math.ceil(vp.width);
@@ -58,7 +74,7 @@ export function ScanPageViewer({url, highlight, className}: {url: string; highli
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, rotation]);
 
   if (state === 'error') {
     return <iframe src={url} title="Scan" className={className ?? 'h-full w-full'} />;
@@ -98,6 +114,17 @@ export function ScanPageViewer({url, highlight, className}: {url: string; highli
         </div>
       </div>
       <div className="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-lg border border-border bg-background/95 p-1 shadow-md backdrop-blur">
+        {onRotate && (
+          <button
+            type="button"
+            onClick={onRotate}
+            aria-label="Rotate 180°"
+            title="Rotate 180°"
+            className="mr-0.5 grid size-7 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+          >
+            <RotateCw className="size-4" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setZoom((z) => Math.max(1, Math.round((z - 0.25) * 100) / 100))}
