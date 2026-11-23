@@ -155,7 +155,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   return (
     <div className="flex flex-col gap-4">
       {duplicate && (
-        <div className="mx-auto w-full max-w-[112rem] px-4 pt-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[140rem] px-4 pt-6 xl:px-6">
           <DuplicateBanner match={duplicate} />
         </div>
       )}

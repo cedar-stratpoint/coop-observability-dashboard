@@ -289,20 +289,8 @@ export function ScanPageViewer({
                     : {}),
                 }}
               >
-                {pointBox.label && (
-                  // The tag sits in the page's left margin, ending at the ITEM# column, so it never covers
-                  // the neighbouring rows' codes; with no margin to speak of it goes past the row's right end.
-                  <span
-                    className="absolute top-1/2 -translate-y-1/2 truncate rounded bg-[color:var(--primary)] px-1.5 py-0.5 text-[10px] leading-tight font-semibold whitespace-nowrap text-white shadow-sm"
-                    style={
-                      (pointBox.px ?? 0) >= 0.12
-                        ? {right: `${(1 - (pointBox.px ?? 0.1)) * 100 + 3.5}%`, maxWidth: `${(pointBox.px ?? 0.1) * 100 - 4}%`}
-                        : {right: '0.5%', maxWidth: '30%', transform: 'translate(0, -50%)'}
-                    }
-                  >
-                    {pointBox.label}
-                  </span>
-                )}
+                {/* No tag on the scan: it covered handwriting or got truncated on tight margins. The
+                    highlighted row in the list names the item. */}
               </div>
             )}
             {highlight && size && (
