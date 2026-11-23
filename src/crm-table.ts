@@ -22,6 +22,7 @@ import {
   tierCounts,
   toPlatinum,
   turnaround,
+  voucherLabels,
   type CartStatus,
   type CustomerRow,
   type PetBirthdayStatus,
@@ -36,8 +37,8 @@ export type Sort<K extends string> = {key: K; dir: SortDir};
 type Val = number | string | null;
 type Getters<T> = Readonly<Record<string, (r: T) => Val>>;
 
-/** Columns whose first click shows the newest first (Vince's SortHeader). Every other column starts ascending. */
-const NEWEST_FIRST: ReadonlySet<string> = new Set(['abandoned', 'placed', 'fulfilled', 'reviewSent', 'reviewed']);
+/** Columns whose first click shows the newest (or, for Vouchers used, the most) first (Vince's SortHeader). Every other column starts ascending. */
+const NEWEST_FIRST: ReadonlySet<string> = new Set(['abandoned', 'placed', 'fulfilled', 'reviewSent', 'reviewed', 'vouchers']);
 
 /** A header click: the same column flips; a new one starts at its natural direction. */
 export function nextSort<K extends string>(cur: Sort<K> | null, key: K): Sort<K> {
@@ -114,6 +115,8 @@ export const CUSTOMER_SORT = {
   email: (c: CustomerRow) => text(c.email),
   tier: (c: CustomerRow) => TIER_RANK(c.membershipTier),
   orders: (c: CustomerRow) => c.orderCount,
+  // RET-11: how many times a code was used; unknown (not read) is null, so it sorts last.
+  vouchers: (c: CustomerRow) => (c.vouchers ? c.vouchers.length : null),
   firstOrder: (c: CustomerRow) => at(c.firstOrderAt),
   lastOrder: (c: CustomerRow) => at(c.lastOrderAt),
   daysSince: (c: CustomerRow) => c.daysSinceLastOrder,
@@ -320,7 +323,7 @@ export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: st
       ['Guest', tiers.guest],
       ['Lifetime spend (paid, test orders excluded)', sum(rows.map((c) => c.spent))],
     ]),
-    ['Name', 'Email', 'Mobile', 'Member since (PH)', 'Tier', 'Orders', 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Last contacted (PH)', 'Last contact kind', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'To Platinum', 'Pet'],
+    ['Name', 'Email', 'Mobile', 'Member since (PH)', 'Tier', 'Orders', 'Vouchers used', 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Last contacted (PH)', 'Last contact kind', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'To Platinum', 'Pet'],
     ...rows.map((c) => [
       [c.firstName, c.lastName].filter(Boolean).join(' '),
       c.email ?? '',
@@ -328,6 +331,7 @@ export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: st
       c.createdAt ? fmtPhDate(c.createdAt) : '',
       c.membershipTier ?? 'guest',
       String(c.orderCount),
+      c.vouchers ? voucherLabels(c.vouchers).map((v) => v.label).join('; ') : 'unknown',
       c.firstOrderAt ? fmtPhDate(c.firstOrderAt) : '',
       c.lastOrderAt ? fmtPhDate(c.lastOrderAt) : '',
       c.daysSinceLastOrder === null ? '' : String(c.daysSinceLastOrder),
