@@ -25,3 +25,16 @@ export function prizeTally(leads: SpinLead[]): {prize: string; count: number}[] 
   for (const l of leads) m.set(l.prize, (m.get(l.prize) ?? 0) + 1);
   return [...m].map(([prize, count]) => ({prize, count})).sort((a, b) => b.count - a.count || a.prize.localeCompare(b.prize));
 }
+
+/**
+ * Free-text lead search: name, email, Instagram handle, pet or mobile contain
+ * the query (case-insensitive). A leading "@" is ignored so "@mimi" finds the
+ * handle, and a number matches the mobile with spaces/dashes ignored.
+ */
+export function matchesLeadSearch(l: SpinLead, query: string): boolean {
+  const q = query.trim().toLowerCase().replace(/^@/, '');
+  if (!q) return true;
+  if ([l.name, l.email, l.instagram, l.pet, l.mobile].some((v) => v?.toLowerCase().includes(q))) return true;
+  const digits = q.replace(/\D/g, '');
+  return digits.length >= 3 && digits.length === q.replace(/[\s()+-]/g, '').length && (l.mobile ?? '').replace(/\D/g, '').includes(digits);
+}
