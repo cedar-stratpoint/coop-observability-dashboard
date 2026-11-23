@@ -19,6 +19,8 @@ export const PAGE_IMAGE_WIDTH = 1600;
 export const MAX_BAND_WIDTH = 2560;
 const MIN_LAST_BAND = 250;
 
+import {estimateSlant, type Slant} from './goldline-slant';
+
 export type ImageBlock = {type: 'image'; source: {type: 'base64'; media_type: 'image/jpeg'; data: string}};
 export type TextBlock = {type: 'text'; text: string};
 export type PageBlock = ImageBlock | TextBlock;
@@ -67,7 +69,7 @@ export const LOCATE_IMAGE_WIDTH = 1000;
  */
 export async function renderReadImages(
   pdfBase64: string,
-): Promise<{blocks: PageBlock[]; locate: {data: string; w: number; h: number}} | null> {
+): Promise<{blocks: PageBlock[]; locate: {data: string; w: number; h: number; slant: Slant | null}} | null> {
   try {
     const {pdf} = await import('pdf-to-img');
     const {createCanvas, loadImage} = await import('@napi-rs/canvas');
@@ -100,8 +102,19 @@ export async function renderReadImages(
     blocks.push({type: 'text', text: bandsNote(bands.length)}, ...bands);
     const lw = LOCATE_IMAGE_WIDTH, lh = Math.round((h * LOCATE_IMAGE_WIDTH) / w);
     const lc = createCanvas(lw, lh);
-    lc.getContext('2d').drawImage(img, 0, 0, lw, lh);
-    const locate = {data: (await lc.encode('jpeg', 85)).toString('base64'), w: lw, h: lh};
+    const lctx = lc.getContext('2d');
+    lctx.drawImage(img, 0, 0, lw, lh);
+    // The page's slant, from the same image, so review can tilt the row box with the paper.
+    let slant: Slant | null = null;
+    try {
+      const px = lctx.getImageData(0, 0, lw, lh).data;
+      const gray = new Uint8Array(lw * lh);
+      for (let i = 0; i < lw * lh; i++) gray[i] = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000;
+      slant = estimateSlant(gray, lw, lh);
+    } catch {
+      slant = null;
+    }
+    const locate = {data: (await lc.encode('jpeg', 85)).toString('base64'), w: lw, h: lh, slant};
     return {blocks, locate};
   } catch (e) {
     console.error('goldline: band render failed, sending the PDF', e instanceof Error ? e.message : String(e));

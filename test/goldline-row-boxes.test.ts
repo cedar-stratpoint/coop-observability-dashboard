@@ -10,7 +10,10 @@ describe('row-box batch ids', () => {
   it('round-trips the image height and stays within the batch id rules', () => {
     const id = boxCustomId('4164ced6-0aa6-4a23-9ae5-04b528922f01', 1544.4);
     expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
-    expect(parseBoxCustomId(id, '4164ced6-0aa6-4a23-9ae5-04b528922f01')).toBe(1544);
+    expect(parseBoxCustomId(id, '4164ced6-0aa6-4a23-9ae5-04b528922f01')).toEqual({h: 1544, slant: null});
+    const withSlant = boxCustomId('4164ced6-0aa6-4a23-9ae5-04b528922f01', 1544, {angle: -0.55, px: 0.178});
+    expect(withSlant).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    expect(parseBoxCustomId(withSlant, '4164ced6-0aa6-4a23-9ae5-04b528922f01')).toEqual({h: 1544, slant: {angle: -0.55, px: 0.178}});
     expect(parseBoxCustomId(id, 'another-upload')).toBeNull();
     expect(isBoxCustomId(id)).toBe(true);
     expect(isBoxCustomId('4164ced6-0aa6-4a23-9ae5-04b528922f01')).toBe(false);

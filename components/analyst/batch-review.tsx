@@ -9,7 +9,7 @@ import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crossha
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
-import {useScanRotation} from '@/components/analyst/scan-rotation';
+import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
@@ -246,8 +246,11 @@ export function BatchReview({
   const [pointRow, setPointRow] = useState<number | null>(null);
   useEffect(() => setPointRow(null), [cur?.upload.id]);
   const curState = cur ? state[cur.upload.id] : null;
-  const pointBoxRaw = pointRow != null ? curState?.rows[pointRow]?.box : null;
-  const pointBox = pointBoxRaw && pointBoxRaw.y_bottom > pointBoxRaw.y_top ? {top: pointBoxRaw.y_top, height: pointBoxRaw.y_bottom - pointBoxRaw.y_top} : null;
+  // Jumping to a flag (the navigator) points the scan at that row too.
+  useEffect(() => {
+    if (curState?.active != null) setPointRow(curState.active);
+  }, [curState?.active]);
+  const pointBox = scanPointBox(pointRow != null ? curState?.rows[pointRow] : null, cur?.extraction?.data?.slant, rot.flipped);
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));

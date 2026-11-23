@@ -52,3 +52,18 @@ export function useScanRotation(uploadId: string | null | undefined, detected: n
   }, [uploadId]);
   return {deg: effectiveRotation(detected, flipped), flipped, toggle};
 }
+
+type BoxRow = {item_code?: string; alt?: string | null; box?: {y_top: number; y_bottom: number} | null} | null | undefined;
+
+/** The box to draw on the scan for the row the reviewer points at: its located box, tilted by the
+ *  page's slant, and turned with the page when the reviewer flipped it (boxes are measured on the
+ *  page as the reader saw it, upright). Labelled with the code and the reader's doubt note. Pure. */
+export function scanPointBox(row: BoxRow, slant: {angle: number; px: number} | null | undefined, flipped: boolean) {
+  const b = row?.box;
+  if (!b || !(b.y_bottom > b.y_top)) return null;
+  const height = b.y_bottom - b.y_top;
+  const top = flipped ? 1 - b.y_bottom : b.y_top;
+  const px = slant ? (flipped ? 1 - slant.px : slant.px) : undefined;
+  const label = row?.item_code ? `${row.item_code}${row.alt ? ` · ${row.alt}` : ''}` : undefined;
+  return {top, height, angle: slant?.angle, px, label};
+}

@@ -15,7 +15,7 @@ import {cn} from '@/lib/utils';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
-import {useScanRotation} from '@/components/analyst/scan-rotation';
+import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {rowBandFor} from '@/src/goldline-extract';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
@@ -203,6 +203,10 @@ export function UploadReview({
   );
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState<number | null>(null);
+  // Jumping to a flag (the navigator) points the scan at that row too.
+  useEffect(() => {
+    if (active != null) setPointRow(active);
+  }, [active]);
   const [view, setView] = useState<ReviewView>(flagged.length ? 'needs' : 'all');
   const [formTotal, setFormTotal] = useState('');
   const [query, setQuery] = useState(''); // the rows search, lifted so jumping to a flag can clear it
@@ -478,10 +482,7 @@ export function UploadReview({
                     setLightboxHighlight(undefined);
                     setLightboxOpen(true);
                   }}
-                  pointBox={(() => {
-                    const b = pointRow != null ? rows[pointRow]?.box : null;
-                    return b && b.y_bottom > b.y_top ? {top: b.y_top, height: b.y_bottom - b.y_top} : null;
-                  })()}
+                  pointBox={scanPointBox(pointRow != null ? rows[pointRow] : null, head?.slant, rot.flipped)}
                   className={cn('rounded-md border border-border', extraction ? 'h-[45dvh] lg:h-[calc(100dvh-12rem)]' : 'h-[20rem]')}
                 />
               </CardContent>
