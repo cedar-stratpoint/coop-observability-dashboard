@@ -8,6 +8,7 @@ import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progres
 import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
 import {sendReread, sendUpload, signAndIngestScan, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
 import {serverPageState, type ServerPageProgress} from '@/src/server-upload-progress';
+import {planServerScans} from '@/components/analyst/server-scan-plan';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
 // in-app navigation), so uploads keep running while the user moves between pages and
@@ -73,6 +74,7 @@ export type ServerBatchState = {
   totalBytes: number;
   phase: ServerScanPhase;
   uploadFrac: number; // real bytes PUT to storage, 0–1
+  part?: {index: number; total: number}; // when several PDFs were dropped: this is scan `index` of `total`
 };
 
 // How often the browser polls the server batch's page progress while it's reading.
@@ -383,30 +385,35 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   }, [items, serverBatch]);
 
   // Server-driven path: start one whole-scan upload, then let the poll effect watch it.
-  const startServerScan = useCallback(async (file: File) => {
+  // Returns false when it failed, so a run of several scans stops there.
+  const startServerScan = useCallback(async (file: File, opts?: {name?: string; part?: {index: number; total: number}}): Promise<boolean> => {
     const company = queueCompany.current;
     if (!company) {
       setNotice('No company in view.');
-      return;
+      return false;
     }
+    const part = opts?.part;
     setForms(null);
     setItems([]); // a server batch replaces any prior list
     serverStartedAt.current.clear();
-    setServerBatch({id: '', totalPages: 0, totalBytes: file.size, phase: 'uploading', uploadFrac: 0});
+    setServerBatch({id: '', totalPages: 0, totalBytes: file.size, phase: 'uploading', uploadFrac: 0, part});
     try {
       const {batchId, pages} = await signAndIngestScan({
         company,
         file,
-        name: uploadNameRef.current.trim() || undefined,
+        name: opts ? opts.name : uploadNameRef.current.trim() || undefined,
         onProgress: (f) => setServerBatch((b) => (b ? {...b, uploadFrac: f} : b)),
         onPhase: (p) => setServerBatch((b) => (b ? {...b, phase: p} : b)),
       });
       setBatch((b) => ({...b, id: batchId}));
       batchRef.current = {...batchRef.current, id: batchId};
-      setServerBatch({id: batchId, totalPages: pages, totalBytes: file.size, phase: 'reading', uploadFrac: 1});
+      setServerBatch({id: batchId, totalPages: pages, totalBytes: file.size, phase: 'reading', uploadFrac: 1, part});
+      return true;
     } catch (e) {
       setServerBatch(null);
-      setNotice(e instanceof Error ? e.message : 'Upload failed. Please try again.');
+      const why = e instanceof Error ? e.message : 'Upload failed. Please try again.';
+      setNotice(part && part.total > 1 ? `Scan ${part.index} of ${part.total} (${file.name}): ${why}` : why);
+      return false;
     }
   }, []);
 
@@ -474,15 +481,25 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   const addFiles = useCallback(
     async (files: File[]) => {
       setNotice(null);
-      // Server-driven path (flagged companies): a lone whole scan PDF is uploaded once and
-      // read server-side. Anything else (several files, or a CSV/XLSX in the drop) stays on
-      // the client-driven path below, which still works under the flag.
-      if (serverUpload && files.length === 1 && kindOfFile(files[0].name) === 'pdf') {
-        if (files[0].size === 0) {
-          setNotice(`“${files[0].name}” is empty.`);
+      // Server-driven path (flagged companies): each whole scan PDF is uploaded once and read
+      // server-side. Several PDFs go up one after another, each as its own scan (a typed name
+      // gets " · part N"). A drop with a CSV/XLSX in it stays on the client-driven path below.
+      const plan = planServerScans(files, serverUpload, uploadNameRef.current);
+      if (plan.kind === 'server') {
+        const empty = files.filter((f) => f.size === 0);
+        if (empty.length) {
+          setNotice(`${empty.map((f) => `“${f.name}”`).join(', ')} ${empty.length === 1 ? 'is' : 'are'} empty.`);
           return;
         }
-        await startServerScan(files[0]);
+        if (files.length === 1) {
+          await startServerScan(files[0]);
+          return;
+        }
+        for (const [i, f] of files.entries()) {
+          const scan = plan.scans[i];
+          const ok = await startServerScan(f, {name: scan.name, part: {index: scan.index, total: scan.total}});
+          if (!ok) return;
+        }
         return;
       }
       const problems: string[] = [];
