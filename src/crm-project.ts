@@ -2,7 +2,7 @@
 // both readers: the pages' live proxy (src/crm-data.ts) and Ask Coop's GET-only client (src/chat/crm/). A field is copied only when
 // it is listed here, so a field the Worker adds later is dropped until someone adds it on purpose.
 // Never projected: a checkout's `lineItems` (reduced to the `items` count), `raw` (the Shopify payload; reduced to `stage` on a checkout and to the `test` flag and discount codes on an order, BDAY- codes cut to the prefix), `abandonedCheckoutUrl` (only the pages add it back, in
-// crm-data.ts), the birthday voucher `code` and `discountNodeId` (projectBirthdayVoucher keeps email, year, tier and sentAt only), and a membership event's `id` and `shopifyCustomerId`. Ask Coop sees none of them.
+// crm-data.ts), the birthday voucher `code` and `discountNodeId` (projectBirthdayVoucher keeps email, year, tier, sentAt and expiresAt only), and a membership event's `id` and `shopifyCustomerId`. Ask Coop sees none of them.
 import {checkoutStage} from './crm-compute';
 import {parseLineItems} from './custom-range';
 import type {CrmBirthdayVoucher, CrmCheckout, CrmMembershipEvent, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder, CrmOrderLine} from './crm-types';
@@ -186,10 +186,10 @@ export function projectCheckoutSafe(c: Rec): CrmCheckoutSafe {
   };
 }
 
-/** What Ask Coop may know of a birthday voucher: who, which year and tier, when it was sent. The `code` (a live discount) is never projected (RET-03). */
-export type CrmBirthdayVoucherSafe = Pick<CrmBirthdayVoucher, 'email' | 'year' | 'tier' | 'sentAt'>;
+/** What Ask Coop may know of a birthday voucher: who, which year and tier, when it was sent and when it expires (RET-13A). The `code` (a live discount) and `amount` are never projected (RET-03). */
+export type CrmBirthdayVoucherSafe = Pick<CrmBirthdayVoucher, 'email' | 'year' | 'tier' | 'sentAt' | 'expiresAt'>;
 export function projectBirthdayVoucher(v: Rec): CrmBirthdayVoucherSafe {
-  return {email: str(v.email) ?? '', year: num(v.year), tier: str(v.tier) ?? '', sentAt: str(v.sentAt) ?? ''};
+  return {email: str(v.email) ?? '', year: num(v.year), tier: str(v.tier) ?? '', sentAt: str(v.sentAt) ?? '', expiresAt: str(v.expiresAt)};
 }
 
 /** What the dashboard and Ask Coop keep of a membership email (RET-07 7C): who, which tier, which event, when. */

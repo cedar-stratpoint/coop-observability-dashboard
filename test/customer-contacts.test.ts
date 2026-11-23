@@ -157,7 +157,7 @@ describe('S5.0 contactTally with manual contacts: one code path for the page and
   const c = (email: string): EnrichedCustomer => ({
     shopifyCustomerId: email, email, firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null, membershipTier: null,
     petName: null, petBirthday: null, emailMarketingState: null, createdAt: null, updatedAt: null,
-    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null,
+    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null,
   });
   const tally = contactTally({...src, manualContacts: [{email: 'mia@example.com'}]});
   it('the page row shows emails sent and manual contacts separately, and times contacted as their sum', () => {

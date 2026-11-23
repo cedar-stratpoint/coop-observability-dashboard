@@ -62,7 +62,7 @@ describe('7A customerRows: last contacted, never vs unknown (R2, R3)', () => {
   const c = (email: string): EnrichedCustomer => ({
     shopifyCustomerId: email, email, firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null, membershipTier: null,
     petName: null, petBirthday: null, emailMarketingState: null, createdAt: null, updatedAt: null,
-    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null,
+    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null,
   });
   const tally = contactTally({checkouts: [], orders: [], birthdayVouchers: [{email: 'mia@x.com', sentAt: '2026-10-04T10:00:00Z'}]});
   it('known: the newest contact and its kind; nobody contacted reads never (null + known)', () => {
