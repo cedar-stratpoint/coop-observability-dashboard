@@ -469,7 +469,7 @@ export function TriageBoard({
 
   const summaryLine =
     n > 0 ? (
-      <p className="text-[15px] text-muted-foreground">
+      <p className={cn('text-muted-foreground', embedded ? 'text-sm' : 'text-[15px]')}>
         <span className="font-semibold text-foreground">{n}</span> {n === 1 ? 'form' : 'forms'} across{' '}
         <span className="font-semibold text-foreground">{storeCount}</span> {storeCount === 1 ? 'store' : 'stores'}
         {scan ? ' in this scan, sorted so the ones that need you come first.' : ', sorted so the ones that need you come first.'}
@@ -493,7 +493,7 @@ export function TriageBoard({
   return (
     <div className={embedded ? 'flex flex-col gap-6' : GL_PAGE}>
       {embedded ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {summaryLine}
           {pills}
         </div>
@@ -654,7 +654,7 @@ function StorePill({active, tone, onClick, children}: {active: boolean; tone?: T
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none',
         tone === 'crit'
           ? active
             ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
