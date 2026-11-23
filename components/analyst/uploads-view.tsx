@@ -14,6 +14,7 @@ import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
+import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {cn} from '@/lib/utils';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upload-groups';
@@ -33,6 +34,12 @@ export const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', 
 
 type StatusFilter = 'all' | UploadStatus;
 type KindFilter = 'all' | UploadKind;
+const STATUS_KEYS: Record<StatusFilter, true> = {all: true, needs_review: true, committed: true, processing: true, failed: true, rejected: true} as Record<StatusFilter, true>;
+const KIND_KEYS: Record<KindFilter, true> = {all: true, pos_csv: true, pos_xlsx: true, inventory_pdf: true} as Record<KindFilter, true>;
+// Filters, view and page live in the URL (replaceState, not Back steps), so opening a scan or
+// a file and coming back returns to the list as you left it. `?status=` was already a param.
+const UPLOADS_LIST = {q: '', status: 'all', kind: 'all', from: '', to: '', view: 'groups', page: '1'};
+
 
 const STATUS_META: Record<UploadStatus, {label: string; cls: string; Icon: typeof Clock}> = {
   queued: {label: 'Queued', cls: 'text-muted-foreground bg-muted', Icon: Clock},
@@ -87,14 +94,16 @@ function GroupTile({
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
   return (
-    <div className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-within:ring-3 focus-within:ring-ring/40">
+    <div data-kept-id={keptId(g.key)} className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-within:ring-3 focus-within:ring-ring/40">
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <FileStack className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
           <Link
+            data-row
             href={`/uploads/scan/${encodeURIComponent(g.source)}${g.batchId ? `?batch=${encodeURIComponent(g.batchId)}` : ''}`}
+            onClick={() => leaveList('uploads', keptId(g.key), `/uploads/scan/${encodeURIComponent(g.source)}`)}
             title={g.name ?? g.source}
             className="block truncate text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring/40"
           >
@@ -180,17 +189,26 @@ export function UploadsView({
 }) {
   const router = useRouter();
 
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus);
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
-  const [from, setFrom] = useState(''); // YYYY-MM-DD, uploaded on or after
-  const [to, setTo] = useState(''); // YYYY-MM-DD, uploaded on or before
-  const [page, setPage] = useState(1);
+  const [lp, setLp] = useListParams(UPLOADS_LIST);
+  const {leave} = useReturnTrip('uploads');
+  const query = lp.q;
+  const setQuery = (q: string) => setLp({q});
+  const statusFilter: StatusFilter = Object.hasOwn(STATUS_KEYS, lp.status) ? (lp.status as StatusFilter) : initialStatus;
+  const setStatusFilter = (status: StatusFilter) => setLp({status});
+  const kindFilter: KindFilter = Object.hasOwn(KIND_KEYS, lp.kind) ? (lp.kind as KindFilter) : 'all';
+  const setKindFilter = (kind: KindFilter) => setLp({kind});
+  const from = lp.from; // YYYY-MM-DD, uploaded on or after
+  const setFrom = (v: string) => setLp({from: v});
+  const to = lp.to; // YYYY-MM-DD, uploaded on or before
+  const setTo = (v: string) => setLp({to: v});
+  const page = Math.max(1, Number.parseInt(lp.page, 10) || 1);
+  const setPage = (n: number) => setLp({page: String(n)});
   const [rowSize, setRowSize] = useState<number>(ROW_SIZES[0]); // rows per page (10/20/50)
   const [tileSize, setTileSize] = useState<number>(TILE_SIZES[0]); // tiles per page (12/24/36)
   // 'list' = the flat file table; 'groups' = one tile per drop. Selecting a tile sets
   // `groupKey`, which scopes the list to that drop's files.
-  const [view, setView] = useState<'list' | 'groups'>('groups');
+  const view: 'list' | 'groups' = lp.view === 'list' ? 'list' : 'groups';
+  const setView = (v: 'list' | 'groups') => setLp({view: v});
   const [groupKey, setGroupKey] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -463,11 +481,13 @@ export function UploadsView({
             {/* Phones: one card per file — name, type · when, status, delete. */}
             <ul role="list" className="-mx-4 flex flex-col divide-y divide-border border-t border-border md:hidden">
               {pageRows.map((u) => (
-                <li key={u.id} className="relative flex items-center gap-3 px-4 py-3">
+                <li key={u.id} data-kept-id={u.id} className="relative flex items-center gap-3 px-4 py-3">
                   <FileTypeBadge filename={u.filename} />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <Link
+                      data-row
                       href={`/uploads/${u.id}`}
+                      onClick={() => leave(u.id, `/uploads/${u.id}`)}
                       className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
@@ -510,12 +530,18 @@ export function UploadsView({
                   {pageRows.map((u) => (
                     <tr
                       key={u.id}
+                      data-kept-id={u.id}
+                      data-row
                       tabIndex={0}
                       role="button"
-                      onClick={() => router.push(`/uploads/${u.id}`)}
+                      onClick={() => {
+                        leave(u.id, `/uploads/${u.id}`);
+                        router.push(`/uploads/${u.id}`);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
+                          leave(u.id, `/uploads/${u.id}`);
                           router.push(`/uploads/${u.id}`);
                         }
                       }}

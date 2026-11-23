@@ -6,6 +6,7 @@
 // Row → product page; ⋯ → ship / warehouse stock / price / hide.
 
 import {useMemo, useRef, useState, useTransition} from 'react';
+import {useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
@@ -51,6 +52,11 @@ export type BoardViewData = {
 type SortKey = 'urgency' | 'product' | 'price' | 'onHand' | 'thisMonth' | 'lastMonth' | 'threeMonths' | 'lasts' | 'need' | 'warehouse' | 'shipBy';
 type Filter = 'all' | 'action' | 'out' | 'healthy' | 'not_counted';
 const PAGE_SIZE = 25;
+const FILTERS: readonly Filter[] = ['all', 'action', 'out', 'healthy', 'not_counted'];
+const SORT_KEYS: readonly SortKey[] = ['urgency', 'product', 'price', 'onHand', 'thisMonth', 'lastMonth', 'threeMonths', 'lasts', 'need', 'warehouse', 'shipBy'];
+// The board's filters live in the URL (replaceState, so not Back steps): opening a product and
+// coming back returns to the same filter, sort, search and page. Values at default stay out.
+const BOARD_LIST = {filter: 'all', focus: '', line: '', q: '', hidden: '0', sort: 'urgency', dir: '1', page: '1'};
 
 const STATUS_LABEL: Record<BoardRow['status'], {label: string; tone: string | null}> = {
   ...MOVEMENT_STATUS,
@@ -110,16 +116,19 @@ function sortRows(rows: BoardRow[], key: SortKey, dir: 1 | -1): BoardRow[] {
 export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
   const router = useRouter();
   const {rows, summary, store, config, today} = data;
-  const [filter, setFilter] = useState<Filter>('all');
+  const [lp, setLp] = useListParams(BOARD_LIST);
+  const {leave} = useReturnTrip('stock');
+  const filter: Filter = FILTERS.find((f) => f === lp.filter) ?? 'all';
   // A summary tile picked as the table's filter (click it again to clear). Picking one resets
   // the status segments to All so the two never stack into an empty table.
-  const [focus, setFocus] = useState<BoardFocus | null>(null);
+  const focus: BoardFocus | null = Object.hasOwn(FOCUS_META, lp.focus) ? (lp.focus as BoardFocus) : null;
   const tableRef = useRef<HTMLDivElement>(null);
-  const [line, setLine] = useState('');
-  const [query, setQuery] = useState('');
-  const [showHidden, setShowHidden] = useState(false);
-  const [sort, setSort] = useState<{key: SortKey; dir: 1 | -1}>({key: 'urgency', dir: 1});
-  const [page, setPage] = useState(1);
+  const line = lp.line;
+  const query = lp.q;
+  const showHidden = lp.hidden === '1';
+  const sort: {key: SortKey; dir: 1 | -1} = {key: SORT_KEYS.find((k) => k === lp.sort) ?? 'urgency', dir: lp.dir === '-1' ? -1 : 1};
+  const page = Math.max(1, Number.parseInt(lp.page, 10) || 1);
+  const setPage = (n: number) => setLp({page: String(n)});
   const [ship, setShip] = useState<ShipTarget | null>(null);
   const [whEdit, setWhEdit] = useState<BoardRow | null>(null);
   const [priceEdit, setPriceEdit] = useState<BoardRow | null>(null);
@@ -165,16 +174,14 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
 
   function pickFocus(f: BoardFocus) {
     const next = focus === f ? null : f;
-    setFocus(next);
-    setFilter('all');
-    setPage(1);
+    setLp({focus: next ?? '', filter: 'all', page: '1'});
     if (next) tableRef.current?.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start'});
   }
   const tile = (f: BoardFocus) => ({active: focus === f, onClick: () => pickFocus(f)});
 
   const setSortKey = (key: SortKey) => {
-    setPage(1);
-    setSort((s) => (s.key === key ? {key, dir: (s.dir * -1) as 1 | -1} : {key, dir: key === 'product' || key === 'shipBy' || key === 'lasts' || key === 'urgency' ? 1 : -1}));
+    const dir = sort.key === key ? sort.dir * -1 : key === 'product' || key === 'shipBy' || key === 'lasts' || key === 'urgency' ? 1 : -1;
+    setLp({sort: key, dir: String(dir), page: '1'});
   };
   const productHref = (r: BoardRow) => `/stock/${encodeURIComponent(r.itemCode)}${store ? `?store=${encodeURIComponent(store)}` : ''}`;
   const itemOptions = useMemo(
@@ -358,7 +365,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   <span className="text-muted-foreground">Showing only</span>
                   <button
                     type="button"
-                    onClick={() => setFocus(null)}
+                    onClick={() => setLp({focus: ''})}
                     aria-label={`Clear the ${FOCUS_META[focus].label} filter`}
                     className="inline-flex h-7 items-center gap-1.5 rounded-full border px-3 font-medium outline-none transition-transform duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
                     style={{borderColor: tint(FOCUS_META[focus].tone, 45), background: tint(FOCUS_META[focus].tone, 10)}}
@@ -375,9 +382,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   ariaLabel="Filter by status"
                   value={filter}
                   onChange={(v) => {
-                    setFilter(v);
-                    setFocus(null);
-                    setPage(1);
+                    setLp({filter: v, focus: '', page: '1'});
                   }}
                   options={[
                     {value: 'all', label: `All ${counts.all}`},
@@ -392,8 +397,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   aria-label="Product line"
                   value={line}
                   onChange={(e) => {
-                    setLine(e.target.value);
-                    setPage(1);
+                    setLp({line: e.target.value, page: '1'});
                   }}
                 >
                   <option value="">All product lines</option>
@@ -405,7 +409,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                 </NativeSelect>
                 {hiddenCount > 0 && (
                   <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                    <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
+                    <input type="checkbox" checked={showHidden} onChange={(e) => setLp({hidden: e.target.checked ? '1' : '0'})} className="size-3.5 accent-[var(--primary)]" />
                     Show hidden ({hiddenCount})
                   </label>
                 )}
@@ -414,15 +418,14 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   <input
                     value={query}
                     onChange={(e) => {
-                      setQuery(e.target.value);
-                      setPage(1);
+                      setLp({q: e.target.value, page: '1'});
                     }}
                     placeholder="Search product or code…"
                     aria-label="Search products"
                     className="h-8 w-full rounded-md border border-border bg-background pr-7 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
                   />
                   {query && (
-                    <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
+                    <button type="button" aria-label="Clear search" onClick={() => setLp({q: '', page: '1'})} className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
                       <X className="size-3.5" />
                     </button>
                   )}
@@ -469,6 +472,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                         {pageRows.map((r) => (
                           <tr
                             key={r.itemCode}
+                            data-kept-id={r.itemCode}
                             className={cn(
                               'relative border-b border-border/60 transition-colors duration-150 last:border-b-0 hover:bg-muted/40 has-[a[data-row]:focus-visible]:bg-muted/40',
                               r.hidden && 'opacity-55',
@@ -479,6 +483,7 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                                 <Link
                                   data-row
                                   href={productHref(r)}
+                                  onClick={() => leave(r.itemCode, productHref(r))}
                                   className="truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                                 >
                                   {r.name}
@@ -551,10 +556,10 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
                   {/* Mobile cards */}
                   <ul className="flex flex-col divide-y divide-border border-y border-border md:hidden">
                     {pageRows.map((r) => (
-                      <li key={r.itemCode} className={cn('relative flex flex-col gap-2 px-4 py-3', r.hidden && 'opacity-55')}>
+                      <li key={r.itemCode} data-kept-id={r.itemCode} className={cn('relative flex flex-col gap-2 px-4 py-3', r.hidden && 'opacity-55')}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <Link data-row href={productHref(r)} className="font-medium outline-none after:absolute after:inset-0 after:content-['']">
+                            <Link data-row href={productHref(r)} onClick={() => leave(r.itemCode, productHref(r))} className="font-medium outline-none after:absolute after:inset-0 after:content-['']">
                               {r.name}
                             </Link>
                             <span className="block truncate font-mono text-[11px] text-muted-foreground">

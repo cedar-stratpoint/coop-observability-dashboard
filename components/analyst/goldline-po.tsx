@@ -10,6 +10,7 @@
 
 import {Fragment, useMemo, useState, useTransition} from 'react';
 import Link from 'next/link';
+import {ReturnLink} from '@/components/analyst/back-nav';
 import {useRouter} from 'next/navigation';
 import {Loader2, Printer, Save} from 'lucide-react';
 import type {PoLine, PurchaseOrder, RejectedLine} from '@/src/goldline-po-data';
@@ -108,9 +109,9 @@ export function GoldlinePurchaseOrder({data}: {data: PoViewData}) {
             Orders
           </Link>
           <span aria-hidden>/</span>
-          <Link href={`/stock/orders/date/${data.date}`} className="underline-offset-4 hover:text-foreground hover:underline">
+          <ReturnLink listKey="orders-day" fallback={`/stock/orders/date/${data.date}`} className="underline-offset-4 hover:text-foreground hover:underline">
             {fmtDay(data.date)}
-          </Link>
+          </ReturnLink>
           <span aria-hidden>/</span>
           <span className="font-mono text-foreground">{data.number}</span>
         </nav>

@@ -16,6 +16,7 @@ import {restockItemHref} from '@/src/goldline-restock-item';
 import {Metric} from '@/components/analyst/metric';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {Pagination} from '@/components/analyst/pagination';
+import {useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
@@ -37,6 +38,7 @@ export type RestockRunViewData = RestockRunData & {
 };
 
 type Filter = 'to_decide' | 'decided' | 'send' | 'covered' | 'held' | 'all';
+const FILTER_KEYS: Record<Filter, true> = {to_decide: true, decided: true, send: true, covered: true, held: true, all: true};
 const PAGE_SIZE = 25;
 
 const DECISION: Record<Exclude<Decision, 'pending'>, {label: string; tone: string | null}> = {
@@ -48,12 +50,19 @@ const pct = (x: number | null) => (x == null ? 'None yet' : `${Math.round(x * 10
 const half = (cycle: string) => `${cycle.endsWith('a') ? 'first' : 'second'} half of ${monthLabel(cycle.slice(0, 7), {month: 'long'})}`;
 const stamp = (iso: string) => new Date(iso).toLocaleString('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila'});
 
+// Filter + page live in the URL (replaceState) so a line's year-of-sales page returns here as
+// you left it. `show` is blank for the scope's own default (All for one store, To decide for all).
+const RUN_LIST = {show: '', page: '1'};
+
 export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
   const router = useRouter();
   const pathname = usePathname();
   const {run, store} = data;
-  const [filter, setFilter] = useState<Filter>(store ? 'all' : 'to_decide');
-  const [page, setPage] = useState(1);
+  const [lp, setLp] = useListParams(RUN_LIST);
+  const {leave} = useReturnTrip('restock');
+  const filter: Filter = (Object.hasOwn(FILTER_KEYS, lp.show) ? lp.show : store ? 'all' : 'to_decide') as Filter;
+  const page = Math.max(1, Number.parseInt(lp.page, 10) || 1);
+  const setPage = (n: number) => setLp({page: String(n)});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<{line: RunLine; kind: 'edited' | 'rejected'} | null>(null);
@@ -68,9 +77,9 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
     if (s) q.set('store', s);
     if (a && a !== data.today) q.set('asOf', a);
     setSelected(new Set());
-    setPage(1);
-    setFilter(s ? 'all' : 'to_decide');
-    router.push(q.size ? `${pathname}?${q}` : pathname);
+    // A store or preview date is a filter on this page, not a step: replace keeps Back meaning
+    // "leave Restock". The new URL has no show/page, so the list resets to the scope's default.
+    router.replace(q.size ? `${pathname}?${q}` : pathname, {scroll: false});
   };
 
   const counts = useMemo(() => {
@@ -283,10 +292,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                   <SegmentedControl<Filter>
                     ariaLabel="Filter lines"
                     value={filter}
-                    onChange={(v) => {
-                      setFilter(v);
-                      setPage(1);
-                    }}
+                    onChange={(v) => setLp({show: v === (store ? 'all' : 'to_decide') ? '' : v, page: '1'})}
                     options={[
                       {value: 'to_decide', label: `To decide ${num(counts.to_decide)}`},
                       {value: 'decided', label: `Decided ${num(counts.decided)}`},
@@ -351,7 +357,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                         const canPick = data.canDecide && l.state === 'send' && l.decision === 'pending';
                         return (
                           <Fragment key={l.id}>
-                            <tr className={cn('border-b border-border/60 transition-colors duration-150 hover:bg-muted/40', selected.has(l.id) && 'bg-muted/50')}>
+                            <tr data-kept-id={l.id} className={cn('border-b border-border/60 transition-colors duration-150 hover:bg-muted/40', selected.has(l.id) && 'bg-muted/50')}>
                               <td className={cn(TD, 'pl-4')}>
                                 {canPick && (
                                   <input
@@ -383,7 +389,9 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                   </span>
                                 </button>
                                 <Link
+                                  data-row
                                   href={restockItemHref(l.itemCode, l.storeCode, data.preview ? data.runDate : null)}
+                                  onClick={() => leave(l.id, restockItemHref(l.itemCode, l.storeCode, data.preview ? data.runDate : null))}
                                   aria-label={`${l.name}: a year of sales`}
                                   title="A year of sales"
                                   className="ml-1.5 inline-flex rounded p-0.5 align-[-3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
