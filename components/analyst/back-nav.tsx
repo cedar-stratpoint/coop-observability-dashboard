@@ -80,6 +80,22 @@ export function useListParams<D extends ListDefaults>(defaults: D): [D, (patch: 
   return [state, set];
 }
 
+/** Remember this list (URL, scroll, the row being opened) before following a row's link. */
+export function leaveList(listKey: string, rowId: string | null, href: string) {
+  const entry: ReturnEntry = {
+    url: `${window.location.pathname}${window.location.search}`,
+    scrollY: window.scrollY,
+    rowId,
+    at: Date.now(),
+    to: normPath(href),
+  };
+  try {
+    store()?.setItem(returnKey(listKey), JSON.stringify(entry));
+  } catch {
+    /* full or blocked: Back falls back to the fixed parent */
+  }
+}
+
 /** Briefly mark the row you came back to: an accent rail + tint that fades (CSS in globals). */
 function markKept(el: HTMLElement) {
   el.dataset.kept = 'on';
@@ -95,8 +111,8 @@ const visible = (el: Element) => el.getClientRects().length > 0;
 
 /**
  * The list side of the return trip. Call `leave(rowId, href)` when a row opens (onClick on the
- * row's link). Rows carry `data-kept-id={rowId}`; the element inside matching `[data-row]` (or
- * the first link) gets focus on return.
+ * row's link). Rows carry `data-kept-id` (one id, or several space-separated, e.g. a page and
+ * its re-reads); the element inside matching `[data-row]` (or the first link) gets focus.
  */
 export function useReturnTrip(listKey: string) {
   useEffect(() => {
@@ -119,7 +135,7 @@ export function useReturnTrip(listKey: string) {
     requestAnimationFrame(() => {
       window.scrollTo({top: entry.scrollY, behavior: 'instant'});
       if (!entry.rowId) return;
-      const row = [...document.querySelectorAll<HTMLElement>(`[data-kept-id="${CSS.escape(entry.rowId)}"]`)].find(visible);
+      const row = [...document.querySelectorAll<HTMLElement>(`[data-kept-id~="${CSS.escape(entry.rowId)}"]`)].find(visible);
       if (!row) return;
       const r = row.getBoundingClientRect();
       if (r.top < 64 || r.bottom > window.innerHeight) row.scrollIntoView({block: 'center', behavior: 'instant'});
@@ -129,29 +145,13 @@ export function useReturnTrip(listKey: string) {
     });
   }, [listKey]);
 
-  const leave = useCallback(
-    (rowId: string | null, href: string) => {
-      const entry: ReturnEntry = {
-        url: `${window.location.pathname}${window.location.search}`,
-        scrollY: window.scrollY,
-        rowId,
-        at: Date.now(),
-        to: normPath(href),
-      };
-      try {
-        store()?.setItem(returnKey(listKey), JSON.stringify(entry));
-      } catch {
-        /* full or blocked: Back falls back to the fixed parent */
-      }
-    },
-    [listKey],
-  );
+  const leave = useCallback((rowId: string | null, href: string) => leaveList(listKey, rowId, href), [listKey]);
   return {leave};
 }
 
 /** The previous history entry's same-origin path + query, via the Navigation API (Chromium,
  *  Safari 26.2+, Firefox 147+). Null when unknown: callers then just navigate forward. */
-function previousEntryUrl(): string | null {
+export function previousEntryUrl(): string | null {
   const nav = (window as unknown as {navigation?: {currentEntry?: {index: number} | null; entries?: () => Array<{url: string | null}>}}).navigation;
   const i = nav?.currentEntry?.index;
   if (!nav?.entries || i == null || i < 1) return null;
@@ -166,6 +166,31 @@ function cameFrom(entry: ReturnEntry | null, detailPrefix?: string): boolean {
   if (!entry?.to) return false;
   const here = normPath(window.location.pathname);
   return detailPrefix ? here.startsWith(detailPrefix) && entry.to.startsWith(detailPrefix) : here === entry.to;
+}
+
+/**
+ * For a detail page that moves between rows in place (a ‹ › stepper using replace): keep the
+ * list's remembered row in step, so coming back marks the row you were last on, not the first.
+ */
+export function useTrackReturnRow(listKey: string, rowId: string, detailPrefix: string) {
+  useEffect(() => {
+    const entry = readEntry(listKey);
+    if (!entry || !cameFrom(entry, detailPrefix) || entry.rowId === rowId) return;
+    try {
+      store()?.setItem(returnKey(listKey), JSON.stringify({...entry, rowId, to: normPath(window.location.pathname)}));
+    } catch {
+      /* ignore */
+    }
+  }, [listKey, rowId, detailPrefix]);
+}
+
+/** Mark that the next list mount is a return to `listKey` (for a custom Back control). */
+export function markReturn(listKey: string) {
+  try {
+    store()?.setItem(ARRIVE_KEY, listKey);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {useCallback, useMemo, useState, useTransition} from 'react';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
+import {leaveList, useReturnTrip} from '@/components/analyst/back-nav';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, CalendarDays, Check, ChevronRight, Loader2, MapPin, Pencil, Search, Store, User} from 'lucide-react';
 import {Button} from '@/components/ui/button';
@@ -365,6 +366,9 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
   return (
     <Link
       href={href}
+      data-row
+      data-kept-id={form.uploadIds.join(' ') || undefined}
+      onClick={() => leaveList('scan', form.uploadIds[0] ?? null, href)}
       className="group flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
     >
       <CardBody form={form} s={s} />
@@ -395,6 +399,7 @@ export function TriageBoard({
    *  reviews inside that BA's pages, not this store's. */
   baScope?: string | null;
 }) {
+  useReturnTrip('scan');
   const {needsStore, groups, singles, counts, storeCount, n} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
     const counts = {ready: 0, needsStore: 0, incomplete: 0, committed: 0};

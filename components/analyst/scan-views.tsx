@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
+import {useReturnTrip} from '@/components/analyst/back-nav';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
@@ -81,6 +82,7 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
   const chooseVersion = (v: 'all' | FormVersion) => setQuery({fv: v === 'all' ? null : v, lp: null});
   const chooseStatus = (s: 'all' | UploadStatus) => setQuery({status: s === 'all' ? null : s, lp: null});
   const reviewQuery = fileReviewQuery(filters, version);
+  const {leave} = useReturnTrip('scan');
   // Pages being read again from the stored file (a failed page, retried in place).
   const [rereading, setRereading] = useState<Set<string>>(() => new Set());
   // Per-page read progress (0..100), driven by the real read stages streamed back from the
@@ -281,7 +283,7 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           const ptype = pageType(u);
           const what = ptype ? TYPE_LABEL[ptype] : (KIND_LABEL[u.kind] ?? 'File');
           return (
-            <li key={idx} className="flex flex-col">
+            <li key={idx} data-kept-id={[u.id, ...others.map((o) => o.id)].join(' ')} className="flex flex-col">
               <div className="group relative flex items-center gap-3.5 px-4 py-3 transition-colors duration-150 hover:bg-muted/40 sm:px-5">
                 {pageOf ? (
                   <span
@@ -296,7 +298,9 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex min-w-0 items-baseline gap-2">
                     <Link
+                      data-row
                       href={`/uploads/${u.id}?${reviewQuery}`}
+                      onClick={() => leave(u.id, `/uploads/${u.id}`)}
                       className="truncate text-[0.9375rem] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >

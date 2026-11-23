@@ -8,6 +8,7 @@
 
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
+import {ReturnLink} from '@/components/analyst/back-nav';
 import {ArrowLeft, CalendarClock, ChevronRight, Info} from 'lucide-react';
 import type {RestockItemData} from '@/src/goldline-restock-item-data';
 import type {Decision} from '@/src/goldline-restock';
@@ -50,7 +51,8 @@ export function GoldlineRestockItem({data}: {data: RestockItemViewData}) {
     const a = next.asOf === undefined ? asOf : next.asOf;
     if (s) q.set('store', s);
     if (a && a !== data.today) q.set('asOf', a);
-    router.push(q.size ? `${pathname}?${q}` : pathname);
+    // Store / date are filters on this page, not steps: replace, so Back returns to Restock.
+    router.replace(q.size ? `${pathname}?${q}` : pathname, {scroll: false});
   };
 
   const have = one ? (one.state === 'held' ? null : Math.max(0, one.onHand ?? 0) + one.onTheWay) : totals.ready ? totals.onHand + totals.onTheWay : null;
@@ -60,9 +62,9 @@ export function GoldlineRestockItem({data}: {data: RestockItemViewData}) {
   return (
     <div className="mx-auto flex max-w-6xl min-w-0 flex-col gap-6 px-4 py-6 *:min-w-0">
       <header className="flex flex-col gap-3">
-        <Link href={backHref} className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+        <ReturnLink listKey="restock" fallback={backHref} className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="size-3.5" aria-hidden /> Restock
-        </Link>
+        </ReturnLink>
         <h1 className="font-heading text-2xl font-semibold tracking-tight text-balance">{item.name}</h1>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {data.stores.length > 0 && (

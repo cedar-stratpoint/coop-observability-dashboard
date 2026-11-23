@@ -18,6 +18,7 @@ import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
+import {markReturn, previousEntryUrl, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
@@ -123,6 +124,9 @@ export function UploadReview({
   const [rereading, setRereading] = useState(false);
   // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
   const rot = useScanRotation(upload.id, upload.orientation);
+  // The ‹ › stepper replaces in place, so keep the scan board's remembered row on this page:
+  // Back then marks the page you were last on.
+  useTrackReturnRow('scan', upload.id, '/uploads/');
   // The row the reviewer points at (hover or focus): boxed on the scan beside the rows when the read
   // located it.
   const [pointRow, setPointRow] = useState<number | null>(null);
@@ -322,7 +326,13 @@ export function UploadReview({
               <button
                 type="button"
                 onClick={() => {
-                  if (window.history.length > 1) router.back();
+                  // Step back only when the previous entry really is the board/uploads (a deep
+                  // link in a tab with other history would otherwise leave Coop). Browsers
+                  // without the Navigation API keep the old history-length check.
+                  const prev = previousEntryUrl();
+                  const canStep = 'navigation' in window ? prev?.startsWith('/uploads') : window.history.length > 1;
+                  markReturn('scan');
+                  if (canStep) router.back();
                   else router.push(nav.backHref);
                 }}
                 aria-label="Back"

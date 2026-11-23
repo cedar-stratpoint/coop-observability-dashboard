@@ -6,7 +6,8 @@
 // /stock/orders/date/YYYY-MM-DD: that day's POs, one per store, filtered by status and a
 // store search. Only the opened day's POs are loaded. Rows there open the PO.
 
-import {useMemo, useState} from 'react';
+import {useMemo} from 'react';
+import {ReturnLink, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
 import {ChevronLeft, ChevronRight, ClipboardList, Info, Search} from 'lucide-react';
@@ -23,6 +24,9 @@ export type OrderDatesViewData = {configured: boolean; dates: PoDate[]; month: s
 export type OrdersOfDayViewData = {date: string; rows: PoListRow[]};
 
 type StatusFilter = 'all' | Exclude<PoStatus, 'empty'>;
+const STATUS_KEYS: Record<StatusFilter, true> = {all: true, shipped: true, partly_received: true, received: true};
+// The day's status filter + search live in the URL (replaceState), so a PO's page returns here as you left it.
+const DAY_LIST = {status: 'all', q: ''};
 
 const rowDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC'});
 const longDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC'});
@@ -52,7 +56,9 @@ export function GoldlineOrderDates({data}: {data: OrderDatesViewData}) {
   const at = months.findIndex(([m]) => m === month);
   const older = at >= 0 ? months[at + 1]?.[0] : undefined;
   const newer = at > 0 ? months[at - 1]?.[0] : undefined;
-  const goMonth = (m: string) => router.push(`${pathname}?month=${m}`, {scroll: false});
+  // A month is a filter on this page, not a step: replace keeps Back meaning "leave Orders".
+  const goMonth = (m: string) => router.replace(`${pathname}?month=${m}`, {scroll: false});
+  const {leave} = useReturnTrip('orders');
 
   return (
     <div className="mx-auto flex max-w-7xl min-w-0 flex-col gap-6 px-4 py-6 *:min-w-0">
@@ -117,9 +123,9 @@ export function GoldlineOrderDates({data}: {data: OrderDatesViewData}) {
                   {days.map((d) => {
                     const done = d.lines > 0 && d.received === d.lines;
                     return (
-                      <tr key={d.date} className={ROW}>
+                      <tr key={d.date} data-kept-id={d.date} className={ROW}>
                         <td className="py-2.5 pr-3 pl-4 whitespace-nowrap">
-                          <Link href={`/stock/orders/date/${d.date}`} className={ROW_LINK}>
+                          <Link data-row href={`/stock/orders/date/${d.date}`} onClick={() => leave(d.date, `/stock/orders/date/${d.date}`)} className={ROW_LINK}>
                             {rowDay(d.date)}
                           </Link>{' '}
                           <span className="text-xs text-muted-foreground tabular-nums">{d.date.slice(0, 4)}</span>
@@ -144,8 +150,10 @@ export function GoldlineOrderDates({data}: {data: OrderDatesViewData}) {
 }
 
 export function GoldlineOrdersOfDay({data}: {data: OrdersOfDayViewData}) {
-  const [status, setStatus] = useState<StatusFilter>('all');
-  const [query, setQuery] = useState('');
+  const [lp, setLp] = useListParams(DAY_LIST);
+  const {leave} = useReturnTrip('orders-day');
+  const status: StatusFilter = Object.hasOwn(STATUS_KEYS, lp.status) ? (lp.status as StatusFilter) : 'all';
+  const query = lp.q;
   const ofDay = data.rows;
   const statusCount = (s: StatusFilter) => (s === 'all' ? ofDay.length : ofDay.filter((r) => r.status === s).length);
   const q = query.trim().toLowerCase();
@@ -158,9 +166,9 @@ export function GoldlineOrdersOfDay({data}: {data: OrdersOfDayViewData}) {
     <div className="mx-auto flex max-w-7xl min-w-0 flex-col gap-6 px-4 py-6 *:min-w-0">
       <header className="flex flex-col gap-2">
         <nav aria-label="Breadcrumb" className="flex items-baseline gap-2 text-sm text-muted-foreground">
-          <Link href={`/stock/orders?month=${data.date.slice(0, 7)}`} className="underline-offset-4 hover:text-foreground hover:underline">
+          <ReturnLink listKey="orders" fallback={`/stock/orders?month=${data.date.slice(0, 7)}`} className="underline-offset-4 hover:text-foreground hover:underline">
             Orders
-          </Link>
+          </ReturnLink>
           <span aria-hidden>/</span>
           <span className="text-foreground">{rowDay(data.date)}</span>
         </nav>
@@ -176,7 +184,7 @@ export function GoldlineOrdersOfDay({data}: {data: OrdersOfDayViewData}) {
               <SegmentedControl<StatusFilter>
                 ariaLabel="Filter by status"
                 value={status}
-                onChange={setStatus}
+                onChange={(v) => setLp({status: v})}
                 options={[
                   {value: 'all', label: `All ${statusCount('all')}`},
                   {value: 'shipped', label: `Shipped ${statusCount('shipped')}`},
@@ -191,7 +199,7 @@ export function GoldlineOrdersOfDay({data}: {data: OrdersOfDayViewData}) {
                   type="search"
                   aria-label="Find a store"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => setLp({q: e.target.value})}
                   placeholder="Store or PO no."
                   className="h-8 w-44 rounded-md border border-border bg-background pr-2 pl-7 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
                 />
@@ -215,9 +223,9 @@ export function GoldlineOrdersOfDay({data}: {data: OrdersOfDayViewData}) {
                 </thead>
                 <tbody>
                   {shown.map((r) => (
-                    <tr key={r.id} className={ROW}>
+                    <tr key={r.id} data-kept-id={r.id} className={ROW}>
                       <td className="py-2.5 pr-3 pl-4">
-                        <Link href={`/stock/orders/${r.id}`} className={ROW_LINK}>
+                        <Link data-row href={`/stock/orders/${r.id}`} onClick={() => leave(r.id, `/stock/orders/${r.id}`)} className={ROW_LINK}>
                           {r.storeName ?? `Store ${r.storeCode}`}
                         </Link>{' '}
                         <span className="font-mono text-xs text-muted-foreground">{r.storeCode}</span>
