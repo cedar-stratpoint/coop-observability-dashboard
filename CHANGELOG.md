@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Scan page: refreshed Per file list and pager
+
+The Per file list on the scan page now leads with the page number: each row has a numbered tile, "Page 7 of 30" with the total quieter, and the page's type ("Inventory form", "Sales report", "Blank page") instead of the generic "Inventory scan". The scan-name pill on every row is gone unless the list mixes scans (the header already names the scan). Delete shows on hover on mouse devices (always on touch), and a chevron marks each row as opening its review. The range, per-page switch and pager now sit in a footer inside the list card, styled as the same segmented trays as the view tabs: the current page is raised in the tray instead of a filled green square. The shared `Pagination` component gains this as an opt-in `variant="segmented"`; its other 19 uses keep the boxed look.
+
 ## 2026-11-23 — Scan page: refreshed header; Per file is the default view
 
 The scan page header is redesigned: the scan's name is a proper title (file name in mono beneath) with Delete scan beside it; the form-version cards become one panel of segments with a thin bar showing the scan's version mix; the view switch is a segmented control whose highlight slides to the chosen tab on click. Per file is now the first tab and the default view (plain scan links land on it); Per store and Per BA are a tab away, and links that name a view keep it.

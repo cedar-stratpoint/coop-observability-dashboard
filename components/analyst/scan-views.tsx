@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, Check, ChevronDown, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
+import {AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel, scanPosition} from '@/src/upload-batch';
@@ -141,6 +141,9 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
     } catch {}
   };
   const groups = useMemo(() => groupFiles(files), [files]);
+  // Every page here usually comes from one scan, already named in the page header, so the
+  // per-row scan-name pill only earns its place when the list mixes scans.
+  const mixedSources = useMemo(() => new Set(files.map((f) => scanPosition(f.filename)?.source ?? f.filename)).size > 1, [files]);
 
   // Scan outcome recap (one per page, its best attempt), read straight from review status:
   // "read" = a form in review or committed; "set aside" = a parked page (rejected form, or a
@@ -271,22 +274,40 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
         {pageGroups.map(({idx, best: u, others}) => {
           const label = scanPageLabel(u.filename);
           const open = expanded.has(idx);
-          // The source scan name, shown as a quiet pill beside "Page N of M"; and, for a
-          // read inventory page, the detected form version (Legacy / V1 / V2).
-          const src = scanPosition(u.filename)?.source ?? null;
-          const ver = pageType(u) === 'inventory' && u.form_version && u.form_version !== 'unknown' ? VERSION_LABEL[u.form_version as FormVersion] : null;
+          // "Page 10 of 98" split so the number leads: the tile carries it, the title repeats it
+          // with the total quieter. A whole-file upload keeps its file badge and own name.
+          const pageOf = /^Page (\d+) of (\d+)$/.exec(label.title);
+          const src = mixedSources ? (scanPosition(u.filename)?.source ?? null) : null;
+          const ptype = pageType(u);
+          const what = ptype ? TYPE_LABEL[ptype] : (KIND_LABEL[u.kind] ?? 'File');
           return (
             <li key={idx} className="flex flex-col">
-              <div className="relative flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-muted/40">
-                <FileTypeBadge filename={u.filename} />
-                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div className="group relative flex items-center gap-3.5 px-4 py-3 transition-colors duration-150 hover:bg-muted/40 sm:px-5">
+                {pageOf ? (
+                  <span
+                    aria-hidden
+                    className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-sm font-semibold tabular-nums ring-1 ring-border/60 ring-inset transition-colors duration-150 group-hover:bg-background"
+                  >
+                    {pageOf[1]}
+                  </span>
+                ) : (
+                  <FileTypeBadge filename={u.filename} />
+                )}
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex min-w-0 items-baseline gap-2">
                     <Link
                       href={`/uploads/${u.id}?${reviewQuery}`}
                       className="truncate text-[0.9375rem] font-semibold tracking-tight outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
                       title={u.filename}
                     >
-                      {label.title}
+                      {pageOf ? (
+                        <>
+                          Page {pageOf[1]}
+                          <span className="font-normal text-muted-foreground"> of {pageOf[2]}</span>
+                        </>
+                      ) : (
+                        label.title
+                      )}
                     </Link>
                     {src && (
                       <span
@@ -324,9 +345,11 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
                       </span>
                     )
                   )}
-                  <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
-                    {ver && <VersionPill version={u.form_version} />}
-                    <span className="truncate">{KIND_LABEL[u.kind] ?? 'File'} · {fmtWhen(u.created_at)}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <VersionPill version={ptype === 'inventory' ? u.form_version : null} />
+                    <span className="min-w-0 truncate">
+                      {what} · {fmtWhen(u.created_at)}
+                    </span>
                     {others.length > 0 && (
                       <button
                         type="button"
@@ -358,15 +381,19 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
                     variant="ghost"
                     size="icon-sm"
                     aria-label={`Delete ${label.title}`}
-                    className="relative z-10 shrink-0 text-muted-foreground hover:text-destructive"
+                    className="relative z-10 shrink-0 text-muted-foreground transition-opacity duration-150 hover:text-destructive focus-visible:opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100"
                     onClick={() => setDeleteTarget(u)}
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
                 )}
+                <ChevronRight
+                  aria-hidden
+                  className="hidden size-4 shrink-0 text-muted-foreground/50 transition-[color,transform] duration-150 ease-out group-hover:translate-x-0.5 group-hover:text-foreground sm:block motion-reduce:transition-none"
+                />
               </div>
               {open && others.length > 0 && (
-                <ul className="flex flex-col divide-y divide-border border-t border-border bg-muted/20 pl-[4.25rem]">
+                <ul className="flex flex-col divide-y divide-border border-t border-border bg-muted/20 pl-[4.25rem] sm:pl-[4.5rem]">
                   {others.map((o) => (
                     <li key={o.id} className="flex items-center gap-3 px-4 py-2.5">
                       <Link href={`/uploads/${o.id}`} className="min-w-0 flex-1 truncate text-xs text-muted-foreground hover:text-foreground" title={o.filename}>
@@ -392,19 +419,21 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           );
         })}
       </ul>
-      </div>
-      )}
-
       {total > PAGE_SIZES[0] && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/25 px-4 py-2.5 sm:px-5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <p className="text-xs text-muted-foreground tabular-nums">
-              {from + 1} to {Math.min(total, from + size)} of {total} {total === 1 ? 'page' : 'pages'}
+              <span className="font-medium text-foreground">
+                {from + 1} to {Math.min(total, from + size)}
+              </span>{' '}
+              of {total} {total === 1 ? 'page' : 'pages'}
             </p>
             <RowsPerPage value={size} onChange={changeSize} />
           </div>
-          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Scan pages" />
+          <Pagination variant="segmented" page={safePage} pageCount={pageCount} onPage={setPage} label="Scan pages" />
         </div>
+      )}
+      </div>
       )}
 
       <DeleteUploadDialog
@@ -449,7 +478,7 @@ function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize
   return (
     <div role="group" aria-label="Pages per view" className="flex items-center gap-2 text-xs text-muted-foreground">
       <span>Per page</span>
-      <div className="flex rounded-md bg-muted/60 p-0.5">
+      <div className="inline-flex gap-0.5 rounded-xl bg-muted/70 p-1 ring-1 ring-border/70 ring-inset">
         {PAGE_SIZES.map((s) => (
           <button
             key={s}
@@ -457,8 +486,8 @@ function RowsPerPage({value, onChange}: {value: PageSize; onChange: (v: PageSize
             aria-pressed={value === s}
             onClick={() => onChange(s)}
             className={cn(
-              'h-6 min-w-8 rounded px-2 tabular-nums transition-colors duration-150',
-              value === s ? 'bg-background font-medium text-foreground shadow-sm' : 'hover:text-foreground',
+              'h-7 min-w-8 rounded-lg px-2 font-medium tabular-nums transition-[color,background-color,box-shadow,transform] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.97] motion-reduce:transition-none',
+              value === s ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60' : 'hover:bg-background/60 hover:text-foreground',
             )}
           >
             {s}
