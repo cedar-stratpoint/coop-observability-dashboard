@@ -241,7 +241,13 @@ export function BatchReview({
   const cur = pages[tab];
   // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
   const rot = useScanRotation(cur?.upload.id, cur?.upload.orientation);
+  // The row the reviewer points at (hover or focus): boxed on the scan beside the rows when the read
+  // located it. Cleared when the page changes.
+  const [pointRow, setPointRow] = useState<number | null>(null);
+  useEffect(() => setPointRow(null), [cur?.upload.id]);
   const curState = cur ? state[cur.upload.id] : null;
+  const pointBoxRaw = pointRow != null ? curState?.rows[pointRow]?.box : null;
+  const pointBox = pointBoxRaw && pointBoxRaw.y_bottom > pointBoxRaw.y_top ? {top: pointBoxRaw.y_top, height: pointBoxRaw.y_bottom - pointBoxRaw.y_top} : null;
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));
@@ -617,6 +623,7 @@ export function BatchReview({
                         rotation={rot.deg}
                         onRotate={rot.toggle}
                         onEnlarge={() => setLightbox({url: cur.scanUrl!})}
+                        pointBox={pointBox}
                         className="h-[45dvh] rounded-md border border-border lg:h-[calc(100dvh-11rem)]"
                       />
                       <span className="truncate text-[11px] text-muted-foreground" title={cur.upload.filename}>
@@ -637,6 +644,7 @@ export function BatchReview({
                   </CardContent>
                 </Card>
                 <ReviewRows
+                  onPoint={cur.scanUrl ? setPointRow : undefined}
                   rows={curState.rows}
                   productNames={cur.productNames}
                   catalog={catalog}

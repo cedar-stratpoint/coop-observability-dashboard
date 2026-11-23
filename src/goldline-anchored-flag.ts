@@ -66,3 +66,13 @@ function companyInEnv(companyId: string, raw: string | undefined): boolean {
     .filter(Boolean)
     .includes(companyId);
 }
+
+/**
+ * Exact row boxes for review (scan-review plan, step 3): alongside each batched read, one small
+ * request asks where every printed product row sits on the page, so hovering a row in review boxes
+ * it on the scan. Comma-separated `GOLDLINE_READ_BOXES_COMPANIES`; needs batch mode and the sharper
+ * page images (the box request uses the rendered page). Off is byte-identical to today.
+ */
+export function readBoxesEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_READ_BOXES_COMPANIES);
+}

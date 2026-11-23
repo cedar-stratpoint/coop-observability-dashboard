@@ -3,8 +3,9 @@ import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
 import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, templateReadEnabled} from './goldline-anchored-flag';
-import {renderBandBlocks} from './goldline-page-bands';
+import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {renderReadImages} from './goldline-page-bands';
+import {boxCustomId, buildLocateParams, locateRowsFor} from './goldline-row-boxes';
 import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
 import {knownStoreCodes} from './goldline-store-registry';
@@ -233,7 +234,8 @@ export async function runInventoryRead(args: {
     // the poller when the batch returns. Flag-off is byte-identical to the synchronous read below.
     // Sharper page images (flag-gated): a 1600 px page + 300 dpi bands replace the PDF for the read.
     // Best-effort: null (render failed or flag off) sends the PDF exactly as before.
-    const pageBlocks = readBandsEnabled(companyId) ? await renderBandBlocks(extractB64) : null;
+    const images = readBandsEnabled(companyId) ? await renderReadImages(extractB64) : null;
+    const pageBlocks = images?.blocks ?? null;
     if (pageBlocks) {
       rec.detail = {
         ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
@@ -246,7 +248,15 @@ export async function runInventoryRead(args: {
       const batchParams = template
         ? buildAnchoredParams(extractB64, template, profile, pageBlocks)
         : buildInventoryReadParams(extractB64, page, profile, 'legacy', pageBlocks);
-      const anthropicBatchId = await submitAnchoredBatch([{custom_id: uploadId, params: batchParams}]);
+      // Row boxes for review (flag-gated): a second, small request in the same batch asks where each
+      // printed row sits on the page. Its own result never affects the read; the poller attaches it.
+      const requests: {custom_id: string; params: unknown}[] = [{custom_id: uploadId, params: batchParams}];
+      const locateRows = images && readBoxesEnabled(companyId) ? locateRowsFor(template, page) : [];
+      if (images && locateRows.length) {
+        requests.push({custom_id: boxCustomId(uploadId, images.locate.h), params: buildLocateParams(images.locate, locateRows)});
+        rec.detail = {...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}), boxes: locateRows.length};
+      }
+      const anthropicBatchId = await submitAnchoredBatch(requests);
       await setUploadStatus(uploadId, 'queued_batch', {pageCount: page, anthropicBatchId});
       await logReadEvent({...rec, status: 'queued_batch', stage: 'submitted', usage: readUsageSnapshot()});
       return {http: 202, body: {uploadId, status: 'queued_batch', page, batchId: anthropicBatchId, formVersion: av}};

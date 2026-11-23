@@ -81,6 +81,9 @@ type Props = {
   /** Open the enlarged scan pointing at this item's row (the "Show in scan" button).
    *  Absent when there's no scan to point at. */
   onLocate?: (itemCode: string) => void;
+  /** The row the reviewer is pointing at (hover or keyboard focus), so the scan beside the rows can
+   *  box it. Absent when there's no scan pane. */
+  onPoint?: (index: number) => void;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -118,6 +121,7 @@ export function ReviewRows({
   onResolve,
   onStep,
   onLocate,
+  onPoint,
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
@@ -154,6 +158,8 @@ export function ReviewRows({
         key={`${r.item_code}-${r.i}`}
         id={`review-row-${r.i}`}
         data-review-row={r.i}
+        onPointerEnter={onPoint ? () => onPoint(r.i) : undefined}
+        onFocus={onPoint ? () => onPoint(r.i) : undefined}
         className={cn(
           'scroll-mt-24 border-b border-border/60 transition-colors',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
@@ -247,6 +253,7 @@ export function ReviewRows({
       <li
         key={`${r.item_code}-${r.i}`}
         data-review-row={r.i}
+        onFocus={onPoint ? () => onPoint(r.i) : undefined}
         className={cn(
           'flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',

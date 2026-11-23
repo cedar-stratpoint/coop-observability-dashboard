@@ -10,6 +10,8 @@ if (typeof window !== 'undefined') {
 }
 
 export type ScanHighlight = {top: number; height: number; label: string; approximate?: boolean};
+/** A light box on the row the reviewer is pointing at in the rows beside the scan (page fractions). */
+export type ScanPointBox = {top: number; height: number};
 
 const ZMIN = 1;
 const ZMAX = 4;
@@ -37,6 +39,7 @@ export function ScanPageViewer({
   onRotate,
   onEnlarge,
   fit = 'width',
+  pointBox,
 }: {
   url: string;
   highlight?: ScanHighlight;
@@ -45,6 +48,7 @@ export function ScanPageViewer({
   onRotate?: () => void;
   onEnlarge?: () => void;
   fit?: 'width' | 'page';
+  pointBox?: ScanPointBox | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -221,6 +225,19 @@ export function ScanPageViewer({
     if (!cancelled && d && !d.moved && onEnlarge && (e.target as HTMLElement).closest('[data-scan-page]')) onEnlarge();
   };
 
+  // Keep the pointed-at row in view: scroll only when its box is outside the visible part.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const page = pageRef.current;
+    if (!pointBox || !size || !scroller || !page || drag.current) return;
+    const top = page.offsetTop + pointBox.top * size.h * zoom;
+    const bottom = top + pointBox.height * size.h * zoom;
+    const margin = 40;
+    if (top >= scroller.scrollTop + margin && bottom <= scroller.scrollTop + scroller.clientHeight - margin) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scroller.scrollTo({top: Math.max(0, top - scroller.clientHeight / 2 + (bottom - top) / 2), behavior: reduce ? 'auto' : 'smooth'});
+  }, [pointBox?.top, pointBox?.height, size?.h]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Bring the "Show in scan" band into view.
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -257,6 +274,18 @@ export function ScanPageViewer({
         >
           <div className="relative origin-top-left" style={size ? {width: size.w, height: size.h, transform: `scale(${zoom})`} : undefined}>
             <canvas ref={canvasRef} className="block" style={size ? {width: size.w, height: size.h} : {width: '100%'}} />
+            {pointBox && size && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute right-0 left-0 rounded-[3px] transition-[top,height] duration-150 ease-out motion-reduce:transition-none"
+                style={{
+                  top: `${Math.max(0, pointBox.top - 0.002) * 100}%`,
+                  height: `${(pointBox.height + 0.004) * 100}%`,
+                  background: 'color-mix(in oklab, var(--primary) 14%, transparent)',
+                  boxShadow: 'inset 0 0 0 1.5px color-mix(in oklab, var(--primary) 70%, transparent)',
+                }}
+              />
+            )}
             {highlight && size && (
               <div
                 className="pointer-events-none absolute right-0 left-0 motion-safe:animate-[pulse_1.6s_ease-in-out_2]"

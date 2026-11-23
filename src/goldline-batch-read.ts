@@ -11,6 +11,7 @@ import {
 import {fetchAnchoredBatch, mapInventoryRead, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
 import {mapAnchoredOutput} from './goldline-anchored-extract';
+import {applyRowBoxes, isBoxCustomId, locateRowsFor, parseBoxCustomId, type LocateOutput} from './goldline-row-boxes';
 import {avgConfidence, runInventoryRead} from './goldline-read-pipeline';
 import {logReadEvent} from './goldline-read-log';
 import {uploadSource} from './goldline-upload-groups';
@@ -96,7 +97,8 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
         }
         continue;
       }
-      const r = batch.results.find((x) => x.custom_id === p.uploadId) ?? batch.results[0];
+      // The read's own result (never the page's row-box request, which shares the batch).
+      const r = batch.results.find((x) => x.custom_id === p.uploadId) ?? batch.results.find((x) => !isBoxCustomId(x.custom_id));
       if (!r || r.error || !r.output || p.version == null || p.page == null) {
         await fallbackSync(p);
         out.fellBack++;
@@ -106,10 +108,11 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
       // read's shape; everything else is the anchored template read.
       let extracted: ExtractedPage;
       let anchoredDetail: Record<string, unknown> | null = null;
+      let template: Awaited<ReturnType<typeof getFormTemplate>> = null;
       if (p.version === 'legacy') {
         extracted = mapInventoryRead(r.output, p.page, undefined, 'legacy');
       } else {
-        const template = await getFormTemplate(p.companyId, p.version, p.page);
+        template = await getFormTemplate(p.companyId, p.version, p.page);
         if (!template) {
           await fallbackSync(p);
           out.fellBack++;
@@ -125,6 +128,19 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
           versionMismatch: mapped.versionMismatch,
         };
       }
+      // Row boxes for review, when the page's batch carried a box request. Cosmetic: any problem just
+      // leaves the boxes off (review falls back to the template band); it never holds up the page.
+      const boxResult = batch.results.find((x) => parseBoxCustomId(x.custom_id, p.uploadId) != null);
+      let boxesSet: number | null = null;
+      if (boxResult) {
+        try {
+          const h = parseBoxCustomId(boxResult.custom_id, p.uploadId) ?? 0;
+          boxesSet = boxResult.output ? applyRowBoxes(extracted.rows, locateRowsFor(template, p.page), boxResult.output as unknown as LocateOutput, h) : 0;
+        } catch (e) {
+          console.error('goldline batch-poll: row boxes skipped', p.uploadId, msg(e));
+          boxesSet = 0;
+        }
+      }
       const docConfidence = avgConfidence(extracted);
       await saveExtraction({companyId: p.companyId, uploadId: p.uploadId, page: p.page, extracted, docConfidence});
       await setUploadStatus(p.uploadId, 'needs_review', {pageCount: p.page, anthropicBatchId: null});
@@ -137,10 +153,16 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
         status: 'needs_review',
         rowCount: extracted.rows.length,
         docConfidence,
-        detail: {batch: true, ...(anchoredDetail ? {anchored: anchoredDetail} : {legacy: true})},
+        detail: {batch: true, ...(anchoredDetail ? {anchored: anchoredDetail} : {legacy: true}), ...(boxesSet != null ? {boxes: boxesSet} : {})},
         // The anchored read's Claude usage, now billed at the 50% batch rate — recorded so a run's
         // cost is still summable from the DB (classify + locate were logged at submit time).
-        usage: {input: r.usage?.input ?? 0, output: r.usage?.output ?? 0, cacheRead: 0, cacheCreate: 0, calls: 1},
+        usage: {
+          input: (r.usage?.input ?? 0) + (boxResult?.usage?.input ?? 0),
+          output: (r.usage?.output ?? 0) + (boxResult?.usage?.output ?? 0),
+          cacheRead: 0,
+          cacheCreate: 0,
+          calls: 1 + (boxResult ? 1 : 0),
+        },
       }).catch((e) => console.error('goldline batch-poll: logReadEvent failed', msg(e)));
       out.ingested++;
     } catch (e) {
