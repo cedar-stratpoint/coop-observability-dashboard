@@ -16,6 +16,18 @@ Dates are local working dates (GMT+8). Newest first.
 
 
 
+## v1.24.0 (2026-11-23): Customers — last contacted, profile drawer, CRM parity and cohorts (prod release)
+Ships, on top of `main`, only our own customer work from staging, cherry-picked (no merge of staging):
+- last contacted per customer (RET-07 7A), Instagram / Facebook / Viber channels (7B), membership emails as contacts (7C);
+- the customer profile drawer and timeline (RET-08 8B + 8C);
+- Website CRM parity with the storefront admin CRM (RET-09 8A);
+- rule-based cohorts and Ask Coop cohort drafts (RET-10 9A + 9B);
+- Ask Coop with an org-scoped Anthropic key (`ANTHROPIC_WORKSPACE_ID`).
+
+Nothing else from staging rides along: no uploads, Goldline or CI changes. **Decision (owner, 2026-11-23):** a PROD release carries only our own changes, cherry-picked.
+
+**Before deploying, on PROD:** run `supabase/customer_contacts_channels_7b.sql` and `supabase/customer_cohorts.sql` (`customer_contacts` itself shipped in v1.23.0); set `ANTHROPIC_WORKSPACE_ID` in Vercel Production if the key is org-scoped; confirm the CRM's `GET /api/membership-events` is live (a 404 is handled: membership emails are left out with a note).
+
 ## 2026-11-20 — Ask Coop drafts, suggests and reads customer cohorts (RET-10, Stage 9B)
 
 The owner describes a cohort and does not build it. A new Ask Coop tool, **`propose_crm_cohort`**, turns a sentence like "Make a cohort: Circuit Makati buyers who haven't reordered" into a group, a name and a rule over the same closed field list as the 9A builder. Code then validates the draft with the builder's own validator and counts the preview with the page's evaluator (`cohortPreview` = `matchesCohort` over `customerRows`: count, repeat rate, up to five first names). Ask Coop draws the draft as a block with **Save cohort** and **Adjust the rule**. `{suggest: true}` drafts the first-order codes with buyers that no saved cohort covers yet (`cohortSuggestions` over RET-06 `codeCohorts`), for "what cohorts should we track?". `list_crm_customers` now reads saved cohorts:
