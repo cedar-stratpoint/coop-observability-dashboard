@@ -90,6 +90,12 @@ describe('RET-13A birthdayVoucherState', () => {
     ];
     expect(birthdayVoucherState(customers[0], two, [], NOW)).toEqual({state: 'unused', expiresAt: '2026-12-03'});
   });
+  it('a voucher without a valid sentAt is unknown (null), never "unused"; a dated row still wins over an undated one', () => {
+    const undated = {email: 'a@x.com', year: 2026, sentAt: '', expiresAt: '2026-12-03'};
+    expect(birthdayVoucherState(customers[0], [undated], [], NOW)).toBeNull();
+    const dated = {email: 'a@x.com', year: 2026, sentAt: '2026-11-02T00:00:00Z', expiresAt: '2026-12-03'};
+    expect(birthdayVoucherState(customers[0], [undated, dated], [], NOW)).toEqual({state: 'unused', expiresAt: '2026-12-03'});
+  });
   it('a ledger or orders list that was not read is unknown (null), never "none" or "unused"', () => {
     expect(birthdayVoucherState(customers[0], null, orders, NOW)).toBeNull();
     expect(birthdayVoucherState(customers[0], ledger, null, NOW)).toBeNull();

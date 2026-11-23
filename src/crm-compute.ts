@@ -483,8 +483,11 @@ export function birthdayVoucherState(
   const key = emailKey(c.email);
   const year = Number(phDay(now.getTime()).slice(0, 4));
   const mine = key ? vouchers.filter((v) => v.year === year && emailKey(v.email) === key) : [];
-  const newest = mine.reduce<BdayLedgerRow | null>((a, v) => (a === null || Date.parse(v.sentAt ?? '') > Date.parse(a.sentAt ?? '') ? v : a), null);
-  if (newest === null) return {state: 'none', expiresAt: null};
+  if (mine.length === 0) return {state: 'none', expiresAt: null};
+  // Only a ledger row with a parseable send time can be judged; if none has one the state is unknown, never "not used".
+  const dated = mine.filter((v) => Number.isFinite(Date.parse(v.sentAt ?? '')));
+  const newest = dated.reduce<BdayLedgerRow | null>((a, v) => (a === null || Date.parse(v.sentAt ?? '') > Date.parse(a.sentAt ?? '') ? v : a), null);
+  if (newest === null) return null;
   const sent = Date.parse(newest.sentAt ?? '');
   const expiresAt = newest.expiresAt ?? null;
   const used = customerOrders(c, orders).some((o) => o.test !== true && Date.parse(o.createdAt ?? '') >= sent && (o.discountCodes ?? []).some((code) => firstOrderCode([code]) === BIRTHDAY_COHORT));

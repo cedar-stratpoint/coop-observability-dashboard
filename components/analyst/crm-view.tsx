@@ -1003,7 +1003,7 @@ export function CrmView({
                     {BUILTIN_RULE_COHORTS.map((b) => (
                       <option key={b.key} value={b.key}>
                         {b.label}
-                        {customerRead ? ` (${ruleBuiltinCounts.get(b.key) ?? 0})` : ''}
+                        {customerRead ? ` (${birthdayVouchers === null || orders === null ? 'unknown' : (ruleBuiltinCounts.get(b.key) ?? 0)})` : ''}
                       </option>
                     ))}
                   </optgroup>
@@ -1623,6 +1623,12 @@ export function CrmView({
                           <dt>Vouchers used</dt>
                           <dd><VoucherChips uses={c.vouchers} /></dd>
                         </div>
+                        {ruleBuiltin && (
+                          <div className="col-span-3 flex justify-between gap-2">
+                            <dt>Birthday voucher</dt>
+                            <dd className="text-foreground">{bdayVoucherText(c.bdayVoucher)}</dd>
+                          </div>
+                        )}
                         <div className="col-span-3 flex justify-between gap-2">
                           <dt>Last contacted</dt>
                           <dd className="text-foreground">
