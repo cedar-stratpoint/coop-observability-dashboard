@@ -118,7 +118,7 @@ describe('9B propose_crm_cohort: drafts', () => {
 
   it('an invalid draft is refused in plain words: no CRM read, no block', async () => {
     const cases: [unknown, RegExp][] = [
-      [{group: 'Event', name: 'X', rule: {all: [{f: 'pet_name', op: 'is', v: 'Mochi'}]}}, /field Coop does not know\. Use one of: First-order code, Used code \(any order\), First order date, Orders/],
+      [{group: 'Event', name: 'X', rule: {all: [{f: 'pet_name', op: 'is', v: 'Mochi'}]}}, /field Coop does not know\. Use one of: First-order code, Used code \(any order\), Birthday voucher \(this year\), First order date, Orders/],
       [{group: 'Event', name: 'X', rule: {all: [{f: 'orders', op: 'is', v: '1'}]}}, /Orders takes the operator "at least" or "at most" or "exactly"/],
       [{group: 'Event', name: 'X', rule: {all: []}}, /at least one condition/],
       [{group: '', name: 'X', rule: {all: [{f: 'orders', op: 'eq', v: 1}]}}, /Give the cohort a group/],

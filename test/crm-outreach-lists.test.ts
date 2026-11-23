@@ -171,7 +171,7 @@ describe('negative cases: test orders, voucher codes, no send path, the GET cap'
     expect(back).not.toContain('t1x');
   });
   it('the voucher code (and its discount node) is never projected or returned', async () => {
-    expect(Object.keys(projectBirthdayVoucher(VOUCHERS[0])).sort()).toEqual(['email', 'sentAt', 'tier', 'year']);
+    expect(Object.keys(projectBirthdayVoucher(VOUCHERS[0])).sort()).toEqual(['email', 'expiresAt', 'sentAt', 'tier', 'year']);
     const all = JSON.stringify((await run({audience: 'repeat_promo'})).r) + JSON.stringify((await run({audience: 'win_back'})).r);
     expect(all).not.toMatch(/SECRET/);
   });

@@ -260,6 +260,7 @@ const proposeCrmCohort: ToolDefinition = {
     'Map the owner\'s sentence onto the fields; code validates the draft, counts the preview and draws it with Save cohort and Adjust the rule buttons. Nothing is saved until the owner clicks Save: never say it was saved. ' +
     'Never guess which discount code was which event: ask (list_crm_customers group_by first_order_code shows the codes). "Haven\'t reordered" = orders eq 1. ' +
     '"Used X on any order" = anycode; "never used any code" = anycode is "no code". ' +
+    '"Got a birthday voucher and didn\'t use it" = bday is unused. ' +
     '{suggest: true} alone: first-order codes with buyers that no saved cohort covers, drawn as one-click drafts ("what cohorts should we track?"). ' +
     `Fields (f = meaning (ops)): ${FIELD_LIST}. Dates YYYY-MM-DD; spend in pesos. Tell the owner the rule in words, never these codes.`,
   strict: false,

@@ -2,8 +2,8 @@
 // page IN CODE, and return a MetricResult the render tools can draw and the number check can read. Pure: `get` is injected.
 // Customer text is untrusted (spec 4.1): control and bidi characters are removed, each value is capped, and the result says so.
 // The hidden fields never reach this module: src/crm-project.ts does not project them.
-import {AUDIENCE_RULES, CONTACT_KIND_LABEL, CUSTOMER_AUDIENCES, REPEAT_TARGET_PCT, SMALL_COHORT, cartStatus, codeCohorts, compareLastContacted, compareLastOrder, compareTimesContacted, contactTally, customerRows, enrichCustomers, filterCustomers, inAudience, matchesCohort, membershipWindowStart, ordersBucket, phDaysSince, repeatRate, ruleText, type ContactTally, type CohortRule, type CustomerRow} from '../../crm-compute';
-import {cohortLabel, compareCohorts, findCohort, ruleUsesContact, type CustomerCohort} from '../../customer-cohorts';
+import {AUDIENCE_RULES, CONTACT_KIND_LABEL, CUSTOMER_AUDIENCES, REPEAT_TARGET_PCT, SMALL_COHORT, cartStatus, codeCohorts, compareLastContacted, compareLastOrder, compareTimesContacted, contactTally, customerRows, enrichCustomers, filterCustomers, inAudience, matchesCohort, membershipWindowStart, ordersBucket, phDaysSince, repeatRate, ruleText, withVoucherFacts, type BdayLedgerRow, type ContactTally, type CohortRule, type CustomerRow} from '../../crm-compute';
+import {cohortLabel, compareCohorts, findCohort, ruleUsesBday, ruleUsesContact, type CustomerCohort} from '../../customer-cohorts';
 import {envelope, MEMBERSHIP_EVENTS_NOT_LIVE, MEMBERSHIP_FALLBACK, projectBirthdayVoucher, projectCheckoutSafe, projectCustomer, projectMembership, projectMetrics, projectOrderChat, readMembershipEvents, type CrmCheckoutSafe, type CrmLineItemSafe, type CrmOrderChat} from '../../crm-project';
 import {phDay, phDayStart, type RangeOrder} from '../../custom-range';
 import {dayKeysBetween, MAX_RANGE_DAYS, mondayOf, rangeLabel} from '../range';
@@ -403,7 +403,7 @@ const BREAKDOWN_MEASURES: MeasureDecl[] = [
 /** CRM list caps: the checkouts read stops at 1,000 rows, the birthday voucher ledger and the membership email log at 2,000. */
 const VOUCHER_LIST_CAP = 2000;
 /** `membershipLive` false = the CRM's /api/membership-events answered 404 (not deployed yet): excluded with a note, not missing (7C). */
-type TallyRead = {tally: Map<string, ContactTally>; missing: {checkouts: boolean; birthdayVouchers: boolean; membership: boolean; manual: boolean}; membershipLive: boolean; notes: Check[]};
+type TallyRead = {tally: Map<string, ContactTally>; /** RET-13A: the birthday ledger as read (no code); null = unread. */ vouchers: BdayLedgerRow[] | null; missing: {checkouts: boolean; birthdayVouchers: boolean; membership: boolean; manual: boolean}; membershipLive: boolean; notes: Check[]};
 
 /**
  * The per-email contact tally from checkouts, orders, the voucher ledger, the membership email log and the manual contact log. A source
@@ -426,8 +426,9 @@ export async function crmContactTally(get: CrmGet, orders: readonly CrmOrderChat
   if (!manual) notes.push({code: 'partial_coverage', status: 'warn', text: 'The manual contact log is not set up or could not be read, so manual_contacts and times_contacted are unknown (blank) for every row; emails_sent is unaffected. Say so; do not read blank as zero.'});
   if (!checkouts || !vouchers || !membership || !manual) notes.push({code: 'partial_coverage', status: 'warn', text: 'A contact source could not be read, so last_contacted is unknown (blank, last_contact_kind "unknown") for every row. Never say a customer was never contacted.'});
   const capped = [checkouts && capCheck('checkouts', checkouts.length), vouchers && capCheck('birthday vouchers', vouchers.length, VOUCHER_LIST_CAP), membership && capCheck('membership emails', membership.events.length, VOUCHER_LIST_CAP)].filter((c): c is Check => Boolean(c));
-  const tally = contactTally({checkouts: (checkouts ?? []).map(projectCheckoutSafe), orders, birthdayVouchers: (vouchers ?? []).map(projectBirthdayVoucher), membershipEvents: membership?.events ?? [], manualContacts: manual ?? []});
-  return {tally, missing: {checkouts: !checkouts, birthdayVouchers: !vouchers, membership: !membership, manual: !manual}, membershipLive: membership?.live === true, notes: [...notes, ...capped]};
+  const safeVouchers = vouchers ? vouchers.map(projectBirthdayVoucher) : null;
+  const tally = contactTally({checkouts: (checkouts ?? []).map(projectCheckoutSafe), orders, birthdayVouchers: safeVouchers ?? [], membershipEvents: membership?.events ?? [], manualContacts: manual ?? []});
+  return {tally, vouchers: safeVouchers, missing: {checkouts: !checkouts, birthdayVouchers: !vouchers, membership: !membership, manual: !manual}, membershipLive: membership?.live === true, notes: [...notes, ...capped]};
 }
 
 const CUSTOMER_GROUP_MEASURES: MeasureDecl[] = [
@@ -490,11 +491,11 @@ export async function crmEnrichedCustomers(get: CrmGet, now: Date) {
  * RET-10 9B: every website customer as the Website CRM page's row (customerRows over the same enrichment and contact tally), for
  * propose_crm_cohort's preview. `contactKnown` false = a contact source was unread (last contacted / times contacted are unknown).
  */
-export async function crmCohortRows(get: CrmGet, now: Date, manual?: ManualContactsRead): Promise<{rows: CustomerRow[]; contactKnown: boolean}> {
+export async function crmCohortRows(get: CrmGet, now: Date, manual?: ManualContactsRead): Promise<{rows: CustomerRow[]; contactKnown: boolean; bdayKnown: boolean}> {
   const {enriched, orders} = await crmEnrichedCustomers(get, now);
   const t = await crmContactTally(get, orders, manual);
   const auto = !(t.missing.checkouts || t.missing.birthdayVouchers || t.missing.membership);
-  return {rows: customerRows(enriched, t.tally, now, {automated: auto, manual: !t.missing.manual}), contactKnown: auto && !t.missing.manual};
+  return {rows: withVoucherFacts(customerRows(enriched, t.tally, now, {automated: auto, manual: !t.missing.manual}), orders, t.vouchers, now), contactKnown: auto && !t.missing.manual, bdayKnown: t.vouchers !== null};
 }
 
 /* ---------- RET-10 9B: saved cohorts in list_crm_customers (cohort, group_by cohort_group, not_contacted_days) ---------- */
@@ -547,7 +548,8 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const contactKnown = t !== null && !partialAuto && !t.missing.manual;
   // the shared row (src/crm-compute.ts customerRows, the Customers tab's own): counts and last contacted, null = unknown
   // RET-10: a saved cohort and "not contacted in N days" filter with THE evaluator (matchesCohort), as the Website CRM page does.
-  const rowsOf: CustomerRow[] = customerRows(base, t?.tally ?? null, now, {automated: t !== null && !partialAuto, manual: t !== null && !t.missing.manual}).filter((r) => cohortRules.every((rule) => matchesCohort(r, rule)));
+  // RET-13A: the voucher facts (codes used, this year's birthday voucher) ride on the same rows: ledger unread (or no tally read) = unknown.
+  const rowsOf: CustomerRow[] = withVoucherFacts(customerRows(base, t?.tally ?? null, now, {automated: t !== null && !partialAuto, manual: t !== null && !t.missing.manual}), orders, t?.vouchers ?? null, now).filter((r) => cohortRules.every((rule) => matchesCohort(r, rule)));
   const matched = rowsOf;
   // customers with no order sort last whichever way the last-order sort runs (shared with the Customers tab)
   const byLast = compareLastOrder;
@@ -574,6 +576,8 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   if (testOrders > 0) notes.push({code: 'test_orders', status: 'info', text: `${testOrders} of ${orders.length} captured website orders are Shopify test orders and count nowhere here (owner rule): no orders, spend or buyers. The CRM's own order total includes them, so it is higher than the orders counted here.`, values: {test_orders: testOrders, orders: orders.length}});
   if (!membership) notes.push({code: 'partial_coverage', status: 'warn', text: `The membership settings could not be read, so the default programme start (${MEMBERSHIP_FALLBACK.programStart}) was used.`});
   const contactRules = [...cohortRules, ...(scope.group?.cohorts.map((c) => c.rule) ?? [])].some(ruleUsesContact);
+  const bdayRules = [...cohortRules, ...(scope.group?.cohorts.map((c) => c.rule) ?? [])].some(ruleUsesBday);
+  if (bdayRules && (t === null || t.vouchers === null)) notes.push({code: 'partial_coverage', status: 'warn', text: 'The birthday voucher ledger could not be read, so every condition on the birthday voucher matches nobody here (unknown, never "not used"). Say so: the list or counts are missing those customers.'});
   if (contactRules && !contactKnown) notes.push({code: 'partial_coverage', status: 'warn', text: 'A contact source could not be read, so every condition on last contacted or times contacted matches nobody here (unknown, never "never"). Say so: the list or counts are missing those customers.'});
 
   if (req.group_by === 'none') {

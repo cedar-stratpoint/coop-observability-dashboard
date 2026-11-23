@@ -420,11 +420,14 @@ export const voucherLabel = (code: string): string => {
   return k === BIRTHDAY_COHORT ? 'Birthday voucher' : k;
 };
 
+/** The order fields the voucher helpers read (a CrmOrder, or the chat's CrmOrderChat). */
+export type VoucherOrder = Pick<CrmOrder, 'shopifyCustomerId' | 'email' | 'createdAt' | 'test' | 'orderNumber' | 'shopifyOrderId' | 'discountCodes' | 'discountAmounts'>;
+
 /**
  * Every discount code this customer redeemed, one entry per code per order, newest order first (customerOrders' match and order; a
  * code keeps its place within its order). Test orders count nowhere. `orders` null (not read) → null: the page says "unknown", never 0.
  */
-export function customerVouchers(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly CrmOrder[] | null): VoucherUse[] | null {
+export function customerVouchers(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly VoucherOrder[] | null): VoucherUse[] | null {
   if (orders === null) return null;
   return customerOrders(c, orders)
     .filter((o) => o.test !== true)
@@ -445,6 +448,70 @@ export function voucherLabels(uses: readonly VoucherUse[]): {label: string; uses
   const m = new Map<string, VoucherUse[]>();
   for (const u of uses) m.set(u.label, [...(m.get(u.label) ?? []), u]);
   return [...m.entries()].map(([label, list]) => ({label, uses: list})).sort((a, b) => b.uses.length - a.uses.length);
+}
+
+/* ---------- RET-13A (Stage 9D): birthday voucher sent, not used ---------- */
+
+export type BdayState = 'unused' | 'expired' | 'used' | 'none';
+/** The birthday ledger fields the state reads (CrmBirthdayVoucherSafe): never the code. */
+export type BdayLedgerRow = {email: string | null; year?: number; sentAt?: string; expiresAt?: string | null};
+/** One customer's birthday voucher this PH year; `expiresAt` is the ledger's (not secret), null when unknown. */
+export type BdayVoucher = {state: BdayState; expiresAt: string | null};
+
+const DAY_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Expired = the expiry is behind us. A date with no time ends at the end of that PH day; an instant is compared as is. */
+function expiredAt(expiresAt: string | null | undefined, now: Date): boolean {
+  const e = String(expiresAt ?? '').trim();
+  if (e === '') return false;
+  if (DAY_ONLY_RE.test(e)) return e < phDay(now.getTime());
+  const t = Date.parse(e);
+  return Number.isFinite(t) && t < now.getTime();
+}
+
+/**
+ * This customer's birthday voucher for the current PH year (the newest sent): "used" = a counted (non-test) order of theirs with a
+ * BDAY- code at or after the send; "expired" = not used and past its expiry; else "unused" (no expiry known counts as unused); no
+ * voucher this year (or no email) = "none". Null (unknown, never "none") when the ledger or the orders list was not read.
+ */
+export function birthdayVoucherState(
+  c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>,
+  vouchers: readonly BdayLedgerRow[] | null,
+  orders: readonly VoucherOrder[] | null,
+  now: Date,
+): BdayVoucher | null {
+  if (vouchers === null || orders === null) return null;
+  const key = emailKey(c.email);
+  const year = Number(phDay(now.getTime()).slice(0, 4));
+  const mine = key ? vouchers.filter((v) => v.year === year && emailKey(v.email) === key) : [];
+  const newest = mine.reduce<BdayLedgerRow | null>((a, v) => (a === null || Date.parse(v.sentAt ?? '') > Date.parse(a.sentAt ?? '') ? v : a), null);
+  if (newest === null) return {state: 'none', expiresAt: null};
+  const sent = Date.parse(newest.sentAt ?? '');
+  const expiresAt = newest.expiresAt ?? null;
+  const used = customerOrders(c, orders).some((o) => o.test !== true && Date.parse(o.createdAt ?? '') >= sent && (o.discountCodes ?? []).some((code) => firstOrderCode([code]) === BIRTHDAY_COHORT));
+  return {state: used ? 'used' : expiredAt(expiresAt, now) ? 'expired' : 'unused', expiresAt};
+}
+
+/**
+ * The voucher facts every row carries: the codes redeemed (RET-11) and this year's birthday voucher (RET-13A). ONE helper for the
+ * Website CRM page and Ask Coop, so the cohort evaluator reads the same values in both. A source unread = null on every row.
+ */
+export function withVoucherFacts<T extends Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>>(
+  rows: readonly T[],
+  orders: readonly VoucherOrder[] | null,
+  vouchers: readonly BdayLedgerRow[] | null,
+  now: Date,
+): Array<T & {vouchers: VoucherUse[] | null; bdayVoucher: BdayVoucher | null}> {
+  return rows.map((r) => ({...r, vouchers: customerVouchers(r, orders), bdayVoucher: birthdayVoucherState(r, vouchers, orders, now)}));
+}
+
+/** The Birthday voucher column / CSV cell: "Sent, not used · expires Dec 3", "Expired", "Used", "—"; "unknown" when a source was unread. */
+export function bdayVoucherText(b: BdayVoucher | null | undefined): string {
+  if (!b) return 'unknown';
+  if (b.state === 'none') return '—';
+  if (b.state === 'used') return 'Used';
+  if (b.state === 'expired') return 'Expired';
+  const d = b.expiresAt ? fmtPhDate(DAY_ONLY_RE.test(b.expiresAt) ? `${b.expiresAt}T00:00:00+08:00` : b.expiresAt).replace(/,\s*\d{4}$/, '') : null;
+  return d && d !== '—' ? `Sent, not used · expires ${d}` : 'Sent, not used';
 }
 
 /** The orders bucket a customer falls in: 0, 1, 2, 3 or 4+. */
@@ -470,6 +537,8 @@ export type CustomerRow = EnrichedCustomer & {
   consent: string;
   /** RET-11: customerVouchers for this row, set by the Website CRM page; absent / null = not read (shown "unknown"). */
   vouchers?: VoucherUse[] | null;
+  /** RET-13A: this PH year's birthday voucher (withVoucherFacts); absent / null = ledger or orders not read (unknown). */
+  bdayVoucher?: BdayVoucher | null;
 };
 
 /** `known` says which parts of `tally` were read; by default the automated part is known when a tally is given and the manual part is not. */
@@ -528,7 +597,7 @@ export function audienceRows<T extends Pick<EnrichedCustomer, 'orderCount' | 'la
  * rule is always read back as sentences (condText / ruleText). Adding a field = a new entry here, a case in cohortValue and in
  * condText, and a test; 9B's tool schema enumerates the same list.
  */
-export const COHORT_FIELDS = ['code', 'anycode', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
+export const COHORT_FIELDS = ['code', 'anycode', 'bday', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
 export type CohortField = (typeof COHORT_FIELDS)[number];
 export const COHORT_OPS = ['is', 'is_not', 'on_or_after', 'on_or_before', 'gte', 'lte', 'eq'] as const;
 export type CohortOp = (typeof COHORT_OPS)[number];
@@ -550,10 +619,12 @@ type FieldSpec = {
   values?: Readonly<Record<string, string>>;
 };
 const TIER_VALUES = Object.freeze({platinum: 'Platinum', gold: 'Gold', guest: 'Guest'});
+const BDAY_VALUES = Object.freeze({unused: 'Sent, not used', expired: 'Sent, expired unused', used: 'Sent and used', none: 'Not sent this year'});
 const CONSENT_VALUES = Object.freeze({subscribed: 'Subscribed', not_subscribed: 'Not subscribed'});
 export const COHORT_FIELD_SPEC: Readonly<Record<CohortField, FieldSpec>> = Object.freeze({
   code: {label: 'First-order code', type: 'text', ops: ['is', 'is_not']},
   anycode: {label: 'Used code (any order)', type: 'text', ops: ['is', 'is_not']},
+  bday: {label: 'Birthday voucher (this year)', type: 'enum', values: BDAY_VALUES, ops: ['is', 'is_not']},
   first: {label: 'First order date', type: 'date', ops: ['on_or_after', 'on_or_before']},
   orders: {label: 'Orders', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
   days: {label: 'Days since last order', type: 'num', integer: true, ops: ['gte', 'lte']},
@@ -641,6 +712,7 @@ export type CohortRow = Pick<
   | 'orderCount'
   | 'firstOrderCode'
   | 'codesUsed'
+  | 'bdayVoucher'
   | 'firstOrderAt'
   | 'daysSinceLastOrder'
   | 'spent'
@@ -666,6 +738,8 @@ function cohortValue(r: CohortRow, f: CohortField): string | number | ReadonlySe
       return r.orderCount >= 1 && r.firstOrderCode !== null ? r.firstOrderCode.toUpperCase() : null;
     case 'anycode':
       return r.orderCount >= 1 && r.codesUsed !== null ? new Set(r.codesUsed.map((k) => k.toUpperCase())) : null;
+    case 'bday':
+      return r.bdayVoucher?.state ?? null;
     case 'first':
       return r.orderCount >= 1 ? phDayOf(r.firstOrderAt) : null;
     case 'orders':
@@ -739,6 +813,14 @@ export const BUILTIN_COHORT_RULES: Readonly<Record<Exclude<CustomerAudience, 'al
   ) as Record<Exclude<CustomerAudience, 'all'>, CohortRule>,
 );
 
+/**
+ * RET-13A: built-in cohorts that are a rule on a cohort field (not an audience). Listed through matchesCohort, one evaluator.
+ * "Sent, expired unused" is left out on purpose: those vouchers can no longer be used, so there is nothing to bump.
+ */
+export const BUILTIN_RULE_COHORTS: readonly {key: 'bday_unused'; label: string; rule: CohortRule}[] = Object.freeze([
+  {key: 'bday_unused', label: 'Birthday voucher not used', rule: {all: [{f: 'bday', op: 'is', v: 'unused'}]}},
+]);
+
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 const pesoWhole = (n: number): string => `₱${n.toLocaleString('en-PH', {minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2})}`;
 /** The special first-order keys firstOrderCode() produces, said in words. */
@@ -763,6 +845,15 @@ export function condText(c: CohortCond): string {
       if (v.toUpperCase() === NO_CODE.toUpperCase()) return c.op === 'is' ? 'Never used any code' : 'Used a code on some order';
       if (words) return c.op === 'is' ? `Used ${words} on some order` : `Never used ${words}`;
       return c.op === 'is' ? `Used code ${v} on any order` : `Never used code ${v}`;
+    }
+    case 'bday': {
+      const said: Record<string, string> = {
+        unused: 'Got a birthday voucher this year and has not used it',
+        expired: "This year's birthday voucher expired unused",
+        used: "Used this year's birthday voucher",
+        none: 'No birthday voucher this year',
+      };
+      return c.op === 'is' ? (said[v] ?? v) : `Birthday voucher this year is not ${BDAY_VALUES[v as keyof typeof BDAY_VALUES] ?? v}`;
     }
     case 'first':
       return `First order ${c.op === 'on_or_after' ? 'on or after' : 'on or before'} ${fmtPhDate(`${v}T00:00:00+08:00`)}`;

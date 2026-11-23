@@ -69,8 +69,8 @@ const ok = (input: unknown): CohortRule => {
 };
 
 describe('9A the closed field list', () => {
-  it('has exactly the eleven owner fields, each with a plain label and its operators', () => {
-    expect([...COHORT_FIELDS]).toEqual(['code', 'anycode', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent']);
+  it('has exactly the twelve owner fields, each with a plain label and its operators', () => {
+    expect([...COHORT_FIELDS]).toEqual(['code', 'anycode', 'bday', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent']);
     for (const f of COHORT_FIELDS) {
       expect(COHORT_FIELD_SPEC[f].label, f).not.toMatch(/^[a-z]+$/); // a label, never the code
       expect(COHORT_FIELD_SPEC[f].ops.length, f).toBeGreaterThan(0);
@@ -86,7 +86,7 @@ describe('9A readCohortRule: the one validator (builder, server action, and 9B A
     ).toEqual(rule({f: 'code', op: 'is', v: 'CIRCUIT10'}, {f: 'orders', op: 'eq', v: 1}, {f: 'tier', op: 'is', v: 'gold'}, {f: 'life', op: 'gte', v: 1500.5}));
   });
   it('accepts every field with every one of its operators', () => {
-    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 0, consent: 'subscribed'};
+    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', bday: 'unused', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 0, consent: 'subscribed'};
     for (const f of COHORT_FIELDS) for (const op of COHORT_FIELD_SPEC[f].ops) expect('rule' in readCohortRule({all: [{f, op, v: sample[f]}]}), `${f} ${op}`).toBe(true);
   });
   it.each([
@@ -252,7 +252,7 @@ describe('9A rules read as plain sentences (never field codes)', () => {
     expect(condText(c)).toBe(text);
   });
   it('no sentence ever shows a field or operator code', () => {
-    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 2, consent: 'not_subscribed'};
+    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', bday: 'unused', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 2, consent: 'not_subscribed'};
     for (const f of COHORT_FIELDS) {
       for (const op of COHORT_FIELD_SPEC[f].ops) {
         const t = condText({f, op, v: sample[f]} as CohortRule['all'][number]);
