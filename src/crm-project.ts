@@ -100,21 +100,24 @@ export function projectCustomer(c: Rec): CrmCustomer {
 /** Single-use birthday voucher codes start with this (zoomy-crm BIRTHDAY_CODE_SQL_PREFIX): each names one customer, so only the prefix is kept. */
 export const BIRTHDAY_CODE_PREFIX = 'BDAY-';
 
-/** The order's discount codes, trimmed and upper-cased, amounts and types dropped; junk entries are skipped. A BDAY- code becomes "BDAY-". */
-function discountCodesOf(raw: unknown): string[] {
+/**
+ * The order's discount codes, trimmed and upper-cased, with the amount Shopify took off for each (raw.discount_codes[].amount, a
+ * string like "300.00"; null when missing or not a number); types are dropped and junk entries skipped. A BDAY- code becomes "BDAY-".
+ */
+function discountsOf(raw: unknown): {code: string; amount: number | null}[] {
   const list = rec(raw).discount_codes;
   if (!Array.isArray(list)) return [];
-  return list
-    .map((d) => rec(d).code)
-    .filter((c): c is string => typeof c === 'string' && c.trim() !== '')
-    .map((c) => {
-      const code = c.trim().toUpperCase().slice(0, 60);
-      return code.startsWith(BIRTHDAY_CODE_PREFIX) ? BIRTHDAY_CODE_PREFIX : code;
-    });
+  return list.flatMap((d) => {
+    const {code: c, amount} = rec(d);
+    if (typeof c !== 'string' || c.trim() === '') return [];
+    const code = c.trim().toUpperCase().slice(0, 60);
+    return [{code: code.startsWith(BIRTHDAY_CODE_PREFIX) ? BIRTHDAY_CODE_PREFIX : code, amount: numOrNull(amount)}];
+  });
 }
 
 export function projectOrder(o: Rec): CrmOrder {
   const raw = parseRaw(o.raw);
+  const discounts = discountsOf(raw);
   return {
     shopifyOrderId: String(o.shopifyOrderId),
     shopifyCustomerId: str(o.shopifyCustomerId),
@@ -130,8 +133,10 @@ export function projectOrder(o: Rec): CrmOrder {
     reviewSubmittedAt: str(o.reviewSubmittedAt),
     // Shopify's test-order flag (raw.test). Owner rule 2026-11-09: test orders count nowhere.
     test: rec(raw).test === true,
-    // RET-06: the discount codes (raw.discount_codes[].code), codes only; a BDAY- code is cut to its prefix (BIRTHDAY_CODE_PREFIX).
-    discountCodes: discountCodesOf(raw),
+    // RET-06: the discount codes (raw.discount_codes[].code); a BDAY- code is cut to its prefix (BIRTHDAY_CODE_PREFIX).
+    discountCodes: discounts.map((d) => d.code),
+    // RET-11: the amount off per code, index for index with discountCodes (null = Shopify sent no readable amount).
+    discountAmounts: discounts.map((d) => d.amount),
     // ponytail: raw Shopify JSON (~2.3KB/order); past ~850 orders the pages' cache entry nears Next's 2MB limit, so slim it to
     // title/quantity/price/discounts then.
     lineItems: typeof o.lineItems === 'string' ? o.lineItems : o.lineItems === null || o.lineItems === undefined ? null : JSON.stringify(o.lineItems),

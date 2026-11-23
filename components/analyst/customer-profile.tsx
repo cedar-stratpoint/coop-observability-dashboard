@@ -32,6 +32,7 @@ import {
   cartStatus,
   customerOrders,
   customerTimeline,
+  customerVouchers,
   daysToPetBirthday,
   fmtPh,
   fmtPhDate,
@@ -43,6 +44,7 @@ import {
   petBirthdayStatus,
   toPlatinum,
   turnaround,
+  voucherUseText,
   type CartStatus,
   type ContactKind,
   type CustomerRow,
@@ -280,7 +282,9 @@ export function CustomerProfile({
     const carts = key ? (checkouts ?? []).filter((k) => (k.email ?? '').trim().toLowerCase() === key) : [];
     const events = customerTimeline(row, {orders: orders ?? [], checkouts: checkouts ?? [], birthdayVouchers: birthdayVouchers ?? [], membershipEvents: membershipEvents?.events ?? [], manualContacts: contacts ?? []});
     const paid = mine.filter((o) => o.test !== true && o.financialStatus === 'paid').length;
-    return {mine, carts, events, paid};
+    // RET-11: null when the orders list was not read ("unknown", never 0).
+    const vouchers = customerVouchers(row, orders);
+    return {mine, carts, events, paid, vouchers};
   }, [row, orders, checkouts, birthdayVouchers, membershipEvents, contacts]);
 
   if (!mounted) return null;
@@ -407,6 +411,22 @@ export function CustomerProfile({
                   unknown={!row.lastContactKnown}
                   sub={row.lastContactKind ? CONTACT_KIND_LABEL[row.lastContactKind] : !row.lastContactKnown ? 'a source did not answer' : undefined}
                 />
+                <div className="col-span-2 sm:col-span-4">
+                  <Stat
+                    title="Vouchers used"
+                    value={data.vouchers === null ? 'unknown' : data.vouchers.length.toLocaleString()}
+                    unknown={data.vouchers === null}
+                    sub={data.vouchers === null ? 'the orders list did not load' : data.vouchers.length === 0 ? 'No discount code on any order' : undefined}
+                  >
+                    {data.vouchers !== null && data.vouchers.length > 0 && (
+                      <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                        {data.vouchers.map((v, i) => (
+                          <li key={`${v.orderId}:${i}`} className="tabular-nums">{voucherUseText(v)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </Stat>
+                </div>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-1.5 border-b pb-3" role="tablist" aria-label="Profile sections">
