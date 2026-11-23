@@ -223,7 +223,7 @@ export function DashboardShell({
   const skuLinksTab: NavItem = {href: '/stock/skus', label: 'SKU linking', icon: Link2};
   const actionsTab: NavItem = {href: '/action-feed', label: 'Actions', icon: ListChecks};
   const flagsTab: NavItem = {href: '/flags', label: 'Flags', icon: Flag};
-  const auditTab: NavItem = {href: '/stock/audit', label: 'Audit', icon: ClipboardCheck};
+  const auditTab: NavItem = {href: '/stock/audit', label: 'Reconcile', icon: ClipboardCheck};
   const basTab: NavItem = {href: '/bas', label: 'BAs', icon: Contact};
   const healthTab: NavItem = {href: '/store-health', label: 'Health', icon: HeartPulse};
   const usersTab: NavItem = {href: '/admin/users', label: 'Users & Roles', icon: Users};

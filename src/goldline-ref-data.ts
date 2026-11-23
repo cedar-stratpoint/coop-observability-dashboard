@@ -26,6 +26,7 @@ export const glTags = {
   forecast: (companyId: string) => `gl-forecast:${companyId}`,
   sales: (companyId: string) => `gl-sales:${companyId}`,
   uploads: (companyId: string) => `gl-uploads:${companyId}`,
+  poForm: (companyId: string) => `gl-po-form:${companyId}`,
 };
 
 export type GlProduct = {

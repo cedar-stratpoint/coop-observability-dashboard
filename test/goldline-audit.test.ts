@@ -1,61 +1,78 @@
 import {describe, expect, it} from 'vitest';
-import {auditMatrix, auditState, auditSummary, AUDIT_ACTION, type AuditInput} from '../src/goldline-audit';
+import {AUDIT_META, AUDIT_STATES, auditMatrix, auditState, auditSummary, productRollup, type AuditInput} from '../src/goldline-audit';
 
+// Justin's notebook matrix (Nov 23): Watsons · Inventory · PO → state.
 describe('auditState', () => {
-  it('maps the two legs to a matrix state', () => {
-    expect(auditState(true, true)).toBe('matched');
-    expect(auditState(true, false)).toBe('no_sales');
-    expect(auditState(false, true)).toBe('not_counted');
+  it.each([
+    [true, true, true, 'ok'],
+    [true, false, true, 'form_missing'],
+    [false, true, true, 'no_sales'],
+    [false, false, true, 'delivery_check'],
+    [true, true, false, 'phasing_out'],
+    [true, false, false, 'accounting'],
+    [false, true, false, 'watsons_audit'],
+    [false, false, false, 'retire_candidate'],
+  ] as const)('W=%s I=%s PO=%s → %s', (w, i, p, state) => {
+    expect(auditState(w, i, p)).toBe(state);
+    expect(AUDIT_META[state].legs).toEqual({watsons: w, inventory: i, po: p});
   });
 });
 
 describe('auditMatrix', () => {
-  const inp = (p: Partial<AuditInput> & {item_code: string}): AuditInput => ({inForm: false, inWatsons: false, ...p});
-  it('drops SKUs in neither leg, keeps the rest', () => {
-    const cells = auditMatrix([
-      inp({item_code: 'A', inForm: true, inWatsons: true}),
-      inp({item_code: 'B'}), // neither → dropped
-    ]);
-    expect(cells.map((c) => c.item_code)).toEqual(['A']);
+  const inp = (p: Partial<AuditInput> & {item_code: string}): AuditInput => ({onForm: false, onPo: false, ...p});
+
+  it('a counted zero is Inventory no (decided Nov 23)', () => {
+    const [c] = auditMatrix([inp({item_code: 'A', onPo: true, onForm: true, onHand: 0, units: 3})]);
+    expect(c).toMatchObject({inInventory: false, onHand: 0, state: 'form_missing'});
   });
-  it('sorts mismatches first (not_counted, no_sales, matched), then by code', () => {
+
+  it('every PO product gets a row; inactive ones only when on the form or selling', () => {
     const cells = auditMatrix([
-      inp({item_code: 'M1', inForm: true, inWatsons: true}),
-      inp({item_code: 'NC1', inWatsons: true, units: 5}),
-      inp({item_code: 'NS1', inForm: true, onHand: 3}),
-      inp({item_code: 'M2', inForm: true, inWatsons: true}),
+      inp({item_code: 'ACTIVE_NOTHING', onPo: true}), // row 4: check delivery
+      inp({item_code: 'GONE'}), // inactive, nothing anywhere, not on the form → no row
+      inp({item_code: 'ZERO', onForm: true, onHand: 0}), // row 8: still printed, stock hit zero
+      inp({item_code: 'SOLD', units: 2}), // row 6: accounting
     ]);
-    expect(cells.map((c) => `${c.item_code}:${c.state}`)).toEqual([
-      'NC1:not_counted',
-      'NS1:no_sales',
-      'M1:matched',
-      'M2:matched',
-    ]);
+    expect(Object.fromEntries(cells.map((c) => [c.item_code, c.state]))).toEqual({
+      ACTIVE_NOTHING: 'delivery_check',
+      ZERO: 'retire_candidate',
+      SOLD: 'accounting',
+    });
   });
-  it('carries units and onHand through, defaulting units to 0', () => {
-    const [c] = auditMatrix([inp({item_code: 'A', inWatsons: true, units: 12})]);
-    expect(c).toMatchObject({item_code: 'A', inForm: false, inWatsons: true, units: 12, state: 'not_counted'});
-    const [d] = auditMatrix([inp({item_code: 'B', inForm: true, onHand: 7, units: null})]);
-    expect(d).toMatchObject({units: 0, onHand: 7, state: 'no_sales'});
+
+  it('sorts in the notebook order (active group first)', () => {
+    const cells = auditMatrix([
+      inp({item_code: 'Z', onForm: true, onHand: 0}),
+      inp({item_code: 'B', onPo: true, onForm: true, onHand: 5, units: 1}),
+      inp({item_code: 'A', onPo: true}),
+    ]);
+    expect(cells.map((c) => c.state)).toEqual(['ok', 'delivery_check', 'retire_candidate']);
+  });
+
+  it('summary counts every state and what needs a step', () => {
+    const s = auditSummary(
+      auditMatrix([
+        inp({item_code: 'A', onPo: true, onForm: true, onHand: 1, units: 1}), // ok
+        inp({item_code: 'B', onForm: true, onHand: 3, units: 1}), // phasing out
+        inp({item_code: 'C', onPo: true}), // delivery check
+      ]),
+    );
+    expect(s.total).toBe(3);
+    expect(s.needsAction).toBe(1);
+    expect(AUDIT_STATES.reduce((a, k) => a + s[k], 0)).toBe(3);
   });
 });
 
-describe('auditSummary', () => {
-  it('tallies the states', () => {
-    const cells = auditMatrix([
-      {item_code: 'A', inForm: true, inWatsons: true},
-      {item_code: 'B', inForm: true, inWatsons: false},
-      {item_code: 'C', inForm: false, inWatsons: true},
-      {item_code: 'D', inForm: false, inWatsons: true},
+describe('productRollup', () => {
+  it('counts stores per state and orders active products with the most steps first', () => {
+    const rows = productRollup([
+      {item_code: 'X', state: 'ok', onPo: true},
+      {item_code: 'Y', state: 'no_sales', onPo: true},
+      {item_code: 'Y', state: 'delivery_check', onPo: true},
+      {item_code: 'Z', state: 'accounting', onPo: false},
     ]);
-    expect(auditSummary(cells)).toEqual({matched: 1, no_sales: 1, not_counted: 2, total: 4});
-  });
-});
-
-describe('AUDIT_ACTION', () => {
-  it('has a plain-language action for every state', () => {
-    expect(AUDIT_ACTION.matched).toMatch(/no action/i);
-    expect(AUDIT_ACTION.no_sales).toMatch(/watsons/i);
-    expect(AUDIT_ACTION.not_counted).toMatch(/accounting/i);
+    expect(rows.map((r) => r.item_code)).toEqual(['Y', 'X', 'Z']);
+    expect(rows[0]).toMatchObject({stores: 2, needsAction: 2});
+    expect(rows[0].counts.no_sales).toBe(1);
   });
 });

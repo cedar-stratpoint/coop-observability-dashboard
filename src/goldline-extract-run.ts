@@ -125,6 +125,13 @@ function clientFor(c: GoldlineCred): Anthropic {
   return new Anthropic({apiKey: c.apiKey, ...(c.workspaceId ? {defaultHeaders: {'anthropic-workspace-id': c.workspaceId}} : {})});
 }
 
+/** The primary Goldline reader client (null when no key is set). For one-off reads
+ *  outside the scan pipeline, e.g. transcribing a PO form PDF. */
+export function goldlineReaderClient(): Anthropic | null {
+  const c = goldlineCreds()[0];
+  return c ? clientFor(c) : null;
+}
+
 /** A KEY-level failure worth switching to the fallback key: an expired/revoked/invalid
  *  key, an out-of-credits balance, or a workspace-scope problem. NOT a transient (429 /
  *  529 / timeout) or a content error (our own page_mismatch) — those must stay on the

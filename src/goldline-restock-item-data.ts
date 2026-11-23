@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getForecastSettings, getGlCatalog, getGlStores, getGlSupplyRef, getStoreScope} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
+import {getActivePoSet} from './goldline-po-form-data';
 import {onHandOf, type InventoryRowIn} from './goldline-inventory';
 import {SHIPMENT_COLS, SHIPMENT_OPEN, shipmentOf, type Shipment, type ShipmentRow} from './goldline-supply';
 import {forecastWindow, HOLD_REASONS, salesYear, type ForecastWindow, type MonthStatus} from './goldline-forecast';
@@ -131,6 +132,7 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
   for (const r of counts) if (latestEnd.get(r.store_code) === r.period_end) countMap.get(r.store_code)!.onHand.set(itemCode, onHandOf(r).onHand);
 
   const winIdx = window.lastYear.map((m) => yearMonths.indexOf(m));
+  const po = await getActivePoSet(companyId);
   const all = itemStoreLines({
     itemCode,
     window,
@@ -138,6 +140,7 @@ export async function getRestockItem(companyId: string, itemCode: string, runDat
     history: Object.entries(hist).map(([storeCode, units]) => ({storeCode, units: winIdx.map((i) => Number(units[i]) || 0)})),
     inScope: new Set(scopeRows.filter((s) => s.in_scope).map((s) => s.store_code)),
     retired: Boolean(p?.retired_at),
+    notOnPo: po ? !po.items.has(itemCode) : false,
     openFlagStores: new Set(flags.map((f) => f.store_code)),
     counts: countMap,
     shipments: shipments.map(shipmentOf).filter((s): s is Shipment => s != null),
