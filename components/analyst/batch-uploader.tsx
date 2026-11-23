@@ -147,11 +147,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{serverUploading ? 'Uploading scan' : !hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
+            <h2 className="font-heading text-base font-semibold">{serverUploading ? ((q.serverRun?.length ?? 1) > 1 ? `Uploading ${q.serverRun!.length} scans` : 'Uploading scan') : !hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
               {serverUploading ? (
                 sb!.phase === 'uploading'
-                  ? `Uploading the whole scan (${Math.round(sb!.uploadFrac * 100)}%). It reads on the server, so you can leave this page or refresh.`
+                  ? `${sb!.part && sb!.part.total > 1 ? `Scan ${sb!.part.index} of ${sb!.part.total}` : 'The whole scan'} is ${Math.round(sb!.uploadFrac * 100)}% uploaded. Keep this page open until the upload finishes.`
+                  : sb!.part && sb!.part.index < sb!.part.total
+                    ? `Scan ${sb!.part.index} of ${sb!.part.total} uploaded. Keep this page open for the next one.`
                   : sb!.phase === 'ingesting'
                     ? 'Uploaded. Splitting it into pages…'
                     : 'Uploaded. Reading starts in a moment…'
@@ -234,7 +236,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
         )}
 
         {serverUploading ? (
-          <ServerUploadStatus sb={sb!} />
+          <ServerUploadStatus sb={sb!} files={q.serverRun ?? []} />
         ) : !hasItems ? (
           <div
             role="button"
@@ -497,43 +499,90 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   );
 }
 
-// Server-driven upload (P2): the whole scan is going to storage / being split, before the
-// per-page rows arrive. A calm status with real upload progress, and the key reassurance —
-// it reads on the server, so leaving or refreshing is safe.
-function ServerUploadStatus({sb}: {sb: ServerBatchState}) {
+// Server-driven upload (P2): the scan PDFs are going to storage / being split, before the
+// per-page rows arrive. The file still uploads FROM THIS BROWSER, so the one thing the user
+// must do is keep the page open until every PDF is up; after that the reading lives on the
+// server and leaving is safe. That instruction leads, in the warning colour, until it's true.
+function ServerUploadStatus({sb, files}: {sb: ServerBatchState; files: {name: string; size: number}[]}) {
+  const total = Math.max(sb.part?.total ?? 1, files.length || 1);
+  const current = sb.part?.index ?? 1;
   const pct = sb.phase === 'uploading' ? Math.round(sb.uploadFrac * 100) : 100;
-  const step = sb.phase === 'uploading' ? 'Uploading scan' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
-  const many = sb.part && sb.part.total > 1 ? sb.part : null;
-  const label = many ? `Scan ${many.index} of ${many.total} · ${step.charAt(0).toLowerCase()}${step.slice(1)}` : step;
-  const more = many && many.index < many.total;
+  const uploadsLeft = sb.phase === 'uploading' || current < total;
+  const step = sb.phase === 'uploading' ? 'Uploading' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
+  const many = total > 1;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-4 py-5">
-      <div className="flex items-center gap-2.5">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
-        </span>
-        <div className="flex min-w-0 flex-col">
-          <span className="text-sm font-medium">{label}</span>
+    <div className="flex flex-col gap-3">
+      <div
+        role="status"
+        className={cn(
+          'flex items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors duration-200 ease-out',
+          uploadsLeft
+            ? 'border-[color:var(--status-warn)]/40 bg-[color:var(--status-warn)]/10'
+            : 'border-[color:var(--status-good)]/35 bg-[color:var(--status-good)]/10',
+        )}
+      >
+        {uploadsLeft ? (
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+        ) : (
+          <Check className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-good)'}} aria-hidden />
+        )}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-semibold">
+            {uploadsLeft ? 'Keep this page open' : many ? 'All scans uploaded' : 'Scan uploaded'}
+          </span>
           <span className="text-xs text-muted-foreground">
-            {more
-              ? 'Each scan reads on the server. Keep this page open until the last scan has uploaded; after that you can leave.'
-              : 'Reads on the server. You can leave this page or refresh, it won\u2019t stop.'}
+            {uploadsLeft
+              ? many
+                ? `The scans upload from this browser, one after another. Once scan ${total} of ${total} is up, reading carries on on the server and you can leave.`
+                : 'The scan uploads from this browser. Once it is up, reading carries on on the server and you can leave.'
+              : 'Reading carries on on the server. You can leave this page or refresh; it won\u2019t stop.'}
           </span>
         </div>
-        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{pct}%</span>
       </div>
-      <div
-        role="progressbar"
-        aria-label="Upload progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={pct}
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
-      >
+
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-4 py-4">
+        {many && (
+          <ol className="flex flex-col gap-1.5" aria-label="Scans in this upload">
+            {files.map((f, i) => {
+              const n = i + 1;
+              const state = n < current ? 'up' : n === current ? 'now' : 'next';
+              return (
+                <li key={`${f.name}-${i}`} className="flex items-center gap-2.5 text-sm">
+                  <span
+                    className={cn(
+                      'grid size-5 shrink-0 place-items-center rounded-full font-mono text-[10px] font-semibold',
+                      state === 'up' ? 'bg-[color:var(--status-good)]/15 text-[color:var(--status-good)]' : state === 'now' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {state === 'up' ? <Check className="size-3" aria-hidden /> : n}
+                  </span>
+                  <span className={cn('min-w-0 flex-1 truncate', state === 'next' && 'text-muted-foreground')} title={f.name}>{f.name}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {state === 'up' ? 'uploaded' : state === 'now' ? (sb.phase === 'uploading' ? `${pct}%` : step.toLowerCase()) : 'waiting'}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <div className="flex items-center gap-2.5">
+          <Loader2 className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
+          <span className="text-sm font-medium">{many ? `Scan ${current} of ${total} · ${step.toLowerCase()}` : step === 'Uploading' ? 'Uploading scan' : step}</span>
+          <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{pct}%</span>
+        </div>
         <div
-          className={cn('h-full min-w-[0.5rem] rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none', sb.phase !== 'uploading' && 'gl-progress-fill')}
-          style={{width: `${pct}%`}}
-        />
+          role="progressbar"
+          aria-label="Upload progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          className="h-2 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className={cn('h-full min-w-[0.5rem] rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none', sb.phase !== 'uploading' && 'gl-progress-fill')}
+            style={{width: `${pct}%`}}
+          />
+        </div>
       </div>
     </div>
   );

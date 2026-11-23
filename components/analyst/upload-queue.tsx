@@ -99,6 +99,8 @@ type QueueApi = {
    *  uploaded once and read server-side). Lets the UI offer the optional upload name. */
   serverUpload: boolean;
   serverBatch: ServerBatchState | null;
+  /** The PDFs in the current server-driven run, in upload order (one entry for a single scan). */
+  serverRun: {name: string; size: number}[] | null;
   active: number; // queued + running + waiting
   addFiles: (files: File[]) => Promise<void>;
   retry: (id: string) => void;
@@ -143,6 +145,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   // active the client-driven machinery (scheduler, split, beforeunload) stands down; the
   // ref lets those effects bail synchronously.
   const [serverBatch, setServerBatch] = useState<ServerBatchState | null>(null);
+  const [serverRun, setServerRun] = useState<{name: string; size: number}[] | null>(null);
   const serverBatchRef = useRef<ServerBatchState | null>(null);
   serverBatchRef.current = serverBatch;
   // Stamp when each server page first went 'running', so its progress band eases instead of
@@ -372,17 +375,20 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   }, [active, batch.id, items, splitting, router]);
 
   // Leaving the app (reload / close) would kill in-flight CLIENT uploads — warn first. The
-  // server-driven path is refresh-safe (the work lives in the DB), so it never warns.
+  // server-driven path is refresh-safe once its file is up (the work lives in the DB), but the
+  // PDF itself still uploads from this browser, and several PDFs go up one after another:
+  // warn while any of them is still uploading.
+  const serverUploadsLeft = Boolean(serverBatch && (serverBatch.phase === 'uploading' || (serverBatch.part && serverBatch.part.index < serverBatch.part.total)));
   useEffect(() => {
-    if (serverBatch) return;
-    if (!items.some((i) => i.state === 'queued' || i.state === 'running')) return;
+    if (serverBatch && !serverUploadsLeft) return;
+    if (!serverUploadsLeft && !items.some((i) => i.state === 'queued' || i.state === 'running')) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [items, serverBatch]);
+  }, [items, serverBatch, serverUploadsLeft]);
 
   // Server-driven path: start one whole-scan upload, then let the poll effect watch it.
   // Returns false when it failed, so a run of several scans stops there.
@@ -491,6 +497,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
           setNotice(`${empty.map((f) => `“${f.name}”`).join(', ')} ${empty.length === 1 ? 'is' : 'are'} empty.`);
           return;
         }
+        setServerRun(files.map((f) => ({name: f.name, size: f.size})));
         if (files.length === 1) {
           await startServerScan(files[0]);
           return;
@@ -578,6 +585,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       serverMode: Boolean(serverBatch),
       serverUpload,
       serverBatch,
+      serverRun,
       active,
       addFiles,
       retry: (id) => {
@@ -618,6 +626,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
         setBatch(EMPTY_BATCH);
         setForms(null);
         setServerBatch(null);
+        setServerRun(null);
         setUploadName('');
         serverStartedAt.current.clear();
         splitFor.current = null;
@@ -628,7 +637,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       dismissNotice: () => setNotice(null),
     }),
     // company: queueCompany.current follows it whenever the queue is empty.
-    [batch, items, preparing, notice, forms, splitting, serverBatch, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
+    [batch, items, preparing, notice, forms, splitting, serverBatch, serverRun, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
