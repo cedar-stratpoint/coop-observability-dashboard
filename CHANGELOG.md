@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Event lead contacts: search box
+
+The contact list on `/customers/leads` (and each event page's lead block, same component) gains a search box: name, email, Instagram handle (with or without "@"), pet, or mobile (spaces and dashes ignored). It narrows the list, the "n of N" count and the Copy emails button together, alongside the Prize and Collected filters. **Decision:** client-side, over the leads the page already holds (no new read), with the matcher as one pure function, `matchesLeadSearch` (`src/spin-leads-types.ts`, `test/spin-leads-search.test.ts`).
+
 ## 2026-11-20 — Ask Coop drafts, suggests and reads customer cohorts (RET-10, Stage 9B)
 
 The owner describes a cohort and does not build it. A new Ask Coop tool, **`propose_crm_cohort`**, turns a sentence like "Make a cohort: Circuit Makati buyers who haven't reordered" into a group, a name and a rule over the same closed field list as the 9A builder. Code then validates the draft with the builder's own validator and counts the preview with the page's evaluator (`cohortPreview` = `matchesCohort` over `customerRows`: count, repeat rate, up to five first names). Ask Coop draws the draft as a block with **Save cohort** and **Adjust the rule**. `{suggest: true}` drafts the first-order codes with buyers that no saved cohort covers yet (`cohortSuggestions` over RET-06 `codeCohorts`), for "what cohorts should we track?". `list_crm_customers` now reads saved cohorts:
