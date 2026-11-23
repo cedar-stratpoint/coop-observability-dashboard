@@ -104,7 +104,9 @@ import {
   textMatch,
   tierCounts,
   turnaround,
-  customerVouchers,
+  bdayVoucherText,
+  withVoucherFacts,
+  BUILTIN_RULE_COHORTS,
   voucherLabels,
   voucherUseText,
   EMPTY_CART_FILTER,
@@ -204,8 +206,8 @@ const BUILTINS: Array<{key: Exclude<CustomerAudience, 'all'>; label: string}> = 
   {key: 'repeat_promo', label: 'Repeat promo'},
   {key: 'win_back', label: 'Win-back'},
 ];
-/** The Cohort menu's value: 'all', a built-in audience, or `cohort:<id>` for a saved one. */
-type CohortSel = 'all' | Exclude<CustomerAudience, 'all'> | `cohort:${string}`;
+/** The Cohort menu's value: 'all', a built-in audience, a built-in rule cohort (RET-13A, listed through matchesCohort), or `cohort:<id>` for a saved one. */
+type CohortSel = 'all' | Exclude<CustomerAudience, 'all'> | (typeof BUILTIN_RULE_COHORTS)[number]['key'] | `cohort:${string}`;
 const savedSel = (id: string): CohortSel => `cohort:${id}`;
 
 
@@ -497,7 +499,9 @@ export function CrmView({
   // A saved cohort that is gone (deleted, or the read failed) falls back to All rather than an empty list.
   const savedCohort = cohortSel.startsWith('cohort:') ? (cohorts?.find((c) => savedSel(c.id) === cohortSel) ?? null) : null;
   const preset: CustomerAudience = cohortSel === 'repeat_promo' || cohortSel === 'win_back' ? cohortSel : 'all';
-  const cohortOn = preset !== 'all' || savedCohort !== null;
+  // RET-13A: a built-in that is a rule on a cohort field; it lists through matchesCohort like a saved cohort does.
+  const ruleBuiltin = BUILTIN_RULE_COHORTS.find((b) => b.key === cohortSel) ?? null;
+  const cohortOn = preset !== 'all' || savedCohort !== null || ruleBuiltin !== null;
   const filtersOn =
     tab === 'carts'
       ? filterActive(cartFilter)
@@ -540,8 +544,8 @@ export function CrmView({
     // Emails sent needs every CRM source and the manual count needs the log; an unread part is unknown for every row, never 0.
     const tally = contactTally({checkouts: checkouts ?? [], orders, birthdayVouchers: birthdayVouchers ?? [], membershipEvents: membershipEvents?.events ?? [], manualContacts: contacts ?? []});
     const rows = customerRows(enriched, tally, nowDate, {automated: checkouts !== null && birthdayVouchers !== null && membershipEvents !== null, manual: contacts !== null});
-    // RET-11: the codes each customer redeemed (counted orders only), for the Vouchers used column, its sort, the CSV and the profile.
-    return rows.map((r) => ({...r, vouchers: customerVouchers(r, orders)}));
+    // RET-11 / RET-13A: the codes each customer redeemed and this year's birthday voucher (one helper, shared with Ask Coop).
+    return withVoucherFacts(rows, orders, birthdayVouchers, nowDate);
   }, [customers, orders, checkouts, birthdayVouchers, membershipEvents, contacts, membership.programStart, nowDate]);
   // Each customer's logged contacts for the dialog, newest first (the read is already ordered that way).
   const contactsByEmail = useMemo(() => {
@@ -585,6 +589,7 @@ export function CrmView({
     }),
     [all, nowDate],
   );
+  const ruleBuiltinCounts = useMemo(() => new Map(BUILTIN_RULE_COHORTS.map((b) => [b.key, all.filter((r) => matchesCohort(r, b.rule)).length])), [all]);
   // Saved cohorts, sorted for the menu; their live counts; and each customer's labels (one evaluator: matchesCohort).
   const savedCohorts = useMemo(() => [...(cohorts ?? [])].sort(compareCohorts), [cohorts]);
   const cohortGroups = useMemo(() => {
@@ -605,22 +610,24 @@ export function CrmView({
   const orderRows = useMemo(() => sortRows(filterOrders(orders ?? [], orderFilter, needle), orderSort, ORDER_SORT), [orders, orderFilter, needle, orderSort]);
   const customerList = useMemo(() => {
     const audience = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
-    const listed = savedCohort ? audience.filter((r) => matchesCohort(r, savedCohort.rule)) : audience;
+    const rule = savedCohort?.rule ?? ruleBuiltin?.rule ?? null;
+    const listed = rule ? audience.filter((r) => matchesCohort(r, rule)) : audience;
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
-  }, [all, customerFilter, needle, preset, savedCohort, nowDate, customerSort]);
+  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort]);
   // The cohort bar: everyone in the selected cohort (search and the other filters aside), their repeat buyer rate and the rule.
   const cohortBar = useMemo(() => {
     if (!cohortOn) return null;
-    const members = savedCohort ? all.filter((r) => matchesCohort(r, savedCohort.rule)) : audienceRows(all, preset, nowDate);
-    const builtin = BUILTINS.find((b) => b.key === preset);
+    const rule = savedCohort?.rule ?? ruleBuiltin?.rule ?? null;
+    const members = rule ? all.filter((r) => matchesCohort(r, rule)) : audienceRows(all, preset, nowDate);
+    const builtin = ruleBuiltin ?? BUILTINS.find((b) => b.key === preset);
     return {
       label: savedCohort ? cohortLabel(savedCohort) : `Built in · ${builtin?.label ?? ''}`,
       count: members.length,
       rate: repeatRate(members.map((r) => r.orderCount)),
-      sentence: ruleText(savedCohort ? savedCohort.rule : BUILTIN_COHORT_RULES[preset as Exclude<CustomerAudience, 'all'>]),
+      sentence: ruleText(rule ?? BUILTIN_COHORT_RULES[preset as Exclude<CustomerAudience, 'all'>]),
     };
-  }, [cohortOn, savedCohort, all, preset, nowDate]);
-  const cohortName = savedCohort ? cohortLabel(savedCohort) : preset;
+  }, [cohortOn, savedCohort, ruleBuiltin, all, preset, nowDate]);
+  const cohortName = savedCohort ? cohortLabel(savedCohort) : (ruleBuiltin?.label ?? preset);
   const removeCohort = () => {
     if (!savedCohort) return;
     if (!confirmDelete) {
@@ -670,9 +677,9 @@ export function CrmView({
       const note = filterNote([['Payment', orderFilter.payment], ['Fulfillment', orderFilter.fulfillment], ['Reviewed', orderFilter.reviewed]], q);
       downloadCsv(`crm-orders (${orderRows.length}).csv`, orderCsv(orderRows, asOf, note));
     } else if (tab === 'customers') {
-      const name = savedCohort ? 'crm-customers-cohort' : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
+      const name = savedCohort ? 'crm-customers-cohort' : ruleBuiltin ? `crm-customers-${ruleBuiltin.key.replace('_', '-')}` : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
       const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers]], q);
-      downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name));
+      downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name, ruleBuiltin !== null));
     } else {
       const note = filterNote([['Voucher', petFilter]], q);
       downloadCsv(`crm-pet-birthdays (${petList.length}).csv`, petCsv(petList, asOf, note, thisYear));
@@ -974,7 +981,7 @@ export function CrmView({
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 Cohort
                 <select
-                  value={savedCohort || preset !== 'all' ? cohortSel : 'all'}
+                  value={savedCohort || preset !== 'all' || ruleBuiltin ? cohortSel : 'all'}
                   onChange={(e) => {
                     setConfirmDelete(false);
                     setCohortMsg(null);
@@ -991,6 +998,12 @@ export function CrmView({
                       <option key={b.key} value={b.key}>
                         {b.label}
                         {customerRead ? ` (${presetCounts[b.key]})` : ''}
+                      </option>
+                    ))}
+                    {BUILTIN_RULE_COHORTS.map((b) => (
+                      <option key={b.key} value={b.key}>
+                        {b.label}
+                        {customerRead ? ` (${birthdayVouchers === null || orders === null ? 'unknown' : (ruleBuiltinCounts.get(b.key) ?? 0)})` : ''}
                       </option>
                     ))}
                   </optgroup>
@@ -1305,6 +1318,7 @@ export function CrmView({
                           onSort={sortCustomers}
                           title="Discount codes redeemed on counted orders, most uses first. Hover a code for its orders"
                         />
+                        {ruleBuiltin && <th className={th} title="This year's birthday voucher: sent, not used (with its expiry), expired, or used">Birthday voucher</th>}
                         <SortTh label="First order" k="firstOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Last order" k="lastOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Days since" k="daysSince" sort={customerSort} onSort={sortCustomers} className="text-right" title="Philippine days since the last counted order" />
@@ -1422,6 +1436,7 @@ export function CrmView({
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.createdAt)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{c.orderCount}</td>
                           <td className="px-4 py-2.5"><VoucherChips uses={c.vouchers} /></td>
+                          {ruleBuiltin && <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{bdayVoucherText(c.bdayVoucher)}</td>}
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.firstOrderAt)}</td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.lastOrderAt)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{c.daysSinceLastOrder ?? '—'}</td>
@@ -1608,6 +1623,12 @@ export function CrmView({
                           <dt>Vouchers used</dt>
                           <dd><VoucherChips uses={c.vouchers} /></dd>
                         </div>
+                        {ruleBuiltin && (
+                          <div className="col-span-3 flex justify-between gap-2">
+                            <dt>Birthday voucher</dt>
+                            <dd className="text-foreground">{bdayVoucherText(c.bdayVoucher)}</dd>
+                          </div>
+                        )}
                         <div className="col-span-3 flex justify-between gap-2">
                           <dt>Last contacted</dt>
                           <dd className="text-foreground">

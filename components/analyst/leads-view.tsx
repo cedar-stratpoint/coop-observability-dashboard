@@ -7,7 +7,7 @@ import type {LeadMatch} from '@/src/lead-order-match';
 import {FOLLOW_UP_DAYS, addDays, followUpMessage, leadKey, petName, treatPhrase, type FollowUpStage} from '@/src/lead-order-match';
 import {manilaDayKey} from '@/src/pos-sales-compute';
 import {SegmentedControl} from './segmented-control';
-import {LeadCapture} from './lead-capture';
+import {LeadCapture, type VoucherProps} from './lead-capture';
 
 const VIEWS = [
   {value: 'contacts', label: 'Contacts'},
@@ -15,12 +15,12 @@ const VIEWS = [
 ] as const;
 
 /** /customers/leads: the contact list, or the day's follow-up messages built from it. */
-export function LeadsView({leads, matches}: {leads: SpinLead[]; matches: Record<string, LeadMatch>}) {
+export function LeadsView({leads, matches, ...voucher}: {leads: SpinLead[]; matches: Record<string, LeadMatch>} & VoucherProps) {
   const [view, setView] = useState<'contacts' | 'followups'>('contacts');
   return (
     <div className="flex flex-col gap-6">
       <SegmentedControl ariaLabel="Leads view" options={VIEWS} value={view} onChange={setView} />
-      {view === 'contacts' ? <LeadCapture leads={leads} orders={0} matches={matches} /> : <FollowUps leads={leads} matches={matches} />}
+      {view === 'contacts' ? <LeadCapture leads={leads} orders={0} matches={matches} voucher={voucher} /> : <FollowUps leads={leads} matches={matches} />}
     </div>
   );
 }

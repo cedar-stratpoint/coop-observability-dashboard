@@ -160,7 +160,7 @@ const checkoutsCached = unstable_cache(async (): Promise<CrmCheckout[] | null> =
   }
 }, ['crm-checkouts'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CRM_TAG]});
 
-/** The voucher ledger, projected on the server (projectBirthdayVoucher keeps email, year, tier, sentAt): no voucher code reaches the page. */
+/** The voucher ledger, projected on the server (projectBirthdayVoucher keeps email, year, tier, sentAt, expiresAt, never the code): no voucher code reaches the page. */
 export const getCrmBirthdayVouchers = cache((): Promise<CrmBirthdayVoucherSafe[] | null> =>
   crmConfigured() ? birthdaysCached() : Promise.resolve(null),
 );
