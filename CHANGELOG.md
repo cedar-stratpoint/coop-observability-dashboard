@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Scan review: the hovered row is highlighted in the list too; "Show in scan" retired
+
+The row the reviewer points at is now tinted in the rows list as well (the same primary tint as its box on the scan, plus a left bar), so the pair reads at a glance. The per-row "Show in scan" crosshair is removed: hovering or focusing a row now boxes it on the always-visible scan, which does the same job without opening the enlarged view. Existing uploads from today (the Oct 16 to 31 scans) were backfilled with row boxes and page slant on Nichido Staging (53 pages, 2,558 rows, $0.87 at normal price) so they get the box too.
+
 ## 2026-11-23 — Scan review: the row box tilts with slanted pages, follows the flag navigator, and carries the reader's note
 
 Step 4 of the scan-review plan (polish). Scans are often slightly slanted (up to about 1.4° on the October scan), so a straight box drifts off its row toward the far edge. The page's slant is now measured on the server from the same 1000 px image the row-box request uses (`src/goldline-slant.ts`: neighbouring narrow strips across the ruled table, each shift refined to a fraction of a pixel; within about 0.2° of the hand measurements on six answer-key pages), carried in the box request's batch id, and stored on the page (`slant` on the extraction document, no schema change) when its boxes are set. Review tilts the box around the ITEM# column. The box also follows the flag navigator (jumping to the next flagged row points the scan at it), turns with the page when the reviewer used Rotate 180°, and carries a tag with the item code and the reader's "could be" note, placed in the page's left margin so it never covers the neighbouring rows. Pages read before this keep a straight box.
