@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Uploads: "Keep this page open" leads the upload status until every scan is up
+
+Follow-up to the several-PDFs fix. The card header still said "you can leave this page or refresh" while the status below said to keep it open; and even a single scan is not safe to leave while its PDF is uploading (the file goes up from the browser; only the reading is on the server). Now the upload status opens with a banner in the warning colour, "Keep this page open", for as long as any PDF is still uploading, then turns to a calm "All scans uploaded" (or "Scan uploaded") once leaving is safe. Several PDFs get a numbered list (uploaded ✓ / N% / waiting) above the current progress bar, the header reads "Uploading 2 scans" with "Scan 1 of 2 is N% uploaded", and the browser asks before leaving while an upload is in flight (it never did on the server path).
+
 ## 2026-11-23 — Event lead contacts: search box
 
 The contact list on `/customers/leads` (and each event page's lead block, same component) gains a search box: name, email, Instagram handle (with or without "@"), pet, or mobile (spaces and dashes ignored). It narrows the list, the "n of N" count and the Copy emails button together, alongside the Prize and Collected filters. **Decision:** client-side, over the leads the page already holds (no new read), with the matcher as one pure function, `matchesLeadSearch` (`src/spin-leads-types.ts`, `test/spin-leads-search.test.ts`).
