@@ -43,6 +43,17 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   // accidental click shouldn't start processing a 100-page scan.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // When files are added, bring the tray into view. Typing a name first pushes the tray below
+  // the tall drop zone, so a drop looked like it did nothing (user report 2026-11-23).
+  const trayRef = useRef<HTMLDivElement>(null);
+  const prevPending = useRef(0);
+  useEffect(() => {
+    const grew = pending.length > prevPending.current;
+    prevPending.current = pending.length;
+    if (!grew || !trayRef.current) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    trayRef.current.scrollIntoView({block: 'nearest', behavior: reduce ? 'auto' : 'smooth'});
+  }, [pending.length]);
   const running = Boolean(q?.items.some((i) => i.state === 'running'));
   useEffect(() => {
     if (!running) return;
@@ -238,7 +249,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             }}
             {...dropProps}
             className={cn(
-              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center outline-none transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
+              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 text-center outline-none',
+              pending.length > 0 ? 'py-4' : 'py-10',
+              ' transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
               dragging ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-muted/40',
               disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
@@ -247,11 +260,11 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               <span className="flex size-11 items-center justify-center rounded-full bg-primary/15 text-primary">
                 <Loader2 className="size-5 animate-spin" aria-hidden />
               </span>
-            ) : (
+            ) : pending.length === 0 ? (
               <UploadIllustration active={dragging} className="mb-1" />
-            )}
+            ) : null}
             <span className="text-sm">
-              <span className="font-medium">{q.preparing ? 'Preparing pages…' : dragging ? 'Drop to add them' : 'Drop files here'}</span>
+              <span className="font-medium">{q.preparing ? 'Preparing pages…' : dragging ? 'Drop to add them' : pending.length > 0 ? 'Drop more files here' : 'Drop files here'}</span>
               {!dragging && !q.preparing && (
                 <>
                   <span className="text-muted-foreground"> or </span>
@@ -259,6 +272,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 </>
               )}
             </span>
+            {pending.length === 0 && (
             <span className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
                 <FileTypeBadge filename="x.pdf" /> Inventory form (pages or whole form)
@@ -270,6 +284,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 <FileTypeBadge filename="x.xlsx" /> POS Sales Data (Watsons, one month)
               </span>
             </span>
+            )}
           </div>
         ) : (
           <>
@@ -393,9 +408,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
         {/* Staging tray: the files picked but not yet submitted. Shown on screen so the
             user can add more (drop/browse above) or remove any, then confirm with Upload. */}
         {pending.length > 0 && (
-          <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3.5">
+          <div ref={trayRef} className="flex scroll-mb-6 flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3.5">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="text-sm font-medium">
+              <span className="text-sm font-medium" aria-live="polite">
                 {pending.length} {pending.length === 1 ? 'file' : 'files'} ready to upload
               </span>
               <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
