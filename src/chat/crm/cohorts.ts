@@ -5,7 +5,7 @@
 // write path: no client, no action, no RPC. The only way a draft becomes a cohort is a person clicking Save cohort, which calls the 9A
 // create action (src/customer-cohorts-actions.ts) as the signed-in user. The model is told, every time, that nothing was saved.
 import {condText, ruleText, type CohortRule} from '../../crm-compute';
-import {cohortLabel, cohortPreview, cohortSuggestions, labelTaken, readCohortInput, ruleUsesContact, type CohortDraftInput, type CohortPreview, type CustomerCohort} from '../../customer-cohorts';
+import {cohortLabel, cohortPreview, cohortSuggestions, labelTaken, readCohortInput, ruleUsesBday, ruleUsesContact, type CohortDraftInput, type CohortPreview, type CustomerCohort} from '../../customer-cohorts';
 import type {CohortDraftBlock} from '../block-types';
 import type {MetricError} from '../result-types';
 
@@ -58,13 +58,17 @@ export interface ProposeContext {
   rows: Rows;
   /** False when a contact source could not be read: then conditions on last contacted or times contacted match nobody. */
   contactKnown: boolean;
+  /** RET-13A: false when the birthday voucher ledger could not be read: then a condition on the birthday voucher matches nobody. Absent = known. */
+  bdayKnown?: boolean;
   saved: readonly CustomerCohort[];
   emit?: (block: CohortDraftBlock) => void;
   nextId: () => string;
 }
 
-const contactCaveat = (rule: CohortRule, known: boolean): string[] =>
-  !known && ruleUsesContact(rule) ? ['A contact source could not be read, so the conditions on last contacted or times contacted match nobody in this preview.'] : [];
+const contactCaveat = (rule: CohortRule, known: boolean, bdayKnown = true): string[] => [
+  ...(!known && ruleUsesContact(rule) ? ['A contact source could not be read, so the conditions on last contacted or times contacted match nobody in this preview.'] : []),
+  ...(!bdayKnown && ruleUsesBday(rule) ? ['The birthday voucher ledger could not be read, so the condition on the birthday voucher matches nobody in this preview.'] : []),
+];
 const previewOut = (p: CohortPreview) => ({customers: p.customers, buyers: p.buyers, repeat_buyers: p.repeat, repeat_rate_pct: p.ratePct});
 
 /** A draft label that is already saved: never a second draft of it (the save would be refused anyway). */
@@ -80,7 +84,7 @@ export function runPropose(req: ProposeRequest, ctx: ProposeContext): unknown {
     const dup = duplicateError(req.draft, ctx.saved);
     if (dup) return dup;
     const preview = cohortPreview(ctx.rows, req.draft.rule);
-    const caveats = contactCaveat(req.draft.rule, ctx.contactKnown);
+    const caveats = contactCaveat(req.draft.rule, ctx.contactKnown, ctx.bdayKnown);
     const id = ctx.nextId();
     ctx.emit?.(draftBlock(id, req.draft, preview, caveats));
     return {

@@ -202,6 +202,8 @@ export function cohortPreview(rows: readonly (CohortRow & {firstName?: string | 
 
 /** True when the rule reads last contacted or times contacted: those need every contact source read, or they match nobody. */
 export const ruleUsesContact = (rule: CohortRule): boolean => rule.all.some((c) => c.f === 'lcdays' || c.f === 'times');
+/** True when the rule reads this year's birthday voucher: it needs the voucher ledger and the orders read, or it matches nobody (RET-13A). */
+export const ruleUsesBday = (rule: CohortRule): boolean => rule.all.some((c) => c.f === 'bday');
 
 export type CohortDraftInput = CohortLabel & {rule: CohortRule};
 export type CohortSuggestion = {code: string; buyers: number; repeat: number; ratePct: number; small: boolean; draft: CohortDraftInput};

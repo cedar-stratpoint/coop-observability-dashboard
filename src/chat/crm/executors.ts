@@ -235,7 +235,7 @@ export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (
       const out = await tracked(deps, 'propose_crm_cohort', {kind: req.kind}, (get) => crmCohortRows(get, deps.now, deps.manualContacts), (r) => r.rows.length);
       if (isMetricError(out)) return out;
       const emit = deps.emitBlock;
-      return runPropose(req, {rows: out.rows, contactKnown: out.contactKnown, saved, emit: emit ? (b) => emit(b) : undefined, nextId: () => `cd${++drafts}`});
+      return runPropose(req, {rows: out.rows, contactKnown: out.contactKnown, bdayKnown: out.bdayKnown, saved, emit: emit ? (b) => emit(b) : undefined, nextId: () => `cd${++drafts}`});
     },
     list_crm_checkouts: tool('list_crm_checkouts', readCheckoutsInput, crmCheckoutsResult),
   };

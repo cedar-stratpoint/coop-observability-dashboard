@@ -57,6 +57,13 @@ export const PRIZE_LABEL: Record<string, string> = {
   'free-ship': 'Free Shipping',
 };
 
+/**
+ * RET-13B: the prizes that are vouchers (by label, the table stores labels). The item prizes (Poop Bag, bandana,
+ * toy or collar, free item) are not. A brand-new storefront prize is not a voucher until it is added here.
+ */
+export const VOUCHER_PRIZES: readonly string[] = ['₱300 Off', '30% Off', '35% Off', 'Free Shipping'];
+export const isVoucherPrize = (label: string | null | undefined): boolean => VOUCHER_PRIZES.includes((label ?? '').trim());
+
 /** "@KylRvr" → {instagram: "kylrvr"}; "A@x.com" → {email: "A@x.com"}; junk → null. Same rules as the CSV import. */
 export function splitContact(contact: string): {email: string | null; instagram: string | null} | null {
   const c = contact.trim();

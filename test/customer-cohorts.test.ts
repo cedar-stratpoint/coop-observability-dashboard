@@ -10,7 +10,10 @@ import {
   COHORT_FIELDS,
   COHORT_FIELD_SPEC,
   COHORT_RULE_MAX_CONDS,
+  codesUsedList,
   condText,
+  customerVouchers,
+  enrichCustomers,
   contactTally,
   customerRows,
   inAudience,
@@ -45,6 +48,7 @@ const NOW = new Date('2026-11-10T04:00:00Z');
 const row = (o: Partial<CohortRow> = {}): CohortRow => ({
   orderCount: 1,
   firstOrderCode: 'CIRCUIT10',
+  codesUsed: ['CIRCUIT10'] as string[] | null,
   firstOrderAt: '2026-10-01T02:00:00Z',
   daysSinceLastOrder: 40,
   spent: 1200,
@@ -65,8 +69,8 @@ const ok = (input: unknown): CohortRule => {
 };
 
 describe('9A the closed field list', () => {
-  it('has exactly the ten owner fields, each with a plain label and its operators', () => {
-    expect([...COHORT_FIELDS]).toEqual(['code', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent']);
+  it('has exactly the twelve owner fields, each with a plain label and its operators', () => {
+    expect([...COHORT_FIELDS]).toEqual(['code', 'anycode', 'bday', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent']);
     for (const f of COHORT_FIELDS) {
       expect(COHORT_FIELD_SPEC[f].label, f).not.toMatch(/^[a-z]+$/); // a label, never the code
       expect(COHORT_FIELD_SPEC[f].ops.length, f).toBeGreaterThan(0);
@@ -82,7 +86,7 @@ describe('9A readCohortRule: the one validator (builder, server action, and 9B A
     ).toEqual(rule({f: 'code', op: 'is', v: 'CIRCUIT10'}, {f: 'orders', op: 'eq', v: 1}, {f: 'tier', op: 'is', v: 'gold'}, {f: 'life', op: 'gte', v: 1500.5}));
   });
   it('accepts every field with every one of its operators', () => {
-    const sample: Record<string, string | number> = {code: 'X', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 0, consent: 'subscribed'};
+    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', bday: 'unused', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 0, consent: 'subscribed'};
     for (const f of COHORT_FIELDS) for (const op of COHORT_FIELD_SPEC[f].ops) expect('rule' in readCohortRule({all: [{f, op, v: sample[f]}]}), `${f} ${op}`).toBe(true);
   });
   it.each([
@@ -248,7 +252,7 @@ describe('9A rules read as plain sentences (never field codes)', () => {
     expect(condText(c)).toBe(text);
   });
   it('no sentence ever shows a field or operator code', () => {
-    const sample: Record<string, string | number> = {code: 'X', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 2, consent: 'not_subscribed'};
+    const sample: Record<string, string | number> = {code: 'X', anycode: 'X', bday: 'unused', first: '2026-10-01', orders: 1, days: 30, life: 1000, ytd: 500, tier: 'gold', lcdays: 30, times: 2, consent: 'not_subscribed'};
     for (const f of COHORT_FIELDS) {
       for (const op of COHORT_FIELD_SPEC[f].ops) {
         const t = condText({f, op, v: sample[f]} as CohortRule['all'][number]);
@@ -262,7 +266,7 @@ describe('9A built-ins stay inAudience and match it exactly', () => {
   const c = (orderCount: number, lastOrderAt: string | null): EnrichedCustomer => ({
     shopifyCustomerId: `${orderCount}-${lastOrderAt}`, email: null, firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null,
     membershipTier: null, petName: null, petBirthday: null, emailMarketingState: null, createdAt: null, updatedAt: null,
-    orderCount, spent: 0, spendYtd: 0, firstOrderAt: lastOrderAt, lastOrderAt, firstOrderCode: orderCount ? 'no code' : null,
+    orderCount, spent: 0, spendYtd: 0, firstOrderAt: lastOrderAt, lastOrderAt, firstOrderCode: orderCount ? 'no code' : null, codesUsed: null,
   });
   const days = [null, 0, 29, 30, 31, 59, 60, 61, 400];
   const at = (d: number | null) => (d === null ? null : new Date(NOW.getTime() - d * 86_400_000).toISOString());
@@ -283,7 +287,7 @@ describe('9A customerRows carries days since last contacted for the evaluator', 
   const e: EnrichedCustomer = {
     shopifyCustomerId: '1', email: 'mia@x.com', firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null, membershipTier: null,
     petName: null, petBirthday: null, emailMarketingState: null, createdAt: null, updatedAt: null,
-    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null,
+    orderCount: 1, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null,
   };
   it('PH days since the last contact when known; null when never or unknown', () => {
     const tally = contactTally({checkouts: [], orders: [], birthdayVouchers: [], manualContacts: [{email: 'mia@x.com', channel: 'sms', contactedAt: '2026-10-31T04:00:00Z'}]});
@@ -478,5 +482,80 @@ describe('9A negative: no send path, no hand tagging, the table stays service-ro
     expect(sql).toMatch(/create unique index if not exists \w+ on public\.customer_cohorts \(lower\(group_name\), lower\(name\)\)/i);
     expect(sql).toMatch(/enable row level security/i);
     expect(sql).not.toMatch(/create policy|grant |\bkey\s+text|\bvalue\s+text|member/i);
+  });
+});
+
+describe('RET-12 "Used code (any order)"', () => {
+  const cust = (id: string) => ({shopifyCustomerId: id, email: `${id}@x.com`, firstName: null, lastName: null, phone: null, ordersCount: null, totalSpent: null, membershipTier: null, petName: null, petBirthday: null, emailMarketingState: null, createdAt: null, updatedAt: null});
+  const ord = (id: string, n: number, codes: string[], over: Record<string, unknown> = {}) => ({
+    shopifyOrderId: `${id}-${n}`, shopifyCustomerId: id, orderNumber: `#${id}${n}`, email: `${id}@x.com`, totalPrice: '500', currency: 'PHP',
+    financialStatus: 'paid', fulfillmentStatus: null, createdAt: `2026-0${n}-01T00:00:00Z`, fulfilledAt: null, reviewRequestSentAt: null, reviewSubmittedAt: null,
+    discountCodes: codes, ...over,
+  });
+  const rowsOf = (orders: ReturnType<typeof ord>[], ids: string[]) =>
+    enrichCustomers(ids.map(cust), orders, '2026-01-01').map((c) => ({...row(), ...c, daysSinceLastOrder: 10}) as CohortRow);
+  const any = (op: 'is' | 'is_not', v: string) => rule({f: 'anycode', op, v});
+
+  it('a code on the 2nd order matches "used on any order" but not the first-order code field', () => {
+    const [r] = rowsOf([ord('a', 1, []), ord('a', 2, ['GRAND300'])], ['a']);
+    expect(r.codesUsed).toEqual(['GRAND300']);
+    expect(matchesCohort(r, any('is', 'GRAND300'))).toBe(true);
+    expect(matchesCohort(r, rule({f: 'code', op: 'is', v: 'GRAND300'}))).toBe(false);
+  });
+  it('"no code" = no code on any counted order; a code on order 3 puts the buyer out', () => {
+    const [none, late, bday] = rowsOf([ord('a', 1, []), ord('a', 2, []), ord('b', 1, []), ord('b', 2, []), ord('b', 3, ['GRAND300']), ord('c', 1, ['BDAY-'])], ['a', 'b', 'c']);
+    expect(matchesCohort(none, any('is', 'no code'))).toBe(true);
+    expect(matchesCohort(late, any('is', 'no code'))).toBe(false);
+    expect(matchesCohort(bday, any('is', 'no code'))).toBe(false); // a birthday code counts as a code
+    expect(matchesCohort(none, any('is_not', 'no code'))).toBe(false);
+    expect(matchesCohort(late, any('is_not', 'no code'))).toBe(true);
+  });
+  it('"is not X" includes code-less buyers and excludes X users', () => {
+    const [x, other, none] = rowsOf([ord('a', 1, ['GRAND300']), ord('b', 1, ['RETURN30']), ord('c', 1, [])], ['a', 'b', 'c']);
+    expect([x, other, none].map((r) => matchesCohort(r, any('is_not', 'GRAND300')))).toEqual([false, true, true]);
+  });
+  it('0 orders matches nothing, in all four forms', () => {
+    const [r] = rowsOf([], ['a']);
+    expect(r.codesUsed).toBeNull();
+    for (const [op, v] of [['is', 'GRAND300'], ['is_not', 'GRAND300'], ['is', 'no code'], ['is_not', 'no code']] as const) {
+      expect(matchesCohort(r, any(op, v)), `${op} ${v}`).toBe(false);
+    }
+  });
+  it('a test order never counts; BDAY- reads as the birthday key; BUNDLE- collapses', () => {
+    const [t, b, u] = rowsOf(
+      [ord('a', 1, ['GRAND300'], {test: true}), ord('a', 2, []), ord('b', 1, ['BDAY-']), ord('c', 1, ['BUNDLE-1']), ord('c', 2, ['BUNDLE-2'])],
+      ['a', 'b', 'c'],
+    );
+    expect(matchesCohort(t, any('is', 'GRAND300'))).toBe(false);
+    expect(matchesCohort(t, any('is', 'no code'))).toBe(true);
+    expect(matchesCohort(b, any('is', 'birthday voucher'))).toBe(true);
+    expect(matchesCohort(b, any('is_not', 'birthday voucher'))).toBe(false);
+    expect(u.codesUsed).toEqual(['BUNDLE (auto)']);
+    expect(matchesCohort(u, any('is', 'bundle (auto)'))).toBe(true);
+  });
+  it('codesUsed equals the labels of customerVouchers for every customer', () => {
+    const orders = [ord('a', 1, ['GRAND300', 'BDAY-']), ord('a', 2, ['RETURN30']), ord('b', 1, []), ord('c', 1, ['BUNDLE-9'])];
+    for (const e of enrichCustomers(['a', 'b', 'c'].map(cust), orders, '2026-01-01')) {
+      const labels = new Set((customerVouchers(e, orders as never) ?? []).map((v) => v.label.toUpperCase()));
+      expect(new Set((e.codesUsed ?? []).map((k) => k.toUpperCase())), e.shopifyCustomerId).toEqual(labels);
+    }
+  });
+  it('codesUsedList: codes with buyers, biggest first', () => {
+    const rows = rowsOf([ord('a', 1, ['B']), ord('b', 1, ['A']), ord('c', 1, ['A']), ord('d', 1, [])], ['a', 'b', 'c', 'd']);
+    expect(codesUsedList(rows)).toEqual(['A', 'B']);
+  });
+  it('sentences say it in words, never the field code', () => {
+    expect(condText({f: 'anycode', op: 'is', v: 'GRAND300'})).toBe('Used code GRAND300 on any order');
+    expect(condText({f: 'anycode', op: 'is_not', v: 'GRAND300'})).toBe('Never used code GRAND300');
+    expect(condText({f: 'anycode', op: 'is', v: 'NO CODE'})).toBe('Never used any code');
+    expect(condText({f: 'anycode', op: 'is_not', v: 'NO CODE'})).toBe('Used a code on some order');
+    expect(condText({f: 'anycode', op: 'is', v: 'BIRTHDAY VOUCHER'})).toBe('Used a birthday voucher on some order');
+    expect(condText({f: 'anycode', op: 'is_not', v: 'BIRTHDAY VOUCHER'})).toBe('Never used a birthday voucher');
+    expect(ruleText(rule({f: 'anycode', op: 'is', v: 'GRAND300'}, {f: 'orders', op: 'eq', v: 1}))).not.toMatch(/anycode/);
+  });
+  it('readCohortRule accepts anycode is / is not and refuses gte', () => {
+    expect(readCohortRule({all: [{f: 'anycode', op: 'is', v: 'grand300'}]})).toEqual({rule: {all: [{f: 'anycode', op: 'is', v: 'GRAND300'}]}});
+    expect(readCohortRule({all: [{f: 'anycode', op: 'is_not', v: 'x'}]})).toHaveProperty('rule');
+    expect(readCohortRule({all: [{f: 'anycode', op: 'gte', v: 'x'}]})).toHaveProperty('error');
   });
 });

@@ -10,6 +10,7 @@ type Row = CohortRow & {firstName: string | null; lastName?: string | null; emai
 const row = (o: Partial<Row> = {}): Row => ({
   orderCount: 1,
   firstOrderCode: 'CIRCUIT10',
+  codesUsed: ['CIRCUIT10'] as string[] | null,
   firstOrderAt: '2026-10-01T02:00:00Z',
   daysSinceLastOrder: 40,
   spent: 1200,
