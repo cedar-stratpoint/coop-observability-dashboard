@@ -61,6 +61,8 @@ export type CrmOrder = {
   test?: boolean;
   // RET-06: the order's discount codes (raw.discount_codes), upper-cased, a BDAY- voucher cut to "BDAY-"; projectOrder always sets it, hand-built orders may leave it out (= no code).
   discountCodes?: string[];
+  // RET-11: the amount off per code (raw.discount_codes[].amount), index for index with discountCodes; null = not readable. Optional like discountCodes.
+  discountAmounts?: (number | null)[];
   // Shopify line items as the CRM sends them (a JSON string). Only the Overview's
   // custom date range reads it (units + top products) — see src/custom-range.ts.
   lineItems?: string | null;
