@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Event lead contacts: spin voucher winners with no website order (RET-13B, Stage 9D)
+
+`/customers/leads` gains a filter **Won a voucher, no website order since (N)**, so Syl can bump booth winners who never came to the website. While it is on the table adds Website order since spin (No / PH date / Unknown), Last logged contact and a **Log contact** button per email lead (the existing `ContactLogDialog`), plus **Download CSV**; Copy emails works on the filtered rows. A summary line counts voucher winners, those who ordered since, and Instagram-only leads. A note says public codes like GRAND300 have no recipient list: Coop can only show who used them (Website CRM, Used code (any order)).
+
+**Decisions.**
+- **Vouchers are the four discount prizes by label** (`VOUCHER_PRIZES`: ₱300 Off, 30% Off, 35% Off, Free Shipping); item prizes and unknown raw prize ids are not vouchers.
+- **Any counted (non-test) website order by the lead's email at or after the spin means "used".** The lead row carries no code and the data cannot tell a website code from a booth discount. A winner who ordered without the voucher drops off the list; accepted until the storefront exposes per-prize codes.
+- **Unknown is never "not used".** CRM orders unread gives Unknown; an Instagram-only lead (no email) is counted apart and never listed.
+- **Computed on the server** (`spinVoucherState` in `src/spin-voucher.ts`): the CRM orders list stays off the browser, only state and first order date per lead ship. The event page's lead block does not pass the new props, so it is unchanged. Page only, no Ask Coop.
+- The CSV has no voucher code and no recovery link; nothing sends.
+
 ## 2026-11-23 — Website CRM: "Birthday voucher not used" (RET-13A, Stage 9D)
 
 Syl's priority B(b), birthday half: a bump list of customers who were sent this year's birthday voucher and have not used it. **Decision: it is a cohort field plus one built-in, not a new page.** These are CRM customers, so the Customers table already gives CSV, Log contact, Last contacted, the profile and Ask Coop. New cohort field **Birthday voucher (this year)** (`bday`, is / is not: Sent, not used · Sent, expired unused · Sent and used · Not sent this year) and the built-in cohort **Birthday voucher not used** (`bday is unused`), listed through `matchesCohort` under "Built in". While it is selected the table adds a Birthday voucher column (Sent, not used · expires Dec 3 / Expired / Used) and the CSV adds the same column.

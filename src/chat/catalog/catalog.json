@@ -1283,15 +1283,16 @@
   {
    "route": "/customers/leads",
    "title": "Booth leads",
-   "shows": "Booth leads matched to orders and prizes",
-   "data": "spin_wheel_leads, pos_orders, pos_order_prizes",
+   "shows": "Booth leads matched to orders and prizes; RET-13B: a filter \"Won a voucher, no website order since\" (voucher prizes ₱300 Off, 30% Off, 35% Off, Free Shipping; any counted website order by the lead's email at or after the spin counts as used; unread CRM orders = Unknown; Instagram-only leads counted apart) with a Website order since spin column, Last logged contact, Log contact per email lead, Download CSV (no code, no link)",
+   "data": "spin_wheel_leads, pos_orders, pos_order_prizes, customer_contacts, website CRM (API)",
    "domains": [
     "booth-leads",
     "pos-sales",
-    "pos-prizes-sampling"
+    "pos-prizes-sampling",
+    "crm-api"
    ],
    "fenced": false,
-   "access": "full",
+   "access": "none (page only)",
    "redirectTo": null
   },
   {
