@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, RefreshCw, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, Maximize2, RefreshCw, RotateCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -14,6 +14,7 @@ import {cn} from '@/lib/utils';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
+import {useScanRotation} from '@/components/analyst/scan-rotation';
 import {rowBandFor} from '@/src/goldline-extract';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
@@ -120,6 +121,8 @@ export function UploadReview({
   // Re-read a failed page in place (synchronous, heartbeat-kept-alive), then refresh to pick up
   // the new status/reason — so a "couldn't read" page is retried without leaving this screen.
   const [rereading, setRereading] = useState(false);
+  // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
+  const rot = useScanRotation(upload.id, upload.orientation);
   const rereadPage = () => {
     setRereading(true);
     sendReread({company, uploadId: upload.id})
@@ -452,11 +455,16 @@ export function UploadReview({
                   <CardTitle className="inline-flex items-center gap-2 text-sm">
                     <FileText className="size-3.5 text-muted-foreground" /> Scan
                   </CardTitle>
-                  <a href={scanUrl} target="_blank" rel="noopener noreferrer">
-                    <Button variant="ghost" size="xs">
-                      <ExternalLink className="size-3.5" /> Open
+                  <span className="flex items-center gap-0.5">
+                    <Button variant="ghost" size="xs" onClick={rot.toggle} aria-pressed={rot.flipped} title="Turn this scan upside down" className="max-md:hidden">
+                      <RotateCw className="size-3.5" /> Rotate 180°
                     </Button>
-                  </a>
+                    <a href={scanUrl} target="_blank" rel="noopener noreferrer">
+                      <Button variant="ghost" size="xs">
+                        <ExternalLink className="size-3.5" /> Open
+                      </Button>
+                    </a>
+                  </span>
                 </div>
               </CardHeader>
               <CardContent>
@@ -485,10 +493,14 @@ export function UploadReview({
                   className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
                   aria-label="Enlarge scan"
                 >
+                  {/* Turned with CSS: the browser PDF viewer can't be told to rotate. Its toolbar is hidden
+                      while turned so it isn't shown upside down. */}
                   <iframe
-                    src={scanUrl}
+                    key={rot.deg}
+                    src={rot.deg === 180 ? `${scanUrl}#toolbar=0&navpanes=0` : scanUrl}
                     title="Scanned inventory form"
                     tabIndex={-1}
+                    style={rot.deg === 180 ? {transform: 'rotate(180deg)'} : undefined}
                     className={cn('pointer-events-none w-full', extraction ? 'h-[360px] lg:h-[min(640px,calc(100dvh-12rem))]' : 'h-[20rem]')}
                   />
                   <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
@@ -781,7 +793,7 @@ export function UploadReview({
           {/* The page rendered to a canvas with the approximate row band drawn in the page's own
               coordinate space (same viewer the batch review uses), so the band stays locked on. */}
           <div className="min-h-0 w-full flex-1">
-            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} className="h-full" />
+            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} rotation={rot.deg} onRotate={rot.toggle} className="h-full" />
           </div>
           <button
             type="button"

@@ -4,10 +4,11 @@ import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, Maximize2, RotateCw, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
+import {useScanRotation} from '@/components/analyst/scan-rotation';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
@@ -237,6 +238,8 @@ export function BatchReview({
     }
   }, [hydrated, state, pages, editable, committed, batch.id]);
   const cur = pages[tab];
+  // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
+  const rot = useScanRotation(cur?.upload.id, cur?.upload.orientation);
   const curState = cur ? state[cur.upload.id] : null;
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
@@ -600,9 +603,20 @@ export function BatchReview({
                         <span className="inline-flex items-center gap-1.5 text-sm font-medium">
                           <FileText className="size-3.5 text-muted-foreground" /> Scan
                         </span>
-                        <a href={cur.scanUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-muted">
-                          <ExternalLink className="size-3.5" /> Open
-                        </a>
+                        <span className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={rot.toggle}
+                            aria-pressed={rot.flipped}
+                            title="Turn this scan upside down"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-[background-color,transform] duration-150 ease-out hover:bg-muted active:scale-[0.97] max-md:hidden"
+                          >
+                            <RotateCw className="size-3.5" /> Rotate 180°
+                          </button>
+                          <a href={cur.scanUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-muted">
+                            <ExternalLink className="size-3.5" /> Open
+                          </a>
+                        </span>
                       </div>
 {/* Phones can't show a PDF inside the page — open it in the phone's viewer instead. */}
                 <a
@@ -624,7 +638,16 @@ export function BatchReview({
                         aria-label="Enlarge scan"
                         className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
                       >
-                        <iframe src={cur.scanUrl} title={`Scan of ${cur.upload.filename}`} tabIndex={-1} className="pointer-events-none h-[360px] w-full lg:h-[min(640px,calc(100dvh-12rem))]" />
+                        {/* Turned with CSS: the browser PDF viewer can't be told to rotate. Its toolbar is hidden
+                            while turned so it isn't shown upside down. */}
+                        <iframe
+                          key={rot.deg}
+                          src={rot.deg === 180 ? `${cur.scanUrl}#toolbar=0&navpanes=0` : cur.scanUrl}
+                          title={`Scan of ${cur.upload.filename}`}
+                          tabIndex={-1}
+                          style={rot.deg === 180 ? {transform: 'rotate(180deg)'} : undefined}
+                          className="pointer-events-none h-[360px] w-full lg:h-[min(640px,calc(100dvh-12rem))]"
+                        />
                         <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
                           <span className="inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-xs font-medium">
                             <Maximize2 className="size-3" /> Click to enlarge
@@ -781,7 +804,7 @@ export function BatchReview({
               iframe overlay drifted). Falls back to the browser PDF viewer if it can't
               render. The band is approximate — see the "Show in scan" button. */}
           <div className="min-h-0 w-full flex-1">
-            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} className="h-full" />
+            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} rotation={rot.deg} onRotate={rot.toggle} className="h-full" />
           </div>
         </div>
       )}
