@@ -84,6 +84,7 @@ export function itemStoreLines(input: {
   history: Array<{storeCode: string; units: number[]}>; // aligned with window.lastYear
   inScope: Set<string>;
   retired: boolean;
+  notOnPo?: boolean; // the product isn't on the active PO form
   openFlagStores: Set<string>;
   counts: Map<string, StoreCount>; // each store's latest count (onHand holds this item only)
   shipments: Shipment[];
@@ -98,6 +99,7 @@ export function itemStoreLines(input: {
     history: input.history.map((h) => ({...h, itemCode})),
     inScope: input.inScope,
     retired: input.retired ? new Set([itemCode]) : new Set(),
+    notOnPo: input.notOnPo ? new Set([itemCode]) : undefined,
     openFlags: new Set([...input.openFlagStores].map((s) => `${s}|${itemCode}`)),
     counted,
   });

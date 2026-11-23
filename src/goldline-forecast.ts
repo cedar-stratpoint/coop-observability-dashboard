@@ -20,9 +20,11 @@ export type MonthStatus = {month: string; loaded: boolean; units: number; unlink
 
 // no_count and blank_on_form are added by the restock (F11, src/goldline-restock.ts): the
 // store has no counted form, or its latest form has no figure for the product.
-export type HoldReason = 'missing_month' | 'out_of_scope' | 'no_count' | 'blank_on_form' | 'retired' | 'open_flag' | 'no_history';
+// not_on_po: the product isn't on the active PO form (NICH-17: a SKU not on the PO is
+// being phased out, so no delivery is recommended). Only applies once a PO form is active.
+export type HoldReason = 'missing_month' | 'out_of_scope' | 'no_count' | 'blank_on_form' | 'retired' | 'not_on_po' | 'open_flag' | 'no_history';
 /** Display order; a line lists every reason that applies, in this order. */
-export const HOLD_REASONS: HoldReason[] = ['missing_month', 'out_of_scope', 'no_count', 'blank_on_form', 'retired', 'open_flag', 'no_history'];
+export const HOLD_REASONS: HoldReason[] = ['missing_month', 'out_of_scope', 'no_count', 'blank_on_form', 'retired', 'not_on_po', 'open_flag', 'no_history'];
 
 export type ForecastWindow = {
   runDate: string; // YYYY-MM-DD
@@ -82,6 +84,7 @@ export function buildForecastLines(input: {
   history: Array<{storeCode: string; itemCode: string; units: number[]}>; // aligned with window.lastYear
   inScope: Set<string>; // store codes in scope (F2)
   retired: Set<string>; // retired item codes (F2)
+  notOnPo?: Set<string>; // item codes not on the active PO form (empty/absent = no PO form yet)
   openFlags: Set<string>; // `${store}|${item}` with an open flag (F7)
   counted: Array<{storeCode: string; itemCode: string}>; // pairs on each store's latest count (F9)
 }): ForecastLine[] {
@@ -109,6 +112,7 @@ export function buildForecastLines(input: {
     if (missing) holds.push('missing_month');
     if (!inScope.has(p.storeCode)) holds.push('out_of_scope');
     if (retired.has(p.itemCode)) holds.push('retired');
+    if (input.notOnPo?.has(p.itemCode)) holds.push('not_on_po');
     if (openFlags.has(k)) holds.push('open_flag');
     if (need != null && need <= 0) holds.push('no_history');
     lines.push({storeCode: p.storeCode, itemCode: p.itemCode, units, need, safety, holds});

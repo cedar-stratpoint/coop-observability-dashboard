@@ -12,6 +12,7 @@ import type {Decision} from '@/src/goldline-restock';
 import {makePurchaseOrders, PoError, receivePoLines, setPoModule} from '@/src/goldline-po-writes';
 import {poLineStores, poStore} from '@/src/goldline-po-data';
 import {runChecks} from '@/src/goldline-checks-data';
+import {activatePoForm, discardPoFormDraft, PoFormError, setPoFormItem} from '@/src/goldline-po-form-data';
 import {
   cancelShipment,
   existingItems,
@@ -371,5 +372,69 @@ export async function setPoModuleAction(input: {company: string | null; id: stri
   } catch (err) {
     console.error('setPoModuleAction', err);
     return {ok: false, error: 'Could not save the module. Please try again.'};
+  }
+}
+
+// ── The PO form (NICH-17, PO leg) ─────────────────────────────────────────────────────
+// Company-wide editors only: the PO form decides which products are active everywhere.
+
+const FORM_ID = /^[0-9a-f-]{36}$/i;
+
+async function poFormEditor(company: string | null) {
+  const e = await editorContext(company);
+  if ('error' in e) return {error: e.error as string} as const;
+  if (e.ctx.storeScope) return {error: 'Only company-wide roles can change the PO form.'} as const;
+  return e;
+}
+
+function refreshPoForm(companyId: string) {
+  revalidateTag(glTags.poForm(companyId), {expire: 0});
+  refresh(companyId, ['forecast']);
+  revalidatePath('/stock/po-form');
+  revalidatePath('/stock/audit', 'layout');
+}
+
+function poFormFail(where: string, err: unknown): {ok: false; error: string} {
+  if (err instanceof PoFormError) return {ok: false, error: err.message};
+  console.error(where, err);
+  return {ok: false, error: 'Could not update the PO form. Please try again.'};
+}
+
+export async function setPoFormItemAction(input: {company: string | null; form: string; item: string; on: boolean}): Promise<ActionResult> {
+  const e = await poFormEditor(input.company);
+  if ('error' in e) return {ok: false, error: e.error ?? 'Not authorized.'};
+  if (!FORM_ID.test(input.form ?? '') || !ITEM.test(input.item ?? '')) return {ok: false, error: 'Product not found.'};
+  try {
+    await setPoFormItem(e.companyId, input.form, input.item, Boolean(input.on));
+    refreshPoForm(e.companyId);
+    return {ok: true};
+  } catch (err) {
+    return poFormFail('setPoFormItemAction', err);
+  }
+}
+
+export async function activatePoFormAction(input: {company: string | null; form: string}): Promise<ActionResult> {
+  const e = await poFormEditor(input.company);
+  if ('error' in e) return {ok: false, error: e.error ?? 'Not authorized.'};
+  if (!FORM_ID.test(input.form ?? '')) return {ok: false, error: 'That PO form was not found.'};
+  try {
+    await activatePoForm(e.companyId, input.form, e.by);
+    refreshPoForm(e.companyId);
+    return {ok: true};
+  } catch (err) {
+    return poFormFail('activatePoFormAction', err);
+  }
+}
+
+export async function discardPoFormDraftAction(input: {company: string | null; form: string}): Promise<ActionResult> {
+  const e = await poFormEditor(input.company);
+  if ('error' in e) return {ok: false, error: e.error ?? 'Not authorized.'};
+  if (!FORM_ID.test(input.form ?? '')) return {ok: false, error: 'That PO form was not found.'};
+  try {
+    await discardPoFormDraft(e.companyId, input.form);
+    refreshPoForm(e.companyId);
+    return {ok: true};
+  } catch (err) {
+    return poFormFail('discardPoFormDraftAction', err);
   }
 }

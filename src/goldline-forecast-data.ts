@@ -3,6 +3,7 @@ import {gunzipSync, gzipSync} from 'node:zlib';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {cachedSalesView, getForecastSettings, getGlCatalog, getGlStores, getStoreScope} from './goldline-ref-data';
+import {getActivePoSet} from './goldline-po-form-data';
 import {itemDisplayName} from './goldline-item-name';
 import type {InventoryRowIn} from './goldline-inventory';
 import {
@@ -157,7 +158,9 @@ export async function loadForecastBase(companyId: string, runDate: string, store
   const inScope = new Set(scopeRows.filter((s) => s.in_scope).map((s) => s.store_code));
   const retired = new Set(catalog.filter((p) => p.retired_at).map((p) => p.item_code));
   const openFlags = new Set((flags as Array<{store_code: string; item_code: string}>).map((f) => `${f.store_code}|${f.item_code}`));
-  const lines = buildForecastLines({window, months: year, history: historyRows, inScope, retired, openFlags, counted});
+  const po = await getActivePoSet(companyId);
+  const notOnPo = po ? new Set(catalog.filter((p) => !po.items.has(p.item_code)).map((p) => p.item_code)) : undefined;
+  const lines = buildForecastLines({window, months: year, history: historyRows, inScope, retired, notOnPo, openFlags, counted});
 
   return {
     settings,

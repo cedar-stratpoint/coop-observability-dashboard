@@ -35,6 +35,7 @@ export const HOLD_LABEL: Record<HoldReason, {label: string; hint: string; tone: 
   no_count: {label: 'No count yet', hint: 'The store has no counted form, so its stock on hand is unknown', tone: 'var(--status-warn)'},
   blank_on_form: {label: 'Blank on form', hint: "The store's latest form has no figure for this product", tone: 'var(--status-warn)'},
   retired: {label: 'Retired', hint: 'The product is retired', tone: null},
+  not_on_po: {label: 'Not on the PO form', hint: "The product isn't on the latest PO form, so it's being phased out", tone: null},
   open_flag: {label: 'Open flag', hint: 'An open flag for this store and product', tone: 'var(--status-crit)'},
   no_history: {label: 'No sales last year', hint: "Counted now, but didn't sell in last year's window", tone: 'var(--status-warn)'},
 };

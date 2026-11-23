@@ -8,6 +8,21 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Reconciliation: the PO leg (NICH-17), the PO form, and a per-product view
+
+Justin's notebook matrix is now the reconciliation: **Watsons · Inventory · PO**, a check or an x each, eight rows in two groups. Active (on the PO form): all good · not on the form (Nichido updates the form) · no Watsons sales (Watsons to audit) · **check delivery** (on the PO, not counted, not selling; new row, user's pick). Inactive (not on the PO form): phasing out (no action, track until it runs out) · for accounting · Watsons audit · retire candidate (flag only, never auto-retire). The Audit tab is now **Reconcile** with three views: **By store** (rows grouped under one header per state that carries who acts and the step), **By product** (every counted store in a month, one stacked bar per product, expand for the stores), and **PO form**.
+
+**Decisions (Nov 23).**
+- **The PO leg is Nichido's paper PURCHASE ORDER FORM, not Coop's F12 orders.** F12 purchase orders come out of the restock run, which already skips non-PO products, so using them would be circular. The form is catalog-wide: a product printed on it is active.
+- **The latest activated PO form wins, in full.** No lookback window. An upload (xlsx, or pdf read by the Goldline Claude reader) becomes a **draft**; the admin sees what was read, what changes against the current form (added / dropped), printed lines that matched no product, and can switch any product on or off by hand before **Make this the PO form**. Older forms are kept as "Replaced".
+- **Reading the form is deterministic.** The form is free text (family headings, shades under them, selling notes and Tagalog keywords in the same cells), so `src/goldline-po-form.ts` splits it into heading/shade phrases, drops notes, and matches each phrase to one catalog product (family + shade, the form's abbreviations like "I. Glow", "TWC", "TCC E/S", numbered shades, lash codes). A PDF is only transcribed by the model; it never picks products. On the real sample: 242 of 286 products on the form, 2 printed lines unmatched (pinned in `test/goldline-po-form.test.ts`).
+- **Inventory is a yes only with stock on hand**: a counted zero (or a blank) is a no.
+- **Which rows show:** every product on the PO, plus any product on this month's form or sold this month. An inactive product with nothing anywhere only shows while it is still printed on the store's form (the "stock hit zero" signal).
+- **Restock holds products not on the PO form** (new hold reason "Not on the PO form"), only once a PO form is active. Before that, every product that isn't retired counts as active and the pages say so.
+- Audit only (the MVP): nothing is written to flags, nothing is retired.
+
+Schema: `supabase/nichido/p4_po_form.sql` (`po_forms`, `po_form_items`, `activate_po_form`), applied to Nichido Staging; prod after review.
+
 ## 2026-11-23 — Uploads: "Keep this page open" leads the upload status until every scan is up
 
 Follow-up to the several-PDFs fix. The card header still said "you can leave this page or refresh" while the status below said to keep it open; and even a single scan is not safe to leave while its PDF is uploading (the file goes up from the browser; only the reading is on the server). Now the upload status opens with a banner in the warning colour, "Keep this page open", for as long as any PDF is still uploading, then turns to a calm "All scans uploaded" (or "Scan uploaded") once leaving is safe. Several PDFs get a numbered list (uploaded ✓ / N% / waiting) above the current progress bar, the header reads "Uploading 2 scans" with "Scan 1 of 2 is N% uploaded", and the browser asks before leaving while an upload is in flight (it never did on the server path).
