@@ -11,7 +11,6 @@ import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {rowBandFor} from '@/src/goldline-extract';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
 import {uploadSource} from '@/src/goldline-upload-groups';
@@ -648,6 +647,7 @@ export function BatchReview({
                 </Card>
                 <ReviewRows
                   onPoint={cur.scanUrl ? setPointRow : undefined}
+                  pointed={pointRow}
                   rows={curState.rows}
                   productNames={cur.productNames}
                   catalog={catalog}
@@ -678,18 +678,6 @@ export function BatchReview({
                     const open = unresolvedFlags(curFlags, curState.resolved);
                     goToFlag(stepFlag(open.length ? open : curFlags, curState.active, dir));
                   }}
-                  onLocate={cur.scanUrl && cur.page ? (itemCode) => {
-                    const names = cur.productNames;
-                    const label = `${itemCode}${names[itemCode] ? ` · ${names[itemCode]}` : ''} · page ${cur.page}`;
-                    // Exact box the reader captured for this scan, else the template band.
-                    const box = cur.extraction?.data?.rows?.find((r) => r.item_code === itemCode)?.box;
-                    if (box && typeof box.y_top === 'number' && typeof box.y_bottom === 'number' && box.y_bottom > box.y_top) {
-                      setLightbox({url: cur.scanUrl!, highlight: {top: box.y_top, height: box.y_bottom - box.y_top, label}});
-                    } else {
-                      const band = rowBandFor(itemCode, cur.page!);
-                      setLightbox({url: cur.scanUrl!, highlight: band ? {...band, label, approximate: true} : undefined});
-                    }
-                  } : undefined}
                 />
               </div>
             </div>

@@ -16,7 +16,6 @@ import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
-import {rowBandFor} from '@/src/goldline-extract';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
@@ -670,26 +669,11 @@ export function UploadReview({
           <ReviewRows
             rows={rows}
             onPoint={scanUrl ? setPointRow : undefined}
+            pointed={pointRow}
             query={query}
             onQuery={setQuery}
             version={upload.form_version}
             productNames={productNames}
-            onLocate={
-              scanUrl && extraction.page
-                ? (itemCode) => {
-                    const label = `${itemCode}${productNames[itemCode] ? ` · ${productNames[itemCode]}` : ''} · page ${extraction.page}`;
-                    // Exact box the reader captured for this row, else the page template's band.
-                    const box = rows.find((r) => r.item_code === itemCode)?.box;
-                    if (box && typeof box.y_top === 'number' && typeof box.y_bottom === 'number' && box.y_bottom > box.y_top) {
-                      setLightboxHighlight({top: box.y_top, height: box.y_bottom - box.y_top, label});
-                    } else {
-                      const band = rowBandFor(itemCode, extraction.page!);
-                      setLightboxHighlight(band ? {...band, label, approximate: true} : undefined);
-                    }
-                    setLightboxOpen(true);
-                  }
-                : undefined
-            }
             catalog={catalog}
             flagged={flagged}
             resolved={resolved}

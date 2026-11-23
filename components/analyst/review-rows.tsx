@@ -1,7 +1,7 @@
 'use client';
 
 import {useMemo} from 'react';
-import {Check, ChevronLeft, ChevronRight, Crosshair, Search} from 'lucide-react';
+import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
 import {groupByFamily, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
@@ -78,12 +78,11 @@ type Props = {
   onCell: (index: number, key: ColKey, raw: string) => void;
   onResolve: (index: number) => void;
   onStep: (dir: 1 | -1) => void;
-  /** Open the enlarged scan pointing at this item's row (the "Show in scan" button).
-   *  Absent when there's no scan to point at. */
-  onLocate?: (itemCode: string) => void;
   /** The row the reviewer is pointing at (hover or keyboard focus), so the scan beside the rows can
    *  box it. Absent when there's no scan pane. */
   onPoint?: (index: number) => void;
+  /** The row currently pointed at: tinted to match the box drawn on the scan. */
+  pointed?: number | null;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -120,8 +119,8 @@ export function ReviewRows({
   onCell,
   onResolve,
   onStep,
-  onLocate,
   onPoint,
+  pointed,
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
@@ -163,6 +162,7 @@ export function ReviewRows({
         className={cn(
           'scroll-mt-24 border-b border-border/60 transition-colors',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
+          pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
@@ -189,17 +189,6 @@ export function ReviewRows({
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
               )}
             </div>
-            {onLocate && (
-              <button
-                type="button"
-                onClick={() => onLocate(r.item_code)}
-                title="Show this item on the scan"
-                aria-label={`Show ${r.item_code} on the scan`}
-                className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 transition-[color,opacity,background-color] hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Crosshair className="size-3.5" />
-              </button>
-            )}
           </div>
         </td>
         {cols.map((col) => (
@@ -257,6 +246,7 @@ export function ReviewRows({
         className={cn(
           'flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
+          pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
