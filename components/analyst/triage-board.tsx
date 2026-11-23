@@ -357,9 +357,11 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
   // whole form is filed with one tap instead of opening the batch to type a store.
   if (needsStore && canEdit && stores.length > 0) {
     return (
-      <div className="flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+      <div className="flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
         <CardBody form={form} s={s} />
-        <StorePicker company={company} form={form} stores={stores} />
+        <div className="mt-auto flex flex-col">
+          <StorePicker company={company} form={form} stores={stores} />
+        </div>
       </div>
     );
   }
@@ -369,10 +371,10 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
       data-row
       data-kept-id={form.uploadIds.join(' ') || undefined}
       onClick={() => leaveList('scan', form.uploadIds[0] ?? null, href)}
-      className="group flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
+      className="group flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
     >
       <CardBody form={form} s={s} />
-      <span className="inline-flex items-center gap-0.5 self-end text-xs font-medium text-muted-foreground transition-colors duration-150 group-hover:text-foreground">
+      <span className="mt-auto inline-flex items-center gap-0.5 self-end text-xs font-medium text-muted-foreground transition-colors duration-150 group-hover:text-foreground">
         Review
         <ChevronRight aria-hidden className="size-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none" />
       </span>
@@ -616,7 +618,9 @@ export function TriageBoard({
 function FormGrid({children}: {children: React.ReactNode}) {
   // Max 3 across (not 4) so each card is wide enough to show the full store name without
   // truncating, with generous whitespace between.
-  return <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
+  // Cards stretch to their row's tallest (the action pinned to the bottom) so a row of tiles
+  // reads as one even band, whatever each card's flags.
+  return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
 }
 
 /** A store (or triage bucket) heading above its cards: the store name once, its code, and

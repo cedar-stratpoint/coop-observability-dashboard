@@ -559,7 +559,9 @@ export function BaCards({
 
   return (
     <>
-      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Cards stretch to their row's tallest, with Change BA pinned to the bottom, so every tile
+          in a row is the same size whatever its pills or footer. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => {
           const attention = g.needsStore + g.incomplete;
           const initials = g.name
@@ -571,7 +573,7 @@ export function BaCards({
           return (
             <div
               key={g.name}
-              className="group relative flex flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md has-[a:active]:scale-[0.99] motion-reduce:transition-none sm:p-5"
+              className="group relative flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md has-[a:active]:scale-[0.99] motion-reduce:transition-none sm:p-5"
             >
               <div className="flex items-center gap-3">
                 {/* Initials tile, the same shape as the Per file page tile. */}
@@ -615,7 +617,7 @@ export function BaCards({
                 {attention === 0 && g.ready === 0 && g.committed === 0 && <span className="text-[11px] text-muted-foreground">Nothing to do</span>}
               </div>
               {canEdit && g.hasName && (
-                <div className="-mx-1.5 -mb-1 flex items-center border-t border-border/70 pt-2.5">
+                <div className="-mx-1.5 -mb-1 mt-auto flex items-center border-t border-border/70 pt-2.5">
                   <button
                     type="button"
                     onClick={() => setEditCard({name: g.name, items: g.items})}
