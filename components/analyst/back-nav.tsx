@@ -109,6 +109,10 @@ function markKept(el: HTMLElement) {
 
 const visible = (el: Element) => el.getClientRects().length > 0;
 
+/** A row id safe for `data-kept-id`, which is space-separated: encode keys that may hold
+ *  spaces (filenames, BA names). Use the same encoded value for the attribute and `leave`. */
+export const keptId = (key: string) => encodeURIComponent(key);
+
 /**
  * The list side of the return trip. Call `leave(rowId, href)` when a row opens (onClick on the
  * row's link). Rows carry `data-kept-id` (one id, or several space-separated, e.g. a page and
@@ -166,6 +170,57 @@ function cameFrom(entry: ReturnEntry | null, detailPrefix?: string): boolean {
   if (!entry?.to) return false;
   const here = normPath(window.location.pathname);
   return detailPrefix ? here.startsWith(detailPrefix) && entry.to.startsWith(detailPrefix) : here === entry.to;
+}
+
+/** Restore a list in place after a drill-in closes: scroll back, then mark + focus the row. */
+function returnToRow(rowId: string, scrollY: number | null) {
+  requestAnimationFrame(() => {
+    if (scrollY != null) window.scrollTo({top: scrollY, behavior: 'instant'});
+    const row = [...document.querySelectorAll<HTMLElement>(`[data-kept-id~="${CSS.escape(rowId)}"]`)].find(visible);
+    if (!row) return;
+    const r = row.getBoundingClientRect();
+    if (r.top < 64 || r.bottom > window.innerHeight) row.scrollIntoView({block: 'center', behavior: 'instant'});
+    markKept(row);
+    (row.querySelector<HTMLElement>('[data-row]') ?? row.querySelector<HTMLElement>('a[href],button'))?.focus({preventScroll: true});
+  });
+}
+
+/**
+ * An in-page drill-in (a list that swaps to one item's view without changing route) as a real
+ * Back step: opening pushes `?<param>=<key>`, so the browser's Back closes it; `close()` steps
+ * back when that entry is ours (else drops the param in place, e.g. after a deep link). When it
+ * closes, the list's scroll comes back and the item is marked (`data-kept-id={keptId(key)}`).
+ */
+export function useDrillIn(param: string): [string | null, (key: string) => void, () => void] {
+  const open = useSearchParams().get(param);
+  const opened = useRef<{key: string; scrollY: number} | null>(null);
+  const last = useRef(open);
+
+  useEffect(() => {
+    const was = last.current;
+    last.current = open;
+    if (!was || open) return;
+    returnToRow(keptId(was), opened.current?.key === was ? opened.current.scrollY : null);
+  }, [open]);
+
+  const openIt = useCallback(
+    (key: string) => {
+      opened.current = {key, scrollY: window.scrollY};
+      const q = new URLSearchParams(window.location.search);
+      q.set(param, key);
+      window.history.pushState(null, '', `${window.location.pathname}?${q}`);
+    },
+    [param],
+  );
+  const close = useCallback(() => {
+    const q = new URLSearchParams(window.location.search);
+    const key = q.get(param);
+    q.delete(param);
+    const target = `${window.location.pathname}${q.size ? `?${q}` : ''}`;
+    if ((key && opened.current?.key === key) || previousEntryUrl() === target) window.history.back();
+    else window.history.replaceState(null, '', target);
+  }, [param]);
+  return [open, openIt, close];
 }
 
 /**

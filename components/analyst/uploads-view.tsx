@@ -14,7 +14,7 @@ import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
-import {leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
+import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {cn} from '@/lib/utils';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upload-groups';
@@ -39,8 +39,7 @@ const KIND_KEYS: Record<KindFilter, true> = {all: true, pos_csv: true, pos_xlsx:
 // Filters, view and page live in the URL (replaceState, not Back steps), so opening a scan or
 // a file and coming back returns to the list as you left it. `?status=` was already a param.
 const UPLOADS_LIST = {q: '', status: 'all', kind: 'all', from: '', to: '', view: 'groups', page: '1'};
-// A tile/row id for data-kept-id: filenames can hold spaces, and the attribute is space-split.
-const keptId = (k: string) => encodeURIComponent(k);
+
 
 const STATUS_META: Record<UploadStatus, {label: string; cls: string; Icon: typeof Clock}> = {
   queued: {label: 'Queued', cls: 'text-muted-foreground bg-muted', Icon: Clock},
