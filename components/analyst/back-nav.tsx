@@ -301,3 +301,39 @@ export function ReturnLink({
     </Link>
   );
 }
+
+/**
+ * One press, one step for sheets and dialogs: while `open`, the dialog owns one history entry
+ * (same URL), so the browser's Back (or a mouse back button / trackpad swipe) closes the dialog
+ * instead of leaving the page. Closing any other way (X, Escape, Cancel, save) steps back off
+ * that entry. Only for dialogs that don't navigate as they close (a push racing the step back
+ * could land on the wrong page).
+ */
+export function useBackToClose(open: boolean, onClose: () => void) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  useEffect(() => {
+    if (!open) return;
+    let pushed: string | null = null; // the URL our entry was pushed at
+    let popped = false;
+    // Deferred a tick: a dev Strict Mode mount/unmount/mount then pushes once, not push+back+push.
+    const t = window.setTimeout(() => {
+      pushed = window.location.href;
+      window.history.pushState(null, '', pushed);
+    }, 0);
+    const onPop = () => {
+      if (!pushed || popped) return;
+      popped = true;
+      onCloseRef.current();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('popstate', onPop);
+      // Still on our entry (no navigation happened meanwhile): step back off it.
+      if (pushed && !popped && window.location.href === pushed) window.history.back();
+    };
+  }, [open]);
+}

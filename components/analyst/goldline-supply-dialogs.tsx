@@ -7,6 +7,7 @@
 import {useMemo, useState, useTransition} from 'react';
 import {useRouter} from 'next/navigation';
 import {Dialog} from '@base-ui/react/dialog';
+import {useBackToClose} from '@/components/analyst/back-nav';
 import {Loader2, Truck, X} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {SearchableSelect} from '@/components/analyst/searchable-select';
@@ -34,6 +35,8 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  // Back closes the dialog, not the page (these dialogs only refresh as they close).
+  useBackToClose(open, onClose);
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
