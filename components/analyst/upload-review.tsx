@@ -18,7 +18,7 @@ import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
-import {markReturn, previousEntryUrl, useTrackReturnRow} from '@/components/analyst/back-nav';
+import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
@@ -333,7 +333,9 @@ export function UploadReview({
                   const canStep = 'navigation' in window ? prev?.startsWith('/uploads') : window.history.length > 1;
                   markReturn('scan');
                   if (canStep) router.back();
-                  else router.push(nav.backHref);
+                  // Not one step behind (reloaded, or arrived another way): go to the list as
+                  // it was left (its page, filters, scroll), else the fixed parent.
+                  else router.push(returnTarget('scan', nav.backHref, '/uploads/'), {scroll: false});
                 }}
                 aria-label="Back"
                 className="shrink-0 transition-colors hover:text-foreground"
@@ -343,20 +345,36 @@ export function UploadReview({
               {nav.crumbs.map((c, i) => (
                 <span key={`${c.href}-${i}`} className="flex min-w-0 items-center gap-1">
                   {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />}
-                  <Link
-                    href={c.href}
-                    // A breadcrumb goes UP the hierarchy, so it replaces this page rather than
-                    // pushing a new entry. Pushing left this review in history, so the board's
-                    // own "‹ Uploads" Back then returned here instead of the uploads list (a loop).
-                    replace
-                    className={cn(
-                      'truncate transition-colors hover:text-foreground',
-                      i === nav.crumbs.length - 1 && nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]',
-                    )}
-                    title={c.label}
-                  >
-                    {c.label}
-                  </Link>
+                  {/* The nearest crumb is where this review was opened from: it returns to that
+                      list as it was left (page, filters, scroll, the page marked), stepping back
+                      through history when the list is right behind. Crumbs further up are plain. */}
+                  {i === nav.crumbs.length - 1 ? (
+                    <ReturnLink
+                      listKey="scan"
+                      fallback={c.href}
+                      detailPrefix="/uploads/"
+                      replace
+                      className={cn('truncate transition-colors hover:text-foreground', nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]')}
+                      title={c.label}
+                    >
+                      {c.label}
+                    </ReturnLink>
+                  ) : (
+                    <Link
+                      href={c.href}
+                      // A breadcrumb goes UP the hierarchy, so it replaces this page rather than
+                      // pushing a new entry. Pushing left this review in history, so the board's
+                      // own "‹ Uploads" Back then returned here instead of the uploads list (a loop).
+                      replace
+                      className={cn(
+                        'truncate transition-colors hover:text-foreground',
+                        i === nav.crumbs.length - 1 && nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]',
+                      )}
+                      title={c.label}
+                    >
+                      {c.label}
+                    </Link>
+                  )}
                 </span>
               ))}
             </nav>
