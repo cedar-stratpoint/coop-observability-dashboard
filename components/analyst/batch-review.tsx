@@ -320,7 +320,7 @@ export function BatchReview({
   const curPageLabel = cur ? scanPageLabel(cur.upload.filename).title : null;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 pt-6 pb-6">
+    <div className="mx-auto flex w-full max-w-[140rem] flex-col gap-5 px-4 pt-6 pb-6 xl:px-6">
       <div className="flex flex-col gap-1.5">
         <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
           {/* A breadcrumb to the scan, so it links straight there. (Not history.back(): the
@@ -605,7 +605,7 @@ export function BatchReview({
           {cur && curState && (
             <div role="tabpanel" className="flex flex-col gap-5 lg:flex-row lg:items-start">
               {cur.scanUrl && (
-                <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%] lg:shrink-0">
+                <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%] lg:shrink-0 2xl:w-[45%]">
                   <Card>
                     <CardContent className="flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">

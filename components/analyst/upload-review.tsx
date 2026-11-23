@@ -310,7 +310,7 @@ export function UploadReview({
           : {pill: 'Set aside', title: 'Set aside', body: upload.reject_reason ?? 'This page was set aside, so there is nothing to review or commit here.', tone: 'var(--muted-foreground)'};
 
   return (
-    <div className="mx-auto flex max-w-[108rem] flex-col gap-5 px-4 py-6 xl:px-6">
+    <div className="mx-auto flex w-full max-w-[140rem] flex-col gap-5 px-4 py-6 xl:px-6">
       {nav ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3">
@@ -455,7 +455,7 @@ export function UploadReview({
         {/* Left: scan preview, pinned under the app header while the rows scroll (desktop);
             sized to the viewport so it's always fully in view. Click to enlarge. */}
         {scanUrl && (
-          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%]' : 'lg:w-[17rem]')}>
+          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%] 2xl:w-[45%]' : 'lg:w-[17rem]')}>
             <Card>
               <CardHeader className="gap-0">
                 <div className="flex items-center justify-between gap-2">

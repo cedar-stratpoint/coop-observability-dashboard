@@ -25,7 +25,7 @@ describe('scanPointBox', () => {
     const b = scanPointBox(row, {angle: 1.2, px: 0.18}, false)!;
     expect(b.top).toBeCloseTo(0.4);
     expect(b.height).toBeCloseTo(0.02);
-    expect(b).toMatchObject({angle: 1.2, px: 0.18, label: 'TCPBT02 · ending on hand could be 50'});
+    expect(b).toMatchObject({angle: 1.2, px: 0.18, label: 'TCPBT02'});
   });
   it('turns the box with a page the reviewer flipped', () => {
     const b = scanPointBox(row, {angle: 1.2, px: 0.18}, true)!;

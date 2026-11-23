@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Scan review: no tag over the handwriting; the page fills wide screens
+
+The code tag drawn beside the pointed row on the scan is removed. On pages with almost no left margin it moved past the row's right end and covered the handwritten numbers, and on narrow margins it was truncated to "EDNH..."; the tinted row in the list already names the item, so the scan shows only the tilted box. The review screens also stopped shrinking to their content: the centred wrapper had no `w-full`, so with the left drawer collapsed the page sat in a ~1,400px column with empty bands either side. It now fills the main column up to 140rem, and the scan pane widens to 45% on 2xl screens (at a 2,000px window the scan goes from about 600px to 820px wide).
+
 ## 2026-11-23 — Scan review: the hovered row is highlighted in the list too; "Show in scan" retired
 
 The row the reviewer points at is now tinted in the rows list as well (the same primary tint as its box on the scan, plus a left bar), so the pair reads at a glance. The per-row "Show in scan" crosshair is removed: hovering or focusing a row now boxes it on the always-visible scan, which does the same job without opening the enlarged view. Existing uploads from today (the Oct 16 to 31 scans) were backfilled with row boxes and page slant on Nichido Staging (53 pages, 2,558 rows, $0.87 at normal price) so they get the box too.
