@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-23 — Event lead contacts: search box
+
+The contact list on `/customers/leads` (and each event page's lead block, same component) gains a search box: name, email, Instagram handle (with or without "@"), pet, or mobile (spaces and dashes ignored). It narrows the list, the "n of N" count and the Copy emails button together, alongside the Prize and Collected filters. **Decision:** client-side, over the leads the page already holds (no new read), with the matcher as one pure function, `matchesLeadSearch` (`src/spin-leads-types.ts`, `test/spin-leads-search.test.ts`).
+
 ## 2026-11-19 — CI: one-way mirror to GitLab
 
 Adds `.github/workflows/mirror-gitlab.yml`, which pushes every branch and tag to `gitlab.stratpoint.dev/cedar-tree-brands/coop-observability-dashboard` on each push or delete, hourly via cron (`:17`) as a safety net, and on manual dispatch. A failed run posts to Google Chat (`GCHAT_WEBHOOK_URL`).

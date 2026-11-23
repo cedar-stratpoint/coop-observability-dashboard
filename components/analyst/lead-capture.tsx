@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState} from 'react';
 import {Check, Copy, Info} from 'lucide-react';
 import type {SpinLead} from '@/src/spin-leads-types';
-import {prizeTally} from '@/src/spin-leads-types';
+import {matchesLeadSearch, prizeTally} from '@/src/spin-leads-types';
 import {leadKey, treatPhrase, type LeadMatch} from '@/src/lead-order-match';
 import {formatPeso} from '@/src/pos-format';
 import {manilaDayKey} from '@/src/pos-sales-compute';
@@ -41,6 +41,7 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
   const [copied, setCopied] = useState(false);
   const [prize, setPrize] = useState('all');
   const [collectedOn, setCollectedOn] = useState('all');
+  const [q, setQ] = useState('');
 
   const prizes = useMemo(() => prizeTally(leads), [leads]);
   const withMobile = leads.filter((l) => l.mobile).length;
@@ -67,11 +68,12 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
       leads.filter(
         (l) =>
           (prize === 'all' || l.prize === prize) &&
-          (collectedOn === 'all' || manilaDayKey(l.collectedAt) === collectedOn),
+          (collectedOn === 'all' || manilaDayKey(l.collectedAt) === collectedOn) &&
+          matchesLeadSearch(l, q),
       ),
-    [leads, prize, collectedOn],
+    [leads, prize, collectedOn, q],
   );
-  const filtering = prize !== 'all' || collectedOn !== 'all';
+  const filtering = prize !== 'all' || collectedOn !== 'all' || q.trim() !== '';
 
   // Clamp rather than reset: a filter change rewinds to page 1 through its own
   // handler, and this keeps the view valid if the list shrinks under it anyway.
@@ -131,6 +133,14 @@ export function LeadCapture({leads, orders, matches}: {leads: SpinLead[]; orders
             {filtering && <span className="ml-1.5 font-medium normal-case tracking-normal">{filtered.length} of {leads.length}</span>}
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => { setQ(e.target.value); setPage(1); }}
+              placeholder="Search name, email, @handle, pet or mobile"
+              aria-label="Search contacts"
+              className="h-[26px] w-64 rounded-md border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-primary max-sm:w-full"
+            />
             <Filter
               label="Prize"
               value={prize}
