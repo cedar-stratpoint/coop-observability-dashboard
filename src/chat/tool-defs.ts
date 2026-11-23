@@ -6,7 +6,9 @@ import {ASK_ABOUT} from './clarify';
 import {CHANNELS, CONTACT_KINDS, LEAD_LIMITS, MATCH_SCOPES, MATCH_TIERS, MAX_PER_LEAD, MAX_QUERY, MAX_TEMPLATE_CHARS, MAX_TEXT_CHARS} from './contacts/leads';
 import {SOURCES} from './contacts/people';
 import {PLACEHOLDERS} from './contacts/draft';
-import {AUDIENCE_TEXT, CHECKOUT_GROUPS, CHECKOUT_STAGES, CHECKOUT_STATUSES, CRM_LIMIT_VALUES, CUSTOMER_AUDIENCES, CUSTOMER_BUYERS, CUSTOMER_GROUPS, CUSTOMER_MIN_ORDERS, CUSTOMER_RULES, CUSTOMER_SORTS, CUSTOMER_TIERS, LAST_CONTACT_TEXT, ORDER_GROUPS, ORDER_STATUSES, REPEAT_TARGET_PCT} from './crm/tools';
+import {COHORT_FIELDS, COHORT_FIELD_SPEC, COHORT_OPS, COHORT_RULE_MAX_CONDS} from '../crm-compute';
+import {COHORT_GROUP_MAX, COHORT_NAME_MAX} from '../customer-cohorts';
+import {AUDIENCE_TEXT, CHECKOUT_GROUPS, CHECKOUT_STAGES, CHECKOUT_STATUSES, CRM_LIMIT_VALUES, CUSTOMER_AUDIENCES, CUSTOMER_BUYERS, CUSTOMER_GROUPS, CUSTOMER_MIN_ORDERS, CUSTOMER_RULES, CUSTOMER_SORTS, CUSTOMER_TIERS, LAST_CONTACT_TEXT, NOT_CONTACTED_DAYS, ORDER_GROUPS, ORDER_STATUSES, REPEAT_TARGET_PCT} from './crm/tools';
 import {DIGEST_SECTIONS, DIGEST_WINDOWS, PRODUCT_SHOWS} from './digest-lookup';
 import {METRICS, METRIC_IDS} from './metrics-registry';
 import type {ToolDefinition} from './stream-types';
@@ -198,9 +200,10 @@ const listCrmCustomers: ToolDefinition = {
     `Every customer list also carries emails_sent (automated CRM emails), manual_contacts (logged by hand), times_contacted (both), last_contacted and last_contact_kind: ${LAST_CONTACT_TEXT} "Who did we contact most": sort contacted_desc. "Who haven't we contacted in the longest time": sort last_contacted_asc. ` +
     `Rules: ${CUSTOMER_RULES} ` +
     'USE THIS TOOL (not crm_query) for repeat buyers (min_orders 2), orders per customer (group_by orders_bucket), new or acquired customers per first-order month (group_by first_order_month), first or last order (sort last_order_asc or last_order_desc). ' +
-    `Repeat promo, win-back or "who do we contact again": set audience (${AUDIENCE_TEXT.repeat_promo}; ${AUDIENCE_TEXT.win_back}); the list is ordered by last order, oldest first (whatever sort was sent), adds each automated email source already sent (cart reminders, win-back, review requests, birthday vouchers) and shows consent without filtering on it. Nothing can be sent from here: the owner copies the table or downloads its CSV. ` +
+    `Repeat promo, win-back or "who do we contact again": set audience (${AUDIENCE_TEXT.repeat_promo}; ${AUDIENCE_TEXT.win_back}); the list is ordered by last order, oldest first (whatever sort was sent), adds each automated email source already sent (cart reminders, win-back, review requests, birthday vouchers, membership emails) and shows consent without filtering on it. Nothing can be sent from here: the owner copies the table or downloads its CSV. ` +
     `Repeat buyer rate, retention or the ${REPEAT_TARGET_PCT}% repeat target: group_by orders_bucket and quote its repeat_rate check word for word (the ${REPEAT_TARGET_PCT}% is a plan target, never an actual). Both groupings are drawn as a chart by default. ` +
     'Cohorts, "which promo or code brings repeat buyers", event promos: group_by first_order_code (buyers, repeat buyers and repeat rate per code on the first counted order; birthday codes read "birthday voucher", bundle codes "BUNDLE (auto)"; flag small groups). Which code was which event: ask the owner, never guess. ' +
+    'Saved cohorts (a group and a name, e.g. Event · Circuit Makati, each a saved rule; same evaluator as the Website CRM page): cohort lists or filters one by its name; group_by cohort_group with cohort_group (e.g. Event) compares every saved cohort in that group ("repeat rate by event"); only 5+ buyers are ranked. An unknown name is refused with the valid ones. not_contacted_days N keeps customers last contacted N+ days ago or never ("who from Circuit Makati haven\'t we contacted in 30 days": cohort + not_contacted_days 30). ' +
     'Filter by tier, buyers, min_orders or join dates ("" and "" for any date); group_by gives counts per tier, join month, email marketing state, first-order month, orders bucket or first-order code. Show contact details only when the owner asks for a list of customers. ' + UNTRUSTED,
   strict: false, // not strict: Explore + all four CRM tools as strict exceed the API's compiled-grammar cap (400); crm/tools.ts defaults missing keys and still refuses unknown ones
   input_schema: {
@@ -214,10 +217,13 @@ const listCrmCustomers: ToolDefinition = {
       sort: {type: 'string', enum: [...CUSTOMER_SORTS], description: 'List order: newest join first, biggest spend first, most orders first, by last order (newest or oldest first; customers with no order last), most contacted first (contacted_desc), or never/longest-ago contacted first (last_contacted_asc).'},
       audience: {type: 'string', enum: [...CUSTOMER_AUDIENCES], description: 'Outreach audience: "all" = no audience rule; repeat_promo or win_back apply the owner\'s rule and list the longest-lapsed customer first, with emails already sent.'},
       min_orders: {type: 'integer', enum: [...CUSTOMER_MIN_ORDERS], description: 'Only customers with at least this many counted orders, all time (test orders excluded). 0 = everyone; 2 = repeat buyers.'},
+      cohort: {type: 'string', description: 'A saved cohort as the owner names it ("Event · Circuit Makati"), or "" for none.'},
+      cohort_group: {type: 'string', description: 'With group_by cohort_group only: the cohort group to compare (e.g. "Event"); otherwise "".'},
+      not_contacted_days: {type: 'integer', enum: [...NOT_CONTACTED_DAYS], description: 'Only customers last contacted this many days ago or more, or never. 0 = no filter.'},
       limit: CRM_LIMIT,
       offset: CRM_OFFSET,
     },
-    required: ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'limit', 'offset'],
+    required: ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'cohort', 'cohort_group', 'not_contacted_days', 'limit', 'offset'],
     additionalProperties: false,
   },
 };
@@ -240,6 +246,41 @@ const listCrmCheckouts: ToolDefinition = {
       offset: CRM_OFFSET,
     },
     required: ['from', 'to', 'stage', 'status', 'group_by', 'limit', 'offset'],
+    additionalProperties: false,
+  },
+};
+
+// RET-10 9B propose_crm_cohort: a DRAFT only (knowledge/best-practices/chat-proposed-writes.md). Not strict, like the other CRM tools (the
+// compiled-grammar cap): src/chat/crm/cohorts.ts refuses unknown keys and runs the builder's own validator. There is no save tool, by design.
+const FIELD_LIST = COHORT_FIELDS.map((f) => `${f} = ${COHORT_FIELD_SPEC[f].label} (${COHORT_FIELD_SPEC[f].ops.join('/')}${COHORT_FIELD_SPEC[f].values ? `: ${Object.keys(COHORT_FIELD_SPEC[f].values ?? {}).join('/')}` : ''})`).join('; ');
+const proposeCrmCohort: ToolDefinition = {
+  name: 'propose_crm_cohort',
+  description:
+    'Draft a website customer cohort for the owner to SAVE (it never saves). A cohort is a group and a name in plain words (e.g. group Event, name Circuit Makati) plus a rule: customers who match ALL conditions. ' +
+    'Map the owner\'s sentence onto the fields; code validates the draft, counts the preview and draws it with Save cohort and Adjust the rule buttons. Nothing is saved until the owner clicks Save: never say it was saved. ' +
+    'Never guess which discount code was which event: ask (list_crm_customers group_by first_order_code shows the codes). "Haven\'t reordered" = orders eq 1. ' +
+    '{suggest: true} alone: first-order codes with buyers that no saved cohort covers, drawn as one-click drafts ("what cohorts should we track?"). ' +
+    `Fields (f = meaning (ops)): ${FIELD_LIST}. Dates YYYY-MM-DD; spend in pesos. Tell the owner the rule in words, never these codes.`,
+  strict: false,
+  input_schema: {
+    type: 'object',
+    properties: {
+      suggest: {type: 'boolean', description: 'true alone for suggestions; leave out to draft one cohort.'},
+      group: {type: 'string', maxLength: COHORT_GROUP_MAX, description: 'Plain words, e.g. Event, Promo, Value.'},
+      name: {type: 'string', maxLength: COHORT_NAME_MAX, description: 'Plain words, e.g. Circuit Makati, haven\'t reordered.'},
+      rule: {
+        type: 'object',
+        properties: {
+          all: {
+            type: 'array',
+            maxItems: COHORT_RULE_MAX_CONDS,
+            items: {type: 'object', properties: {f: {type: 'string', enum: [...COHORT_FIELDS]}, op: {type: 'string', enum: [...COHORT_OPS]}, v: {type: 'string', description: 'The value as text: a code, YYYY-MM-DD, a number or an enum value.'}}, required: ['f', 'op', 'v']},
+          },
+        },
+        required: ['all'],
+      },
+    },
+    required: [],
     additionalProperties: false,
   },
 };
@@ -312,7 +353,7 @@ const shopifyQuery: ToolDefinition = {
   },
 };
 
-export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts, crmQuery, shopifyQuery]);
+export const CRM_TOOLS: readonly ToolDefinition[] = deepFreeze([getCrmMetrics, listCrmOrders, listCrmCustomers, listCrmCheckouts, proposeCrmCohort, crmQuery, shopifyQuery]);
 
 // compare_sku: one product across offline (POS), Shopee and the website (src/sku-compare.ts; contract knowledge/tasks/2026-10-26-sku-compare-contract.md). NOT strict (grammar cap); validated in src/chat/sku-compare-tool.ts.
 export const COMPARE_SKU_TOOL: ToolDefinition = {

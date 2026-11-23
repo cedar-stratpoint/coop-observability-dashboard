@@ -9,7 +9,7 @@
 create table if not exists public.customer_contacts (
   id             uuid primary key default gen_random_uuid(),
   customer_email text not null check (customer_email <> '' and customer_email = lower(customer_email)),
-  channel        text not null check (channel in ('dm', 'sms', 'call', 'email', 'other')),
+  channel        text not null check (channel in ('dm', 'sms', 'call', 'email', 'other', 'instagram', 'facebook', 'viber')),
   note           text check (note is null or char_length(note) <= 500),  -- free text, may hold PII
   contacted_at   timestamptz not null default now(),
   created_by     text not null check (created_by <> ''),                 -- the signed-in Coop email
@@ -22,3 +22,12 @@ create index if not exists customer_contacts_email_idx on public.customer_contac
 -- Contact data. RLS on with NO policies: the anon key can read nothing, and only the service role (Coop server-side,
 -- same as spin_wheel_leads) gets through. Verify after applying: select with the anon key returns no rows.
 alter table public.customer_contacts enable row level security;
+
+-- Stage 7B (RET-07, plan knowledge/tasks/2026-11-11-customer-last-contacted-stage7.md): Instagram, Facebook and Viber became
+-- their own channels; 'dm' stays ("DM (other app)") so older rows stay valid. A table created before 7B still carries the
+-- old 5-channel check, so widen it. Postgres names an inline column check <table>_<column>_check, so the create-table
+-- check above is customer_contacts_channel_check. Idempotent: safe to re-run, and a no-op on a fresh install.
+-- Same statements as supabase/customer_contacts_channels_7b.sql.
+alter table public.customer_contacts drop constraint if exists customer_contacts_channel_check;
+alter table public.customer_contacts add constraint customer_contacts_channel_check
+  check (channel in ('dm', 'sms', 'call', 'email', 'other', 'instagram', 'facebook', 'viber'));

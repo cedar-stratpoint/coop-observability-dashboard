@@ -90,22 +90,23 @@ export function enrichCustomers(
 }
 
 /**
- * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The four automated CRM emails,
+ * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The five automated CRM emails (7C added membership),
  * `automated` = their sum, `manual` = contacts the team logged by hand (customer_contacts), `total` = automated + manual.
  * RET-07: `lastAt` / `lastKind` = the newest dated contact of any kind (null when none of its contacts carries a readable date).
  */
-export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
-type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers';
+export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; membership: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
+type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers' | 'membership';
 /** RET-07: what the last contact was. An automated CRM email kind, or the manual log's own channel (the two sets never overlap). */
-export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | ContactChannel;
+export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | 'membership' | ContactChannel;
 export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.freeze({
   reminder: 'Cart reminder',
   winback: 'Win-back email',
   review_request: 'Review request',
   birthday_voucher: 'Birthday voucher',
+  membership: 'Membership email',
   ...CHANNEL_LABEL,
 });
-const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
+export const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
 const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_CHANNELS as readonly unknown[]).includes(c) ? (c as ContactChannel) : 'other');
 
 /**
@@ -113,19 +114,21 @@ const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_
  * summed; win-back = 1 per checkout with winbackSentAt; review requests = 1 per order with reviewRequestSentAt, test orders excluded;
  * birthday vouchers = 1 per voucher row; manual = 1 per logged contact. Rows without an email are skipped. Only addresses with at
  * least one contact are present. RET-07 (2026-11-11): the newest timestamp of a counted contact wins (lastReminderAt, winbackSentAt,
- * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact.
+ * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact. RET-07 7C: membership
+ * emails = 1 per /api/membership-events row (sentAt). `membershipEvents` is empty when that route is not live yet (excluded, not unknown).
  */
 export function contactTally(src: {
   checkouts: readonly (Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'> & Partial<Pick<CrmCheckout, 'lastReminderAt'>>)[];
   orders: readonly Pick<CrmOrder, 'email' | 'reviewRequestSentAt' | 'test'>[];
   birthdayVouchers: readonly {email: string | null; sentAt?: string | null}[];
+  membershipEvents?: readonly {email: string | null; sentAt?: string | null}[];
   manualContacts?: readonly {email: string | null; channel?: string | null; contactedAt?: string | null}[];
 }): Map<string, ContactTally> {
   const out = new Map<string, ContactTally>();
   const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number, at: string | null | undefined, kind: ContactKind) => {
     const key = emailKey(email);
     if (!key || !(n > 0)) return;
-    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
+    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, membership: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
     t[k] += n;
     if (k !== 'manual') t.automated += n;
     t.total += n;
@@ -142,6 +145,7 @@ export function contactTally(src: {
   }
   for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1, o.reviewRequestSentAt, 'review_request');
   for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1, v.sentAt, 'birthday_voucher');
+  for (const e of src.membershipEvents ?? []) add(e.email, 'membership', 1, e.sentAt, 'membership');
   for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1, m.contactedAt, channelKind(m.channel));
   return out;
 }
@@ -192,6 +196,9 @@ export type TimelineEvent = {
   /** Cart reminders: the CRM keeps only the last reminder's date, so `at` is that date and the count is the total. */
   lastDateOnly?: boolean;
   year?: number;
+  /** Membership email (7C): the tier and the CRM's event name. */
+  tier?: string;
+  membershipEvent?: string;
   note?: string | null;
   by?: string;
 };
@@ -214,6 +221,7 @@ export function customerTimeline(
     orders: readonly CrmOrder[];
     checkouts: readonly (Omit<CrmCheckout, 'abandonedCheckoutUrl'> & Partial<Pick<CrmCheckout, 'abandonedCheckoutUrl'>>)[];
     birthdayVouchers: readonly {email: string | null; year?: number; sentAt?: string | null}[];
+    membershipEvents?: readonly {email: string | null; tier?: string; event?: string; sentAt?: string | null}[];
     manualContacts: readonly {id: string; email: string | null; channel?: string | null; note?: string | null; contactedAt?: string | null; createdBy?: string}[];
   },
 ): TimelineEvent[] {
@@ -250,6 +258,9 @@ export function customerTimeline(
   src.birthdayVouchers.forEach((v, i) => {
     if (mailOf(v.email)) push({id: `voucher:${v.year ?? ''}:${i}`, kind: 'birthday_voucher', group: 'emails', at: v.sentAt || null, year: v.year, contact: true, count: 1});
   });
+  src.membershipEvents?.forEach((e, i) => {
+    if (mailOf(e.email)) push({id: `membership:${i}`, kind: 'membership', group: 'emails', at: e.sentAt || null, tier: e.tier, membershipEvent: e.event, contact: true, count: 1});
+  });
   for (const m of src.manualContacts) {
     if (mailOf(m.email)) push({id: `manual:${m.id}`, kind: channelKind(m.channel), group: 'manual', at: m.contactedAt ?? null, note: m.note ?? null, by: m.createdBy, contact: true, count: 1});
   }
@@ -281,6 +292,18 @@ export function petBirthdayStatus(
   const key = emailKey(c.email);
   if (key && vouchers.some((v) => v.year === Number(today.slice(0, 4)) && emailKey(v.email) === key)) return 'Sent';
   return `${md[1]}-${md[2]}` < today.slice(5) ? 'Passed' : 'Upcoming';
+}
+
+/** PH days until the pet's next birthday (0 = today, a day already passed this PH year rolls to next year); null when it is no date. */
+export function daysToPetBirthday(birthday: string | null | undefined, now: Date): number | null {
+  const md = /(\d{2})-(\d{2})$/.exec(String(birthday ?? '').trim().slice(0, 10));
+  if (!md) return null;
+  const today = phDay(now.getTime());
+  const year = Number(today.slice(0, 4));
+  const at = (y: number) => Date.parse(`${y}-${md[1]}-${md[2]}T00:00:00Z`);
+  const t0 = Date.parse(`${today}T00:00:00Z`);
+  const next = at(year) >= t0 ? at(year) : at(year + 1);
+  return Number.isFinite(next) ? Math.round((next - t0) / 86_400_000) : null;
 }
 
 /* ---------- retention rules (RET-02/03/04): ONE implementation for the Customers tab and Ask Coop ---------- */
@@ -391,6 +414,8 @@ export type CustomerRow = EnrichedCustomer & {
   lastContactedAt: string | null;
   lastContactKind: ContactKind | null;
   lastContactKnown: boolean;
+  /** RET-10: PH days since lastContactedAt; null when never contacted or unknown (lastContactKnown tells them apart). */
+  daysSinceLastContact: number | null;
   consent: string;
 };
 
@@ -414,6 +439,7 @@ export function customerRows(
       lastContactedAt: auto && manual ? (t?.lastAt ?? null) : null,
       lastContactKind: auto && manual ? (t?.lastKind ?? null) : null,
       lastContactKnown: auto && manual,
+      daysSinceLastContact: auto && manual ? phDaysSince(t?.lastAt ?? null, now) : null,
       consent: c.emailMarketingState?.trim() || 'unknown',
     };
   });
@@ -440,6 +466,263 @@ export function compareTimesContacted(a: Pick<CustomerRow, 'timesContacted'>, b:
 export function audienceRows<T extends Pick<EnrichedCustomer, 'orderCount' | 'lastOrderAt'>>(rows: readonly T[], audience: CustomerAudience, now: Date): T[] {
   if (audience === 'all') return [...rows];
   return rows.filter((c) => inAudience(c, audience, now)).sort(compareLastOrder(1));
+}
+
+/* ---------- RET-10 (Stage 9A): rule-based cohorts. ONE evaluator for the Website CRM page and Ask Coop (9B) ---------- */
+
+/**
+ * The closed field list a cohort rule may use (owner, 2026-11-12). The codes stay under the hood: the page shows `label`, and a
+ * rule is always read back as sentences (condText / ruleText). Adding a field = a new entry here, a case in cohortValue and in
+ * condText, and a test; 9B's tool schema enumerates the same list.
+ */
+export const COHORT_FIELDS = ['code', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
+export type CohortField = (typeof COHORT_FIELDS)[number];
+export const COHORT_OPS = ['is', 'is_not', 'on_or_after', 'on_or_before', 'gte', 'lte', 'eq'] as const;
+export type CohortOp = (typeof COHORT_OPS)[number];
+/** One condition: field, operator, value. A number for the numeric fields, a string otherwise (readCohortRule normalises it). */
+export type CohortCond = {f: CohortField; op: CohortOp; v: string | number};
+/** AND of every condition. An object (not a bare array) so OR groups can be added later without rewriting stored rows. */
+export type CohortRule = {all: CohortCond[]};
+export const COHORT_RULE_MAX_CONDS = 10;
+const COHORT_NUM_MAX = 100_000_000;
+const COHORT_CODE_MAX = 64;
+
+type FieldSpec = {
+  label: string;
+  type: 'text' | 'date' | 'num' | 'enum';
+  ops: readonly CohortOp[];
+  /** num: whole numbers only (counts and days); spend may carry centavos. */
+  integer?: boolean;
+  /** enum: the closed values, with their plain labels. */
+  values?: Readonly<Record<string, string>>;
+};
+const TIER_VALUES = Object.freeze({platinum: 'Platinum', gold: 'Gold', guest: 'Guest'});
+const CONSENT_VALUES = Object.freeze({subscribed: 'Subscribed', not_subscribed: 'Not subscribed'});
+export const COHORT_FIELD_SPEC: Readonly<Record<CohortField, FieldSpec>> = Object.freeze({
+  code: {label: 'First-order code', type: 'text', ops: ['is', 'is_not']},
+  first: {label: 'First order date', type: 'date', ops: ['on_or_after', 'on_or_before']},
+  orders: {label: 'Orders', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
+  days: {label: 'Days since last order', type: 'num', integer: true, ops: ['gte', 'lte']},
+  life: {label: 'Lifetime spend (₱)', type: 'num', ops: ['gte', 'lte']},
+  ytd: {label: 'Spend this membership year (₱)', type: 'num', ops: ['gte', 'lte']},
+  tier: {label: 'Tier', type: 'enum', values: TIER_VALUES, ops: ['is', 'is_not']},
+  lcdays: {label: 'Days since last contacted', type: 'num', integer: true, ops: ['gte', 'lte']},
+  times: {label: 'Times contacted', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
+  consent: {label: 'Email consent', type: 'enum', values: CONSENT_VALUES, ops: ['is', 'is_not']},
+});
+/** The operators as the builder's select shows them. */
+export const COHORT_OP_LABEL: Readonly<Record<CohortOp, string>> = Object.freeze({
+  is: 'is',
+  is_not: 'is not',
+  on_or_after: 'on or after',
+  on_or_before: 'on or before',
+  gte: 'at least',
+  lte: 'at most',
+  eq: 'exactly',
+});
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validDay = (v: string): boolean => {
+  const t = Date.parse(`${v}T00:00:00Z`);
+  return DATE_RE.test(v) && Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+};
+const isObj = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x);
+
+function readCond(x: unknown, n: number): CohortCond | {error: string} {
+  const at = `Condition ${n}`;
+  if (!isObj(x)) return {error: `${at} is not a condition.`};
+  const f = x.f as CohortField;
+  if (!(COHORT_FIELDS as readonly unknown[]).includes(f)) {
+    return {error: `${at} uses a field Coop does not know. Use one of: ${COHORT_FIELDS.map((k) => COHORT_FIELD_SPEC[k].label).join(', ')}.`};
+  }
+  const spec = COHORT_FIELD_SPEC[f];
+  const op = x.op as CohortOp;
+  if (!spec.ops.includes(op)) return {error: `${at}: ${spec.label} takes the operator ${spec.ops.map((o) => `"${COHORT_OP_LABEL[o]}"`).join(' or ')}.`};
+  const raw = x.v;
+  switch (spec.type) {
+    case 'num': {
+      const v = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+      if (!Number.isFinite(v) || v < 0 || v > COHORT_NUM_MAX) return {error: `${at}: ${spec.label} needs a number of 0 or more.`};
+      if (spec.integer && !Number.isInteger(v)) return {error: `${at}: ${spec.label} needs a whole number.`};
+      return {f, op, v: spec.integer ? v : Math.round(v * 100) / 100};
+    }
+    case 'date': {
+      const v = typeof raw === 'string' ? raw.trim() : '';
+      return validDay(v) ? {f, op, v} : {error: `${at}: ${spec.label} needs a date (YYYY-MM-DD).`};
+    }
+    case 'enum': {
+      const v = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/\s+/g, '_') : '';
+      const values = spec.values ?? {};
+      return v in values ? {f, op, v} : {error: `${at}: ${spec.label} is ${Object.values(values).join(', ').replace(/, ([^,]*)$/, ' or $1')}.`};
+    }
+    default: {
+      const v = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+      return v && v.length <= COHORT_CODE_MAX ? {f, op, v} : {error: `${at}: type the discount code (up to ${COHORT_CODE_MAX} characters).`};
+    }
+  }
+}
+
+/**
+ * THE rule validator: the builder (live), the server actions (again, trusting nothing from the browser), the stored-row read and
+ * 9B's Ask Coop draft all run this. Returns the normalised rule (code upper-cased, numbers as numbers, enums lower-cased, unknown
+ * keys dropped) or a plain-language error.
+ */
+export function readCohortRule(input: unknown): {rule: CohortRule} | {error: string} {
+  if (!isObj(input)) return {error: 'The rule is missing.'};
+  const list = input.all;
+  if (!Array.isArray(list) || list.length === 0) return {error: 'A cohort needs at least one condition.'};
+  if (list.length > COHORT_RULE_MAX_CONDS) return {error: `A cohort can have at most ${COHORT_RULE_MAX_CONDS} conditions.`};
+  const all: CohortCond[] = [];
+  for (const [i, x] of list.entries()) {
+    const c = readCond(x, i + 1);
+    if ('error' in c) return c;
+    all.push(c);
+  }
+  return {rule: {all}};
+}
+
+/** What the evaluator reads from a Customers tab row (customerRows), so the page and Ask Coop evaluate the very same numbers. */
+export type CohortRow = Pick<
+  CustomerRow,
+  | 'orderCount'
+  | 'firstOrderCode'
+  | 'firstOrderAt'
+  | 'daysSinceLastOrder'
+  | 'spent'
+  | 'spendYtd'
+  | 'membershipTier'
+  | 'lastContactKnown'
+  | 'lastContactedAt'
+  | 'daysSinceLastContact'
+  | 'timesContacted'
+  | 'consent'
+>;
+
+const tierOf = (t: string | null | undefined): string => (t === 'platinum' || t === 'gold' ? t : 'guest');
+
+/**
+ * A field's value for one row; null = unknown or not applicable, and then NO condition on it holds. Never ordered: code, first
+ * order and days since are null (both "is" and "is not" fail: there is no first order to compare). Last contacted: a source unread
+ * is null; known and never contacted is +Infinity, so it counts as "not contacted in N+ days" for any N, never as "in the last N".
+ */
+function cohortValue(r: CohortRow, f: CohortField): string | number | null {
+  switch (f) {
+    case 'code':
+      return r.orderCount >= 1 && r.firstOrderCode !== null ? r.firstOrderCode.toUpperCase() : null;
+    case 'first':
+      return r.orderCount >= 1 ? phDayOf(r.firstOrderAt) : null;
+    case 'orders':
+      return r.orderCount;
+    case 'days':
+      return r.daysSinceLastOrder;
+    case 'life':
+      return r.spent;
+    case 'ytd':
+      return r.spendYtd;
+    case 'tier':
+      return tierOf(r.membershipTier);
+    case 'lcdays':
+      return !r.lastContactKnown ? null : r.lastContactedAt === null ? Number.POSITIVE_INFINITY : r.daysSinceLastContact;
+    case 'times':
+      return r.timesContacted;
+    case 'consent':
+      return r.consent.trim().toLowerCase() === 'subscribed' ? 'subscribed' : 'not_subscribed';
+  }
+}
+
+function condHolds(r: CohortRow, c: CohortCond): boolean {
+  const x = cohortValue(r, c.f);
+  if (x === null) return false;
+  switch (c.op) {
+    case 'is':
+      return x === c.v;
+    case 'is_not':
+      return x !== c.v;
+    case 'on_or_after':
+      return String(x) >= String(c.v);
+    case 'on_or_before':
+      return String(x) <= String(c.v);
+    case 'gte':
+      return Number(x) >= Number(c.v);
+    case 'lte':
+      return Number(x) <= Number(c.v);
+    case 'eq':
+      return Number(x) === Number(c.v);
+  }
+}
+
+/**
+ * THE cohort evaluator (RET-10): true when every condition holds (AND). The rule is re-checked first, so a malformed rule (a stored
+ * row edited by hand, a bad draft) matches nobody, never everybody. Members are never stored: this runs on every render.
+ */
+export function matchesCohort(row: CohortRow, rule: CohortRule): boolean {
+  const ok = readCohortRule(rule);
+  return 'rule' in ok && ok.rule.all.every((c) => condHolds(row, c));
+}
+
+/**
+ * The built-in audiences as rules, built from AUDIENCE_RULES, so the cohort bar can say them as sentences and a test can pin that
+ * they pick exactly inAudience's list. The page still LISTS the built-ins through inAudience / audienceRows (owner: today's lists).
+ */
+export const BUILTIN_COHORT_RULES: Readonly<Record<Exclude<CustomerAudience, 'all'>, CohortRule>> = Object.freeze(
+  Object.fromEntries(
+    (Object.keys(AUDIENCE_RULES) as Array<Exclude<CustomerAudience, 'all'>>).map((a) => {
+      const r = AUDIENCE_RULES[a];
+      const orders: CohortCond[] =
+        r.maxOrders === r.minOrders
+          ? [{f: 'orders', op: 'eq', v: r.minOrders}]
+          : [{f: 'orders', op: 'gte', v: r.minOrders}, ...(r.maxOrders === null ? [] : [{f: 'orders', op: 'lte', v: r.maxOrders} as CohortCond])];
+      return [a, {all: [...orders, {f: 'days', op: 'gte', v: r.minDays}]}];
+    }),
+  ) as Record<Exclude<CustomerAudience, 'all'>, CohortRule>,
+);
+
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+const pesoWhole = (n: number): string => `₱${n.toLocaleString('en-PH', {minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2})}`;
+/** The special first-order keys firstOrderCode() produces, said in words. */
+const CODE_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  [NO_CODE.toUpperCase()]: 'no code',
+  [BIRTHDAY_COHORT.toUpperCase()]: 'a birthday voucher',
+  [BUNDLE_COHORT.toUpperCase()]: 'a bundle code',
+});
+
+/** One condition as a plain sentence. Never a field or operator code (owner, 2026-11-12: "too cody for an end user"). */
+export function condText(c: CohortCond): string {
+  const n = Number(c.v);
+  const v = String(c.v);
+  switch (c.f) {
+    case 'code': {
+      const words = CODE_WORDS[v.toUpperCase()];
+      if (words) return c.op === 'is' ? `First order used ${words}` : `First order did not use ${words}`;
+      return c.op === 'is' ? `First order used code ${v}` : `First order did not use code ${v}`;
+    }
+    case 'first':
+      return `First order ${c.op === 'on_or_after' ? 'on or after' : 'on or before'} ${fmtPhDate(`${v}T00:00:00+08:00`)}`;
+    case 'orders':
+      return c.op === 'eq' ? `Has exactly ${plural(n, 'order')}` : c.op === 'gte' ? `Has ${n} or more orders` : `Has at most ${plural(n, 'order')}`;
+    case 'days':
+      return c.op === 'gte' ? `Last order was ${n} or more days ago` : `Ordered in the last ${plural(n, 'day')}`;
+    case 'life':
+      return c.op === 'gte' ? `Spent ${pesoWhole(n)} or more in total` : `Spent at most ${pesoWhole(n)} in total`;
+    case 'ytd':
+      return c.op === 'gte' ? `Spent ${pesoWhole(n)} or more this membership year` : `Spent at most ${pesoWhole(n)} this membership year`;
+    case 'tier':
+      return `Tier is ${c.op === 'is_not' ? 'not ' : ''}${TIER_VALUES[v as keyof typeof TIER_VALUES] ?? v}`;
+    case 'lcdays':
+      return c.op === 'gte' ? `Not contacted in the last ${plural(n, 'day')}` : `Contacted in the last ${plural(n, 'day')}`;
+    case 'times':
+      if (c.op === 'eq') return n === 0 ? 'Never contacted' : `Contacted exactly ${plural(n, 'time')}`;
+      return c.op === 'gte' ? `Contacted ${n} or more times` : `Contacted at most ${plural(n, 'time')}`;
+    case 'consent': {
+      const subscribed = (v === 'subscribed') === (c.op === 'is');
+      return subscribed ? 'Subscribed to email' : 'Not subscribed to email';
+    }
+  }
+}
+
+/** A whole rule as one sentence: "First order used code CIRCUIT10, and has exactly 1 order". */
+export function ruleText(rule: CohortRule): string {
+  return rule.all.map((c, i) => (i === 0 ? condText(c) : condText(c).charAt(0).toLowerCase() + condText(c).slice(1))).join(', and ');
 }
 
 const countBy = (keys: string[]): {group: string; customers: number}[] => {

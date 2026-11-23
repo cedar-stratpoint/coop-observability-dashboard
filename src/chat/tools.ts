@@ -22,6 +22,7 @@ export const TOOL_ALLOWLIST = Object.freeze([
   'list_crm_orders',
   'list_crm_customers',
   'list_crm_checkouts',
+  'propose_crm_cohort',
   'lookup_product',
   'contacts',
   'ask_owner',
