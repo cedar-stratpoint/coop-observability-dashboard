@@ -62,6 +62,17 @@ Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.2
 
 **Before this deploys:** `docs/nichido-prod-cutover.md` 20 to 34 on Nichido prod, sales uploads paused. The app needs `sales_units()` and `po_forms`.
 
+## 2026-11-23 — Website CRM: Vouchers used in the Customers table and on the profile (RET-11, Stage 8D)
+
+The owner asked to see which vouchers each customer actually used, in the table ("nasa table sana"), next to the vouchers we sent. The Customers table on `/customers/website-crm` gains a **Vouchers used** column right after Orders: one chip per redeemed discount code (labels deduplicated, ×N when a code was used more than once), each use's order, PH date and amount saved on hover, "—" when none. It sorts by uses through the existing header sort, most first on the first click. The CSV gains a "Vouchers used" column (labels joined with "; "). The profile drawer's stat strip gains a **Vouchers used** tile: the count, then one line per use, newest first ("RETURN30 · order #1140 · Jul 19, 2026 · ₱30.00 saved"); "No discount code on any order" when there is none.
+
+At the same time the **Tier**, **To Platinum** and **Spend (year)** columns come off the Customers table (and the tier label, To Platinum bar and Spend (yr) off the phone card). **Decision:** owner, 2026-11-23: "kahit wala na to muna", "pati to kahit nakahide", "hide din ito". They are hidden *for now*, not dropped: the CSV keeps all three columns, the Tier filter stays, and the profile still shows the tier, spend this membership year and the To Platinum bar.
+
+**Decisions.**
+- **The discount amount is now projected.** `projectOrder` keeps `raw.discount_codes[].amount` as `discountAmounts`, a parallel array index for index with `discountCodes`. A parallel array is the smallest change: every existing consumer of `discountCodes` (RET-06 cohorts, the timeline, Ask Coop) is untouched. The `BDAY-` cut still applies, so a birthday code never reaches the page, and it reads "Birthday voucher" (`voucherLabel`, built on `firstOrderCode`, so `BUNDLE-` codes collapse to "BUNDLE (auto)" here too).
+- **One pure function**, `customerVouchers(row, orders)` in `src/crm-compute.ts`, matches orders exactly like `customerOrders` / the timeline: one entry per code per counted order, newest first, test orders excluded. Orders not read → `null` → "unknown", never 0. No new fetch. Test: `test/crm-vouchers-used.test.ts`.
+- **Ask Coop is unchanged.** It still withholds voucher codes; "who used RETURN30?" and a cohort rule "ever used code X" are later (RET-11 story, "Later").
+
 ## 2026-11-23 — Event lead contacts: search box
 
 The contact list on `/customers/leads` (and each event page's lead block, same component) gains a search box: name, email, Instagram handle (with or without "@"), pet, or mobile (spaces and dashes ignored). It narrows the list, the "n of N" count and the Copy emails button together, alongside the Prize and Collected filters. **Decision:** client-side, over the leads the page already holds (no new read), with the matcher as one pure function, `matchesLeadSearch` (`src/spin-leads-types.ts`, `test/spin-leads-search.test.ts`).

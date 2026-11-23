@@ -396,6 +396,44 @@ export function codeCohorts(rows: readonly Pick<EnrichedCustomer, 'orderCount' |
     .sort((x, y) => y.buyers - x.buyers || x.group.localeCompare(y.group));
 }
 
+/* ---------- RET-11 (8D): vouchers used ---------- */
+
+/** One discount code on one counted order. `label` is the code as the page says it (BDAY- reads "Birthday voucher"); amount = pesos off, null when unknown. */
+export type VoucherUse = {label: string; orderNumber: string | null; orderId: string; at: string | null; amount: number | null};
+
+/** The words for a code: firstOrderCode's key (BUNDLE- collapses, a BDAY- code never shows), the birthday key capitalised for display. */
+export const voucherLabel = (code: string): string => {
+  const k = firstOrderCode([code]);
+  return k === BIRTHDAY_COHORT ? 'Birthday voucher' : k;
+};
+
+/**
+ * Every discount code this customer redeemed, one entry per code per order, newest order first (customerOrders' match and order; a
+ * code keeps its place within its order). Test orders count nowhere. `orders` null (not read) → null: the page says "unknown", never 0.
+ */
+export function customerVouchers(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly CrmOrder[] | null): VoucherUse[] | null {
+  if (orders === null) return null;
+  return customerOrders(c, orders)
+    .filter((o) => o.test !== true)
+    .flatMap((o) =>
+      (o.discountCodes ?? []).map((code, i) => ({label: voucherLabel(code), orderNumber: o.orderNumber, orderId: o.shopifyOrderId, at: o.createdAt, amount: o.discountAmounts?.[i] ?? null})),
+    );
+}
+
+/** One use as a line: "RETURN30 · order #1140 · Jul 19, 2026 · ₱30.00 saved" (no date when unreadable, no amount when unknown). */
+export function voucherUseText(u: VoucherUse): string {
+  const no = u.orderNumber ?? u.orderId;
+  const date = fmtPhDate(u.at);
+  return [u.label, `order ${no.startsWith('#') ? no : `#${no}`}`, date === '—' ? null : date, u.amount === null ? null : `${peso(u.amount)} saved`].filter(Boolean).join(' · ');
+}
+
+/** The distinct labels, most used first (ties: first seen, i.e. newest), with how many times each was used. */
+export function voucherLabels(uses: readonly VoucherUse[]): {label: string; uses: VoucherUse[]}[] {
+  const m = new Map<string, VoucherUse[]>();
+  for (const u of uses) m.set(u.label, [...(m.get(u.label) ?? []), u]);
+  return [...m.entries()].map(([label, list]) => ({label, uses: list})).sort((a, b) => b.uses.length - a.uses.length);
+}
+
 /** The orders bucket a customer falls in: 0, 1, 2, 3 or 4+. */
 export const ordersBucket = (n: number): string => (n >= 4 ? '4+' : String(n));
 
@@ -417,6 +455,8 @@ export type CustomerRow = EnrichedCustomer & {
   /** RET-10: PH days since lastContactedAt; null when never contacted or unknown (lastContactKnown tells them apart). */
   daysSinceLastContact: number | null;
   consent: string;
+  /** RET-11: customerVouchers for this row, set by the Website CRM page; absent / null = not read (shown "unknown"). */
+  vouchers?: VoucherUse[] | null;
 };
 
 /** `known` says which parts of `tally` were read; by default the automated part is known when a tally is given and the manual part is not. */

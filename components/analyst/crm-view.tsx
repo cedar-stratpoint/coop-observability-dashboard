@@ -72,8 +72,8 @@ import {ContactLogDialog} from './contact-log-dialog';
 import {CohortBuilderDialog, blankDraft, draftFromProposal, draftOf, type CohortDraft} from './cohort-builder-dialog';
 import {CohortDraftCard, type CohortDraftValue} from './cohort-draft-card';
 import {useCoopChat} from './coop-chat';
-import {CohortChip, CopyButton, CustomerProfile, PET_TONE, PlatinumBar, STATUS_TONE, Stepper, type ProfileTab} from './customer-profile';
-import {InfoPop, InfoTip} from './info-tip';
+import {CohortChip, CopyButton, CustomerProfile, PET_TONE, STATUS_TONE, Stepper, type ProfileTab} from './customer-profile';
+import {InfoPop} from './info-tip';
 import {Eyebrow} from './sections';
 import {Pagination} from './pagination';
 import type {ChartBlock} from '@/src/chat/block-types';
@@ -103,13 +103,16 @@ import {
   ruleText,
   textMatch,
   tierCounts,
-  toPlatinum,
   turnaround,
+  customerVouchers,
+  voucherLabels,
+  voucherUseText,
   EMPTY_CART_FILTER,
   EMPTY_CUSTOMER_FILTER,
   EMPTY_ORDER_FILTER,
   type CustomerAudience,
   type CustomerRow,
+  type VoucherUse,
 } from '@/src/crm-compute';
 import {
   CART_SORT,
@@ -303,15 +306,24 @@ function ScheduleLine({text}: {text: string | null}) {
   );
 }
 
-/** Gold: the bar and the pesos left this membership year. Platinum: Qualified. A guest has no tier. */
-function ToPlatinum({row, threshold}: {row: CustomerRow; threshold: number}) {
-  if (row.membershipTier === 'platinum') return <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', STATUS_TONE.Recovered)}>Qualified</span>;
-  if (row.membershipTier !== 'gold') return <span className="text-xs text-muted-foreground">—</span>;
-  const {pct, left} = toPlatinum(row.spendYtd, threshold);
+/** RET-11: one chip per code (labels deduplicated, most used first, ×N when used more than once); each use's order and date on hover. */
+function VoucherChips({uses}: {uses: VoucherUse[] | null | undefined}) {
+  if (!uses) return <span className="text-xs text-muted-foreground" title="Unknown: the orders list was not read">unknown</span>;
+  if (!uses.length) return <span className="text-xs text-muted-foreground">—</span>;
   return (
-    <div className="min-w-[9.5rem]" title={`${peso(row.spendYtd)} of ${peso(threshold)} this membership year`}>
-      <PlatinumBar pct={pct} text={left > 0 ? `${peso(left)} left` : 'Eligible'} />
-    </div>
+    <span className="flex min-w-[11rem] max-w-[16rem] flex-wrap gap-1">
+      {voucherLabels(uses).map((v) => (
+        <span
+          key={v.label}
+          title={v.uses.map(voucherUseText).join('\n')}
+          className="inline-flex max-w-full items-center overflow-hidden rounded-md border border-border bg-card text-[11px] leading-5 whitespace-nowrap"
+        >
+          <span className="truncate px-1.5 text-foreground">{v.label}</span>
+          {v.uses.length > 1 && <span className="bg-muted px-1.5 tabular-nums text-muted-foreground">×{v.uses.length}</span>}
+          <span className="sr-only">: {v.uses.map(voucherUseText).join('; ')}</span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -527,7 +539,9 @@ export function CrmView({
     const enriched = enrichCustomers(customers, orders, membershipWindowStart(nowDate, membership.programStart));
     // Emails sent needs every CRM source and the manual count needs the log; an unread part is unknown for every row, never 0.
     const tally = contactTally({checkouts: checkouts ?? [], orders, birthdayVouchers: birthdayVouchers ?? [], membershipEvents: membershipEvents?.events ?? [], manualContacts: contacts ?? []});
-    return customerRows(enriched, tally, nowDate, {automated: checkouts !== null && birthdayVouchers !== null && membershipEvents !== null, manual: contacts !== null});
+    const rows = customerRows(enriched, tally, nowDate, {automated: checkouts !== null && birthdayVouchers !== null && membershipEvents !== null, manual: contacts !== null});
+    // RET-11: the codes each customer redeemed (counted orders only), for the Vouchers used column, its sort, the CSV and the profile.
+    return rows.map((r) => ({...r, vouchers: customerVouchers(r, orders)}));
   }, [customers, orders, checkouts, birthdayVouchers, membershipEvents, contacts, membership.programStart, nowDate]);
   // Each customer's logged contacts for the dialog, newest first (the read is already ordered that way).
   const contactsByEmail = useMemo(() => {
@@ -1283,29 +1297,14 @@ export function CrmView({
                         <SortTh label="Email" k="email" sort={customerSort} onSort={sortCustomers} />
                         <th className={th} title="Saved cohorts this customer matches right now. Hover a label for its rule">Cohorts</th>
                         <SortTh label="Member since" k="memberSince" sort={customerSort} onSort={sortCustomers} title="When the customer record was created (PH date)" />
-                        <SortTh
-                          label="Tier"
-                          k="tier"
-                          sort={customerSort}
-                          onSort={sortCustomers}
-                          info={
-                            <InfoPop label="What each tier means">
-                              <p className="font-medium">Membership tiers</p>
-                              <p><b>Platinum</b>: crossed {threshold} of paid spend this membership year (from {membership.programStart} or January 1, whichever is later).</p>
-                              <p><b>Gold</b>: has an account. The default tier.</p>
-                              <p><b>Guest</b>: checked out without an account, so no tier.</p>
-                              <p className="text-muted-foreground">The tier is the one the storefront stamped on the customer.</p>
-                            </InfoPop>
-                          }
-                        />
-                        <SortTh
-                          label="To Platinum"
-                          k="toPlatinum"
-                          sort={customerSort}
-                          onSort={sortCustomers}
-                          info={<InfoTip text={`Gold members: this membership year's paid spend toward ${threshold}, and the pesos left. Platinum members already qualify.`} />}
-                        />
                         <SortTh label="Orders" k="orders" sort={customerSort} onSort={sortCustomers} className="text-right" />
+                        <SortTh
+                          label="Vouchers used"
+                          k="vouchers"
+                          sort={customerSort}
+                          onSort={sortCustomers}
+                          title="Discount codes redeemed on counted orders, most uses first. Hover a code for its orders"
+                        />
                         <SortTh label="First order" k="firstOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Last order" k="lastOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Days since" k="daysSince" sort={customerSort} onSort={sortCustomers} className="text-right" title="Philippine days since the last counted order" />
@@ -1313,7 +1312,6 @@ export function CrmView({
                         <SortTh label="Manual" k="manual" sort={customerSort} onSort={sortCustomers} className="text-right" title="Contacts the team logged by hand: DM, SMS, call, email by hand, other" />
                         <SortTh label="Last contacted" k="lastContacted" sort={customerSort} onSort={sortCustomers} title="The newest contact of any kind, Philippine date. Unknown when a source could not be read" />
                         <SortTh label="Consent" k="consent" sort={customerSort} onSort={sortCustomers} />
-                        <SortTh label="Spend (year)" k="spend" sort={customerSort} onSort={sortCustomers} className="text-right" />
                         <SortTh label="Pet" k="pet" sort={customerSort} onSort={sortCustomers} />
                         <th className="px-2 py-2.5"><span className="sr-only">Log a contact</span></th>
                       </tr>
@@ -1422,13 +1420,8 @@ export function CrmView({
                             )}
                           </td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.createdAt)}</td>
-                          <td className="px-4 py-2.5">
-                            <span className="text-xs capitalize text-muted-foreground">
-                              {c.membershipTier ?? 'guest'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5"><ToPlatinum row={c} threshold={membership.platinumThreshold} /></td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{c.orderCount}</td>
+                          <td className="px-4 py-2.5"><VoucherChips uses={c.vouchers} /></td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.firstOrderAt)}</td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.lastOrderAt)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{c.daysSinceLastOrder ?? '—'}</td>
@@ -1443,7 +1436,6 @@ export function CrmView({
                             {c.lastContactKind && <span className="block">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.consent.replace(/_/g, ' ')}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">{peso(c.spendYtd)}</td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.petName ?? '—'}</td>
                           <td className="px-2 py-1.5 text-right">
                             <button
@@ -1568,7 +1560,6 @@ export function CrmView({
                         <ProfileLink onOpen={open} owner={c} className="min-w-0 flex-1 truncate text-sm font-medium">
                           {nameOf(c) || '—'}
                         </ProfileLink>
-                        <span className="shrink-0 text-xs capitalize text-muted-foreground">{c.membershipTier ?? 'guest'}</span>
                       </div>
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
                         <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
@@ -1579,9 +1570,6 @@ export function CrmView({
                             <CohortChip key={k.id} cohort={k} why={ruleText(k.rule)} />
                           ))}
                         </div>
-                      )}
-                      {(c.membershipTier === 'gold' || c.membershipTier === 'platinum') && (
-                        <div className="mt-2"><ToPlatinum row={c} threshold={membership.platinumThreshold} /></div>
                       )}
                       <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <div className="flex flex-col">
@@ -1609,16 +1597,16 @@ export function CrmView({
                           <dd className="text-foreground">{c.consent.replace(/_/g, ' ')}</dd>
                         </div>
                         <div className="flex flex-col">
-                          <dt>Spend (yr)</dt>
-                          <dd className="tabular-nums text-foreground">{peso(c.spendYtd)}</dd>
-                        </div>
-                        <div className="flex flex-col">
                           <dt>Pet</dt>
                           <dd className="text-foreground">{c.petName ?? '—'}</dd>
                         </div>
                         <div className="flex flex-col">
                           <dt>Member since</dt>
                           <dd className="tabular-nums text-foreground">{fmtPhDate(c.createdAt)}</dd>
+                        </div>
+                        <div className="col-span-3 flex justify-between gap-2">
+                          <dt>Vouchers used</dt>
+                          <dd><VoucherChips uses={c.vouchers} /></dd>
                         </div>
                         <div className="col-span-3 flex justify-between gap-2">
                           <dt>Last contacted</dt>
