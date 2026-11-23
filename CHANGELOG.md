@@ -20,6 +20,10 @@ Based on a "Back goes back" UX reel (Glide): Back should keep your place, leave 
 - Not built: "the page leaves the way it came" (a shared-element transition from row to page). Rule 1 does most of the work; a View Transitions spike would come first.
 
 Verified in a local browser (Playwright, staging data): same URL, exact scroll and marked + focused row on return for Inventory, Restock, Orders, Uploads, scan board (incl. stepping pages), Flags; the next Back leaves the page each time; dialogs close on Back; phone-width cards. Code: `src/back-nav.ts` (pure, unit-tested in `test/back-nav.test.ts`), `components/analyst/back-nav.tsx`, `[data-kept]` styles in `app/globals.css`.
+## 2026-11-24 — Scan page: cards in a row are the same size
+
+Per BA and Per store cards no longer size to their own content. The grids had `items-start`, so a card with fewer pills or no Change BA footer (e.g. "No BA on the form") came out shorter than its neighbours. Cards now stretch to the tallest in their row, with the bottom action (Change BA, Confirm store, Review) pinned to the bottom so it lines up across the row.
+
 ## 2026-11-24 — Scan page: Per store and Per BA cards match the Per file list
 
 The store and BA cards now speak the same visual language as the refreshed Per file list. Card titles use the sans face (the serif stays on the page title only), and period and BA sit on one quiet line with small icons instead of a mono date. Page coverage (pages 1 to 5) sits in the same tray as the view tabs and pager, and the form version uses the coloured Legacy / V1 / V2 pill. Store section headings drop the rule and serif for a sans title with a count pill. "Confirm store" is a calmer 36px button with press feedback, and the hover-only "Review →" becomes an always-visible "Review ›". BA cards get the rounded initials tile from the Per file rows, a chevron to show they open, "no store yet" instead of "0 stores", and Change BA in a footer only when it applies (no empty strip on "No BA on the form").
