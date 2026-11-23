@@ -136,17 +136,7 @@ export function useReturnTrip(listKey: string) {
     }
     // Not cancelled on cleanup: the arrival flag is one-shot, so a dev Strict Mode re-run (or a
     // fast re-render) must not throw the restore away.
-    requestAnimationFrame(() => {
-      window.scrollTo({top: entry.scrollY, behavior: 'instant'});
-      if (!entry.rowId) return;
-      const row = [...document.querySelectorAll<HTMLElement>(`[data-kept-id~="${CSS.escape(entry.rowId)}"]`)].find(visible);
-      if (!row) return;
-      const r = row.getBoundingClientRect();
-      if (r.top < 64 || r.bottom > window.innerHeight) row.scrollIntoView({block: 'center', behavior: 'instant'});
-      markKept(row);
-      const target = row.querySelector<HTMLElement>('[data-row]') ?? row.querySelector<HTMLElement>('a[href],button');
-      target?.focus({preventScroll: true});
-    });
+    returnToRow(entry.rowId, entry.scrollY);
   }, [listKey]);
 
   const leave = useCallback((rowId: string | null, href: string) => leaveList(listKey, rowId, href), [listKey]);
@@ -172,17 +162,27 @@ function cameFrom(entry: ReturnEntry | null, detailPrefix?: string): boolean {
   return detailPrefix ? here.startsWith(detailPrefix) && entry.to.startsWith(detailPrefix) : here === entry.to;
 }
 
-/** Restore a list in place after a drill-in closes: scroll back, then mark + focus the row. */
-function returnToRow(rowId: string, scrollY: number | null) {
-  requestAnimationFrame(() => {
+/**
+ * Bring a list back to where you left it: scroll, then mark + focus the row. A list can finish
+ * laying out a beat after mount (e.g. a per-viewer page size read from storage re-slices it), so
+ * the row is looked for over a few frames before giving up; the scroll is applied each try.
+ */
+function returnToRow(rowId: string | null, scrollY: number | null) {
+  let tries = 0;
+  const attempt = () => {
     if (scrollY != null) window.scrollTo({top: scrollY, behavior: 'instant'});
+    if (!rowId) return;
     const row = [...document.querySelectorAll<HTMLElement>(`[data-kept-id~="${CSS.escape(rowId)}"]`)].find(visible);
-    if (!row) return;
+    if (!row) {
+      if (tries++ < 30) requestAnimationFrame(attempt);
+      return;
+    }
     const r = row.getBoundingClientRect();
     if (r.top < 64 || r.bottom > window.innerHeight) row.scrollIntoView({block: 'center', behavior: 'instant'});
     markKept(row);
     (row.querySelector<HTMLElement>('[data-row]') ?? row.querySelector<HTMLElement>('a[href],button'))?.focus({preventScroll: true});
-  });
+  };
+  requestAnimationFrame(attempt);
 }
 
 /**
@@ -248,6 +248,14 @@ export function markReturn(listKey: string) {
   }
 }
 
+/** Where a detail page's Back should land: the remembered list URL when this page was opened
+ *  from it, else `fallback`. Client-only (reads per-tab storage). */
+export function returnTarget(listKey: string, fallback: string, detailPrefix?: string): string {
+  const entry = readEntry(listKey);
+  const next = cameFrom(entry, detailPrefix) ? returnHref(entry, fallback) : fallback;
+  return isLocalPath(next) ? next : fallback;
+}
+
 /**
  * The detail page's "‹ List" link. When you opened this page from the list, it returns to that
  * list exactly as you left it; from a deep link it is the fixed `fallback`, as before.
@@ -260,11 +268,17 @@ export function ReturnLink({
   detailPrefix,
   className,
   children,
+  replace,
+  title,
   'aria-label': ariaLabel,
 }: {
   listKey: string;
   fallback: string;
   detailPrefix?: string;
+  /** When not stepping back through history, replace this entry instead of pushing (a
+   *  breadcrumb going up, so the detail page doesn't stay behind in history). */
+  replace?: boolean;
+  title?: string;
   className?: string;
   children: ReactNode;
   'aria-label'?: string;
@@ -272,15 +286,14 @@ export function ReturnLink({
   const router = useRouter();
   const [href, setHref] = useState(fallback);
   useEffect(() => {
-    const entry = readEntry(listKey);
-    const came = cameFrom(entry, detailPrefix);
-    const next = came ? returnHref(entry, fallback) : fallback;
-    setHref(isLocalPath(next) ? next : fallback);
+    setHref(returnTarget(listKey, fallback, detailPrefix));
   }, [listKey, fallback, detailPrefix]);
   return (
     <Link
       href={href}
       scroll={false}
+      replace={replace}
+      title={title}
       className={className}
       aria-label={ariaLabel}
       onClick={(e) => {

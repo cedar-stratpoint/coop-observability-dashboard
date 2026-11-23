@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Scan review: the breadcrumb back to the scan keeps your place too
+
+Follow-up to "Back keeps your place": on the scan page's Per file list, opening a page from list page 2 (say, Needs review at 10 per page) and returning by the review's breadcrumb (the scan name) landed on page 1 with nothing marked. Only the small ← arrow used the new return trip; the breadcrumb was a fixed link without the list page. The nearest breadcrumb now returns to the list exactly as it was left (stepping back through history when the list is right behind, else replacing as before), and the ← fallback after a reload does the same. The return also waits a few frames for the row: the per-viewer page size is read from storage after the list first renders, so the row could be missing on the first frame. Verified locally on the Oct 16 to 31 part 2 scan: breadcrumb, ←, and reload then breadcrumb all land on page 2 with the page marked (the same replay on the old code lands on page 1).
+
 ## 2026-11-24 — Nichido: Back keeps your place (lists, drill-ins, dialogs)
 
 Based on a "Back goes back" UX reel (Glide): Back should keep your place, leave the way it came, and take one step. On the Nichido side, Back used to be a fixed breadcrumb link (because every filter click was a history entry, so a history Back only walked back through filters). That stopped the filter loop but dropped your place: opening a product from page 3 of a filtered Inventory and pressing Back landed on page 1, All, top of the page.
