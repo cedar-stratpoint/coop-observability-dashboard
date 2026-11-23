@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import {LayoutGrid, Users, List, X} from 'lucide-react';
+import {X} from 'lucide-react';
 import {BackButton} from '@/components/analyst/back-button';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
@@ -17,15 +17,11 @@ import {TriageBoard} from '@/components/analyst/triage-board';
 import {BaCards, ScanFileList} from '@/components/analyst/scan-views';
 import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
 import {ScanReadingCard} from '@/components/analyst/scan-reading';
+import {ScanViewTabs, type ScanView} from '@/components/analyst/scan-view-tabs';
 
 export const dynamic = 'force-dynamic';
 
-type View = 'store' | 'ba' | 'file';
-const VIEWS: Array<{key: View; label: string; Icon: typeof LayoutGrid}> = [
-  {key: 'store', label: 'Per store', Icon: LayoutGrid},
-  {key: 'ba', label: 'Per BA', Icon: Users},
-  {key: 'file', label: 'Per file', Icon: List},
-];
+type View = ScanView;
 
 // Oldest form layout first; only versions actually present in the scan get a card.
 const VERSION_ORDER: FormVersion[] = ['legacy', 'v1', 'v2', 'unknown'];
@@ -48,7 +44,9 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const {source: raw} = await params;
   const {view: viewRaw, ba: baRaw, version: versionRaw, batch: batchRaw} = await searchParams;
   const source = decodeURIComponent(raw);
-  const view: View = viewRaw === 'ba' || viewRaw === 'file' ? viewRaw : 'store';
+  // Per file is the default view (the plain page list reviewers start from); Per store and
+  // Per BA are a tab away.
+  const view: View = viewRaw === 'ba' || viewRaw === 'store' ? viewRaw : 'file';
   const ba = typeof baRaw === 'string' ? baRaw : null;
   const version = isVersion(versionRaw) ? versionRaw : null;
   // One upload drop of this scan (set by the Uploads list tile). Without it, the page keeps its
@@ -110,63 +108,67 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   return (
     <div className={GL_PAGE}>
-      {/* Breadcrumb — the chevron steps back to where you came from, not a fixed page. */}
-      <nav className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" aria-label="Breadcrumb">
-        <BackButton fallback="/uploads" label="Uploads" />
-        <span aria-hidden>·</span>
-        <span className="min-w-0 truncate font-medium text-foreground" title={scanName ?? source}>{scanName ?? source}</span>
-      </nav>
-      {scanName && (
-        <p className="-mt-1 truncate font-mono text-xs text-muted-foreground/80" title={source}>
-          {source}
-        </p>
-      )}
+      {/* Header: back to Uploads, the scan's name as the title (file name beneath when the user
+          named it), and the whole-scan action on the right. */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground">
+            <BackButton fallback="/uploads" label="Uploads" className="-ml-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 transition-colors hover:text-foreground" />
+          </nav>
+          <h1 className="min-w-0 truncate font-heading text-2xl font-semibold tracking-tight" title={scanName ?? source}>
+            {scanName ?? source}
+          </h1>
+          {scanName && (
+            <p className="truncate font-mono text-xs text-muted-foreground/80" title={source}>
+              {source}
+            </p>
+          )}
+        </div>
+        {canEdit && (
+          <div className="-mr-2 sm:shrink-0">
+            <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
+          </div>
+        )}
+      </header>
 
       {/* Still reading on the server: appears (and survives a refresh) while this scan's pages
           are being read, so a store manager knows more forms are coming and there is nothing
           to act on yet. Scoped to this scan; self-hides once it settles. */}
       <ScanReadingCard scan={source} />
 
-      {/* Form-version summary: how many forms of each layout, and a one-click filter. */}
+      {/* Form-version summary: one panel of segments (how many forms of each layout, a one-click
+          filter) over a thin bar showing the scan's version mix. */}
       {totalForms > 0 && (
-        <div className="flex flex-wrap items-stretch gap-2.5" role="group" aria-label="Filter by form version">
-          <VersionCard href={scanHref(source, {view, ba, version: null, batch: batchId})} label="All versions" count={totalForms} color={null} active={!version} />
-          {VERSION_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0).map((v) => (
-            <VersionCard
-              key={v}
-              href={scanHref(source, {view, ba, version: version === v ? null : v, batch: batchId})}
-              label={VERSION_LABEL[v]}
-              count={versionCounts[v] ?? 0}
-              color={VERSION_COLOR[v]}
-              active={version === v}
-              previewVersion={v}
-            />
-          ))}
+        <div className="flex w-full flex-col gap-2 rounded-2xl border border-border bg-card p-1.5 sm:w-fit" role="group" aria-label="Filter by form version">
+          <div className="flex flex-wrap gap-1">
+            <VersionCard href={scanHref(source, {view, ba, version: null, batch: batchId})} label="All forms" count={totalForms} color={null} active={!version} />
+            {VERSION_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0).map((v) => (
+              <VersionCard
+                key={v}
+                href={scanHref(source, {view, ba, version: version === v ? null : v, batch: batchId})}
+                label={VERSION_LABEL[v]}
+                count={versionCounts[v] ?? 0}
+                color={VERSION_COLOR[v]}
+                active={version === v}
+                previewVersion={v}
+              />
+            ))}
+          </div>
+          <div className="flex h-1 gap-0.5 overflow-hidden rounded-full px-1.5 pb-0.5" aria-hidden>
+            {VERSION_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0).map((v) => (
+              <span
+                key={v}
+                className="h-full rounded-full transition-opacity duration-200"
+                style={{flexGrow: versionCounts[v] ?? 0, background: VERSION_COLOR[v], opacity: !version || version === v ? 1 : 0.25}}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Toggle */}
+      {/* View switch */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-lg border border-border p-0.5" role="tablist" aria-label="View this scan by">
-          {VIEWS.map(({key, label, Icon}) => {
-            const active = view === key;
-            return (
-              <Link
-                key={key}
-                href={href(key)}
-                replace
-                role="tab"
-                aria-selected={active}
-                className={
-                  'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
-                  (active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:text-foreground')
-                }
-              >
-                <Icon className="size-3.5" /> {label}
-              </Link>
-            );
-          })}
-        </div>
+        <ScanViewTabs view={view} hrefs={{file: href('file'), store: href('store'), ba: href('ba')}} />
         {ba && view === 'store' && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
             BA · {ba}
@@ -174,11 +176,6 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
               <X className="size-3" />
             </Link>
           </span>
-        )}
-        {canEdit && (
-          <div className="ml-auto">
-            <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
-          </div>
         )}
       </div>
 
@@ -193,8 +190,8 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   );
 }
 
-/** A form-version summary card above the view toggle: the layout, its form count, and a
- *  one-click filter for the view below. The active card wears the version's own colour. */
+/** One segment of the form-version panel: the layout, its form count, and a one-click filter for
+ *  the view below. The active segment is tinted in the version's own colour. */
 function VersionCard({href, label, count, color, active, previewVersion}: {href: string; label: string; count: number; color: string | null; active: boolean; previewVersion?: string}) {
   const accent = color ?? 'var(--foreground)';
   const preview = previewVersion ? formVersionPreview(previewVersion) : null;
@@ -203,29 +200,31 @@ function VersionCard({href, label, count, color, active, previewVersion}: {href:
       href={href}
       replace
       aria-pressed={active}
-      className="group flex min-w-[108px] flex-col gap-0.5 rounded-xl border px-3.5 py-2.5 transition-[transform,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/35 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-      style={{
-        borderColor: active ? `color-mix(in oklab, ${accent} 55%, transparent)` : 'var(--border)',
-        background: active ? `color-mix(in oklab, ${accent} 10%, transparent)` : 'transparent',
-      }}
+      className={
+        'flex min-w-[7.5rem] flex-1 flex-col gap-1 rounded-xl px-4 py-3 transition-[background-color,box-shadow,transform] duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 motion-reduce:transition-none sm:flex-none ' +
+        (active ? '' : 'hover:bg-muted/60')
+      }
+      style={active ? {background: `color-mix(in oklab, ${accent} 12%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${accent} 38%, transparent)`} : undefined}
     >
-      <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        {color && <span aria-hidden className="size-1.5 rounded-full" style={{background: color}} />}
+      <span className="flex items-center gap-1.5 pr-6 text-xs font-medium text-muted-foreground">
+        {color && <span aria-hidden className="size-2 rounded-full" style={{background: color}} />}
         {label}
       </span>
-      <span className="font-heading text-xl font-semibold tabular-nums" style={active ? {color: accent} : undefined}>
-        {count}
+      <span className="flex items-baseline gap-1.5">
+        <span className="font-heading text-2xl leading-none font-semibold tracking-tight tabular-nums" style={active && color ? {color: accent} : undefined}>
+          {count}
+        </span>
+        <span className="text-xs text-muted-foreground">{count === 1 ? 'form' : 'forms'}</span>
       </span>
-      <span className="text-[11px] text-muted-foreground">{count === 1 ? 'form' : 'forms'}</span>
     </Link>
   );
   if (!preview) return link;
-  // A small Preview affordance on the card (sibling to the filter Link, not nested), opening a
+  // A small Preview affordance on the segment (sibling to the filter Link, not nested), opening a
   // modal with that version's reference form pages.
   return (
-    <div className="relative">
+    <div className="relative flex flex-1 sm:flex-none">
       {link}
-      <VersionPreviewButton version={previewVersion!} className="absolute right-1.5 top-1.5 z-10" />
+      <VersionPreviewButton version={previewVersion!} className="absolute top-2 right-2 z-10 size-6 border-transparent bg-transparent backdrop-blur-none" />
     </div>
   );
 }

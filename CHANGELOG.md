@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-23 — Scan page: refreshed header; Per file is the default view
+
+The scan page header is redesigned: the scan's name is a proper title (file name in mono beneath) with Delete scan beside it; the form-version cards become one panel of segments with a thin bar showing the scan's version mix; the view switch is a segmented control whose highlight slides to the chosen tab on click. Per file is now the first tab and the default view (plain scan links land on it); Per store and Per BA are a tab away, and links that name a view keep it.
+
 ## 2026-11-23 — Scan review: no tag over the handwriting; the page fills wide screens
 
 The code tag drawn beside the pointed row on the scan is removed. On pages with almost no left margin it moved past the row's right end and covered the handwritten numbers, and on narrow margins it was truncated to "EDNH..."; the tinted row in the list already names the item, so the scan shows only the tilted box. The review screens also stopped shrinking to their content: the centred wrapper had no `w-full`, so with the left drawer collapsed the page sat in a ~1,400px column with empty bands either side. It now fills the main column up to 140rem, and the scan pane widens to 45% on 2xl screens (at a 2,000px window the scan goes from about 600px to 820px wide).
