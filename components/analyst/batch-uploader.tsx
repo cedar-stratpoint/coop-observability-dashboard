@@ -9,6 +9,7 @@ import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, 
 import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
+import {planServerScans} from '@/components/analyst/server-scan-plan';
 import {VersionPill} from '@/components/analyst/version-pill';
 import {VERSION_COLOR, VERSION_LABEL} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
@@ -465,9 +466,11 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                       </div>
                       <AlertDialog.Description className="text-sm text-muted-foreground">
                         This starts reading {pending.length === 1 ? 'it' : 'them'} now.{' '}
-                        {pending.some((f) => f.name.toLowerCase().endsWith('.pdf'))
-                          ? 'A multi-page PDF is split into pages and read in the background. '
-                          : ''}
+                        {pending.length > 1 && planServerScans(pending, q.serverUpload, q.uploadName).kind === 'server'
+                          ? 'Each PDF is uploaded as its own scan, one after another, and read on the server. Keep this page open until the last one has uploaded. '
+                          : pending.some((f) => f.name.toLowerCase().endsWith('.pdf'))
+                            ? 'A multi-page PDF is split into pages and read in the background. '
+                            : ''}
                         You can keep working while it runs.
                       </AlertDialog.Description>
                       <div className="flex flex-wrap justify-end gap-2">
@@ -499,8 +502,10 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 // it reads on the server, so leaving or refreshing is safe.
 function ServerUploadStatus({sb}: {sb: ServerBatchState}) {
   const pct = sb.phase === 'uploading' ? Math.round(sb.uploadFrac * 100) : 100;
-  const label =
-    sb.phase === 'uploading' ? 'Uploading scan' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
+  const step = sb.phase === 'uploading' ? 'Uploading scan' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
+  const many = sb.part && sb.part.total > 1 ? sb.part : null;
+  const label = many ? `Scan ${many.index} of ${many.total} · ${step.charAt(0).toLowerCase()}${step.slice(1)}` : step;
+  const more = many && many.index < many.total;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-4 py-5">
       <div className="flex items-center gap-2.5">
@@ -509,7 +514,11 @@ function ServerUploadStatus({sb}: {sb: ServerBatchState}) {
         </span>
         <div className="flex min-w-0 flex-col">
           <span className="text-sm font-medium">{label}</span>
-          <span className="text-xs text-muted-foreground">Reads on the server. You can leave this page or refresh, it won&apos;t stop.</span>
+          <span className="text-xs text-muted-foreground">
+            {more
+              ? 'Each scan reads on the server. Keep this page open until the last scan has uploaded; after that you can leave.'
+              : 'Reads on the server. You can leave this page or refresh, it won\u2019t stop.'}
+          </span>
         </div>
         <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{pct}%</span>
       </div>
