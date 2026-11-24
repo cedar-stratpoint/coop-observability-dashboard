@@ -10,6 +10,32 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-24 · v1.25.1 Nichido: page check room, accessories commit, Form pages strip, kept-row ring
+
+Prod hotfix after the first real scans on coop-cedar: the page check's 2,000-token room, plus #697, #698 and #699 from staging (entries below). No SQL.
+
+## 2026-11-24 — Page 4 can be committed: accessories save under their own product codes
+
+The form prints accessories under shared price codes (five "ACCS 288", three "ACCS 150", four "ACCS 125"), and inventory keeps one count per item code, so committing a page 4 read against the printed form failed ("ON CONFLICT DO UPDATE command cannot affect row a second time"; a store batch with page 4 was refused). At commit, page and batch, each printed accessory line now saves under the product code named in it ("Stippling Brush #185" -> ACCS185; Belt Bag -> ACCSBELTBAG), paired in printed order: 19 of 19 on every form version, prices agree. Everything else keeps its code. If two rows would still share a code, the commit stops with a message naming the rows. The review still shows the printed code. Verified with a throwaway copy of a V1 page 4 committed through the app to a made-up store: 68 rows saved, 19 accessories under their own codes; test data removed.
+## 2026-11-24 — Back keeps your place: a ring instead of the left rail
+
+- The row or tile you come back to is no longer marked with a 3px accent rail on its left
+  edge (read as a template tell). Tiles (Uploads groups, scan board cards, Flags BAs) now get a
+  ring that settles around the whole card: a soft halo contracts onto a 1px primary ring in
+  320ms, holds, then fades over 900ms. Table and list rows get a light tint and a hairline
+  inset ring, kept inside the row so a clipped list never cuts it.
+- Reduced motion drops the settle; the mark just appears and fades.
+- The Uploads group tile shows its focus ring only for keyboard focus, so the focus the return
+  trip puts on the tile's link no longer leaves a second ring behind.
+
+## 2026-11-24 — Uploads: the Form pages strip only shows for one store's form
+
+The Form pages (1 to 5) strip is for a single store's form. A big scan read its pages out of order, so until a page number restart turned up it showed a partial "1 ✓ … 5 ✓" strip. It is now decided by size up front: shown only when the upload is one scan of at most 10 pages (5 printed pages, or 10 scanned two-sided) with no restart (`isSingleFormUpload`). The forms board still covers multi-store scans.
+
+## 2026-11-24 · Page check: room for a longer answer
+
+On prod's first real scans (Nov 24), 2 of 163 pages were set aside as "doesn't look like a Nichido inventory form page" although they were normal V2 form pages; staging had read both. The page check (`classifyPage`) answers within 800 tokens, and both answers stopped at exactly 800: the cut-off reply couldn't be parsed, so the page fell back to "unknown". The limit is now 2,000. Only the rare long answer uses it, and output is billed as used. Pages set aside before this need **Re-read this page**.
+
 ## 2026-11-24 · v1.25.0 Nichido on prod: restock and orders, reconcile, the scan pipeline
 
 Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.
