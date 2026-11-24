@@ -1,9 +1,10 @@
 'use client';
 
-import {useMemo, useRef, useState, useTransition} from 'react';
+import {useEffect, useId, useMemo, useRef, useState, useTransition} from 'react';
+import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, FileText, Loader2, Search, UploadCloud} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, FileText, Loader2, Search, UploadCloud, X} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
@@ -11,6 +12,7 @@ import {GL_PAGE} from '@/src/goldline-ui';
 import type {PoFormProduct, PoFormRow, PoFormView} from '@/src/goldline-po-form-data';
 import {activatePoFormAction, discardPoFormDraftAction, setPoFormItemAction} from '@/app/stock/actions';
 import {ink, ReconTabs, tint} from '@/components/analyst/audit-shared';
+import {useModalExit} from '@/components/analyst/modal-shell';
 
 // The PO form page (NICH-17, PO leg). Upload Nichido's PURCHASE ORDER FORM (xlsx or
 // pdf); it's read into a draft; the admin reviews what was read (and what changes against
@@ -172,15 +174,19 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
               <CardContent className="px-6 py-12 text-center text-sm text-muted-foreground">No products here.</CardContent>
             </Card>
           ) : (
-            <LineList
-              key={`${filter}|${q.trim() ? 'q' : ''}`}
-              groups={groups}
-              // A filter or search leaves a short list: open it, so the products show at once.
-              openAll={filter !== 'all' || Boolean(q.trim())}
-              changed={changed}
-              editable={canEdit && current.status !== 'superseded'}
-              onToggle={toggle}
-            />
+            filter !== 'all' || q.trim() ? (
+              // A filter or search leaves a short list: lines open, products shown at once.
+              <LineList
+                key={`${filter}|${q.trim() ? 'q' : ''}`}
+                groups={groups}
+                openAll
+                changed={changed}
+                editable={canEdit && current.status !== 'superseded'}
+                onToggle={toggle}
+              />
+            ) : (
+              <LineTiles groups={groups} changed={changed} editable={canEdit && current.status !== 'superseded'} onToggle={toggle} />
+            )
           )}
         </section>
       ) : (
@@ -410,6 +416,230 @@ function Unmatched({form}: {form: PoFormRow}) {
 }
 
 const PREVIEW = 8;
+
+/**
+ * The overview (Nov 25): each product line is a compact tile in a grid, so the page reads
+ * at a glance instead of as one long, mostly empty list. Lines with something to decide
+ * come first; lines fully on the form fold behind one row. A tile opens its products in a
+ * side panel, so the overview never moves.
+ */
+function LineTiles({
+  groups,
+  changed,
+  editable,
+  onToggle,
+}: {
+  groups: Array<[string, PoFormProduct[]]>;
+  changed: (p: PoFormProduct) => boolean;
+  editable: boolean;
+  onToggle: (p: PoFormProduct, on: boolean) => void;
+}) {
+  const [openLine, setOpenLine] = useState<string | null>(null);
+  const [showSettled, setShowSettled] = useState(false);
+  const look = (items: PoFormProduct[]) => items.some((p) => !p.onForm || changed(p));
+  const attention = groups.filter(([, items]) => look(items));
+  const settled = groups.filter(([, items]) => !look(items));
+  const open = groups.find(([l]) => l === openLine) ?? null;
+  const tile = ([line, items]: [string, PoFormProduct[]]) => <LineTile key={line} line={line} items={items} changed={changed} onOpen={() => setOpenLine(line)} />;
+  return (
+    <div className="flex flex-col gap-8">
+      {attention.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">{attention.length}</span> {attention.length === 1 ? 'line has' : 'lines have'} products not on the form
+          </p>
+          <ul className="grid gap-3" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr))'}}>
+            {attention.map(tile)}
+          </ul>
+        </div>
+      )}
+      {settled.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => setShowSettled(!showSettled)}
+            aria-expanded={showSettled}
+            className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm transition-[border-color,background-color] duration-150 focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none [@media(hover:hover)]:hover:border-foreground/20"
+          >
+            <CheckCircle2 aria-hidden className="size-4 shrink-0" style={{color: 'var(--status-good)'}} />
+            <span className="flex-1">
+              <span className="font-medium">{settled.length} lines</span>{' '}
+              <span className="text-muted-foreground">are fully on the form ({settled.reduce((a, [, i]) => a + i.length, 0)} products)</span>
+            </span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+              {showSettled ? 'Hide them' : 'Show them'}
+              <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 ease-out', showSettled && 'rotate-180')} />
+            </span>
+          </button>
+          {showSettled && (
+            <ul className="grid gap-3 transition-opacity duration-200 ease-out starting:opacity-0" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr))'}}>
+              {settled.map(tile)}
+            </ul>
+          )}
+        </div>
+      )}
+      {open && <LinePanel line={open[0]} items={open[1]} changed={changed} editable={editable} onToggle={onToggle} onClose={() => setOpenLine(null)} />}
+    </div>
+  );
+}
+
+/** A small ring: how much of a line is on the form. */
+function Ring({on, total, size = 40}: {on: number; total: number; size?: number}) {
+  const r = (size - 6) / 2;
+  const c = 2 * Math.PI * r;
+  const frac = total ? on / total : 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className="shrink-0 -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={4} className="stroke-muted" />
+      {on > 0 && (
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          strokeWidth={4}
+          strokeLinecap="round"
+          stroke="var(--status-good)"
+          strokeDasharray={`${c * frac} ${c}`}
+          className="transition-[stroke-dasharray] duration-300 ease-out"
+        />
+      )}
+    </svg>
+  );
+}
+
+function LineTile({line, items, changed, onOpen}: {line: string; items: PoFormProduct[]; changed: (p: PoFormProduct) => boolean; onOpen: () => void}) {
+  const on = items.filter((p) => p.onForm).length;
+  const off = items.length - on;
+  const changes = items.filter(changed).length;
+  const none = on === 0;
+  const warn = 'var(--status-warn)';
+  const good = 'var(--status-good)';
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-haspopup="dialog"
+        className={cn(
+          'group flex h-full w-full flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left',
+          'transition-[transform,border-color,box-shadow] duration-150 ease-out active:scale-[0.98] focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
+          '[@media(hover:hover)]:hover:border-foreground/20 [@media(hover:hover)]:hover:shadow-sm',
+        )}
+      >
+        <span className="flex items-start gap-3">
+          <span className="relative grid place-items-center">
+            <Ring on={on} total={items.length} />
+            <span className="absolute text-[10px] font-semibold tabular-nums">{items.length ? Math.round((on / items.length) * 100) : 0}%</span>
+          </span>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className={cn('line-clamp-2 font-heading text-sm leading-snug font-semibold', none && 'text-muted-foreground')} title={line}>
+              {line}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              <span className="font-medium text-foreground">{on}</span> of {items.length} on the form
+            </span>
+          </span>
+          <ChevronRight aria-hidden className="ml-auto size-4 shrink-0 text-muted-foreground/50 transition-[transform,color] duration-150 ease-out group-hover:translate-x-0.5 group-hover:text-foreground" />
+        </span>
+        <span className="mt-auto flex flex-wrap gap-1.5">
+          {changes > 0 && (
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{color: ink(warn), background: tint(warn, 12)}}>
+              {changes} changed
+            </span>
+          )}
+          {none ? (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Not on the form</span>
+          ) : off > 0 ? (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{off} not on it</span>
+          ) : (
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{color: ink(good), background: tint(good, 12)}}>
+              All on the form
+            </span>
+          )}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/** A line's products in a side panel. Slides in from the right; Escape or the backdrop closes it. */
+function LinePanel({
+  line,
+  items,
+  changed,
+  editable,
+  onToggle,
+  onClose,
+}: {
+  line: string;
+  items: PoFormProduct[];
+  changed: (p: PoFormProduct) => boolean;
+  editable: boolean;
+  onToggle: (p: PoFormProduct, on: boolean) => void;
+  onClose: () => void;
+}) {
+  const {closing, close} = useModalExit(onClose);
+  const title = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    panel.current?.focus();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('keydown', key);
+      prev?.focus?.();
+    };
+  }, [close]);
+  if (typeof document === 'undefined') return null;
+  const on = items.filter((p) => p.onForm).length;
+  const sorted = [...items].sort((a, b) => Number(a.onForm) - Number(b.onForm) || a.shade.localeCompare(b.shade));
+  return createPortal(
+    <div className="group fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby={title} data-closing={closing || undefined}>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={close}
+        className="absolute inset-0 cursor-default bg-foreground/30 transition-opacity duration-200 ease-out starting:opacity-0 group-data-closing:opacity-0 group-data-closing:duration-120"
+      />
+      <div
+        ref={panel}
+        tabIndex={-1}
+        className="absolute inset-y-0 right-0 flex w-[min(30rem,100vw)] flex-col border-l border-border bg-popover text-popover-foreground shadow-2xl outline-none transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] starting:translate-x-full group-data-closing:translate-x-full group-data-closing:duration-150 motion-reduce:transition-none"
+      >
+        <div className="flex items-start gap-3 border-b border-border px-6 py-5">
+          <span className="relative grid place-items-center">
+            <Ring on={on} total={items.length} size={44} />
+            <span className="absolute text-[10px] font-semibold tabular-nums">{items.length ? Math.round((on / items.length) * 100) : 0}%</span>
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 id={title} className="font-heading text-base leading-snug font-semibold">
+              {line}
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+              <span className="font-medium text-foreground">{on}</span> of {items.length} on the form{editable ? ' · switch a product on or off' : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[transform,background-color] duration-150 ease-out active:scale-[0.94] [@media(hover:hover)]:hover:bg-muted [@media(hover:hover)]:hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <ul className="flex-1 overflow-y-auto px-6 pb-6">
+          {sorted.map((p) => (
+            <ProductLine key={p.item_code} p={p} change={changed(p) ? (p.onForm ? 'added' : 'dropped') : null} editable={editable} onToggle={(v) => onToggle(p, v)} />
+          ))}
+        </ul>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * The catalog as one list of product lines (Hick's law, Nov 25). Each line is a single row:
