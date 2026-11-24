@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — PO form page: product lines fold, and the page breathes
+
+The product list showed every product of all 66 lines in a two-column grid, so a one-product line stood as tall as Accessories (53) beside it, and the page was a long scroll. Now (Hick's law):
+- **One row per product line**: how many of its products are on the form (with a small bar) and what needs a look ("8 not on it", "3 changed" in a draft). A line opens in place; its products sit in two columns, the first 8 shown with "Show all 53".
+- **Lines with something to decide come first.** Lines fully on the form fold into one row, "47 lines are fully on the form · Show them".
+- **A search or a filter** (On the form, Not on it, Changes) lists every matching line already open.
+- "Read from …" moved into a tooltip on the product code; "Added by hand" stays visible.
+- **More whitespace**: the page is four bands 40px apart (header, current form and upload, notices, products), with roomier cards and rows.
+
 ## 2026-11-24 · Page check: room for a longer answer
 
 On prod's first real scans (Nov 24), 2 of 163 pages were set aside as "doesn't look like a Nichido inventory form page" although they were normal V2 form pages; staging had read both. The page check (`classifyPage`) answers within 800 tokens, and both answers stopped at exactly 800: the cut-off reply couldn't be parsed, so the page fell back to "unknown". The limit is now 2,000. Only the rare long answer uses it, and output is billed as used. Pages set aside before this need **Re-read this page**.

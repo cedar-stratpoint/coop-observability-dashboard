@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, Loader2, Search, UploadCloud} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, FileText, Loader2, Search, UploadCloud} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
@@ -85,12 +85,13 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
   };
 
   return (
-    <div className={GL_PAGE}>
-      <header className="flex flex-wrap items-end justify-between gap-4">
+    // Bands 40px apart (Nov 25: the page read as cramped); related pieces stay close inside each band.
+    <div className={cn(GL_PAGE, 'gap-10 pb-16')}>
+      <header className="flex flex-wrap items-end justify-between gap-6">
         <div className="max-w-2xl">
           <p className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase">Reconciliation</p>
           <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">The PO form</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             The latest PO form decides which products are active. A product printed on it is still delivered; one that isn&apos;t is being phased out, and restock holds it.
           </p>
         </div>
@@ -101,11 +102,13 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
         <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">The database isn&apos;t connected on this environment.</div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <ActiveCard active={data.active} onCount={data.active && current?.id === data.active.id ? onCount : products.filter((p) => p.onActive).length} total={products.length} />
         {canEdit ? <Dropzone company={company} onDone={(id) => router.push(`/stock/po-form?form=${id}`)} /> : <ReadOnlyNote />}
       </div>
 
+      {(error || note || (isDraft && current) || (current && current.unmatched.length > 0)) && (
+      <div className="flex flex-col gap-4">
       {(error || note) && (
         <p role={error ? 'alert' : 'status'} className={cn('rounded-lg px-3 py-2 text-sm', error ? '' : 'text-muted-foreground')} style={error ? {color: ink('var(--status-crit)'), background: tint('var(--status-crit)', 10)} : undefined}>
           {error ?? note}
@@ -126,10 +129,14 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
       )}
 
       {current && current.unmatched.length > 0 && <Unmatched form={current} />}
+      </div>
+      )}
 
       {current ? (
-        <section className="flex flex-col gap-3" aria-label="Products">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section className="flex flex-col gap-5" aria-label="Products">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-col gap-3">
+            <h2 className="font-heading text-base font-semibold">Products on the form</h2>
             <div className="inline-flex rounded-lg bg-muted p-1" role="group" aria-label="Show">
               {(
                 [
@@ -153,6 +160,7 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
                 </button>
               ))}
             </div>
+            </div>
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a product, line or code" aria-label="Find a product" className={cn(FIELD, 'w-72 pl-8')} />
@@ -164,23 +172,15 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
               <CardContent className="px-6 py-12 text-center text-sm text-muted-foreground">No products here.</CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {groups.map(([line, items]) => (
-                <Card key={line} className="gap-0 overflow-hidden py-0">
-                  <div className="flex items-baseline gap-2 border-b border-border bg-muted/30 px-4 py-2.5">
-                    <h3 className="truncate font-heading text-sm font-semibold">{line}</h3>
-                    <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                      {items.filter((p) => p.onForm).length} of {items.length} on the form
-                    </span>
-                  </div>
-                  <ul>
-                    {items.map((p) => (
-                      <ProductLine key={p.item_code} p={p} change={changed(p) ? (p.onForm ? 'added' : 'dropped') : null} editable={canEdit && current.status !== 'superseded'} onToggle={(on) => toggle(p, on)} />
-                    ))}
-                  </ul>
-                </Card>
-              ))}
-            </div>
+            <LineList
+              key={`${filter}|${q.trim() ? 'q' : ''}`}
+              groups={groups}
+              // A filter or search leaves a short list: open it, so the products show at once.
+              openAll={filter !== 'all' || Boolean(q.trim())}
+              changed={changed}
+              editable={canEdit && current.status !== 'superseded'}
+              onToggle={toggle}
+            />
           )}
         </section>
       ) : (
@@ -200,7 +200,7 @@ export function PoFormPage({data, company, canEdit}: {data: PoFormView; company:
 function ActiveCard({active, onCount, total}: {active: PoFormRow | null; onCount: number | null; total: number}) {
   return (
     <Card className="gap-0 py-0">
-      <CardContent className="flex h-full flex-col justify-between gap-5 p-5">
+      <CardContent className="flex h-full flex-col justify-between gap-7 p-6 sm:p-7">
         <div className="flex items-start gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl" style={{background: tint(active ? 'var(--status-good)' : 'var(--muted-foreground)'), color: ink(active ? 'var(--status-good)' : 'var(--muted-foreground)')}}>
             {active ? <CheckCircle2 className="size-5" /> : <FileSpreadsheet className="size-5" />}
@@ -274,7 +274,7 @@ function Dropzone({company, onDone}: {company: string | null; onDone: (id: strin
         void send(e.dataTransfer.files?.[0]);
       }}
       className={cn(
-        'relative flex min-h-[9.5rem] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-5 text-center transition-[border-color,background-color] duration-150',
+        'relative flex min-h-[11rem] flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed px-6 py-7 text-center transition-[border-color,background-color] duration-150',
         drag ? 'border-primary bg-accent' : 'border-border bg-card/60',
       )}
     >
@@ -337,7 +337,7 @@ function DraftBanner({
 }) {
   const warn = 'var(--status-warn)';
   return (
-    <section aria-label="Draft to review" className="flex flex-col gap-4 rounded-xl border p-5 md:flex-row md:items-center md:justify-between" style={{borderColor: tint(warn, 45), background: tint(warn, 7)}}>
+    <section aria-label="Draft to review" className="flex flex-col gap-5 rounded-xl border p-6 md:flex-row md:items-center md:justify-between" style={{borderColor: tint(warn, 45), background: tint(warn, 7)}}>
       <div className="flex items-start gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl" style={{background: tint(warn, 18), color: ink(warn)}}>
           {form.file_kind === 'pdf' ? <FileText className="size-5" /> : <FileSpreadsheet className="size-5" />}
@@ -386,7 +386,7 @@ function DraftBanner({
 function Unmatched({form}: {form: PoFormRow}) {
   return (
     <Card className="gap-0 py-0">
-      <CardContent className="flex flex-col gap-3 p-5">
+      <CardContent className="flex flex-col gap-4 p-6">
         <div className="flex items-start gap-2.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
           <div>
@@ -396,7 +396,7 @@ function Unmatched({form}: {form: PoFormRow}) {
             <p className="text-xs text-muted-foreground">A new product not in the catalog yet, or a different name. Switch the right product on below if it should count.</p>
           </div>
         </div>
-        <ul className="flex flex-wrap gap-1.5">
+        <ul className="flex flex-wrap gap-2">
           {form.unmatched.map((u, i) => (
             <li key={i} className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs">
               <span className="text-muted-foreground">{/^page/i.test(u.page) ? titleCase(u.page) : `Page ${u.page}`} · </span>
@@ -409,11 +409,178 @@ function Unmatched({form}: {form: PoFormRow}) {
   );
 }
 
+const PREVIEW = 8;
+
+/**
+ * The catalog as one list of product lines (Hick's law, Nov 25). Each line is a single row:
+ * how much of it is on the form, and what needs a look (products not on it, changes in a
+ * draft). A line opens in place to show its products; a long line shows the first eight
+ * and "Show all". One column, so a one-product line no longer stands as tall as Accessories.
+ */
+function LineList({
+  groups,
+  openAll,
+  changed,
+  editable,
+  onToggle,
+}: {
+  groups: Array<[string, PoFormProduct[]]>;
+  openAll: boolean;
+  changed: (p: PoFormProduct) => boolean;
+  editable: boolean;
+  onToggle: (p: PoFormProduct, on: boolean) => void;
+}) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set(openAll ? groups.map(([l]) => l) : []));
+  // Lines with something to decide (a product not on the form, or changed in a draft) come
+  // first; lines fully on the form fold into one row. A filter or search shows everything.
+  const look = (items: PoFormProduct[]) => items.some((p) => !p.onForm || changed(p));
+  const attention = openAll ? groups : groups.filter(([, items]) => look(items));
+  const settled = openAll ? [] : groups.filter(([, items]) => !look(items));
+  const [showSettled, setShowSettled] = useState(false);
+  const listed = [...attention, ...(showSettled ? settled : [])];
+  const allOpen = listed.length > 0 && listed.every(([l]) => open.has(l));
+  const flip = (line: string) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      if (n.has(line)) n.delete(line);
+      else n.add(line);
+      return n;
+    });
+  return (
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3 text-xs text-muted-foreground">
+        <span>
+          {openAll ? (
+            <>
+              <span className="font-medium text-foreground tabular-nums">{groups.length}</span> product {groups.length === 1 ? 'line' : 'lines'}
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground tabular-nums">{attention.length}</span> {attention.length === 1 ? 'line has' : 'lines have'} products not on the form
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(allOpen ? new Set() : new Set(listed.map(([l]) => l)))}
+          className="rounded-md px-2 py-1 font-medium transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted [@media(hover:hover)]:hover:text-foreground"
+        >
+          {allOpen ? 'Collapse all' : 'Expand all'}
+        </button>
+      </div>
+      <ul>
+        {[...attention, ...(showSettled ? settled : [])].map(([line, items]) => (
+          <LineRow key={line} line={line} items={items} open={open.has(line)} onOpen={() => flip(line)} changed={changed} editable={editable} onToggle={onToggle} />
+        ))}
+      </ul>
+      {settled.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowSettled(!showSettled)}
+          aria-expanded={showSettled}
+          className="flex w-full items-center gap-4 border-t border-border bg-muted/20 px-5 py-3.5 text-left text-sm transition-colors duration-150 focus-visible:bg-muted/50 focus-visible:outline-none [@media(hover:hover)]:hover:bg-muted/40"
+        >
+          <CheckCircle2 aria-hidden className="size-4 shrink-0" style={{color: 'var(--status-good)'}} />
+          <span className="flex-1">
+            <span className="font-medium">{settled.length} lines</span> <span className="text-muted-foreground">are fully on the form ({settled.reduce((a, [, i]) => a + i.length, 0)} products)</span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+            {showSettled ? 'Hide them' : 'Show them'}
+            <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 ease-out', showSettled && 'rotate-180')} />
+          </span>
+        </button>
+      )}
+    </Card>
+  );
+}
+
+function LineRow({
+  line,
+  items,
+  open,
+  onOpen,
+  changed,
+  editable,
+  onToggle,
+}: {
+  line: string;
+  items: PoFormProduct[];
+  open: boolean;
+  onOpen: () => void;
+  changed: (p: PoFormProduct) => boolean;
+  editable: boolean;
+  onToggle: (p: PoFormProduct, on: boolean) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const on = items.filter((p) => p.onForm).length;
+  const off = items.length - on;
+  const changes = items.filter(changed).length;
+  const shown = all ? items : items.slice(0, PREVIEW);
+  const good = 'var(--status-good)';
+  const warn = 'var(--status-warn)';
+  const panel = `po-line-${line.replace(/[^a-z0-9]+/gi, '-')}`;
+  return (
+    <li className="border-b border-border/70 last:border-0">
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={open}
+        aria-controls={panel}
+        className={cn(
+          'group flex w-full items-center gap-4 px-5 py-3.5 text-left transition-colors duration-150 focus-visible:bg-muted/50 focus-visible:outline-none',
+          open ? 'bg-muted/30' : '[@media(hover:hover)]:hover:bg-muted/30',
+        )}
+      >
+        <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]', open && 'rotate-90')} />
+        <span className="min-w-0 flex-1 truncate font-heading text-sm font-semibold" title={line}>
+          {line}
+        </span>
+        <span className="hidden items-center gap-1.5 sm:flex">
+          {changes > 0 && (
+            <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{color: ink(warn), background: tint(warn, 12)}}>
+              {changes} changed
+            </span>
+          )}
+          {off > 0 && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{off} not on it</span>}
+        </span>
+        <span className="flex w-28 shrink-0 flex-col items-end gap-1 sm:w-36">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            <span className="font-medium text-foreground">{on}</span> of {items.length} on the form
+          </span>
+          <span aria-hidden className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <span className="block h-full rounded-full transition-[width] duration-300 ease-out" style={{width: `${(on / Math.max(1, items.length)) * 100}%`, background: good}} />
+          </span>
+        </span>
+      </button>
+      {open && (
+        <div id={panel} className="border-t border-border/60 bg-card px-5 pt-1 pb-4 pl-13 transition-[opacity,transform] duration-200 ease-out starting:-translate-y-1 starting:opacity-0 motion-reduce:transition-none">
+          <ul className="grid gap-x-10 sm:grid-cols-2 2xl:grid-cols-3">
+            {shown.map((p) => (
+              <ProductLine key={p.item_code} p={p} change={changed(p) ? (p.onForm ? 'added' : 'dropped') : null} editable={editable} onToggle={(v) => onToggle(p, v)} />
+            ))}
+          </ul>
+          {items.length > PREVIEW && (
+            <button
+              type="button"
+              onClick={() => setAll(!all)}
+              aria-expanded={all}
+              className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted"
+            >
+              {all ? 'Show fewer' : `Show all ${items.length}`}
+              <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 ease-out', all && 'rotate-180')} />
+            </button>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function ProductLine({p, change, editable, onToggle}: {p: PoFormProduct; change: 'added' | 'dropped' | null; editable: boolean; onToggle: (on: boolean) => void}) {
   const good = 'var(--status-good)';
   const crit = 'var(--status-crit)';
   return (
-    <li className="flex items-center gap-3 border-b border-border/60 px-4 py-2.5 last:border-0">
+    <li className="flex items-center gap-4 border-b border-border/50 py-3">
       <div className="min-w-0 flex-1">
         <p className={cn('flex items-center gap-2 truncate text-sm', p.onForm ? 'font-medium' : 'text-muted-foreground')}>
           <span className="truncate" title={p.name}>{p.shade}</span>
@@ -425,8 +592,10 @@ function ProductLine({p, change, editable, onToggle}: {p: PoFormProduct; change:
           {p.retired && <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">Retired</span>}
         </p>
         <p className="truncate text-[11px] text-muted-foreground">
-          <span className="font-mono">{p.item_code}</span>
-          {p.onForm && <> · {p.byHand ? 'Added by hand' : p.source ? <>Read from “{p.source}”</> : null}</>}
+          <span className="font-mono" title={p.onForm && !p.byHand && p.source ? `Read from “${p.source}”` : undefined}>
+            {p.item_code}
+          </span>
+          {p.onForm && p.byHand && ' · Added by hand'}
         </p>
       </div>
       <Switch checked={p.onForm} disabled={!editable} onChange={onToggle} label={`${p.name} on the PO form`} />
@@ -460,8 +629,8 @@ function Switch({checked, disabled, onChange, label}: {checked: boolean; disable
 function History({forms, currentId}: {forms: PoFormRow[]; currentId: string | null}) {
   const label: Record<PoFormRow['status'], string> = {draft: 'Draft', active: 'In use', superseded: 'Replaced'};
   return (
-    <section aria-label="Earlier PO forms" className="flex flex-col gap-2">
-      <h2 className="font-heading text-sm font-semibold">All uploads</h2>
+    <section aria-label="Earlier PO forms" className="flex flex-col gap-4">
+      <h2 className="font-heading text-base font-semibold">All uploads</h2>
       <Card className="gap-0 py-0">
         <ul>
           {forms.map((f) => (
