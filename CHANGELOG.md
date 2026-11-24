@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconciliation: every combo shows its marks, and each state explains itself
+
+Review on staging read the four tiles as "missing the other combos". They were there, as chips at 0 in the "Everything else" row, but only as words. Now each chip carries the same Watsons · Inventory · PO marks as the tiles, so all eight combinations read as one matrix at a glance. Every tile and chip also has a tooltip (hover after a short pause, or keyboard focus at once): the state, Active or Inactive, the three marks in words ("No Watsons sale this month", "Not on the form, or counted zero", "On the PO form, so still delivered"), then who acts and the step. The tile tooltip matches the tile's width so it never runs off screen.
+
 ## 2026-11-24 — Reconciliation: cleaner tiles, every state reachable, Active/Inactive tabs and pages
 
 - **Tiles without the side stripe.** The coloured bar on the left of each tile (and each table row) read as template filler. A tile now leads with its count, the state under it with a small tone dot, and "Active · Nichido" (status and who acts) top right. When picked it gets a soft ring and tint in its tone.
