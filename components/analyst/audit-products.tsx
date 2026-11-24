@@ -10,7 +10,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
-import {ink, LegKey, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, tint, toneOf} from '@/components/analyst/audit-shared';
+import {ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, tint, toneOf} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By product (NICH-17). Every counted store in a month, rolled up per
 // product: how many stores sit in each of the 8 states, as one stacked bar per product.
@@ -23,14 +23,14 @@ const FIELD =
 // flush against the right edge), sized to match FIELD.
 const SELECT = 'h-9 rounded-lg bg-card pr-9 pl-3 duration-150';
 
-const PAGE = 60;
+const PAGE = 25;
 
 export function AuditProducts({data}: {data: ProductAuditResult}) {
   const router = useRouter();
   const [pick, setPick] = useState<AuditState | null>(null);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const [limit, setLimit] = useState(PAGE);
+  const [page, setPage] = useState(0);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -39,6 +39,12 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
     );
     return pick ? [...out].sort((a, b) => b.counts[pick] - a.counts[pick] || a.item_code.localeCompare(b.item_code)) : out;
   }, [data.rows, pick, q]);
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const at = Math.min(page, pages - 1);
+  const filter = (fn: () => void) => {
+    fn();
+    setPage(0);
+  };
 
   return (
     <div className={GL_PAGE}>
@@ -95,16 +101,16 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
 
           <div className="flex flex-col gap-3">
             <LegKey />
-            <MatrixLegend summary={data.summary} active={pick} onPick={setPick} unit="store and product pairs" />
+            <MatrixLegend summary={data.summary} active={pick} onPick={(s) => filter(() => setPick(s))} unit="store and product pairs" />
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a product or code" aria-label="Find a product" className={cn(FIELD, 'w-64 pl-8')} />
+              <input value={q} onChange={(e) => filter(() => setQ(e.target.value))} placeholder="Find a product or code" aria-label="Find a product" className={cn(FIELD, 'w-64 pl-8')} />
             </div>
             {pick && (
-              <button type="button" onClick={() => setPick(null)} className="text-sm font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
+              <button type="button" onClick={() => filter(() => setPick(null))} className="text-sm font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
                 Products with {AUDIT_META[pick].label} · Clear
               </button>
             )}
@@ -126,21 +132,21 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
                   {rows.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                        {q ? 'No product matches that search.' : 'No products in this state.'}
+                        {q ? 'No product matches that search.' : pick ? `No product is at “${AUDIT_META[pick].label}” in any counted store.` : 'No products here.'}
                       </td>
                     </tr>
                   ) : (
-                    rows.slice(0, limit).map((r) => (
+                    rows.slice(at * PAGE, at * PAGE + PAGE).map((r) => (
                       <ProductRow key={r.item_code} r={r} open={open === r.item_code} onToggle={() => setOpen(open === r.item_code ? null : r.item_code)} month={data.month!} />
                     ))
                   )}
                 </tbody>
               </table>
             </div>
-            {rows.length > limit && (
-              <button type="button" onClick={() => setLimit(limit + PAGE)} className="w-full border-t border-border py-2.5 text-sm font-medium text-primary transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted/40">
-                Show {Math.min(PAGE, rows.length - limit)} more of {rows.length - limit}
-              </button>
+            {pages > 1 && (
+              <div className="border-t border-border px-4 py-2.5">
+                <Pager page={at} pages={pages} total={rows.length} size={PAGE} onPage={setPage} label="Products" />
+              </div>
             )}
           </Card>
         </>
