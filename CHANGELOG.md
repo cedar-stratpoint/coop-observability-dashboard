@@ -11,7 +11,7 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 ## 2026-11-24 — Follow-ups to the QA fixes: handwritten prices, no forcing of sums, history check off, reuse signature
 
 - **Band totals use the price the consultant wrote.** The Legacy reader returns each band's `written_price` when one is handwritten, and the check uses it instead of the printed price. The hand-checked key for San Pablo p.7 reconciles four bands that way (₱14,910 = 70 × 213, ₱9,353 = 47 × 199, ₱3,861 = 39 × 99, ₱7,110 = 45 × 158), so IPSLS08 read 5 (key: 15) is now caught. It can still flag right rows: the Brow Master band on that page matches the key on every row but its written total does not.
-- **The Legacy reader no longer bends digits to make sums work.** Sums only say where to look again. The old instruction had the same push, so this is not a regression fix; accuracy on the answer key is not measured yet.
+- **The Legacy reader no longer bends digits to make sums work.** Sums only say where to look again. The old instruction had the same push, so this is not a regression fix. Measured on the 7 Legacy answer-key pages, twice each ($1.40): 30 wrong rows of 810 with either instruction, a tie. The written-price field read all five handwritten prices on San Pablo p.7.
 - **History check off by default** (`GOLDLINE_HISTORY_CHECK_COMPANIES`): offline it flagged 32 right rows for 4 wrong ones.
 - **Reuse signature is stamped at submit**, not when the batch poller ingests the read, so a newer deploy cannot claim an older deploy's read.
 
