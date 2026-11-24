@@ -93,6 +93,7 @@ export function UploadReview({
   nav = null,
   suggestion = null,
   periodDefault = null,
+  rowNotes = {},
   bas,
 }: {
   company: string;
@@ -117,6 +118,8 @@ export function UploadReview({
   suggestion?: PageSuggestionView | null;
   /** The period to prefill (YYYY-MM-DD) when there is no suggestion (page opened on its own). */
   periodDefault?: {start: string | null; end: string | null} | null;
+  /** Row index → a history-check note (the store's last count can't explain the row); flagged. */
+  rowNotes?: Record<number, string>;
   /** The BA list (each store's current BA and every name), for the BA field. */
   bas?: {byStore: Record<string, string>; names: string[]};
 }) {
@@ -205,8 +208,8 @@ export function UploadReview({
   // Flags = rows under the threshold, fixed at load (editing a value doesn't change
   // the reader's confidence). A flag is resolved by editing its row or "Looks right".
   const flagged = useMemo(
-    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW).map((x) => x.i),
-    [head],
+    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null).map((x) => x.i),
+    [head, rowNotes],
   );
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState<number | null>(null);
@@ -708,6 +711,7 @@ export function UploadReview({
             productNames={productNames}
             catalog={catalog}
             flagged={flagged}
+            rowNotes={rowNotes}
             resolved={resolved}
             active={active}
             view={view}
