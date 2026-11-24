@@ -136,7 +136,7 @@ export function ReviewRows({
 
   const header = (
     <tr className="border-b border-border text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-      <th className="py-2 pr-3 font-medium">Item</th>
+      <th className="py-2 pr-3 pl-3 font-medium">Item</th>
       {cols.map((c) => (
         <th key={c.key} className="py-2 pr-2 text-right font-medium" title={c.title}>
           {c.label}
@@ -166,7 +166,8 @@ export function ReviewRows({
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
-        <td className="py-3 pr-3 align-top">
+        {/* pl-3 keeps the item clear of the 3px bar on the pointed row. */}
+        <td className="py-3 pr-3 pl-3 align-top">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               {/* Primary: code + name. */}

@@ -58,6 +58,10 @@ export function ScanPageViewer({
   const [base, setBase] = useState<{w: number; h: number} | null>(null); // page size in PDF units
   const [box, setBox] = useState<{w: number; h: number}>({w: 0, h: 0}); // the scroll box's size
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  // Download progress (0..100) while loading, null when the size isn't known yet.
+  const [pct, setPct] = useState<number | null>(null);
+  // Bumped by "Try again" on the fallback, to re-run the load.
+  const [attempt, setAttempt] = useState(0);
 
   // Track the box size so the page re-fits when the pane or window is resized.
   useEffect(() => {
@@ -72,13 +76,33 @@ export function ScanPageViewer({
   useEffect(() => {
     let cancelled = false;
     setState('loading');
+    setPct(null);
     setZoom(1);
-    // If pdfjs can't load/render in a reasonable time (an environment that blocks the
-    // worker, say), fall back to the browser PDF viewer instead of spinning forever.
-    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('pdf render timed out')), 10000));
+    // Fall back to the browser PDF viewer only when the load STALLS (no bytes for STALL_MS:
+    // a blocked worker, a dead connection), never just because it is slow. A scan page is
+    // ~2.7 MB, so a fixed 10 s limit gave up on ordinary connections and showed the page
+    // un-rotated in the browser viewer. Progress resets the clock.
+    const STALL_MS = 20000;
+    let stall: ReturnType<typeof setTimeout> | undefined;
+    let rejectStall: (e: Error) => void = () => {};
+    const stalled = new Promise<never>((_, reject) => {
+      rejectStall = reject;
+    });
+    stalled.catch(() => {});
+    const arm = () => {
+      clearTimeout(stall);
+      stall = setTimeout(() => rejectStall(new Error('pdf load stalled')), STALL_MS);
+    };
+    arm();
+    const task = pdfjs.getDocument({url});
+    task.onProgress = ({loaded, total}: {loaded: number; total: number}) => {
+      arm();
+      if (!cancelled && total > 0) setPct(Math.min(99, Math.round((loaded / total) * 100)));
+    };
+    let render: {cancel: () => void} | null = null;
     (async () => {
       try {
-        const doc = await Promise.race([pdfjs.getDocument({url}).promise, timeout]);
+        const doc = await Promise.race([task.promise, stalled]);
         const page = await doc.getPage(1);
         if (cancelled) return;
         const turn = ((page.rotate ?? 0) + rotation) % 360;
@@ -93,18 +117,28 @@ export function ScanPageViewer({
         canvas.height = Math.ceil(vp.height);
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-        await page.render({canvasContext: ctx, viewport: vp}).promise;
+        const r = page.render({canvasContext: ctx, viewport: vp});
+        render = r;
+        arm();
+        await Promise.race([r.promise, stalled]);
         if (cancelled) return;
         setBase({w: vp1.width, h: vp1.height});
         setState('ready');
       } catch {
+        // A cancelled load (the reviewer stepped to another page) is not a failure.
         if (!cancelled) setState('error');
+      } finally {
+        clearTimeout(stall);
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(stall);
+      // Stop the half-drawn page so the next one never shares the canvas with it.
+      render?.cancel();
+      void task.destroy();
     };
-  }, [url, rotation]);
+  }, [url, rotation, attempt]);
 
   // Display size at zoom 1: fit the width, or the whole page.
   const size = (() => {
@@ -248,7 +282,23 @@ export function ScanPageViewer({
   }, [highlight, size?.h]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state === 'error') {
-    return <iframe src={url} title="Scan" className={className ?? 'h-full w-full'} />;
+    // The browser's own PDF viewer: always shows the file, but can't turn it upright or draw
+    // the row box, so offer another go at the full viewer.
+    return (
+      <div className={`flex flex-col gap-2 ${className ?? ''}`}>
+        <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground">
+          <span>Showing the plain file: it may be upside down.</span>
+          <button
+            type="button"
+            onClick={() => setAttempt((a) => a + 1)}
+            className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Try again
+          </button>
+        </div>
+        <iframe src={url} title="Scan" className="min-h-[60vh] w-full flex-1" />
+      </div>
+    );
   }
 
   return (
@@ -264,7 +314,10 @@ export function ScanPageViewer({
       >
         {state === 'loading' && (
           <div className="absolute inset-0 grid place-items-center">
-            <Loader2 className="size-6 animate-spin text-muted-foreground" aria-label="Loading scan" />
+            <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground tabular-nums">
+              <Loader2 className="size-6 animate-spin" aria-label="Loading scan" />
+              {pct != null && <span>Loading the scan · {pct}%</span>}
+            </div>
           </div>
         )}
         <div
