@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Uploads: search in the header, by upload name too
+
+Search was hidden inside the Filters panel and only matched the file name, while a tile shows the name given at upload ("SM SAN PABLO [QA TEST] RERUN NOV24"), so typing what you saw could miss it. The search box now sits in the Files header next to the count, always visible, and matches the upload name or the file name. The count reads "17 of 100 uploads" while narrowed; × or Escape clears it, and an empty result says what was searched with a Clear search link. Filters keeps the dates, status and type. Works in Grouped, All files and inside a group.
+
 ## 2026-11-25 — PO form page: product lines as tiles, products in a side panel
 
 Review: the line list looked plain, and full-width rows left a wide empty gap between each line's name and its count. The overview is now a grid of compact tiles, one per product line: a ring with the share on the form (and its %), "45 of 53 on the form", and a chip for what needs a look ("8 not on it", "Not on the form", "All on the form", "3 changed" in a draft). Lines with something to decide still come first; the 47 fully on the form stay folded behind one row. A tile opens its products in a side panel (slides in from the right; Escape, the backdrop or × closes it, focus returns), products not on the form listed first. A search or filter still shows the open line list, so matches appear at once.
