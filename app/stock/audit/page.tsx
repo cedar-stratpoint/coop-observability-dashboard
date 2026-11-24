@@ -1,13 +1,13 @@
 import {getDataContext} from '@/src/active-context';
-import {auditData} from '@/src/goldline-audit-data';
+import {auditData, type AuditParams} from '@/src/goldline-audit-data';
 import {AuditMatrix} from '@/components/analyst/audit-matrix';
 
 export const dynamic = 'force-dynamic';
 
-// Reconciliation audit (Phase 4, NICH-17): per SKU per store, counted-in-form vs
-// sold-in-Watsons, with the action. Scoped to the active company like the rest of the
-// Goldline surface.
-export default async function Page(props: {searchParams: Promise<{store?: string; month?: string}>}) {
+// Reconciliation · By store (NICH-17): per product per store (or every store), counted vs
+// sold vs on the PO form, with the recommendation. Scoped to the active company, and to the
+// role's stores when it is limited to some.
+export default async function Page(props: {searchParams: Promise<Record<string, string | string[] | undefined>>}) {
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
     return (
@@ -18,7 +18,9 @@ export default async function Page(props: {searchParams: Promise<{store?: string
     );
   }
   const sp = await props.searchParams;
-  const data = await auditData(ctx.companyId, {store: sp.store ?? null, month: sp.month ?? null});
-  // Keyed by store and month: a new selection opens on its own most urgent state.
+  const one = (k: string) => (typeof sp[k] === 'string' ? (sp[k] as string) : null);
+  const params: AuditParams = {store: one('store'), month: one('month'), state: one('state'), q: one('q'), sort: one('sort'), dir: one('dir'), page: one('page')};
+  const data = await auditData(ctx.companyId, params, ctx.storeScope ?? null);
+  // Keyed by store and month: a new selection starts from its own query.
   return <AuditMatrix key={`${data.selected?.code ?? ''}|${data.selected?.month ?? ''}`} data={data} />;
 }

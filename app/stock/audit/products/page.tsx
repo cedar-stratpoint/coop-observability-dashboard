@@ -4,8 +4,8 @@ import {AuditProducts} from '@/components/analyst/audit-products';
 
 export const dynamic = 'force-dynamic';
 
-// Reconciliation · By product (NICH-17): every counted store in a month, per product.
-export default async function Page(props: {searchParams: Promise<{month?: string}>}) {
+// Reconciliation · By product (NICH-17): every store in a month, per product, within the role's stores.
+export default async function Page(props: {searchParams: Promise<{month?: string | string[]}>}) {
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
     return (
@@ -16,7 +16,7 @@ export default async function Page(props: {searchParams: Promise<{month?: string
     );
   }
   const sp = await props.searchParams;
-  const data = await productAuditData(ctx.companyId, {month: sp.month ?? null});
+  const data = await productAuditData(ctx.companyId, {month: typeof sp.month === 'string' ? sp.month : null}, ctx.storeScope ?? null);
   // Keyed by month: a new month opens on its own most urgent state.
   return <AuditProducts key={data.month ?? ''} data={data} />;
 }

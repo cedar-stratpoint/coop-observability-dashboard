@@ -314,8 +314,12 @@ function score(ph: PoPhrase, pr: Prepared, rare: Map<string, number>): number {
   if (hitsAny < pr.distinct.length) {
     const words = shadeT.filter((w) => !/^\d+$/.test(w)); // "#9717 Naturally Beautiful"
     const inside = words.length >= 2 && covered(words, pr.distinct) === words.length;
-    if (!(inside && hitsAny / pr.distinct.length >= 0.5)) return 0;
-    partial = 0.6;
+    // An accessory named by one word no other product has: "Extractor ( Stainless Steel )"
+    // is the catalog's only extractor, whatever the rest of the line says.
+    const accessory = /^accessories$/i.test(ph.heading ?? '') && /^accessories$/i.test((pr.p.product_line ?? '').trim());
+    const onlyOne = accessory && shadeT[0]?.length >= 6 && pr.distinct[0] === shadeT[0] && rare.get(shadeT[0]) === 1;
+    if (!(inside && hitsAny / pr.distinct.length >= 0.5) && !onlyOne) return 0;
+    partial = onlyOne ? 1.2 : 0.6;
   }
   // And the printed shade shouldn't carry words the product lacks (e.g. "#802 M. Brown"
   // must not match plain "803 Brown").
