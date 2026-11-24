@@ -150,6 +150,19 @@ export function scanOrder<T extends {filename: string; created_at: string}>(page
  * the review asks to remove the copy. Pages the reader couldn't number stay with the
  * form they sit in.
  */
+/** One store's form is 5 printed pages; scanned two-sided with blank backs, 10. */
+export const MAX_SINGLE_FORM_PAGES = 10;
+
+/**
+ * Whether the Form pages (1 to 5) strip applies: only to an upload that can be ONE store's
+ * form. Decided from what is known up front (pages in the upload, files dropped), so a big
+ * scan never shows the strip while its pages are still being read out of order; a page
+ * number restarting (several forms) hides it too.
+ */
+export function isSingleFormUpload(u: {totalPages: number; scans: number; forms: number}): boolean {
+  return u.scans <= 1 && u.totalPages <= MAX_SINGLE_FORM_PAGES && u.forms <= 1;
+}
+
 export function groupForms<T extends {page: number | null}>(ordered: T[]): T[][] {
   const forms: T[][] = [];
   let last: number | null = null;
