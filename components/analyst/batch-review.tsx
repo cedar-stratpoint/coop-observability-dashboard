@@ -37,6 +37,7 @@ export type BatchReviewPage = {
   upload: UploadRow;
   extraction: ExtractionRecord | null;
   productNames: Record<string, string>;
+  rowNames: (string | null)[];
   scanUrl: string | null;
   detectedStore: string | null;
 };
@@ -656,6 +657,7 @@ export function BatchReview({
                   pointed={pointRow}
                   rows={curState.rows}
                   productNames={cur.productNames}
+                  rowNames={cur.rowNames}
                   catalog={catalog}
                   flagged={curFlags}
                   resolved={curState.resolved}

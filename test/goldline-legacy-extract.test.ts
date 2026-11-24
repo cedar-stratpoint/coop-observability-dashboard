@@ -184,6 +184,13 @@ describe('legacyBandCheck (written band totals)', () => {
     expect(rows[7].confidence).toBeLessThan(0.6);
   });
 
+  it('counts each accessory once when several share a printed code', () => {
+    const acc = printedPageItems('legacy', 4).filter((i) => i.group === 'ACCESSORIES');
+    const rows = acc.map((i, n) => ({...core(i.code, null, n + 1, n + 1)}));
+    const amount = acc.reduce((a, i, n) => a + (n + 1) * (i.price as number), 0);
+    expect(legacyBandCheck(rows, acc, [{family: 'ACCESSORIES', amount}])).toEqual({checked: 1, mismatched: 0});
+  });
+
   it('leaves a band alone when it matches its written total', () => {
     const rows = [core('BMEPC01', 20, 8, 28), core('BMEPP02', 20, 18, 38), core('BMEPM04', 12, 10, 22), core('BMEPBS05', 15, 7, 22)].map((r) => ({...r}));
     const sum = (28 + 38 + 22 + 22) * 175;

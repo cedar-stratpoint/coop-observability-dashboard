@@ -146,14 +146,21 @@ const bandKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9#&]+/g, '');
 export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: FamilyTotal[]): {checked: number; mismatched: number} {
   let checked = 0;
   let mismatched = 0;
-  const byCode = new Map(rows.map((r) => [r.item_code, r] as const));
+  // Several accessories share one printed code, so a printed line takes the next row with its code.
+  const queue = new Map<string, CoreRow[]>();
+  for (const r of rows) queue.set(r.item_code, [...(queue.get(r.item_code) ?? []), r]);
+  const rowOf = new Map<PrintedItem, CoreRow>();
+  for (const it of items) {
+    const r = queue.get(it.code)?.shift();
+    if (r) rowOf.set(it, r);
+  }
   const paper = totals.filter((t) => t && typeof t.amount === 'number' && Number.isFinite(t.amount)).map((t) => ({k: bandKey(t.family), amount: t.amount, price: typeof t.written_price === 'number' && t.written_price > 0 ? t.written_price : null}));
   for (const band of bandsOf(items)) {
     if (!band.group || band.items.some((i) => i.price == null)) continue;
     const k = bandKey(band.group);
     const written = paper.find((t) => t.k === k || (t.k.length > 4 && (t.k.includes(k) || k.includes(t.k))));
     if (!written) continue;
-    const bandRows = band.items.map((i) => byCode.get(i.code)).filter((r): r is CoreRow => Boolean(r));
+    const bandRows = band.items.map((i) => rowOf.get(i)).filter((r): r is CoreRow => Boolean(r));
     if (!bandRows.length) continue;
     // The price the consultant wrote for the band wins over the printed one: on San Pablo p.7 the
     // answer key reconciles ₱14,910 = 70 x 213, ₱9,353 = 47 x 199, ₱3,861 = 39 x 99, ₱7,110 = 45 x 158.
@@ -161,7 +168,7 @@ export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: F
     const price = written.price ?? band.price ?? null;
     if (price != null && price > 0 && Math.abs(written.amount / price - Math.round(written.amount / price)) > 1e-6) continue;
     checked++;
-    const sum = band.items.reduce((a, i) => a + (byCode.get(i.code)?.ending_on_hand ?? 0) * (written.price ?? (i.price as number)), 0);
+    const sum = band.items.reduce((a, i) => a + (rowOf.get(i)?.ending_on_hand ?? 0) * (written.price ?? (i.price as number)), 0);
     if (Math.abs(sum - written.amount) <= 1) continue;
     mismatched++;
     const peso = (n: number) => `₱${n.toLocaleString('en-US')}`;

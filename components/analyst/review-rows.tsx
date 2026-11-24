@@ -64,6 +64,8 @@ const BAND_TONE: Record<Band, string> = {high: 'var(--status-good)', medium: 'va
 type Props = {
   rows: ExtractedRow[];
   productNames: Record<string, string>;
+  /** Row index → its own product name: several printed rows can share a code, so a code lookup isn't enough. */
+  rowNames?: (string | null)[];
   catalog: Record<string, CatalogLite>;
   flagged: number[]; // row indices under the threshold
   /** Row index → an extra note to show with the row's reason (the history check). */
@@ -113,6 +115,7 @@ function printedNameHint(r: ExtractedRow, catalogName: string | undefined): stri
 export function ReviewRows({
   rows,
   productNames,
+  rowNames,
   catalog,
   flagged,
   rowNotes,
@@ -135,8 +138,10 @@ export function ReviewRows({
   const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
   const q = query.trim().toLowerCase();
   const indexed = useMemo(() => rows.map((r, i) => ({...r, i})), [rows]);
+  const nameOf = (r: (typeof indexed)[number]) => (rowNames ? rowNames[r.i] : productNames[r.item_code]) ?? r.printed_name ?? null;
+  const knownName = (r: (typeof indexed)[number]) => (rowNames ? rowNames[r.i] : productNames[r.item_code]) ?? undefined;
   const matches = (r: (typeof indexed)[number]) =>
-    !q || r.item_code.toLowerCase().includes(q) || (productNames[r.item_code] ?? '').toLowerCase().includes(q);
+    !q || r.item_code.toLowerCase().includes(q) || (nameOf(r) ?? '').toLowerCase().includes(q);
   const visible = indexed.filter((r) => (view === 'all' || flaggedSet.has(r.i)) && matches(r));
   const groups = view === 'all' ? groupByFamily(visible, catalog) : null;
   // Rows under a heading whose items print different prices (Make-Up Collection: BESP ₱320,
@@ -205,21 +210,21 @@ export function ReviewRows({
               {/* Primary: code + name. */}
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-xs font-medium">{r.item_code}</span>
-                {(productNames[r.item_code] ?? r.printed_name) && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code] ?? r.printed_name}</span>}
+                {nameOf(r) && <span className="min-w-0 text-xs text-muted-foreground">{nameOf(r)}</span>}
                 {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
                   <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
                 )}
               </div>
-              {printedNameHint(r, productNames[r.item_code]) && (
-                <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
+              {printedNameHint(r, knownName(r)) && (
+                <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, knownName(r))}</span>
               )}
               {view === 'needs' && catalog[r.item_code]?.productLine && (
                 <span className="mt-0.5 block max-w-[16rem] truncate text-[11px] text-muted-foreground/70">{catalog[r.item_code]?.productLine}</span>
               )}
               {/* Secondary: one reason line (marks + alt combined), then the Legacy
                   deducted context as a quieter tertiary line. */}
-              {reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i]) && (
-                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i])}</span>
+              {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && (
+                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>
               )}
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
@@ -289,14 +294,14 @@ export function ReviewRows({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <span className="font-mono text-xs font-medium">{r.item_code}</span>
-            {(productNames[r.item_code] ?? r.printed_name) && <span className="block truncate text-sm">{productNames[r.item_code] ?? r.printed_name}</span>}
+            {nameOf(r) && <span className="block text-sm">{nameOf(r)}</span>}
             {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
               <span className="block font-mono text-xs text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
             )}
-            {printedNameHint(r, productNames[r.item_code]) && (
-              <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
+            {printedNameHint(r, knownName(r)) && (
+              <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, knownName(r))}</span>
             )}
-            {reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i])}</span>}
+            {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span

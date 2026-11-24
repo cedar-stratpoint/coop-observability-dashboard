@@ -1,4 +1,5 @@
 import {pageItemNames} from '@/src/goldline-legacy-extract';
+import {rowNames} from '@/src/row-names';
 import {printedPageItems, withPrintedHeadings} from '@/src/goldline-printed-page';
 import {notFound, redirect} from 'next/navigation';
 import {auth} from '@/auth';
@@ -68,6 +69,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
         upload: p.upload,
         extraction: p.extraction,
         productNames: names,
+        rowNames: rowNames(p.extraction?.data?.rows ?? [], p.upload.form_version, pageNo),
         scanUrl: p.upload.storage_path ? `/api/goldline/uploads/${p.upload.id}/file` : null,
         detectedStore: p.detectedStore,
       };

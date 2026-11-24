@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Review: every row shows its own product name
+
+Since #686 names were looked up by printed code. On page 4 several accessories share a code (five "ACCS 288"), so they all showed one brush's name, and older Legacy reads with codes like ACCS185 showed only the code. Names now come per row (`src/row-names.ts`): the Nth row with a code takes the Nth printed line with it, then the shared list for that page, then the other pages (for a misread page number), then the name printed on the paper. Long names wrap, so the table no longer runs wider than its pane. The Legacy band-total check had the same shared-code mistake and now counts each accessory once.
+
+Known, not changed: the commit path keys counts by item code, so a page 4 with shared codes cannot be committed as it is.
+
 ## 2026-11-24 — Scan review: every row points at the scan; a line follows the mouse
 
 - **Rows without a located position get an estimated pointer**, drawn dashed. On older Legacy reads those were exactly the flagged rows (not on the list sent for positions), so Needs review showed no pointer. `estimateRowBoxes` counts printed lines, heading bars included, between located neighbours and gives up when they are too few or oddly spaced. Checked by hiding located rows one at a time on 114 stored reads (many are repeats of the same pages): 99.9% within half a row; 85 of 5,953 got no estimate. A page read with no positions at all still has no pointer.
