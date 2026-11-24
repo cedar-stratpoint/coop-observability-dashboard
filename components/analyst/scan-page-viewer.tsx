@@ -12,7 +12,7 @@ if (typeof window !== 'undefined') {
 export type ScanHighlight = {top: number; height: number; label: string; approximate?: boolean};
 /** A light box on the row the reviewer is pointing at in the rows beside the scan (page fractions).
  *  `angle`/`px` tilt it with a slanted page around the ITEM# column; `label` is a small tag on it. */
-export type ScanPointBox = {top: number; height: number; angle?: number; px?: number; label?: string};
+export type ScanPointBox = {top: number; height: number; angle?: number; px?: number; label?: string; estimated?: boolean};
 
 const ZMIN = 1;
 const ZMAX = 4;
@@ -41,6 +41,7 @@ export function ScanPageViewer({
   onEnlarge,
   fit = 'width',
   pointBox,
+  tilt = 0,
 }: {
   url: string;
   highlight?: ScanHighlight;
@@ -50,6 +51,8 @@ export function ScanPageViewer({
   onEnlarge?: () => void;
   fit?: 'width' | 'page';
   pointBox?: ScanPointBox | null;
+  /** The page's slant in degrees: the line that follows the mouse leans with the printed rows. */
+  tilt?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -229,7 +232,24 @@ export function ScanPageViewer({
       drag.current = {x: e.clientX, y: e.clientY, l: 0, t: 0, moved: false}; // a tap, unless it moves
     }
   };
+  // A thin line under the mouse, along the printed rows, to see which row a number sits on (the
+  // answer key's ruler). Moved directly, so following the mouse never re-renders the page.
+  const rulerRef = useRef<HTMLDivElement>(null);
+  const rulerAt = useRef<{x: number; y: number} | null>(null);
+  const moveRuler = (at: {x: number; y: number} | null) => {
+    rulerAt.current = at;
+    const line = rulerRef.current;
+    const r = pageRef.current?.getBoundingClientRect();
+    if (!line) return;
+    const on = Boolean(at && r && state === 'ready' && at.x >= r.left && at.x <= r.right && at.y >= r.top && at.y <= r.bottom);
+    line.style.opacity = on ? '1' : '0';
+    if (!on || !at || !r) return;
+    line.style.top = `${at.y - r.top}px`;
+    line.style.transformOrigin = `${at.x - r.left}px 0`;
+    line.style.transform = `rotate(${tilt}deg)`;
+  };
   const onPointerMove = (e: React.PointerEvent) => {
+    moveRuler(e.pointerType === 'mouse' && !drag.current?.moved ? {x: e.clientX, y: e.clientY} : null);
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, {x: e.clientX, y: e.clientY});
     if (pinch.current && pointers.current.size === 2) {
@@ -309,6 +329,8 @@ export function ScanPageViewer({
         onPointerMove={onPointerMove}
         onPointerUp={(e) => endPointer(e)}
         onPointerCancel={(e) => endPointer(e, true)}
+        onPointerLeave={() => moveRuler(null)}
+        onScroll={() => moveRuler(rulerAt.current)}
         style={{touchAction: 'pan-x pan-y'}}
         className={`relative flex flex-1 overflow-auto overscroll-contain rounded-md bg-[color:var(--muted)] select-none ${dragging ? 'cursor-grabbing' : onEnlarge ? 'cursor-zoom-in' : 'cursor-grab'}`}
       >
@@ -323,9 +345,10 @@ export function ScanPageViewer({
         <div
           ref={pageRef}
           data-scan-page
-          className={fit === 'page' ? 'm-auto shrink-0' : 'mx-auto shrink-0'}
+          className={`relative overflow-clip ${fit === 'page' ? 'm-auto shrink-0' : 'mx-auto shrink-0'}`}
           style={size ? {width: size.w * zoom, height: size.h * zoom} : undefined}
         >
+          <div ref={rulerRef} data-scan-ruler aria-hidden className="pointer-events-none absolute -right-8 -left-8 z-10 h-[2px] bg-emerald-700 opacity-0" />
           <div className="relative origin-top-left" style={size ? {width: size.w, height: size.h, transform: `scale(${zoom})`} : undefined}>
             <canvas ref={canvasRef} className="block" style={size ? {width: size.w, height: size.h} : {width: '100%'}} />
             {pointBox && size && (
@@ -336,7 +359,9 @@ export function ScanPageViewer({
                   top: `${Math.max(0, pointBox.top - 0.002) * 100}%`,
                   height: `${(pointBox.height + 0.004) * 100}%`,
                   background: 'color-mix(in oklab, var(--primary) 14%, transparent)',
-                  boxShadow: 'inset 0 0 0 1.5px color-mix(in oklab, var(--primary) 70%, transparent)',
+                  ...(pointBox.estimated
+                    ? {outline: '1.5px dashed color-mix(in oklab, var(--primary) 80%, transparent)', outlineOffset: '-1.5px'}
+                    : {boxShadow: 'inset 0 0 0 1.5px color-mix(in oklab, var(--primary) 70%, transparent)'}),
                   ...(pointBox.angle && Math.abs(pointBox.angle) > 0.05
                     ? {transformOrigin: `${((pointBox.px ?? 0.1) * 100).toFixed(2)}% 50%`, transform: `rotate(${pointBox.angle}deg)`}
                     : {}),

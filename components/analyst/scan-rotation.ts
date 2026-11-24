@@ -58,13 +58,14 @@ type BoxRow = {item_code?: string; alt?: string | null; box?: {y_top: number; y_
 /** The box to draw on the scan for the row the reviewer points at: its located box, tilted by the
  *  page's slant, and turned with the page when the reviewer flipped it (boxes are measured on the
  *  page as the reader saw it, upright). Labelled with the item code. Pure. */
-export function scanPointBox(row: BoxRow, slant: {angle: number; px: number} | null | undefined, flipped: boolean) {
-  const b = row?.box;
+export function scanPointBox(row: BoxRow, slant: {angle: number; px: number} | null | undefined, flipped: boolean, estimate?: {y_top: number; y_bottom: number} | null) {
+  const located = row?.box && row.box.y_bottom > row.box.y_top ? row.box : null;
+  const b = located ?? (row ? estimate : null);
   if (!b || !(b.y_bottom > b.y_top)) return null;
   const height = b.y_bottom - b.y_top;
   const top = flipped ? 1 - b.y_bottom : b.y_top;
   const px = slant ? (flipped ? 1 - slant.px : slant.px) : undefined;
   // Code only: the reader's note is long and already shows on the highlighted row in the list.
   const label = row?.item_code || undefined;
-  return {top, height, angle: slant?.angle, px, label};
+  return {top, height, angle: slant?.angle, px, label, ...(located ? {} : {estimated: true})};
 }

@@ -38,9 +38,9 @@ export function readerNote(alt: string | null | undefined, layout: Layout, opts:
   s = s.replace(/off_manifest:?\s*/gi, '');
   if (opts.known) {
     // On the list after all: drop the remark and the printed name that went with it.
-    s = s.replace(/(?:printed row )?not in (?:the )?reference list,?\s*(?:printed name\s+[^;]+)?/gi, '');
+    s = s.replace(/(?:printed (?:row |but )?)?not in (?:the )?reference list/gi, '').replace(/printed name\s+[^;]+/gi, '');
   } else {
-    s = s.replace(/(?:printed row )?not in (?:the )?reference list/gi, 'not on the usual list for this page');
+    s = s.replace(/(?:printed (?:row |but )?)?not in (?:the )?reference list/gi, 'not on the usual list for this page');
     s = s.replace(/printed name\s+([^;]+?)(?=;|$)/gi, (_, name: string) => `printed as "${name.trim()}"`);
   }
   // Field names the model used verbatim.
@@ -57,6 +57,6 @@ export function readerNote(alt: string | null | undefined, layout: Layout, opts:
     s = s.replace(/\bbeginning\b/gi, 'stockroom');
     s = s.replace(/\bdelivery\b/gi, 'drawer');
   }
-  s = s.replace(/\s*;\s*(?=;|$)/g, '').replace(/\s{2,}/g, ' ').replace(/^[;,\s]+|[;,\s]+$/g, '');
+  s = s.split(';').map((x) => x.replace(/\s{2,}/g, ' ').replace(/^[,\s]+|[,\s]+$/g, '')).filter(Boolean).join('; ');
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : null;
 }
