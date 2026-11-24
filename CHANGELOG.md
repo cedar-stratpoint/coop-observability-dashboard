@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Scan page: filter numbers follow the other filters
+
+On the Per file list each chip counted the whole scan, so Blank page read 14 while Status was Needs review and the list was empty. Every chip (and each All) now shows how many pages it would list with the other two filters kept as they are (`facetCounts` in `src/scan-file-nav.ts`). A chip that would list nothing is dimmed and not clickable, except the chosen one; an empty combination (reachable from a link) offers Clear filters. Which chips exist still follows the whole scan, so they don't jump around.
+
 ## 2026-11-24 — Reconciliation: honest marks, a recommendation on every line, all stores
 
 Review feedback: every SKU should show its recommendation at once, and "how do we find all YYX across stores". Checking the data first found the marks were wrong, so those came first.

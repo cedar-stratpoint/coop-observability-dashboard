@@ -75,6 +75,24 @@ export function matchesFilter(u: Pick<NavFile, 'status' | 'page_kind' | 'form_ve
   );
 }
 
+export type FacetCounts = {
+  type: Record<PageType | 'all', number>;
+  status: Record<PageStatus | 'all', number>;
+  fv: Record<string, number>;
+};
+
+/** What each filter chip leads to: the number of pages listed if it were chosen now, with the
+ *  other two facets kept as they are. So a chip never promises pages the list won't show (Blank
+ *  page reads 0 while Status is Needs review), and the chosen chip's number is the list's length. */
+export function facetCounts(pages: ReadonlyArray<Pick<NavFile, 'status' | 'page_kind' | 'form_version'>>, f: FileFilter): FacetCounts {
+  const n = (over: Partial<FileFilter>) => pages.filter((u) => matchesFilter(u, {...f, ...over})).length;
+  return {
+    type: Object.fromEntries((['all', ...TYPE_ORDER] as const).map((t) => [t, n({type: t})])) as FacetCounts['type'],
+    status: Object.fromEntries((['all', ...STATUS_FILTER_ORDER] as const).map((s) => [s, n({status: s})])) as FacetCounts['status'],
+    fv: Object.fromEntries((['all', ...VERSION_FILTER_ORDER] as const).map((v) => [v, n({fv: v})])),
+  };
+}
+
 /** Where one file sits in the filtered list, and its neighbours for the ‹ › arrows. A file
  *  outside the filter (an older attempt, a page just committed while filtered to "Needs
  *  review", or a stale link) sits at its scan position: the arrows still step to the nearest
