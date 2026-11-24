@@ -3,11 +3,12 @@
 // so the columns render in each form version's printed left-to-right order.
 
 export const COLS = [
-  {key: 'stockroom', label: 'Stk', title: 'Bilang sa stockroom / steel cabinet'},
-  {key: 'drawer', label: 'Drw', title: 'Bilang sa drawer ng module'},
-  {key: 'selling_area', label: 'Sell', title: 'Bilang sa selling area'},
-  {key: 'delivery', label: 'Dlv', title: 'Delivery'},
-  {key: 'ending_on_hand', label: 'End', title: 'Ending inventory (stock on hand)'},
+  // Full names (QA: "Stk / Drw / Sell" read as codes, not columns).
+  {key: 'stockroom', label: 'Stockroom', title: 'Bilang sa stockroom / steel cabinet'},
+  {key: 'drawer', label: 'Drawer', title: 'Bilang sa drawer ng module'},
+  {key: 'selling_area', label: 'Selling area', title: 'Bilang sa selling area'},
+  {key: 'delivery', label: 'Delivery', title: 'Delivery'},
+  {key: 'ending_on_hand', label: 'Ending', title: 'Ending inventory (stock on hand)'},
 ] as const;
 export type ColKey = (typeof COLS)[number]['key'];
 
@@ -25,4 +26,17 @@ export function colsForVersion(version: string | null | undefined): readonly (ty
   if (!order) return COLS;
   const byKey = new Map(COLS.map((c) => [c.key, c] as const));
   return order.map((k) => byKey.get(k)!);
+}
+
+/** The columns to show for one page: the version's order, minus Delivery on a Legacy page that
+ *  has none. A Legacy form filled as Stockroom / Drawer / Selling has no delivery column on the
+ *  paper (its 4th column is "Deducted"), so an always-empty Delivery column would break the
+ *  match with the scan. A Legacy page that does carry deliveries keeps it. */
+export function colsForPage(
+  version: string | null | undefined,
+  rows: ReadonlyArray<Partial<Record<ColKey, number | null>>>,
+): readonly (typeof COLS)[number][] {
+  const cols = colsForVersion(version);
+  if (version !== 'legacy' || rows.some((r) => r.delivery != null)) return cols;
+  return cols.filter((c) => c.key !== 'delivery');
 }

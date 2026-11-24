@@ -40,6 +40,11 @@ describe('rowMathOff', () => {
     // not enough deducted inputs → skip (don't use the three-location sum on a Legacy row)
     expect(rowMathOff(leg({beginning: 20}, {ending_on_hand: 20}))).toBeNull();
   });
+  it('checks a Legacy row filed as stockroom / drawer / selling by the location sum', () => {
+    const leg = (p: Partial<CountRow>) => r({form_version: 'legacy', ...p});
+    expect(rowMathOff(leg({drawer: 4, selling_area: 2, ending_on_hand: 6}))).toBeNull(); // IPSLS01, QA Nov 24
+    expect(rowMathOff(leg({stockroom: 20, selling_area: 31, ending_on_hand: 31}))).toEqual({written: 31, counted: 51});
+  });
 });
 
 describe('rowFindings', () => {

@@ -4,6 +4,7 @@
 // sits (top and bottom, in pixels of that image). The poller turns those into page fractions on the
 // extracted rows' existing `box` field, which review already draws. Cosmetic only: no number is ever
 // changed, and anything doubtful leaves the box off so review falls back to the template band.
+import {legacyPageItems} from './goldline-legacy-extract';
 import {EXTRACT_MODEL, MANIFESTS} from './goldline-extract';
 import type {ExtractedRow} from './goldline-extract-run';
 import type {FormTemplate} from './goldline-form-template';
@@ -17,9 +18,10 @@ const BOX_SUFFIX = '_box_';
 
 /** The printed product rows of a page, top to bottom: the template's item rows, or for Legacy (no
  *  template) the same manifest the Legacy reader is given. Pure. */
-export function locateRowsFor(template: FormTemplate | null, page: number): LocateRow[] {
+export function locateRowsFor(template: FormTemplate | null, page: number, version?: string | null): LocateRow[] {
   if (template) return template.rows.flatMap((r) => (r.kind === 'item' ? [{code: r.itemCode, product: r.product}] : []));
-  return (MANIFESTS[page] ?? []).map((m) => ({code: m.code, product: m.product}));
+  const items = version === 'legacy' ? legacyPageItems(page) : MANIFESTS[page] ?? [];
+  return items.map((m) => ({code: m.code, product: m.product}));
 }
 
 /** custom_id of a page's box request in its batch. The image height and the page's slant ride along

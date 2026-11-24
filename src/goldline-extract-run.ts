@@ -16,7 +16,7 @@ import {sanitizeClassification, type PageClassification} from './goldline-segmen
 import {
   buildLegacyManifestPrompt,
   LEGACY_EXTRACTION_SCHEMA,
-  legacyRowToCore,
+  legacyPageToCore,
   type LegacyExtractedRow,
 } from './goldline-legacy-extract';
 import type {FormVersion} from './goldline-extract';
@@ -513,7 +513,7 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
       period_start: p.period_start ?? null,
       period_end: p.period_end ?? null,
       consultant: p.consultant ?? null,
-      rows: p.rows.map(legacyRowToCore),
+      rows: legacyPageToCore(p.rows).rows,
       reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
     };
   }

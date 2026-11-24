@@ -251,7 +251,7 @@ export async function runInventoryRead(args: {
       // Row boxes for review (flag-gated): a second, small request in the same batch asks where each
       // printed row sits on the page. Its own result never affects the read; the poller attaches it.
       const requests: {custom_id: string; params: unknown}[] = [{custom_id: uploadId, params: batchParams}];
-      const locateRows = images && readBoxesEnabled(companyId) ? locateRowsFor(template, page) : [];
+      const locateRows = images && readBoxesEnabled(companyId) ? locateRowsFor(template, page, cls.version) : [];
       if (images && locateRows.length) {
         requests.push({custom_id: boxCustomId(uploadId, images.locate.h, images.locate.slant), params: buildLocateParams(images.locate, locateRows)});
         rec.detail = {...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}), boxes: locateRows.length};

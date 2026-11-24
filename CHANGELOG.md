@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Legacy forms filed the way consultants fill them; full column names; plain reader notes
+
+From the QA rerun of SM San Pablo (Nov 23/24). Consultants fill the Legacy form as a three-location count: they write "Stockroom / Drawer / Selling" over the printed Beginning / Delivery / Beginning + Delivery headers, and the first three columns add up to Ending. On staging every Legacy page with counts (104 pages, 3 stores, 3,964 rows) adds up that way and not one row fits the printed identities. Coop read the digits mostly right but filed them by the printed headers: drawer counts landed in Delivery, selling counts only in a grey "+Delivery N" line, Stockroom/Drawer/Selling stayed empty, and QA's arithmetic check failed on every row.
+
+- **Legacy layout per page.** The reader still returns each cell by column position; the page's own arithmetic then decides (`legacyPageLayout`): at least 80% of counted rows (min 3) with col1 + col2 + col3 = Ending → filed as Stockroom / Drawer / Selling area / Ending; otherwise the printed deducted model. The 104 Legacy pages under review on staging were re-filed (backup kept; committed pages untouched). The row check after commit uses the location sum for these rows.
+- **Legacy reading instructions** no longer push digits toward the printed identities only (they state both uses) and now list the Legacy form's own printed rows, so Double Espresso, Macchiato, 24HRTEEP and LEL091 read against the list instead of being marked "not in reference list". Names and row boxes on Legacy pages use the same list.
+- **Full column names:** Stockroom, Drawer, Selling area, Delivery, Ending (was Stk, Drw, Sell, Dlv, End). A Legacy page with no deliveries drops the always-empty Delivery column, so the grid matches the paper.
+- **Plain reader notes:** the reader is told to write notes for the reviewer (column names, no "col3", no "off_manifest"); notes already stored are cleaned on display ("col3" → the column's name, field names spelled out, a stale "not in reference list" dropped when the row is on the page list) and lose the "Maybe:" prefix. The Legacy context line reads "Beginning + Delivery", not "+Delivery".
+
+Not fixed here: wrong values that still add up in their own row (BMEPP02 60 + 18 = 78 vs the paper's 20 + 18 = 38) need the history cross-check, not row math.
+
 ## 2026-11-24 — Reconciliation: the tiles are the only filter
 
 Review on staging found the page confusing: three controls filtered the same list (the tiles, the Active/Inactive tabs, the "Only products that need a step" checkbox) and they fought, e.g. clicking a tab silently dropped the picked tile. **Decision: one filter, the tiles.** Exactly one tile or chip is always selected (no toggling off) and the table lists only that state; the page opens on the most urgent step. The Active/Inactive tabs and the checkbox are gone (Active/Inactive is on every tile and chip). The table header now says what it shows: the state, who acts and the step. Search is the one exception: it looks across every state, shows each match's state, and clears the tile highlight while it is in use; picking a tile clears the search. Same on By product. Changing store or month opens on that selection's own most urgent state.
