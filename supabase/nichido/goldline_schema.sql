@@ -23,12 +23,15 @@
 -- executable by service_role only. Run on Nichido STAGING first, PROD after review.
 -- The private storage bucket `goldline-uploads` is created at the end.
 --
--- Sales money is encrypted at rest AFTER this file: it creates sales with plain
--- gross_retail / net_of_vat (what migrate-goldline.ts copies into), then
--- s1_sales_encryption.sql moves them into sales.amounts_enc with a Vault key and
--- replaces sales_rollup / sales_by_sku, and s2_sales_drop_plaintext.sql drops the plain
--- columns. A fresh project: this file → (copy) → s1 → s2. The two functions below are
--- the pre-encryption versions; s1 holds the live ones.
+-- Sales figures are encrypted at rest AFTER this file: it creates sales with plain
+-- gross_retail / net_of_vat / units (what migrate-goldline.ts copies into), then
+-- s1_sales_encryption.sql moves the money into sales.amounts_enc with a Vault key,
+-- s3_sales_units_encryption.sql adds units to that ciphertext and replaces every reader of
+-- units, s5_sales_period_totals.sql keeps the totals added up, and s2_sales_drop_plaintext.sql
+-- drops the plain columns. A fresh project: this file → (copy) → s1 → (p3_forecast, p3c) → s3 →
+-- s5 → s2. The sales readers below are the pre-encryption versions; s3 and s5 hold the live
+-- ones. Don't re-run s3 after s5 without re-running s5: both define sales_rollup, sales_by_sku,
+-- store_scope, forecast_months and sku_months, and s5's are the fast ones.
 
 -- ---------------------------------------------------------------------------------
 -- Company mirror (FK target only; not the auth source).

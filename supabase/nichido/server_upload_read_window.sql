@@ -1,14 +1,10 @@
--- Server-driven scan upload: widen the read window for dense pages. **DEFERRED — NOT APPLIED.**
+-- Server-driven scan upload: the 600 s read window for dense pages. **LIVE on Nichido Staging**
+-- (migration goldline_read_window_600s, 2026-11-11). Run after server_upload_resilience.sql.
 -- Plan: knowledge/tasks/2026-11-09-server-driven-upload.md.
 --
--- This pairs with read-page/upload maxDuration = 600, but the pilot's Vercel project
--- (coop-brand-os) is on a plan that caps functions at 300s, so a 600s build fails there. HOLD
--- until that project is on Vercel Pro + Fluid Compute (functions up to 800s). When migrating:
---   1. app: read-page + upload route maxDuration 300 -> 600, STALE_READ_MIN 10 -> 15;
---   2. DB: apply the two functions below (pump per-call timeout 600s, reaper window 12 min).
--- Briefly applied to Staging 2026-11-10 then reverted; Staging is back to the 300s config in
--- server_upload_resilience.sql (pump timeout 300s, reaper 7 min). Keep the invariant:
--- maxDuration (600s) <= pump timeout (600s) < DB reaper (12m) < app backstop (15m).
+-- Needs a host whose functions may run 600 s (read-page maxDuration = 600): our Vercel Pro project
+-- coop-observability-dashboard. On a 300 s plan the build itself fails; there, stay on
+-- server_upload_resilience.sql (pump timeout 300 s, reaper 7 min) and lower maxDuration.
 --
 -- Why: on the reuploads, a subset of dense V1 pages read for ~250-300s and some tipped over
 -- the 300s read limit, stalling (then auto-retrying, then failing). They need more time, not

@@ -26,8 +26,8 @@ export const COOP_ENVS: readonly CoopEnv[] = [
   {
     key: 'staging',
     label: 'Staging',
-    url: 'https://coop-brand-os-staging.vercel.app',
-    host: 'coop-brand-os-staging.vercel.app',
+    url: 'https://coop-cedar-staging.vercel.app',
+    host: 'coop-cedar-staging.vercel.app',
     dbRef: 'syxwixxzmytvhwhkwdvw',
     nichidoRef: 'jcqlnrvplaapvcxyhcns',
     tone: 'oklch(0.62 0.15 250)', // blue
@@ -36,8 +36,8 @@ export const COOP_ENVS: readonly CoopEnv[] = [
   {
     key: 'production',
     label: 'Production',
-    url: 'https://coop-brand-os.vercel.app',
-    host: 'coop-brand-os.vercel.app',
+    url: 'https://coop-cedar.vercel.app',
+    host: 'coop-cedar.vercel.app',
     dbRef: 'qkxbwzdxhwcbwgriwipi',
     nichidoRef: 'pfwrkqsjmetibslltmok',
     tone: 'oklch(0.6 0.2 305)', // purple
