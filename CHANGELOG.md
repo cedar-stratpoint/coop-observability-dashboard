@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Review shows names, headings and prices as printed on the form
+
+QA fixes 1 to 4 (San Pablo reruns, Nov 23/24). The review took product names from the shared page list and headings and prices from the catalog, so it drifted from the paper: headings lost printed text ("MINERAL KOHL - ONYX (2 in 1 Eyeliner & Under Eyeliner)", "EASY GLIDE LIQUID EYELINER 3ml (black)", "NICHIDO EYEBROW GEL (CLEAR MASCARA)"), the Make-Up Collection price lines (BESP, LSESP, CPC001) were missing so those totals came to ₱0, name tags were dropped ("#9717 Naturally Beautiful", "#G0II3-A Bare Basic Palette") and "&" showed as "and" (LCMS01). The review (page and store batch) now takes names, headings and prices from the printed list for the page's form version (`src/goldline-printed-page.ts`; Legacy, V1 and V2 each have their own), falling back to the shared list and catalog when the version is unknown. Rows under a heading with mixed prices show their own price, and each heading shows its total amount (on hand × printed price) on the right, like the bracketed totals written on the paper. The page's ending value now uses the printed prices too.
+
 ## 2026-11-24 — Legacy forms filed the way consultants fill them; full column names; plain reader notes
 
 From the QA rerun of SM San Pablo (Nov 23/24). Consultants fill the Legacy form as a three-location count: they write "Stockroom / Drawer / Selling" over the printed Beginning / Delivery / Beginning + Delivery headers, and the first three columns add up to Ending. On staging every Legacy page with counts (104 pages, 3 stores, 3,964 rows) adds up that way and not one row fits the printed identities. Coop read the digits mostly right but filed them by the printed headers: drawer counts landed in Delivery, selling counts only in a grey "+Delivery N" line, Stockroom/Drawer/Selling stayed empty, and QA's arithmetic check failed on every row.

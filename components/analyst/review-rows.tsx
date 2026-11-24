@@ -4,7 +4,7 @@ import {useMemo} from 'react';
 import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
-import {groupByFamily, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
+import {groupByFamily, pageTotal, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
@@ -135,6 +135,10 @@ export function ReviewRows({
     !q || r.item_code.toLowerCase().includes(q) || (productNames[r.item_code] ?? '').toLowerCase().includes(q);
   const visible = indexed.filter((r) => (view === 'all' || flaggedSet.has(r.i)) && matches(r));
   const groups = view === 'all' ? groupByFamily(visible, catalog) : null;
+  // Rows under a heading whose items print different prices (Make-Up Collection: BESP ₱320,
+  // CPC001 ₱350) show their own price, like the paper's per-item price lines.
+  const ownPrice = new Set(groups?.filter((g) => g.price == null).flatMap((g) => g.items.map((r) => r.i)) ?? []);
+  const priceOf = (code: string) => catalog[code]?.unitPrice ?? null;
   const resolvedCount = flagged.filter((i) => resolved.has(i)).length;
   const pos = active == null ? 0 : flagged.indexOf(active) + 1;
 
@@ -150,6 +154,26 @@ export function ReviewRows({
       {editable && <th className="py-2 font-medium sr-only">Decision</th>}
     </tr>
   );
+
+  // A heading bar as printed: the band's name, its price when every item shares one, and on the
+  // right the band's total amount (on hand × printed price), like the bracketed totals the
+  // consultant writes beside each band.
+  const heading = (g: {family: string; price: number | null; items: (typeof indexed)[number][]}) => {
+    const t = pageTotal(g.items, catalog);
+    return (
+      <span className="flex items-baseline justify-between gap-3">
+        <span>
+          {g.family}
+          {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+        </span>
+        {t.priced > 0 && (
+          <span className="shrink-0 font-mono font-normal text-muted-foreground tabular-nums" title="Total amount: on hand × printed price">
+            ₱{t.total.toLocaleString('en-US')}
+          </span>
+        )}
+      </span>
+    );
+  };
 
   const line = (r: (typeof indexed)[number]) => {
     const isFlag = flaggedSet.has(r.i);
@@ -178,6 +202,9 @@ export function ReviewRows({
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-xs font-medium">{r.item_code}</span>
                 {(productNames[r.item_code] ?? r.printed_name) && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code] ?? r.printed_name}</span>}
+                {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+                )}
               </div>
               {printedNameHint(r, productNames[r.item_code]) && (
                 <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
@@ -259,6 +286,9 @@ export function ReviewRows({
           <div className="min-w-0">
             <span className="font-mono text-xs font-medium">{r.item_code}</span>
             {(productNames[r.item_code] ?? r.printed_name) && <span className="block truncate text-sm">{productNames[r.item_code] ?? r.printed_name}</span>}
+            {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
+              <span className="block font-mono text-xs text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+            )}
             {printedNameHint(r, productNames[r.item_code]) && (
               <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
             )}
@@ -370,10 +400,7 @@ export function ReviewRows({
             {groups
               ? groups.map((g) => (
                   <li key={`${g.family}-${g.items[0].i}`}>
-                    <div className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">
-                      {g.family}
-                      {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
-                    </div>
+                    <div className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">{heading(g)}</div>
                     <ul role="list" className="flex flex-col divide-y divide-border">{g.items.map(card)}</ul>
                   </li>
                 ))
@@ -386,9 +413,8 @@ export function ReviewRows({
                 groups.map((g) => (
                   <tbody key={`${g.family}-${g.items[0].i}`}>
                     <tr className="bg-muted/50">
-                      <th colSpan={COLS.length + (editable ? 3 : 2)} scope="rowgroup" className="px-2 py-1.5 text-left text-xs font-semibold">
-                        {g.family}
-                        {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+                      <th colSpan={cols.length + (editable ? 3 : 2)} scope="rowgroup" className="px-2 py-1.5 text-left text-xs font-semibold">
+                        {heading(g)}
                       </th>
                     </tr>
                     {g.items.map(line)}
