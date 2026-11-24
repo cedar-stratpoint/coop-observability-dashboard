@@ -172,6 +172,11 @@ function pageLabel(filename: string): {title: string; sub: string | null} {
 
 type Toast = {id: number; kind: 'ok' | 'err'; text: string};
 
+/** An upload matches when its given name or its file name contains the text. */
+function matchesUpload(u: {filename: string; batch_name?: string | null}, q: string): boolean {
+  return u.filename.toLowerCase().includes(q) || Boolean(u.batch_name?.toLowerCase().includes(q));
+}
+
 export function UploadsView({
   company,
   canEdit,
@@ -233,7 +238,7 @@ export function UploadsView({
     return uploads.filter((u) => {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
-      if (q && !u.filename.toLowerCase().includes(q)) return false;
+      if (q && !matchesUpload(u, q)) return false;
       const day = (u.created_at ?? '').slice(0, 10);
       if (from && day < from) return false;
       if (to && day > to) return false;
@@ -249,7 +254,7 @@ export function UploadsView({
     const forGroups = uploads.filter((u) => {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
-      if (q && !u.filename.toLowerCase().includes(q)) return false;
+      if (q && !matchesUpload(u, q)) return false;
       const day = (u.created_at ?? '').slice(0, 10);
       if (from && day < from) return false;
       if (to && day > to) return false;
@@ -258,6 +263,7 @@ export function UploadsView({
     return groupUploads(forGroups);
   }, [uploads, query, statusFilter, kindFilter, from, to]);
 
+  const allGroupCount = useMemo(() => groupUploads(uploads).length, [uploads]);
   const selectedGroup = groupKey ? groups.find((g) => g.key === groupKey) ?? null : null;
 
   // The tile grid (grouped view, no drill-in) paginates by tiles; everything else (the
@@ -269,7 +275,9 @@ export function UploadsView({
   const safePage = Math.min(page, pageCount);
   const pageRows = tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
-  const hasActiveFilters = Boolean(query || from || to || statusFilter !== 'all' || kindFilter !== 'all');
+  // Search lives in the header (Nov 25), so it no longer counts as an open filter.
+  const hasActiveFilters = Boolean(from || to || statusFilter !== 'all' || kindFilter !== 'all');
+  const searching = Boolean(query.trim());
   const showFilters = filtersOpen || hasActiveFilters;
 
   return (
@@ -328,8 +336,46 @@ export function UploadsView({
                   <LayoutGrid className="size-3.5 text-muted-foreground" /> See forms in this scan
                 </Link>
               )}
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && query) {
+                      e.preventDefault();
+                      setQuery('');
+                      setPage(1);
+                    }
+                  }}
+                  placeholder={selectedGroup ? 'Search this upload' : 'Search uploads'}
+                  aria-label="Search uploads by name or file name"
+                  className="h-8 w-48 rounded-md border border-border bg-background pr-7 pl-8 text-sm outline-none transition-[width,border-color] duration-200 ease-out [&::-webkit-search-cancel-button]:hidden hover:border-foreground/25 focus:w-64 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 sm:w-56 sm:focus:w-72"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery('');
+                      setPage(1);
+                    }}
+                    aria-label="Clear search"
+                    className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
               <span className="text-xs text-muted-foreground tabular-nums">
-                {view === 'groups' && !selectedGroup ? `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}` : `${filtered.length} of ${uploads.length}`}
+                {view === 'groups' && !selectedGroup
+                  ? searching || hasActiveFilters
+                    ? `${groups.length} of ${allGroupCount} uploads`
+                    : `${groups.length} ${groups.length === 1 ? 'upload' : 'uploads'}`
+                  : `${filtered.length} of ${uploads.length}`}
               </span>
               <button
                 type="button"
@@ -366,19 +412,6 @@ export function UploadsView({
           </div>
           {showFilters && (
           <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-3">
-            <div className="relative w-full sm:w-auto">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search file name…"
-                aria-label="Search file name"
-                className="h-8 w-full rounded-md border border-border bg-background pr-2.5 pl-8 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 sm:w-56"
-              />
-            </div>
             {/* Upload date range — applies to both views. */}
             <label className="flex items-center gap-1 text-xs text-muted-foreground">
               From
@@ -454,7 +487,7 @@ export function UploadsView({
           {view === 'groups' && !selectedGroup ? (
             groups.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                {uploads.length === 0 ? 'No files yet. Add one above.' : 'No uploads match.'}
+                {uploads.length === 0 ? 'No files yet. Add one above.' : searching ? <>No upload matches “{query.trim()}”. <button type="button" onClick={() => { setQuery(''); setPage(1); }} className="font-medium text-primary underline-offset-4 hover:underline">Clear search</button></> : 'No uploads match.'}
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -474,7 +507,7 @@ export function UploadsView({
             )
           ) : pageRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {uploads.length === 0 ? 'No files yet. Add one above.' : 'No files match.'}
+              {uploads.length === 0 ? 'No files yet. Add one above.' : searching ? <>No file matches “{query.trim()}”. <button type="button" onClick={() => { setQuery(''); setPage(1); }} className="font-medium text-primary underline-offset-4 hover:underline">Clear search</button></> : 'No files match.'}
             </p>
           ) : (
             <>
