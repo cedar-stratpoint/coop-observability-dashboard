@@ -11,9 +11,9 @@
 //   col7 Total Amount of Ending Inventory (value)
 // In practice the consultants fill this form as a THREE-LOCATION count: they write
 // "Stockroom / Drawer / Selling" over the printed Beginning / Delivery / Beginning+Delivery
-// headers, and col1 + col2 + col3 = col6 (Ending). On staging every Legacy page with counts
-// (104 pages, 3 stores, 3,964 rows) adds up that way and not one row fits the printed
-// identities, so the old "always key off the printed meaning" mapping filed drawer counts
+// headers, and col1 + col2 + col3 = col6 (Ending). On the 104 staging pages re-filed
+// this way 3,984 of 4,137 counted rows (96.3%) add up; they are only 32 distinct reads, nearly
+// all store 473. Not one row with the inputs fits the printed identities, so the old "always key off the printed meaning" mapping filed drawer counts
 // as Delivery and selling counts as Beginning+Delivery (QA, Nov 23/24).
 //
 // So the reader still returns each cell by its printed column POSITION, and the page's own
@@ -136,8 +136,8 @@ const bandKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9#&]+/g, '');
 /**
  * Band totals: compare the handwritten "Total Amount of Ending Inventory" for each printed
  * heading band with sum(ending) × the printed price. A band that disagrees has a misread or
- * misplaced number somewhere in it, even when every row adds up on its own (QA: BMEPP02 read
- * 60 + 18 = 78 where the paper has 20 + 18 = 38; the band's written total, ₱10,275, exposes it).
+ * misplaced number somewhere in it, even when every row adds up on its own (QA questioned BMEPP02,
+ * 60 + 18 = 78; unconfirmed against the paper).
  * The band's counted rows drop under the review flag line with a plain note; nothing is changed.
  * Only a written total that is a whole number of units at the band's price is trusted. Bands with
  * mixed prices are checked against each row's own price. Mutates and returns `rows`.
@@ -155,9 +155,9 @@ export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: F
     const bandRows = band.items.map((i) => byCode.get(i.code)).filter((r): r is CoreRow => Boolean(r));
     if (!bandRows.length) continue;
     // Only a written total that is a whole number of units at the printed price can say the
-    // counts are off. One that isn't (ICY POUT ₱14,910 at ₱285 = 52.3 units) means the total
-    // itself was misread or summed differently on the paper; flagging the band's rows for it
-    // only buries the real flags (QA re-read of San Pablo p.7: 19 rows flagged, 15 of them for that).
+    // counts are off. One that isn't (ICY POUT ₱14,910 at ₱285 = 52.3 units) is skipped. KNOWN GAP:
+    // it is often a handwritten price change, not a bad total (₱14,910 = 70 x 213, ₱9,353 = 47 x 199,
+    // ₱3,861 = 39 x 99 on San Pablo p.7), so this can hide a real misread (IPSLS08 read 5, likely 15).
     const price = band.price ?? null;
     if (price != null && price > 0 && Math.abs(written.amount / price - Math.round(written.amount / price)) > 1e-6) continue;
     checked++;
