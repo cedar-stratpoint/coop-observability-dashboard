@@ -7,10 +7,10 @@ import {ChevronRight, Search, X} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {NativeSelect} from '@/components/ui/native-select';
-import {GL_PAGE, titleName} from '@/src/goldline-ui';
-import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
+import {GL_PAGE} from '@/src/goldline-ui';
+import {ALL_STORES, AUDIT_META, AUDIT_STATES, NEEDS_ACTION, openingState, patternState, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
-import {defaultState, ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf} from '@/components/analyst/audit-shared';
+import {CoverageNote, ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By product (NICH-17). Every counted store in a month, rolled up per
 // product: how many stores sit in each of the 8 states, as one stacked bar per product.
@@ -28,17 +28,20 @@ const PAGE = 25;
 export function AuditProducts({data}: {data: ProductAuditResult}) {
   const router = useRouter();
   // The tiles are the only filter: one state is always selected, opening on the most urgent.
-  const [pick, setPick] = useState<AuditState>(() => defaultState(data.summary));
+  const [pick, setPick] = useState<AuditState>(() => openingState(data.summary));
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [page, setPage] = useState(0);
 
+  const asState = q.trim() ? patternState(q) : null;
+  const state = asState ?? pick;
+  const searching = Boolean(q.trim()) && !asState;
   const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = searching ? q.trim().toLowerCase() : '';
     // Search looks across every product; otherwise the selected state's products, most stores first.
     if (needle) return data.rows.filter((r) => r.item_code.toLowerCase().includes(needle) || r.product.toLowerCase().includes(needle));
-    return data.rows.filter((r) => r.counts[pick] > 0).sort((a, b) => b.counts[pick] - a.counts[pick] || a.item_code.localeCompare(b.item_code));
-  }, [data.rows, pick, q]);
+    return data.rows.filter((r) => r.counts[state] > 0).sort((a, b) => b.counts[state] - a.counts[state] || a.item_code.localeCompare(b.item_code));
+  }, [data.rows, state, q, searching]);
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const at = Math.min(page, pages - 1);
   const filter = (fn: () => void) => {
@@ -52,9 +55,9 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="max-w-2xl">
             <p className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase">Reconciliation</p>
-            <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">Every product, across every counted store</h1>
+            <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">Every product, across every store</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Each bar splits a product&apos;s stores by state. Products that need a step at the most stores come first.
+              Each bar splits a product&apos;s stores by recommendation. Open a product to see its stores.
             </p>
           </div>
           <ReconTabs query={data.month ? `month=${data.month}` : undefined} />
@@ -81,8 +84,9 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
               {/* A month is a filter, not a step: replace, so Back leaves the page. */}
               <NativeSelect className={SELECT} value={data.month} onChange={(e) => router.replace(`/stock/audit/products?month=${e.target.value}`, {scroll: false})}>
                 {data.months.map((m) => (
-                  <option key={m} value={m}>
-                    {monthLabel(m)}
+                  <option key={m.month} value={m.month}>
+                    {monthLabel(m.month)}
+                    {!m.loaded ? ' (no sales yet)' : !m.counted ? ' (no forms)' : ''}
                   </option>
                 ))}
               </NativeSelect>
@@ -90,7 +94,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
             <div className="ml-auto flex gap-6 text-right">
               <div>
                 <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.storeCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">stores counted</p>
+                <p className="mt-1 text-xs text-muted-foreground">stores, {data.coverage.storesCounted} with a form</p>
               </div>
               <div>
                 <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.rows.filter((r) => r.needsAction > 0).length}</p>
@@ -99,11 +103,13 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
             </div>
           </div>
 
+          <CoverageNote month={data.month} coverage={data.coverage} all />
+
           <div className="flex flex-col gap-3">
             <LegKey />
             <MatrixLegend
               summary={data.summary}
-              active={q.trim() ? null : pick}
+              active={searching ? null : state}
               onPick={(s) =>
                 filter(() => {
                   setPick(s);
@@ -116,14 +122,14 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
 
           <Card className="gap-0 overflow-hidden py-0">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
-              {q.trim() ? (
+              {searching ? (
                 <p className="text-sm">
                   <span className="font-semibold tabular-nums">{rows.length}</span> {rows.length === 1 ? 'product matches' : 'products match'}{' '}
-                  <span className="font-medium">“{q.trim()}”</span> <span className="text-muted-foreground">across every state</span>
+                  <span className="font-medium">“{q.trim()}”</span> <span className="text-muted-foreground">across every recommendation</span>
                 </p>
               ) : (
                 <>
-                  <StateChip state={pick} />
+                  <StateChip state={state} />
                   <span className="text-sm">
                     <span className="font-heading font-semibold tabular-nums">{rows.length}</span>{' '}
                     <span className="text-muted-foreground">{rows.length === 1 ? 'product is' : 'products are'} here in at least one store</span>
@@ -132,7 +138,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
               )}
               <div className="relative ml-auto">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <input value={q} onChange={(e) => filter(() => setQ(e.target.value))} placeholder="Search every product" aria-label="Search every product" className={cn(FIELD, 'w-60 pl-8', q && 'pr-8')} />
+                <input value={q} onChange={(e) => filter(() => setQ(e.target.value))} placeholder="Product or YYX" aria-label="Search products, or type a pattern like YYX" className={cn(FIELD, 'w-60 pl-8', q && 'pr-8')} />
                 {q && (
                   <button type="button" onClick={() => filter(() => setQ(''))} aria-label="Clear search" className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted">
                     <X className="size-3.5" />
@@ -147,7 +153,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
                     <th className="w-8 py-2.5 pl-3" aria-label="Expand" />
                     <th className="py-2.5 pr-3 font-medium">Product</th>
                     <th className="px-2 py-2.5 font-medium">PO</th>
-                    <th className="w-[38%] px-2 py-2.5 font-medium">Stores by state</th>
+                    <th className="w-[38%] px-2 py-2.5 font-medium">Stores by recommendation</th>
                     <th className="py-2.5 pr-4 pl-2 text-right font-medium">Need a step</th>
                   </tr>
                 </thead>
@@ -155,7 +161,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
                   {rows.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                        {q.trim() ? 'No product matches that search.' : `No product is at “${AUDIT_META[pick].label}” in any counted store.`}
+                        {searching ? 'No product matches that search.' : `No product is at “${AUDIT_META[state].label}” at any store.`}
                       </td>
                     </tr>
                   ) : (
@@ -208,9 +214,9 @@ function ProductRow({r, open, onToggle, month}: {r: ProductAuditRow; open: boole
         <td className="px-2 py-2.5">
           <span
             className="inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium"
-            style={r.onPo ? {color: ink('var(--status-good)'), background: tint('var(--status-good)')} : undefined}
+            style={r.po === 'yes' ? {color: ink('var(--status-good)'), background: tint('var(--status-good)')} : undefined}
           >
-            {r.onPo ? 'Active' : <span className="text-muted-foreground">Inactive</span>}
+            {r.po === 'yes' ? 'Active' : <span className="text-muted-foreground">{r.po === 'no' ? 'Inactive' : 'Not known'}</span>}
           </span>
         </td>
         <td className="px-2 py-2.5">
@@ -233,24 +239,18 @@ function ProductRow({r, open, onToggle, month}: {r: ProductAuditRow; open: boole
                 Open the product page (all stores)
                 <ChevronRight className="size-3.5" aria-hidden />
               </Link>
+              <Link
+                href={`/stock/audit?${new URLSearchParams({store: ALL_STORES, month, q: r.item_code})}`}
+                className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline"
+              >
+                See its stores, line by line
+                <ChevronRight className="size-3.5" aria-hidden />
+              </Link>
               {AUDIT_STATES.filter((s) => r.counts[s] > 0).map((s) => (
                 <div key={s} className="flex flex-col gap-1.5 sm:flex-row sm:gap-3">
                   <span className="flex w-40 shrink-0 items-center gap-1.5 text-xs font-medium" style={{color: ink(toneOf(s))}}>
                     <span aria-hidden className="size-1.5 rounded-full" style={{background: toneOf(s)}} />
                     {AUDIT_META[s].label} · {r.counts[s]}
-                  </span>
-                  <span className="flex flex-wrap gap-1.5">
-                    {r.storeList
-                      .filter((x) => x.state === s)
-                      .map((x) => (
-                        <Link
-                          key={x.code}
-                          href={`/stock/audit?store=${encodeURIComponent(x.code)}&month=${month}`}
-                          className="rounded-md border border-border bg-card px-2 py-0.5 text-xs transition-colors duration-150 [@media(hover:hover)]:hover:border-foreground/25"
-                        >
-                          <span className="font-mono text-muted-foreground">{x.code}</span> {x.name ? titleName(x.name) : ''}
-                        </Link>
-                      ))}
                   </span>
                 </div>
               ))}
@@ -273,7 +273,7 @@ function StackBar({counts, total}: {counts: Record<AuditState, number>; total: n
             key={s}
             title={`${AUDIT_META[s].label}: ${counts[s]} of ${total}`}
             className={cn('h-full', i > 0 && 'border-l-2 border-card')}
-            style={{width: `${(counts[s] / Math.max(1, total)) * 100}%`, background: toneOf(s), opacity: NEEDS_ACTION.has(s) ? 1 : 0.45}}
+            style={{width: `${(counts[s] / Math.max(1, total)) * 100}%`, background: toneOf(s), opacity: NEEDS_ACTION.has(s) ? 1 : s === 'unknown' ? 0.3 : 0.45}}
           />
         ))}
       </div>

@@ -1,235 +1,328 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {salesUnits} from './goldline-sales-units';
-import {auditMatrix, auditSummary, productRollup, type AuditCell, type AuditSummary, type ProductRollup} from './goldline-audit';
+import {
+  ALL_PAGE,
+  ALL_STORES,
+  AUDIT_SORTS,
+  auditCell,
+  auditRows,
+  auditSummary,
+  isAuditState,
+  openingState,
+  productRollup,
+  type AuditCell,
+  type AuditInput,
+  type AuditQuery,
+  type AuditSort,
+  type AuditSummary,
+  type ProductRollup,
+} from './goldline-audit';
+import {inventoryAnswer, type FormCount} from './goldline-audit-form';
+import {onHandOf} from './goldline-inventory';
 import {itemDisplayName} from './goldline-item-name';
 import {getGlCatalog} from './goldline-ref-data';
+import {forecastHistory, forecastMonths} from './goldline-forecast-data';
+import {addMonthKey, manilaDate} from './goldline-supply';
 import {getActivePoSet, shadeOf} from './goldline-po-form-data';
 
-// The reconciliation matrix reader (NICH-17). For a month, cross-references three legs:
-// the committed inventory form (on hand per store and item), Watsons POS sales (units per
-// store and Watsons SKU, mapped to items via the product SKU links), and the active PO
-// form (catalog-wide). Two views: one store (per SKU) and per product (stores per state).
+// The reconciliation matrix reader (NICH-17). For a month, cross-references three legs: the
+// committed inventory forms (latest row per store and item), Watsons POS sales (net units
+// per store and linked product) and the active PO form (catalog-wide). One store at a time,
+// or every store. A role limited to some stores only ever sees those stores.
 // Server-only, Nichido project. Mock fallback so the pages render with no DB.
 
-export type AuditRow = AuditCell & {product: string | null; shade: string | null; line: string | null; retired: boolean};
-
-export type AuditStore = {code: string; name: string | null; month: string};
+export type AuditRow = AuditCell & {store: string; storeName: string | null; product: string | null; shade: string | null; line: string | null; retired: boolean};
 
 export type PoLeg = {source: 'form'; fileName: string; activatedAt: string | null; onPo: number} | {source: 'none'};
+
+/** `loaded`: Watsons sales for the whole month are in. `counted`: stores with a form. */
+export type AuditMonth = {month: string; loaded: boolean; counted: number};
+
+/** What the month's data can and can't answer, for the note above the tiles. */
+export type AuditCoverage = {loaded: boolean; storesSold: number; storesCounted: number; unlinkedUnits: number};
 
 export type AuditResult = {
   configured: boolean;
   mock: boolean;
-  /** Stores that have a committed inventory count in the selected month. */
   stores: Array<{code: string; name: string | null}>;
-  /** Months (YYYY-MM) that have a committed count, newest first. */
-  months: string[];
-  selected: AuditStore | null;
+  months: AuditMonth[];
+  /** code is ALL_STORES for the every-store view. */
+  selected: {code: string; name: string | null; month: string} | null;
+  /** One store: every row. Every store: the query's page only. */
   rows: AuditRow[];
+  /** Rows the query matches (every store). */
+  total: number;
+  query: AuditQuery;
   summary: AuditSummary;
+  coverage: AuditCoverage;
   po: PoLeg;
 };
 
-export type ProductAuditRow = ProductRollup & {product: string; shade: string | null; line: string | null; retired: boolean; storeList: Array<{code: string; name: string | null; state: AuditCell['state']}>};
+export type ProductAuditRow = ProductRollup & {product: string; shade: string | null; line: string | null; retired: boolean};
 
 export type ProductAuditResult = {
   configured: boolean;
   mock: boolean;
-  months: string[];
+  months: AuditMonth[];
   month: string | null;
   storeCount: number;
   rows: ProductAuditRow[];
   summary: AuditSummary;
+  coverage: AuditCoverage;
   po: PoLeg;
 };
 
-type Catalog = Awaited<ReturnType<typeof getGlCatalog>>;
+export type AuditParams = {store?: string | null; month?: string | null; state?: string | null; q?: string | null; sort?: string | null; dir?: string | null; page?: string | null};
 
-/** Last day of a YYYY-MM month (YYYY-MM-DD). */
-const monthEnd = (m: string) => {
-  const [y, mo] = m.split('-').map(Number);
-  return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-};
+const firstOf = (month: string) => `${month}-01`;
+const byCode = (a: string, b: string) => a.localeCompare(b, undefined, {numeric: true});
 
-/** The month-level inputs both views share. */
-async function monthInputs(companyId: string, month: string, stores: string[]) {
-  const supa = nichidoDb();
-  const [catalog, po, counts, sales] = await Promise.all([
-    getGlCatalog(companyId),
-    getActivePoSet(companyId),
-    fetchAllRows('inventory', (from, to) =>
-      supa
-        .from('inventory')
-        .select('store_code,item_code,ending_on_hand,period_end')
-        .eq('company_id', companyId)
-        .in('store_code', stores)
-        .gte('period_end', `${month}-01`)
-        .lte('period_end', monthEnd(month))
-        .order('id')
-        .range(from, to),
-    ) as unknown as Promise<Array<{store_code: string; item_code: string; ending_on_hand: number | null; period_end: string}>>,
-    salesUnits(companyId, {fromStart: `${month}-01`, fromEnd: monthEnd(month), stores}),
-  ]);
-  const visible = catalog.filter((p) => !p.hidden);
-  // No PO form yet: every product that isn't retired counts as on the PO, so the active
-  // rows still read sensibly. The page says so.
-  const onPo = (p: Catalog[number]) => (po ? po.items.has(p.item_code) : !p.retired_at);
-
-  // Form: on hand per store|item. Two forms in one month (1st and 2nd half): the later wins.
-  const latest = new Map<string, {end: string; onHand: number | null}>();
-  for (const c of counts) {
-    if (c.period_end.slice(0, 7) !== month) continue;
-    const k = `${c.store_code}|${c.item_code}`;
-    const prev = latest.get(k);
-    if (!prev || prev.end <= c.period_end) latest.set(k, {end: c.period_end, onHand: c.ending_on_hand});
-  }
-  // Watsons: units per store|item (via SKU links). Unlinked SKUs can't enter the matrix.
-  const itemBySku = new Map(catalog.filter((p) => p.sku_code?.trim()).map((p) => [p.sku_code!.trim(), p.item_code]));
-  const sold = new Map<string, number>();
-  for (const s of sales) {
-    if (s.period_start.slice(0, 7) !== month) continue;
-    const item = itemBySku.get(s.sku_code);
-    if (!item) continue;
-    const k = `${s.store_code}|${item}`;
-    sold.set(k, (sold.get(k) ?? 0) + (Number(s.units) || 0));
-  }
-
-  const cellsFor = (store: string): AuditCell[] =>
-    auditMatrix(
-      visible.map((p) => {
-        const k = `${store}|${p.item_code}`;
-        const f = latest.get(k);
-        return {item_code: p.item_code, units: sold.get(k) ?? 0, onHand: f?.onHand ?? null, onForm: Boolean(f), onPo: onPo(p)};
-      }),
-    );
-
-  const poLeg: PoLeg = po ? {source: 'form', fileName: po.fileName, activatedAt: po.activatedAt, onPo: visible.filter(onPo).length} : {source: 'none'};
-  return {catalog, cellsFor, poLeg};
+/** Read the URL's query, falling back to the summary's opening state. Never trusts input. */
+export function parseAuditQuery(p: AuditParams, summary: AuditSummary): AuditQuery {
+  const page = Number(p.page);
+  return {
+    state: isAuditState(p.state) ? p.state : openingState(summary),
+    q: (p.q ?? '').slice(0, 80),
+    sort: AUDIT_SORTS.includes(p.sort as AuditSort) ? (p.sort as AuditSort) : 'reco',
+    dir: p.dir === 'desc' ? 'desc' : 'asc',
+    page: Number.isInteger(page) && page > 0 ? page : 0,
+  };
 }
 
-/** Stores and months that have a committed count (the pickable universe). */
-async function countedUniverse(companyId: string) {
-  const supa = nichidoDb();
-  const keys = (await fetchAllRows('inventory', (from, to) =>
-    supa.from('inventory').select('store_code,period_end').eq('company_id', companyId).order('id').range(from, to),
-  )) as unknown as Array<{store_code: string; period_end: string}>;
-  const months = [...new Set(keys.map((r) => r.period_end.slice(0, 7)))].sort().reverse();
-  const storesIn = (m: string) => [...new Set(keys.filter((r) => r.period_end.slice(0, 7) === m).map((r) => r.store_code))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
-  return {months, storesIn};
+// ── Reads ─────────────────────────────────────────────────────────────────────────────
+
+/** Months with a committed form or a whole month of Watsons sales, newest first. */
+async function monthIndex(companyId: string, scope: Set<string> | null): Promise<{months: AuditMonth[]; countedIn: Map<string, string[]>}> {
+  const now = manilaDate().slice(0, 7);
+  const recent = Array.from({length: 13}, (_, i) => addMonthKey(now, -i));
+  const [index, status] = await Promise.all([
+    // pagination-ok: one jsonb value ({month: [stores]}).
+    nichidoDb().rpc('audit_count_index', {p_company: companyId}),
+    forecastMonths(companyId, recent.map(firstOf)),
+  ]);
+  if (index.error) throw new Error(`audit_count_index failed: ${index.error.message}`);
+  const countedIn = new Map<string, string[]>();
+  for (const [m, codes] of Object.entries((index.data ?? {}) as Record<string, string[]>)) {
+    const mine = scope ? codes.filter((c) => scope.has(c)) : codes;
+    if (mine.length) countedIn.set(m, mine);
+  }
+  const loaded = new Set(status.filter((s) => s.loaded).map((s) => String(s.month).slice(0, 7)));
+  const months = [...new Set([...countedIn.keys(), ...loaded])]
+    .sort()
+    .reverse()
+    .map((month) => ({month, loaded: loaded.has(month), counted: countedIn.get(month)?.length ?? 0}));
+  return {months, countedIn};
+}
+
+/** The newest month with both sales and counts, else the newest with a count, else the newest. */
+function pickMonth(months: AuditMonth[], asked: string | null | undefined): string | null {
+  if (asked && months.some((m) => m.month === asked)) return asked;
+  return (months.find((m) => m.loaded && m.counted) ?? months.find((m) => m.counted) ?? months[0])?.month ?? null;
 }
 
 async function storeNames(companyId: string, codes: string[]): Promise<Map<string, string | null>> {
   if (!codes.length) return new Map();
   const rows = (await fetchAllRows('stores', (from, to) =>
-    nichidoDb().from('stores').select('store_code,name').eq('company_id', companyId).in('store_code', codes).order('store_code').range(from, to),
+    nichidoDb().from('stores').select('store_code,name').eq('company_id', companyId).order('store_code').range(from, to),
   )) as unknown as Array<{store_code: string; name: string | null}>;
-  return new Map(rows.map((r) => [r.store_code, r.name]));
+  const want = new Set(codes);
+  return new Map(rows.filter((r) => want.has(r.store_code)).map((r) => [r.store_code, r.name]));
 }
 
-const naming = (catalog: Catalog) =>
-  new Map(catalog.map((p) => [p.item_code, {name: itemDisplayName(p.product_line, p.variant, p.item_code), shade: shadeOf(p.product_line, p.variant), line: p.product_line, retired: Boolean(p.retired_at)}]));
+/** Everything one month's matrix needs: one store's, or every store's in scope. */
+async function readMonth(companyId: string, month: string, loaded: boolean, countedIn: string[], scope: Set<string> | null, asked: string | null) {
+  const [catalog, po, history, status] = await Promise.all([
+    getGlCatalog(companyId),
+    getActivePoSet(companyId),
+    loaded ? forecastHistory(companyId, [firstOf(month)], null) : Promise.resolve({} as Record<string, Record<string, number[]>>),
+    forecastMonths(companyId, [firstOf(month)]),
+  ]);
+  const sold = new Map(Object.entries(history).filter(([code]) => !scope || scope.has(code)));
+  const stores = [...new Set([...countedIn, ...sold.keys()])].sort(byCode);
+  const firstCounted = stores.find((s) => countedIn.includes(s)) ?? stores[0] ?? null;
+  const only = asked === ALL_STORES ? null : asked && stores.includes(asked) ? asked : firstCounted;
+  const pick = only ? [only] : stores;
 
-/** One store's matrix for a month. Defaults: the newest month and its first store. */
-export async function auditData(companyId: string, opts: {store?: string | null; month?: string | null} = {}): Promise<AuditResult> {
-  if (!nichidoConfigured()) return mockAudit(opts);
-  const {months, storesIn} = await countedUniverse(companyId);
-  if (!months.length) return {configured: true, mock: false, stores: [], months: [], selected: null, rows: [], summary: auditSummary([]), po: {source: 'none'}};
-  const month = opts.month && months.includes(opts.month) ? opts.month : months[0];
-  const storeCodes = storesIn(month);
-  const store = opts.store && storeCodes.includes(opts.store) ? opts.store : storeCodes[0];
+  const counts = new Map<string, Map<string, FormCount>>();
+  const want = pick.filter((s) => countedIn.includes(s));
+  if (want.length) {
+    // pagination-ok: one jsonb value ({store: {item: [ending, stockroom, drawer, selling area, form version]}}).
+    const res = await nichidoDb().rpc('audit_counts', {p_company: companyId, p_month: firstOf(month), p_stores: want});
+    if (res.error) throw new Error(`audit_counts failed: ${res.error.message}`);
+    type Part = number | null;
+    for (const [store, items] of Object.entries((res.data ?? {}) as Record<string, Record<string, [Part, Part, Part, Part, string | null]>>)) {
+      // On hand is the app's one rule (onHandOf): the written ending, else the shelf counts.
+      const row = ([item_code, [ending_on_hand, stockroom, drawer, selling_area, version]]: [string, [Part, Part, Part, Part, string | null]]): [string, FormCount] => [
+        item_code,
+        {onHand: onHandOf({item_code, ending_on_hand, stockroom, drawer, selling_area, delivery: null}).onHand, version},
+      ];
+      counts.set(store, new Map(Object.entries(items).map(row)));
+    }
+  }
 
-  const [names, inputs] = await Promise.all([storeNames(companyId, storeCodes), monthInputs(companyId, month, [store])]);
-  const nm = naming(inputs.catalog);
-  const cells = inputs.cellsFor(store);
-  const rows: AuditRow[] = cells.map((c) => ({...c, product: nm.get(c.item_code)?.name ?? null, shade: nm.get(c.item_code)?.shade || null, line: nm.get(c.item_code)?.line ?? null, retired: nm.get(c.item_code)?.retired ?? false}));
-  return {
+  const visible = catalog.filter((p) => !p.hidden);
+  const names = new Map(
+    visible.map((p) => [p.item_code, {product: itemDisplayName(p.product_line, p.variant, p.item_code), shade: shadeOf(p.product_line, p.variant) || null, line: p.product_line, retired: Boolean(p.retired_at)}]),
+  );
+  const cells = (store: string): AuditCell[] => {
+    const form = counts.get(store) ?? null;
+    const units = sold.get(store);
+    return visible.flatMap((p) => {
+      const watsons: AuditInput['watsons'] = !loaded ? 'month_not_loaded' : !p.sku_code?.trim() ? 'not_linked' : !units ? 'store_not_in_file' : Number(units[p.item_code]?.[0] ?? 0);
+      const cell = auditCell({
+        item_code: p.item_code,
+        watsons,
+        inventory: inventoryAnswer(form, p.item_code),
+        po: po ? po.items.has(p.item_code) : 'no_po_form',
+        onForm: Boolean(form?.has(p.item_code)),
+        retired: Boolean(p.retired_at),
+      });
+      return cell ? [cell] : [];
+    });
+  };
+  const coverage: AuditCoverage = {
+    loaded,
+    storesSold: sold.size,
+    storesCounted: countedIn.length,
+    // A company-wide total, so a store-limited role doesn't see it.
+    unlinkedUnits: loaded && !scope ? Math.max(0, Number(status[0]?.unlinked_units ?? 0)) : 0,
+  };
+  const poLeg: PoLeg = po ? {source: 'form', fileName: po.fileName, activatedAt: po.activatedAt, onPo: visible.filter((p) => po.items.has(p.item_code)).length} : {source: 'none'};
+  return {stores, only, pick, cells, names, coverage, poLeg};
+}
+
+type Loaded = {months: AuditMonth[]; month: string; code: string; stores: string[]; storeName: Map<string, string | null>; rows: AuditRow[]; summary: AuditSummary; coverage: AuditCoverage; poLeg: PoLeg};
+
+/** Every row for one store, or for every store in scope. No `rows` when there is no data yet. */
+async function loadRows(companyId: string, p: AuditParams, storeScope: string[] | null): Promise<Loaded | {months: AuditMonth[]}> {
+  // A store-limited role with no stores assigned sees nothing (never "every store").
+  if (storeScope && storeScope.length === 0) return {months: []};
+  const scope = storeScope ? new Set(storeScope) : null;
+  const {months, countedIn} = await monthIndex(companyId, scope);
+  const month = pickMonth(months, p.month);
+  if (!month) return {months};
+  const m = await readMonth(companyId, month, months.find((x) => x.month === month)!.loaded, countedIn.get(month) ?? [], scope, p.store ?? null);
+  if (!m.stores.length) return {months};
+  const storeName = await storeNames(companyId, m.stores);
+  const rows: AuditRow[] = m.pick.flatMap((store) =>
+    m.cells(store).map((c) => {
+      const n = m.names.get(c.item_code);
+      return {...c, store, storeName: storeName.get(store) ?? null, product: n?.product ?? null, shade: n?.shade ?? null, line: n?.line ?? null, retired: n?.retired ?? false};
+    }),
+  );
+  return {months, month, code: m.only ?? ALL_STORES, stores: m.stores, storeName, rows, summary: auditSummary(rows), coverage: m.coverage, poLeg: m.poLeg};
+}
+
+const NO_COVERAGE: AuditCoverage = {loaded: false, storesSold: 0, storesCounted: 0, unlinkedUnits: 0};
+
+/** The By store page: one store's rows, or one page of every store's. */
+export async function auditData(companyId: string, p: AuditParams = {}, storeScope: string[] | null = null): Promise<AuditResult> {
+  if (!nichidoConfigured()) return mockAudit(p);
+  const d = await loadRows(companyId, p, storeScope);
+  if (!('rows' in d)) {
+    const summary = auditSummary([]);
+    return {configured: true, mock: false, stores: [], months: d.months, selected: null, rows: [], total: 0, query: parseAuditQuery(p, summary), summary, coverage: NO_COVERAGE, po: {source: 'none'}};
+  }
+  const query = parseAuditQuery(p, d.summary);
+  const base = {
     configured: true,
     mock: false,
-    stores: storeCodes.map((code) => ({code, name: names.get(code) ?? null})),
-    months,
-    selected: {code: store, name: names.get(store) ?? null, month},
-    rows,
-    summary: auditSummary(cells),
-    po: inputs.poLeg,
+    stores: d.stores.map((code) => ({code, name: d.storeName.get(code) ?? null})),
+    months: d.months,
+    selected: {code: d.code, name: d.code === ALL_STORES ? null : (d.storeName.get(d.code) ?? null), month: d.month},
+    summary: d.summary,
+    coverage: d.coverage,
+    po: d.poLeg,
   };
+  if (d.code !== ALL_STORES) return {...base, rows: d.rows, total: d.rows.length, query};
+  const hits = auditRows(d.rows, query);
+  const page = Math.min(query.page, Math.max(0, Math.ceil(hits.length / ALL_PAGE) - 1));
+  return {...base, rows: hits.slice(page * ALL_PAGE, page * ALL_PAGE + ALL_PAGE), total: hits.length, query: {...query, page}};
 }
 
-/** Every counted store in a month, rolled up per product. */
-export async function productAuditData(companyId: string, opts: {month?: string | null} = {}): Promise<ProductAuditResult> {
+/** Every row a query matches, for the CSV. */
+export async function auditExport(companyId: string, p: AuditParams, storeScope: string[] | null): Promise<{rows: AuditRow[]; month: string; code: string} | null> {
+  if (!nichidoConfigured()) return null;
+  const d = await loadRows(companyId, p, storeScope);
+  return 'rows' in d ? {rows: auditRows(d.rows, parseAuditQuery(p, d.summary)), month: d.month, code: d.code} : null;
+}
+
+/** Every store in a month, rolled up per product (counts only; which stores is All stores). */
+export async function productAuditData(companyId: string, opts: {month?: string | null} = {}, storeScope: string[] | null = null): Promise<ProductAuditResult> {
   if (!nichidoConfigured()) return mockProductAudit(opts);
-  const {months, storesIn} = await countedUniverse(companyId);
-  if (!months.length) return {configured: true, mock: false, months: [], month: null, storeCount: 0, rows: [], summary: auditSummary([]), po: {source: 'none'}};
-  const month = opts.month && months.includes(opts.month) ? opts.month : months[0];
-  const storeCodes = storesIn(month);
-  const [names, inputs] = await Promise.all([storeNames(companyId, storeCodes), monthInputs(companyId, month, storeCodes)]);
-  const nm = naming(inputs.catalog);
-  const all = storeCodes.flatMap((store) => inputs.cellsFor(store).map((c) => ({...c, store})));
-  const storesByItem = new Map<string, ProductAuditRow['storeList']>();
-  for (const c of all) {
-    const list = storesByItem.get(c.item_code) ?? [];
-    list.push({code: c.store, name: names.get(c.store) ?? null, state: c.state});
-    storesByItem.set(c.item_code, list);
-  }
-  const rows: ProductAuditRow[] = productRollup(all).map((r) => ({
-    ...r,
-    product: nm.get(r.item_code)?.name ?? r.item_code,
-    shade: nm.get(r.item_code)?.shade || null,
-    line: nm.get(r.item_code)?.line ?? null,
-    retired: nm.get(r.item_code)?.retired ?? false,
-    storeList: storesByItem.get(r.item_code) ?? [],
-  }));
-  return {configured: true, mock: false, months, month, storeCount: storeCodes.length, rows, summary: auditSummary(all), po: inputs.poLeg};
+  const d = await loadRows(companyId, {month: opts.month, store: ALL_STORES}, storeScope);
+  if (!('rows' in d)) return {configured: true, mock: false, months: d.months, month: null, storeCount: 0, rows: [], summary: auditSummary([]), coverage: NO_COVERAGE, po: {source: 'none'}};
+  return {configured: true, mock: false, months: d.months, month: d.month, storeCount: d.stores.length, rows: rollup(d.rows), summary: d.summary, coverage: d.coverage, po: d.poLeg};
 }
 
-// ── Mock: a believable month so both views render with no DB ─────────────────────────
-const MOCK_ITEMS: Array<{item_code: string; product: string; line: string; onPo: boolean; units: number; onHand: number | null; onForm: boolean}> = [
-  {item_code: 'FBPP02', product: 'Flawless Beauty Pressed Powder Golden Tan', line: 'Flawless Beauty Pressed Powder', onPo: true, units: 18, onHand: 26, onForm: true},
-  {item_code: 'TSP01202', product: 'Translucent Setting Powder Ivory Glow', line: 'Translucent Setting Powder', onPo: true, units: 9, onHand: 25, onForm: true},
-  {item_code: 'USMLLC08', product: 'Ultra Stay Matte Liquid Lip Color Iconic Red', line: 'Ultra Stay Matte Liquid Lip Color', onPo: true, units: 11, onHand: null, onForm: false},
-  {item_code: 'MPMLSCB03', product: 'Mineral Powder Matte Lipstick Heart to Heart', line: 'Mineral Powder Matte Lipstick', onPo: true, units: 0, onHand: 14, onForm: true},
-  {item_code: 'IPSLS05', product: 'Icy Pout Serum Lip Stain Spiced Candy', line: 'Icy Pout Serum Lip Stain', onPo: true, units: 0, onHand: 0, onForm: true},
-  {item_code: 'TCES1734', product: 'True Colors Eye Shadow Raisin Wine', line: 'True Colors Eye Shadow', onPo: false, units: 3, onHand: 6, onForm: true},
-  {item_code: 'FCPP01131', product: 'Fancy Colors Natural', line: 'Fancy Colors', onPo: false, units: 4, onHand: null, onForm: false},
-  {item_code: 'BGPL01', product: 'Body Glimmer Powder Pink Lite', line: 'Body Glimmer Powder', onPo: false, units: 0, onHand: 7, onForm: true},
-  {item_code: 'EFTT1064', product: 'Elise Futuristic Lashes B1064', line: 'Elise Futuristic Lashes', onPo: false, units: 0, onHand: 0, onForm: true},
+function rollup(rows: AuditRow[]): ProductAuditRow[] {
+  const first = new Map<string, AuditRow>();
+  for (const r of rows) if (!first.has(r.item_code)) first.set(r.item_code, r);
+  return productRollup(rows).map((r) => {
+    const n = first.get(r.item_code)!;
+    return {...r, product: n.product ?? r.item_code, shade: n.shade, line: n.line, retired: n.retired};
+  });
+}
+
+// ── Mock: a believable month so the views render with no DB ───────────────────────────
+type MockItem = AuditInput & {product: string; line: string};
+const MOCK_ITEMS: MockItem[] = [
+  {item_code: 'FBPP02', product: 'Flawless Beauty Pressed Powder Golden Tan', line: 'Flawless Beauty Pressed Powder', po: true, watsons: 18, inventory: 26, onForm: true},
+  {item_code: 'USMLLC08', product: 'Ultra Stay Matte Liquid Lip Color Iconic Red', line: 'Ultra Stay Matte Liquid Lip Color', po: true, watsons: 11, inventory: 'absent', onForm: false},
+  {item_code: 'TSP01202', product: 'Translucent Setting Powder Ivory Glow', line: 'Translucent Setting Powder', po: true, watsons: 9, inventory: 0, onForm: true},
+  {item_code: 'MPMLSCB03', product: 'Mineral Powder Matte Lipstick Heart to Heart', line: 'Mineral Powder Matte Lipstick', po: true, watsons: 0, inventory: 14, onForm: true},
+  {item_code: 'IPSLS05', product: 'Icy Pout Serum Lip Stain Spiced Candy', line: 'Icy Pout Serum Lip Stain', po: true, watsons: 0, inventory: 0, onForm: true},
+  {item_code: 'TCES17314', product: 'True Colors Eye Shadow Soft Black', line: 'True Colors Eye Shadow', po: false, watsons: 3, inventory: 6, onForm: true},
+  {item_code: 'FCPP01131', product: 'Fancy Colors Natural', line: 'Fancy Colors', po: false, watsons: 4, inventory: 'absent', onForm: false},
+  {item_code: 'BGPL01', product: 'Body Glimmer Powder Pink Lite', line: 'Body Glimmer Powder', po: false, watsons: 0, inventory: 7, onForm: true},
+  {item_code: 'EFTT1064', product: 'Elise Futuristic Lashes B1064', line: 'Elise Futuristic Lashes', po: false, watsons: 0, inventory: 0, onForm: true},
+  {item_code: 'TCES1734', product: 'True Colors Eye Shadow Raisin Wine', line: 'True Colors Eye Shadow', po: false, watsons: 'not_linked', inventory: 5, onForm: true},
+  {item_code: 'CPFB', product: 'Cream to Powder Foundation Biscuit', line: 'Cream to Powder Foundation', po: true, watsons: 2, inventory: 'blank', onForm: true},
+];
+const MOCK_STORES = [
+  {code: '473', name: 'Watsons SM San Pablo'},
+  {code: '5300', name: 'SM Sta Rosa'},
 ];
 const MOCK_PO: PoLeg = {source: 'form', fileName: 'PO FILE PAGE 1-2.xlsx', activatedAt: '2026-11-23T08:00:00Z', onPo: 242};
+const MOCK_MONTHS: AuditMonth[] = [
+  {month: '2026-09', loaded: true, counted: 2},
+  {month: '2026-08', loaded: true, counted: 2},
+];
+const MOCK_COVERAGE: AuditCoverage = {loaded: true, storesSold: 2, storesCounted: 2, unlinkedUnits: 12};
 
-function mockAudit(opts: {store?: string | null; month?: string | null}): AuditResult {
-  const month = opts.month ?? '2026-10';
-  const cells = auditMatrix(MOCK_ITEMS);
-  const meta = new Map(MOCK_ITEMS.map((m) => [m.item_code, m]));
+function mockRows(codes: string[]): AuditRow[] {
+  return MOCK_STORES.filter((s) => codes.includes(s.code)).flatMap((s) =>
+    MOCK_ITEMS.flatMap((i) => {
+      const c = auditCell(i);
+      return c ? [{...c, store: s.code, storeName: s.name, product: i.product, shade: null, line: i.line, retired: false}] : [];
+    }),
+  );
+}
+
+function mockAudit(p: AuditParams): AuditResult {
+  const all = p.store === ALL_STORES;
+  const store = MOCK_STORES.find((s) => s.code === p.store) ?? MOCK_STORES[0];
+  const rows = mockRows(all ? MOCK_STORES.map((s) => s.code) : [store.code]);
+  const summary = auditSummary(rows);
+  const query = parseAuditQuery(p, summary);
+  const hits = all ? auditRows(rows, query) : rows;
   return {
     configured: false,
     mock: true,
-    stores: [{code: '473', name: 'Watsons SM San Pablo'}, {code: '5300', name: 'SM Sta Rosa'}],
-    months: ['2026-10', '2026-09'],
-    selected: {code: opts.store ?? '473', name: 'Watsons SM San Pablo', month},
-    rows: cells.map((c) => ({...c, product: meta.get(c.item_code)!.product, shade: null, line: meta.get(c.item_code)!.line, retired: false})),
-    summary: auditSummary(cells),
+    stores: MOCK_STORES,
+    months: MOCK_MONTHS,
+    selected: {code: all ? ALL_STORES : store.code, name: all ? null : store.name, month: p.month === '2026-08' ? '2026-08' : '2026-09'},
+    rows: all ? hits.slice(query.page * ALL_PAGE, query.page * ALL_PAGE + ALL_PAGE) : hits,
+    total: hits.length,
+    query,
+    summary,
+    coverage: MOCK_COVERAGE,
     po: MOCK_PO,
   };
 }
 
 function mockProductAudit(opts: {month?: string | null}): ProductAuditResult {
-  const stores = [
-    {code: '473', name: 'Watsons SM San Pablo'},
-    {code: '5300', name: 'SM Sta Rosa'},
-    {code: '118', name: 'Watsons Cubao'},
-  ];
-  const all = stores.flatMap((s, si) =>
-    auditMatrix(MOCK_ITEMS.map((m, i) => ({...m, units: (i + si) % 3 === 0 ? 0 : m.units, onForm: (i + si) % 4 === 0 ? false : m.onForm}))).map((c) => ({...c, store: s})),
-  );
-  const meta = new Map(MOCK_ITEMS.map((m) => [m.item_code, m]));
-  const rows = productRollup(all).map((r) => ({
-    ...r,
-    product: meta.get(r.item_code)!.product,
-    shade: null,
-    line: meta.get(r.item_code)!.line,
-    retired: false,
-    storeList: all.filter((c) => c.item_code === r.item_code).map((c) => ({code: c.store.code, name: c.store.name, state: c.state})),
-  }));
-  return {configured: false, mock: true, months: ['2026-10', '2026-09'], month: opts.month ?? '2026-10', storeCount: stores.length, rows, summary: auditSummary(all), po: MOCK_PO};
+  const rows = mockRows(MOCK_STORES.map((s) => s.code));
+  return {configured: false, mock: true, months: MOCK_MONTHS, month: opts.month ?? '2026-09', storeCount: MOCK_STORES.length, rows: rollup(rows), summary: auditSummary(rows), coverage: MOCK_COVERAGE, po: MOCK_PO};
 }

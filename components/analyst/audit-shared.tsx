@@ -4,13 +4,13 @@
 // chip, the 8-tile matrix legend (Justin's notebook, made clickable), and the section
 // tabs (By store · By product · PO form).
 
-import {useId} from 'react';
+import {useId, type ReactNode} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {Check, ChevronLeft, ChevronRight, FileSpreadsheet, X} from 'lucide-react';
+import {Check, ChevronLeft, ChevronRight, FileSpreadsheet, HelpCircle, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState, type AuditSummary} from '@/src/goldline-audit';
-import type {PoLeg} from '@/src/goldline-audit-data';
+import {AUDIT_META, MATRIX_STATES, rankedSteps, type AuditState, type AuditSummary, type Leg} from '@/src/goldline-audit';
+import type {AuditCoverage, PoLeg} from '@/src/goldline-audit-data';
 
 export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> = {
   good: 'var(--status-good)',
@@ -18,6 +18,7 @@ export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> =
   crit: 'var(--status-crit)',
   neutral: 'var(--cat-4)',
   out: 'var(--muted-foreground)',
+  unknown: 'var(--chart-5)',
 };
 
 export const toneOf = (s: AuditState) => TONE_VAR[AUDIT_META[s].tone];
@@ -29,45 +30,38 @@ export function monthLabel(m: string): string {
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', {month: 'short', year: 'numeric', timeZone: 'UTC'});
 }
 
-/** A leg's check or x. `size` sm for the legend, md for the table. */
-export function Mark({on, size = 'md', label}: {on: boolean; size?: 'xs' | 'sm' | 'md'; label?: string}) {
+const LEG_WORD: Record<Leg, string> = {yes: 'yes', no: 'no', unknown: 'not known'};
+
+/** A leg's check, x or ?. `size` sm for the legend, md for the table. */
+export function Mark({leg, size = 'md', label}: {leg: Leg; size?: 'xs' | 'sm' | 'md'; label?: string}) {
   const box = size === 'xs' ? 'size-3.5' : size === 'sm' ? 'size-4' : 'size-6';
   const icon = size === 'xs' ? 'size-2' : size === 'sm' ? 'size-2.5' : 'size-3.5';
   return (
     <span
       role="img"
-      aria-label={`${label ? `${label}: ` : ''}${on ? 'yes' : 'no'}`}
-      className={cn('inline-flex shrink-0 items-center justify-center rounded-full', box, !on && 'bg-muted text-muted-foreground/70')}
-      style={on ? {background: tint('var(--status-good)', 16), color: ink('var(--status-good)')} : undefined}
+      aria-label={`${label ? `${label}: ` : ''}${LEG_WORD[leg]}`}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-full',
+        box,
+        leg === 'no' && 'bg-muted text-muted-foreground/70',
+        leg === 'unknown' && 'border border-dashed border-muted-foreground/45 text-[0.6em] leading-none font-semibold text-muted-foreground',
+        leg === 'unknown' && (size === 'md' ? 'text-xs' : 'text-[9px]'),
+      )}
+      style={leg === 'yes' ? {background: tint('var(--status-good)', 16), color: ink('var(--status-good)')} : undefined}
     >
-      {on ? <Check className={icon} strokeWidth={3} /> : <X className={icon} strokeWidth={2.5} />}
+      {leg === 'yes' ? <Check className={icon} strokeWidth={3} /> : leg === 'no' ? <X className={icon} strokeWidth={2.5} /> : <span aria-hidden>?</span>}
     </span>
   );
 }
 
-export function StateChip({state}: {state: AuditState}) {
+export function StateChip({state, label}: {state: AuditState; label?: string}) {
   const c = toneOf(state);
   return (
     <span className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap" style={{color: ink(c), background: tint(c)}}>
       <span aria-hidden className="size-1.5 rounded-full" style={{background: c}} />
-      {AUDIT_META[state].label}
+      {label ?? AUDIT_META[state].label}
     </span>
   );
-}
-
-/** How urgent a state's tone is, for ordering the choices (most urgent first). */
-export const URGENCY: Record<(typeof AUDIT_META)[AuditState]['tone'], number> = {crit: 0, warn: 1, out: 2, neutral: 3, good: 4};
-
-/** The states that need a step and have products, most urgent first (the primary tiles). */
-export function rankedSteps(summary: Record<AuditState, number>): AuditState[] {
-  return AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(
-    (a, b) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a],
-  );
-}
-
-/** The state a page opens on: the most urgent step, else the biggest state, else All good. */
-export function defaultState(summary: Record<AuditState, number>): AuditState {
-  return rankedSteps(summary)[0] ?? [...AUDIT_STATES].sort((a, b) => summary[b] - summary[a])[0] ?? 'ok';
 }
 
 /**
@@ -91,24 +85,26 @@ export function MatrixLegend({
   unit: string;
 }) {
   const steps = rankedSteps(summary);
-  const rest = AUDIT_STATES.filter((s) => !steps.includes(s));
-  const restActive = rest.filter((s) => AUDIT_META[s].legs.po);
-  const restInactive = rest.filter((s) => !AUDIT_META[s].legs.po);
+  // "Can't tell yet" is missing data, not a step: its own tile, always last.
+  const tiles: AuditState[] = summary.unknown > 0 ? [...steps, 'unknown'] : steps;
+  const rest = MATRIX_STATES.filter((s) => !steps.includes(s));
+  const restActive = rest.filter((s) => AUDIT_META[s].legs.po === 'yes');
+  const restInactive = rest.filter((s) => AUDIT_META[s].legs.po === 'no');
   // The tiles are the page's only filter, and one is always selected (no toggling off).
   const pick = (s: AuditState) => onPick(s);
 
   return (
     <div className="flex flex-col gap-3">
-      {steps.length === 0 ? (
+      {tiles.length === 0 ? (
         <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
-          <Mark on />
+          <Mark leg="yes" />
           <p className="text-sm">
             <span className="font-medium">Nothing needs a step.</span> <span className="text-muted-foreground">Every product here lines up.</span>
           </p>
         </div>
       ) : (
         <div className="grid gap-3" style={{gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 14rem), 1fr))`}}>
-          {steps.map((s) => (
+          {tiles.map((s) => (
             <StateTile key={s} state={s} n={summary[s]} on={active === s} onClick={() => pick(s)} unit={unit} />
           ))}
         </div>
@@ -116,12 +112,11 @@ export function MatrixLegend({
 
       {rest.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-          <span className="mr-1 text-xs text-muted-foreground">{steps.length ? 'Everything else' : 'All states'}</span>
+          <span className="mr-1 text-xs text-muted-foreground">{tiles.length ? 'Everything else' : 'All states'}</span>
           {[restActive, restInactive].map((group, gi) =>
             group.length ? (
               <span key={gi} className="flex flex-wrap items-center gap-1.5">
-                {gi === 1 && restActive.length > 0 && <span aria-hidden className="mx-1 h-4 w-px bg-border" />}
-                <span className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase">{gi === 0 ? 'Active' : 'Inactive'}</span>
+                <span className={cn('text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase', gi === 1 && restActive.length > 0 && 'ml-2')}>{gi === 0 ? 'Active' : 'Inactive'}</span>
                 {group.map((s) => (
                   <StateChipButton key={s} state={s} n={summary[s]} on={active === s} onClick={() => pick(s)} />
                 ))}
@@ -155,13 +150,19 @@ function StateTile({state, n, on, onClick, unit}: {state: AuditState; n: number;
       style={on ? {borderColor: `color-mix(in oklab, ${c} 55%, transparent)`, background: tint(c, 6), boxShadow: `0 0 0 3px ${tint(c, 12)}`} : undefined}
     >
       <span className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1" aria-label={`Watsons ${m.legs.watsons ? 'yes' : 'no'}, Inventory ${m.legs.inventory ? 'yes' : 'no'}, PO ${m.legs.po ? 'yes' : 'no'}`}>
-          <Mark size="sm" on={m.legs.watsons} />
-          <Mark size="sm" on={m.legs.inventory} />
-          <Mark size="sm" on={m.legs.po} />
+        <span className="flex items-center gap-1" >
+          <Mark size="sm" leg={m.legs.watsons} label="Watsons" />
+          <Mark size="sm" leg={m.legs.inventory} label="Inventory" />
+          <Mark size="sm" leg={m.legs.po} label="PO" />
         </span>
         <span className="text-[11px] text-muted-foreground">
-          {m.legs.po ? 'Active' : 'Inactive'} · <span className="font-medium text-foreground/80">{m.owner === 'Admin' ? 'You' : m.owner}</span>
+          {state === 'unknown' ? (
+            'Missing data'
+          ) : (
+            <>
+              {m.legs.po === 'yes' ? 'Active' : 'Inactive'} · <span className="font-medium text-foreground/80">{m.owner === 'Admin' ? 'You' : m.owner}</span>
+            </>
+          )}
         </span>
       </span>
       <span className="flex flex-col gap-1.5">
@@ -205,9 +206,9 @@ function StateChipButton({state, n, on, onClick}: {state: AuditState; n: number;
     >
       {/* The same Watsons · Inventory · PO pattern as the tiles, so all eight combos read as one matrix. */}
       <span className="flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5">
-        <Mark size="xs" on={m.legs.watsons} label="Watsons" />
-        <Mark size="xs" on={m.legs.inventory} label="Inventory" />
-        <Mark size="xs" on={m.legs.po} label="PO" />
+        <Mark size="xs" leg={m.legs.watsons} label="Watsons" />
+        <Mark size="xs" leg={m.legs.inventory} label="Inventory" />
+        <Mark size="xs" leg={m.legs.po} label="PO" />
       </span>
       <span aria-hidden className="size-1.5 rounded-full" style={{background: c, opacity: n ? 1 : 0.4}} />
       {m.label}
@@ -218,11 +219,11 @@ function StateChipButton({state, n, on, onClick}: {state: AuditState; n: number;
   );
 }
 
-const LEG_TEXT = {
-  watsons: {yes: 'Sold at Watsons this month', no: 'No Watsons sale this month'},
-  inventory: {yes: 'On the inventory form, with stock', no: 'Not on the form, or counted zero'},
-  po: {yes: 'On the PO form, so still delivered', no: 'Not on the PO form, being phased out'},
-} as const;
+const LEG_TEXT: Record<'watsons' | 'inventory' | 'po', Record<Leg, string>> = {
+  watsons: {yes: 'Sold at Watsons this month', no: 'No Watsons sale this month', unknown: 'Sales not loaded, or no SKU link'},
+  inventory: {yes: 'Counted, with stock', no: 'Not on the form, or counted zero', unknown: 'No count, blank, or page not uploaded'},
+  po: {yes: 'On the PO form, so still delivered', no: 'Not on the PO form, being phased out', unknown: 'No PO form in use'},
+};
 
 /**
  * What a state means, on hover (after a short delay, so passing over the tiles doesn't
@@ -248,13 +249,13 @@ function StateTip({id, state, fit}: {id: string; state: AuditState; fit?: boolea
       <span className="flex items-center gap-2 text-sm font-semibold">
         <span aria-hidden className="size-2 rounded-full" style={{background: c}} />
         {m.label}
-        <span className="ml-auto text-[11px] font-normal text-muted-foreground">{m.legs.po ? 'Active' : 'Inactive'}</span>
+        <span className="ml-auto text-[11px] font-normal text-muted-foreground">{state === 'unknown' ? 'Any of these' : m.legs.po === 'yes' ? 'Active' : 'Inactive'}</span>
       </span>
       <span className="flex flex-col gap-1.5">
         {(['watsons', 'inventory', 'po'] as const).map((leg) => (
           <span key={leg} className="flex items-center gap-2 text-xs">
-            <Mark size="xs" on={m.legs[leg]} />
-            <span className={m.legs[leg] ? 'text-foreground' : 'text-muted-foreground'}>{LEG_TEXT[leg][m.legs[leg] ? 'yes' : 'no']}</span>
+            <Mark size="xs" leg={m.legs[leg]} />
+            <span className={m.legs[leg] === 'yes' ? 'text-foreground' : 'text-muted-foreground'}>{LEG_TEXT[leg][m.legs[leg]]}</span>
           </span>
         ))}
       </span>
@@ -278,10 +279,16 @@ export function LegKey() {
         Dots read <strong className="font-medium text-foreground">Watsons · Inventory · PO</strong>
       </span>
       <span className="inline-flex items-center gap-1">
-        <Mark size="sm" on /> yes
+        <Mark size="sm" leg="yes" /> yes
       </span>
       <span className="inline-flex items-center gap-1">
-        <Mark size="sm" on={false} /> no
+        <Mark size="sm" leg="no" /> no
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Mark size="sm" leg="unknown" /> not known
+      </span>
+      <span>
+        Type a pattern like <span className="font-mono font-medium text-foreground">YYX</span> in search to open it
       </span>
     </p>
   );
@@ -324,7 +331,7 @@ export function PoSourceBar({po}: {po: PoLeg}) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3" style={{borderColor: tint('var(--status-warn)', 60), background: tint('var(--status-warn)', 6)}}>
         <p className="text-sm">
-          <span className="font-medium">No PO form yet.</span> <span className="text-muted-foreground">Until one is uploaded, every product that isn&apos;t retired counts as on the PO.</span>
+          <span className="font-medium">No PO form yet.</span> <span className="text-muted-foreground">Until one is in use, nothing can be recommended.</span>
         </p>
         <Link href="/stock/po-form" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out active:scale-[0.97]">
           Upload the PO form
@@ -386,8 +393,54 @@ export function Pager({page, pages, total, size, onPage, label}: {page: number; 
         <ChevronRight className="size-4" />
       </button>
       <span className="ml-2 text-xs text-muted-foreground tabular-nums">
-        {from} to {to} of {total}
+        {from.toLocaleString('en-US')} to {to.toLocaleString('en-US')} of {total.toLocaleString('en-US')}
       </span>
     </nav>
+  );
+}
+
+/** What this month's data can't answer yet, said once above the tiles. */
+export function CoverageNote({month, coverage, all}: {month: string; coverage: AuditCoverage; all: boolean}) {
+  const notes: ReactNode[] = [];
+  if (!coverage.loaded)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground">{monthLabel(month)} Watsons sales aren&apos;t loaded.</span> Nothing can be recommended for this month until they are.
+      </>,
+    );
+  else if (coverage.storesCounted === 0)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground">No inventory form for {monthLabel(month)}.</span> Only products that sold are listed, and their stock isn&apos;t known.
+      </>,
+    );
+  else if (all && coverage.storesCounted < coverage.storesSold)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground tabular-nums">
+          {coverage.storesCounted} of {coverage.storesSold} stores
+        </span>{' '}
+        have a form. At the others only products that sold are listed, and their stock isn&apos;t known.
+      </>,
+    );
+  if (coverage.unlinkedUnits > 0)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground tabular-nums">{coverage.unlinkedUnits.toLocaleString('en-US')} units</span> sold on Watsons SKUs with no product link, so they can&apos;t show here.{' '}
+        <Link href="/stock/skus" className="font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
+          Link SKUs
+        </Link>
+      </>,
+    );
+  if (!notes.length) return null;
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+      <HelpCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <ul className="flex flex-col gap-1">
+        {notes.map((n, i) => (
+          <li key={i}>{n}</li>
+        ))}
+      </ul>
+    </div>
   );
 }

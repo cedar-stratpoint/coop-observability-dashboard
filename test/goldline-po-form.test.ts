@@ -49,6 +49,11 @@ describe('PO form · the real sample', () => {
     expect(result.unmatched.some((u) => /bestseller|keywords|sayo|flashback/i.test(u.text))).toBe(false);
   });
 
+  it('matches an accessory named by a word no other product has', () => {
+    expect(from('EXT193')).toMatch(/Extractor/); // "Extractor ( Stainless Steel )"
+    expect(result.unmatched.map((u) => u.text)).toEqual([expect.stringMatching(/Refresh All Day/)]);
+  });
+
   it('leaves discontinued products off (inactive)', () => {
     for (const code of ['EFTT1064', 'BGPL01', 'FCPP01131', 'TCES1734', 'BC01191']) expect(on(code)).toBe(false);
   });

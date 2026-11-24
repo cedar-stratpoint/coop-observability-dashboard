@@ -8,6 +8,25 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconciliation: honest marks, a recommendation on every line, all stores
+
+Review feedback: every SKU should show its recommendation at once, and "how do we find all YYX across stores". Checking the data first found the marks were wrong, so those came first.
+
+**Marks fixed.**
+- **On hand ignored the shelf counts.** The page read only the form's Ending column. It now uses the app's one rule (`onHandOf`: ending, else stockroom + drawer + selling area), as the product page does. Store 1 in October has 133 counted products, not 7.
+- **Missing data read as a no.** October Watsons sales aren't loaded on Staging, so every product said "no sale". A third mark, **not known (?)**, covers: sales month not loaded, store not in the file, no SKU link, no count, page not uploaded, blank row, no PO form. Any ? means **Can't tell yet** with the reason, and with one mark missing the two recommendations it is between. It is never counted as a step.
+- **"Not on the form" means not printed on that store's form version** (`goldline-audit-form.ts`, from the printed templates). Shelf codes shared by accessories ("ACCS 288") and the two Stylo pens are mapped to catalog codes and pinned by a test.
+- **EXT193 was off the PO form by a matching miss** ("Extractor ( Stainless Steel )"). The matcher now takes an accessory named by a word no other product has; also switched on by hand on Staging's active form. One printed line is still unmatched ("Refresh All Day Soothes & Protect From Digital Radiation"; possibly HFMBLS, to confirm).
+- **Reconcile ignored a role's store limit.** Both views and the CSV now read only the caller's stores; a role with no stores sees nothing.
+
+**Recommendation on every line**, sortable, also in search: Keep · Add to form · Watsons to audit · Check delivery · **Retire, sell through** (YYX, was "no action"; now a step) · Send to accounting · Report to Watsons · Flag to retire. A counted zero that sold is refined: Restock (on the PO) or Flag to retire (off it). **Recommendation only: nothing is retired here**; an admin retires once stock is zero at every store (user decision).
+
+**All stores**: first choice in the Store picker, with a Store column, server-side sort and pages of 25, and a CSV of every match. Typing a pattern opens it: `YYX` is its tile, `Y?X` the lines still missing a count. The URL carries the whole view. At a store with no form only products that sold are listed. By product no longer sends every store to the browser.
+
+**Blank** rows are not known (the app's existing "a blank form row is not zero"). Months now include any with a full month of sales.
+
+Schema: `supabase/nichido/p5_audit_counts.sql` (two read-only functions), on Nichido Staging; must be applied before this ships to prod.
+
 ## 2026-11-24 — Same page, same result: an identical re-upload reuses its read
 
 QA fix 9 (San Pablo reruns). Uploading one page twice gave different results: 89% vs 92% confidence on p.1, and on p.7 identical counts but confidence moving ~5 points on 46 rows and some notes rewritten. The reader model (Sonnet 5.5) takes no temperature setting, so its self-rated confidence and wording drift run to run (a fresh read of p.7 twice today: 71% then 80%). A read now records the page file's SHA-256 and the reader that read it (model + deployed commit; new columns `uploads.content_sha256`, `uploads.reader_sig`, migration `supabase/nichido/read_fingerprint.sql`, applied to Nichido Staging). A new upload (or the pump's read) of an identical file read by the same deploy copies that read (classification + rows) instead of reading again: same result, ~2 s, no read cost. "Re-read" and the batch fallback always read fresh, a new deploy always reads fresh (so a reader change is measured, not served from an old read), and local dev never reuses. Verified locally: two uploads of San Pablo p.7 under different names, the second copied the first in 2 s with identical rows, confidence and flags.

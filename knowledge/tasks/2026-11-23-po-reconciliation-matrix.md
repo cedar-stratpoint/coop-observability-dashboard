@@ -6,6 +6,10 @@ Status: **BUILT on staging** (2026-11-23, branch `feat/goldline-po-form-matrix`)
 
 The sample is the **blank paper PURCHASE ORDER FORM**, the product list BAs order from. So the PO leg is **catalog-wide**: a product printed on the latest activated PO form is active. User decisions: no lookback window (latest form wins), counted zero = Inventory no, row 8 Watsons mark is an x, flags = whatever the task says (audit only). P0 and P1 below were replaced by: upload xlsx/pdf → draft → review (added/dropped/unmatched, toggle by hand) → activate. See CHANGELOG 2026-11-23 for what shipped. The original plan follows for history.
 
+## Update (Nov 24): recommendations, all stores, third mark
+
+See CHANGELOG 2026-11-24. Open: October POS Sales file (nothing can be recommended for October until it's in); link the remaining Watsons SKUs (17,064 units in September have no product link); confirm the last unmatched PO form line; Justin to confirm a blank is not zero.
+
 
 ## Goal
 
