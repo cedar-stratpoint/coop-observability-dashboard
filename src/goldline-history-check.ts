@@ -1,8 +1,9 @@
-// History check (QA fix 8): a count that adds up within its own row can still be wrong (QA: BMEPP02
-// read 60 + 18 = 78, paper 20 + 18 = 38). Compare each row with the same store's last committed
+// History check (QA fix 8): a count that adds up within its own row can still be wrong on its own. Compare each row with the same store's last committed
 // count of that item: stock can't grow beyond what was there plus what was delivered. Flags only;
 // nothing is changed. Becomes useful as stores' forms get committed (each form is the next one's
-// history). Rule from the offline test of 2026-11-23 (flagged 2 wrong rows nothing else caught). Pure.
+// history). Rule from the offline test of 2026-11-23 (4 wrong rows flagged, 2 of
+// them not caught elsewhere, and 32 right rows). Located Legacy rows carry no Delivery, so a restocked
+// item there is flagged too. Pure.
 
 export type PrevCount = {item_code: string; period_end: string; ending_on_hand: number | null};
 

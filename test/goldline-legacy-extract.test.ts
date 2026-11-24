@@ -147,8 +147,8 @@ describe('legacyBandCheck (written band totals)', () => {
   const core = (code: string, drawer: number | null, sell: number | null, end: number | null) =>
     ({item_code: code, stockroom: null, drawer, selling_area: sell, delivery: null, ending_on_hand: end, confidence: 0.85, alt: null}) as const;
 
-  it('flags a band whose rows each add up but miss the written total (QA: BMEPP02 60 + 18 = 78, paper 20 + 18 = 38)', () => {
-    // San Pablo p.7 Brow Master rows as Coop read them; the paper writes ₱10,275 beside the band.
+  it('flags a band whose rows each add up but miss the written total (illustrative counts)', () => {
+    // Made-up counts for the Brow Master band; only its ₱175 price and ₱16,275 total come from a read.
     const rows = [core('BMEPC01', 20, 8, 28), core('BMEPP02', 60, 18, 78), core('BMEPG03', null, null, null), core('BMEPM04', 12, 10, 22), core('BMEPBS05', 15, 7, 22)].map((r) => ({...r}));
     // The fresh read of that page transcribed the band's written total as ₱16,275 (93 units at ₱175).
     const res = legacyBandCheck(rows, items, [{family: 'BROW MASTER EYE PENCIL', amount: 16275}]);
