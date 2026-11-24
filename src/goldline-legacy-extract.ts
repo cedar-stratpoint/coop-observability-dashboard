@@ -24,6 +24,7 @@
 
 import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
 import {generatedTemplateItems} from './goldline-form-templates.generated';
+import {printedNames, printedPageItems} from './goldline-printed-page';
 
 /** One Legacy item row, in printed column order (handwritten int or null each). */
 export type LegacyExtractedRow = {
@@ -144,13 +145,10 @@ export function legacyPageItems(page: number): Array<{code: string; product: str
   return generatedTemplateItems('legacy', page) ?? MANIFESTS[page] ?? [];
 }
 
-/** code → printed product name for a page of the given form version: the Legacy form's own
- *  rows on a Legacy page, the shared page list otherwise. */
+/** code → printed product name for a page of the given form version (the printed list for
+ *  Legacy, V1 or V2; the shared page list when the version is unknown). */
 export function pageItemNames(version: string | null | undefined, page: number | null | undefined): Record<string, string> {
-  const names: Record<string, string> = {};
-  const items = version === 'legacy' ? legacyPageItems(page ?? 0) : MANIFESTS[page ?? 0] ?? [];
-  for (const it of items) names[it.code] = it.product;
-  return names;
+  return printedNames(printedPageItems(version, page));
 }
 
 export function buildLegacyManifestPrompt(page: number): string {

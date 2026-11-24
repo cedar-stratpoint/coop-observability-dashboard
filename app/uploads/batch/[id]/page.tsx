@@ -1,4 +1,5 @@
 import {pageItemNames} from '@/src/goldline-legacy-extract';
+import {printedPageItems, withPrintedHeadings} from '@/src/goldline-printed-page';
 import {notFound, redirect} from 'next/navigation';
 import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
@@ -54,7 +55,9 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     if (forms.length > 1) redirect(`/uploads/batch/${id}`);
   }
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
-  const [catalog, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);
+  const [catalogRaw, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);
+  // Headings and prices as printed on each page's form version, so the grid matches the paper.
+  const catalog = withPrintedHeadings(catalogRaw, pdfPages.flatMap((p) => printedPageItems(p.upload.form_version, p.extraction?.page ?? null)));
 
   const pages: BatchReviewPage[] = orderPages(
     pdfPages.map((p) => {

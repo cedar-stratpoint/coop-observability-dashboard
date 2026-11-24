@@ -1,4 +1,5 @@
 import {pageItemNames} from '@/src/goldline-legacy-extract';
+import {printedPageItems, withPrintedHeadings} from '@/src/goldline-printed-page';
 import {notFound, redirect} from 'next/navigation';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
@@ -70,9 +71,11 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // Catalog line + price for this page's items (form grid, totals check) and the
   // latest scan of each form page (page strip). Only for a scan with an extraction.
   const codes = extraction?.data?.rows?.map((r) => r.item_code) ?? [];
-  const [catalog, pageStrip, stores] = extraction
+  const [catalogRaw, pageStrip, stores] = extraction
     ? await Promise.all([catalogForCodes(ctx.companyId, codes), fromFile ? Promise.resolve(null) : formPageStrip(ctx.companyId, upload.id), listStores(ctx.companyId)])
     : [{}, null, []];
+  // Headings and prices as printed on this version's form, so the grid matches the paper.
+  const catalog = withPrintedHeadings(catalogRaw, printedPageItems(upload.form_version, extraction?.page));
 
   // The one-page view: where this page sits in the scan's Per file list (same filter, same
   // order, so the arrows step through what the reviewer was looking at), and Coop's
