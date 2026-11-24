@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Back keeps your place: a ring instead of the left rail
+
+- The row or tile you come back to is no longer marked with a 3px accent rail on its left
+  edge (read as a template tell). Tiles (Uploads groups, scan board cards, Flags BAs) now get a
+  ring that settles around the whole card: a soft halo contracts onto a 1px primary ring in
+  320ms, holds, then fades over 900ms. Table and list rows get a light tint and a hairline
+  inset ring, kept inside the row so a clipped list never cuts it.
+- Reduced motion drops the settle; the mark just appears and fades.
+- The Uploads group tile shows its focus ring only for keyboard focus, so the focus the return
+  trip puts on the tile's link no longer leaves a second ring behind.
+
 ## 2026-11-24 — Uploads: the Form pages strip only shows for one store's form
 
 The Form pages (1 to 5) strip is for a single store's form. A big scan read its pages out of order, so until a page number restart turned up it showed a partial "1 ✓ … 5 ✓" strip. It is now decided by size up front: shown only when the upload is one scan of at most 10 pages (5 printed pages, or 10 scanned two-sided) with no restart (`isSingleFormUpload`). The forms board still covers multi-store scans.
