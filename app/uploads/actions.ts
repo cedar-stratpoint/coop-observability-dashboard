@@ -12,6 +12,7 @@ import {uploadSource} from '@/src/goldline-upload-groups';
 import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
+import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
   BatchConflictError,
   BatchStateError,
@@ -24,6 +25,7 @@ import {
   deleteBatch,
   getBatch,
   getBatchPages,
+  getExtraction,
   getUpload,
   latestActiveScan,
   listStores,
@@ -173,11 +175,16 @@ export async function commitReview(input: {
     return {ok: false, error: `Store ${store} is outside your access.`};
   }
 
-  const rows = (Array.isArray(input.rows) ? input.rows : [])
+  const coerced = (Array.isArray(input.rows) ? input.rows : [])
     .map(coerceRow)
     .filter((r): r is ReviewedInventoryRow => r !== null)
     .slice(0, MAX_ROWS);
-  if (!rows.length) return {ok: false, error: 'No valid rows to commit.'};
+  if (!coerced.length) return {ok: false, error: 'No valid rows to commit.'};
+  // Accessories are printed under shared price codes; save each under its own product code.
+  const extraction = await getExtraction(ctx.companyId, input.uploadId);
+  const rows = withProductCodes(coerced, upload.form_version, extraction?.page);
+  const dup = duplicateCodeMessage(rows);
+  if (dup) return {ok: false, error: dup};
 
   // Counts are non-negative and bounded — reject loudly rather than store garbage.
   for (const r of rows) {
@@ -324,7 +331,7 @@ export async function commitBatchAction(input: {
     sent.add(p.uploadId);
     const clean = cleanRows(p.rows);
     if (!clean.ok) return clean;
-    pages.push({uploadId: p.uploadId, rows: clean.rows});
+    pages.push({uploadId: p.uploadId, rows: withProductCodes(clean.rows, mine.upload.form_version, mine.extraction?.page)});
   }
   // Every page awaiting review commits together — none left behind in an emptied batch.
   if (awaiting.length !== sent.size || awaiting.some((p) => !sent.has(p.upload.id))) {
