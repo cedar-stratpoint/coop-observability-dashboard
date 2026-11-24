@@ -3,14 +3,14 @@
 import {Fragment, useMemo, useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ChevronRight, Search} from 'lucide-react';
+import {ChevronRight, Search, X} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
-import {ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, tint, toneOf} from '@/components/analyst/audit-shared';
+import {defaultState, ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By product (NICH-17). Every counted store in a month, rolled up per
 // product: how many stores sit in each of the 8 states, as one stacked bar per product.
@@ -27,17 +27,17 @@ const PAGE = 25;
 
 export function AuditProducts({data}: {data: ProductAuditResult}) {
   const router = useRouter();
-  const [pick, setPick] = useState<AuditState | null>(null);
+  // The tiles are the only filter: one state is always selected, opening on the most urgent.
+  const [pick, setPick] = useState<AuditState>(() => defaultState(data.summary));
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [page, setPage] = useState(0);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const out = data.rows.filter(
-      (r) => (!pick || r.counts[pick] > 0) && (!needle || r.item_code.toLowerCase().includes(needle) || r.product.toLowerCase().includes(needle)),
-    );
-    return pick ? [...out].sort((a, b) => b.counts[pick] - a.counts[pick] || a.item_code.localeCompare(b.item_code)) : out;
+    // Search looks across every product; otherwise the selected state's products, most stores first.
+    if (needle) return data.rows.filter((r) => r.item_code.toLowerCase().includes(needle) || r.product.toLowerCase().includes(needle));
+    return data.rows.filter((r) => r.counts[pick] > 0).sort((a, b) => b.counts[pick] - a.counts[pick] || a.item_code.localeCompare(b.item_code));
   }, [data.rows, pick, q]);
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const at = Math.min(page, pages - 1);
@@ -101,22 +101,45 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
 
           <div className="flex flex-col gap-3">
             <LegKey />
-            <MatrixLegend summary={data.summary} active={pick} onPick={(s) => filter(() => setPick(s))} unit="store and product pairs" />
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <input value={q} onChange={(e) => filter(() => setQ(e.target.value))} placeholder="Find a product or code" aria-label="Find a product" className={cn(FIELD, 'w-64 pl-8')} />
-            </div>
-            {pick && (
-              <button type="button" onClick={() => filter(() => setPick(null))} className="text-sm font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
-                Products with {AUDIT_META[pick].label} · Clear
-              </button>
-            )}
+            <MatrixLegend
+              summary={data.summary}
+              active={q.trim() ? null : pick}
+              onPick={(s) =>
+                filter(() => {
+                  setPick(s);
+                  setQ('');
+                })
+              }
+              unit="store and product pairs"
+            />
           </div>
 
           <Card className="gap-0 overflow-hidden py-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+              {q.trim() ? (
+                <p className="text-sm">
+                  <span className="font-semibold tabular-nums">{rows.length}</span> {rows.length === 1 ? 'product matches' : 'products match'}{' '}
+                  <span className="font-medium">“{q.trim()}”</span> <span className="text-muted-foreground">across every state</span>
+                </p>
+              ) : (
+                <>
+                  <StateChip state={pick} />
+                  <span className="text-sm">
+                    <span className="font-heading font-semibold tabular-nums">{rows.length}</span>{' '}
+                    <span className="text-muted-foreground">{rows.length === 1 ? 'product is' : 'products are'} here in at least one store</span>
+                  </span>
+                </>
+              )}
+              <div className="relative ml-auto">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <input value={q} onChange={(e) => filter(() => setQ(e.target.value))} placeholder="Search every product" aria-label="Search every product" className={cn(FIELD, 'w-60 pl-8', q && 'pr-8')} />
+                {q && (
+                  <button type="button" onClick={() => filter(() => setQ(''))} aria-label="Clear search" className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted">
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[48rem] text-sm">
                 <thead>
@@ -132,7 +155,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
                   {rows.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                        {q ? 'No product matches that search.' : pick ? `No product is at “${AUDIT_META[pick].label}” in any counted store.` : 'No products here.'}
+                        {q.trim() ? 'No product matches that search.' : `No product is at “${AUDIT_META[pick].label}” in any counted store.`}
                       </td>
                     </tr>
                   ) : (

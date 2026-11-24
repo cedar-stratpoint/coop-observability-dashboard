@@ -17,5 +17,6 @@ export default async function Page(props: {searchParams: Promise<{month?: string
   }
   const sp = await props.searchParams;
   const data = await productAuditData(ctx.companyId, {month: sp.month ?? null});
-  return <AuditProducts data={data} />;
+  // Keyed by month: a new month opens on its own most urgent state.
+  return <AuditProducts key={data.month ?? ''} data={data} />;
 }

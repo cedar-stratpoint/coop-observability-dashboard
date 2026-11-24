@@ -4,6 +4,7 @@
 // chip, the 8-tile matrix legend (Justin's notebook, made clickable), and the section
 // tabs (By store · By product · PO form).
 
+import {useId} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {Check, ChevronLeft, ChevronRight, FileSpreadsheet, X} from 'lucide-react';
@@ -29,9 +30,9 @@ export function monthLabel(m: string): string {
 }
 
 /** A leg's check or x. `size` sm for the legend, md for the table. */
-export function Mark({on, size = 'md', label}: {on: boolean; size?: 'sm' | 'md'; label?: string}) {
-  const box = size === 'sm' ? 'size-4' : 'size-6';
-  const icon = size === 'sm' ? 'size-2.5' : 'size-3.5';
+export function Mark({on, size = 'md', label}: {on: boolean; size?: 'xs' | 'sm' | 'md'; label?: string}) {
+  const box = size === 'xs' ? 'size-3.5' : size === 'sm' ? 'size-4' : 'size-6';
+  const icon = size === 'xs' ? 'size-2' : size === 'sm' ? 'size-2.5' : 'size-3.5';
   return (
     <span
       role="img"
@@ -57,6 +58,18 @@ export function StateChip({state}: {state: AuditState}) {
 /** How urgent a state's tone is, for ordering the choices (most urgent first). */
 export const URGENCY: Record<(typeof AUDIT_META)[AuditState]['tone'], number> = {crit: 0, warn: 1, out: 2, neutral: 3, good: 4};
 
+/** The states that need a step and have products, most urgent first (the primary tiles). */
+export function rankedSteps(summary: Record<AuditState, number>): AuditState[] {
+  return AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(
+    (a, b) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a],
+  );
+}
+
+/** The state a page opens on: the most urgent step, else the biggest state, else All good. */
+export function defaultState(summary: Record<AuditState, number>): AuditState {
+  return rankedSteps(summary)[0] ?? [...AUDIT_STATES].sort((a, b) => summary[b] - summary[a])[0] ?? 'ok';
+}
+
 /**
  * The matrix as ranked choices (Hick's law, Nov 24). Every state stays one click away, but
  * not every state asks for the same attention:
@@ -74,15 +87,15 @@ export function MatrixLegend({
 }: {
   summary: AuditSummary;
   active: AuditState | null;
-  onPick: (s: AuditState | null) => void;
+  onPick: (s: AuditState) => void;
   unit: string;
 }) {
-  const rank = (a: AuditState, b: AuditState) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a];
-  const steps = AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(rank);
+  const steps = rankedSteps(summary);
   const rest = AUDIT_STATES.filter((s) => !steps.includes(s));
   const restActive = rest.filter((s) => AUDIT_META[s].legs.po);
   const restInactive = rest.filter((s) => !AUDIT_META[s].legs.po);
-  const pick = (s: AuditState) => onPick(active === s ? null : s);
+  // The tiles are the page's only filter, and one is always selected (no toggling off).
+  const pick = (s: AuditState) => onPick(s);
 
   return (
     <div className="flex flex-col gap-3">
@@ -125,13 +138,16 @@ export function MatrixLegend({
 function StateTile({state, n, on, onClick, unit}: {state: AuditState; n: number; on: boolean; onClick: () => void; unit: string}) {
   const m = AUDIT_META[state];
   const c = toneOf(state);
+  const tip = useId();
   return (
+    <div className="group/tip relative">
     <button
       type="button"
       aria-pressed={on}
+      aria-describedby={tip}
       onClick={onClick}
       className={cn(
-        'group flex flex-col gap-4 rounded-2xl border bg-card p-4 text-left',
+        'group flex w-full flex-col gap-4 rounded-2xl border bg-card p-4 text-left',
         'transition-[transform,border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]',
         'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
         on ? 'shadow-sm' : 'border-border [@media(hover:hover)]:hover:border-foreground/20 [@media(hover:hover)]:hover:shadow-sm',
@@ -162,30 +178,95 @@ function StateTile({state, n, on, onClick, unit}: {state: AuditState; n: number;
         {n} {unit}
       </span>
     </button>
+    <StateTip id={tip} state={state} fit />
+    </div>
   );
 }
 
 /** A secondary choice: small, still clickable, still shows its count (0 included). */
 function StateChipButton({state, n, on, onClick}: {state: AuditState; n: number; on: boolean; onClick: () => void}) {
   const c = toneOf(state);
+  const m = AUDIT_META[state];
+  const tip = useId();
   return (
+    <span className="group/tip relative inline-flex">
     <button
       type="button"
       aria-pressed={on}
+      aria-describedby={tip}
       onClick={onClick}
-      title={AUDIT_META[state].action}
       className={cn(
-        'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium',
+        'inline-flex h-8 items-center gap-2 rounded-full border pr-2.5 pl-1.5 text-xs font-medium',
         'transition-[transform,border-color,background-color,color] duration-150 ease-out active:scale-[0.97]',
         'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
         on ? 'text-foreground' : 'border-border bg-card text-muted-foreground [@media(hover:hover)]:hover:border-foreground/20 [@media(hover:hover)]:hover:text-foreground',
       )}
       style={on ? {borderColor: `color-mix(in oklab, ${c} 55%, transparent)`, background: tint(c, 10)} : undefined}
     >
+      {/* The same Watsons · Inventory · PO pattern as the tiles, so all eight combos read as one matrix. */}
+      <span className="flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5">
+        <Mark size="xs" on={m.legs.watsons} label="Watsons" />
+        <Mark size="xs" on={m.legs.inventory} label="Inventory" />
+        <Mark size="xs" on={m.legs.po} label="PO" />
+      </span>
       <span aria-hidden className="size-1.5 rounded-full" style={{background: c, opacity: n ? 1 : 0.4}} />
-      {AUDIT_META[state].label}
+      {m.label}
       <span className={cn('tabular-nums', n ? 'text-foreground' : 'text-muted-foreground/70')}>{n.toLocaleString('en-US')}</span>
     </button>
+    <StateTip id={tip} state={state} />
+    </span>
+  );
+}
+
+const LEG_TEXT = {
+  watsons: {yes: 'Sold at Watsons this month', no: 'No Watsons sale this month'},
+  inventory: {yes: 'On the inventory form, with stock', no: 'Not on the form, or counted zero'},
+  po: {yes: 'On the PO form, so still delivered', no: 'Not on the PO form, being phased out'},
+} as const;
+
+/**
+ * What a state means, on hover (after a short delay, so passing over the tiles doesn't
+ * flash cards) or on keyboard focus (at once). Reads the three marks out in words, then
+ * the step and who takes it. Scales in from its top-left corner, next to the trigger.
+ */
+function StateTip({id, state, fit}: {id: string; state: AuditState; fit?: boolean}) {
+  const m = AUDIT_META[state];
+  const c = toneOf(state);
+  return (
+    <span
+      role="tooltip"
+      id={id}
+      className={cn(
+        'pointer-events-none absolute top-[calc(100%+8px)] left-0 z-40 flex origin-top-left flex-col gap-2.5 rounded-xl border border-border bg-popover p-3.5 text-left text-popover-foreground shadow-lg',
+        'invisible translate-y-[-2px] scale-[0.97] opacity-0 transition-[opacity,transform,visibility] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+        'group-hover/tip:visible group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 group-hover/tip:delay-300',
+        'group-has-[:focus-visible]/tip:visible group-has-[:focus-visible]/tip:translate-y-0 group-has-[:focus-visible]/tip:scale-100 group-has-[:focus-visible]/tip:opacity-100 group-has-[:focus-visible]/tip:delay-0',
+        'motion-reduce:translate-y-0 motion-reduce:scale-100',
+        fit ? 'right-0' : 'w-72 max-w-[calc(100vw-2rem)]',
+      )}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        <span aria-hidden className="size-2 rounded-full" style={{background: c}} />
+        {m.label}
+        <span className="ml-auto text-[11px] font-normal text-muted-foreground">{m.legs.po ? 'Active' : 'Inactive'}</span>
+      </span>
+      <span className="flex flex-col gap-1.5">
+        {(['watsons', 'inventory', 'po'] as const).map((leg) => (
+          <span key={leg} className="flex items-center gap-2 text-xs">
+            <Mark size="xs" on={m.legs[leg]} />
+            <span className={m.legs[leg] ? 'text-foreground' : 'text-muted-foreground'}>{LEG_TEXT[leg][m.legs[leg] ? 'yes' : 'no']}</span>
+          </span>
+        ))}
+      </span>
+      <span className="border-t border-border pt-2.5 text-xs leading-relaxed text-muted-foreground">
+        {m.owner !== 'None' && (
+          <span className="font-medium" style={{color: ink(c)}}>
+            {m.owner === 'Admin' ? 'You' : m.owner}:{' '}
+          </span>
+        )}
+        {m.action}
+      </span>
+    </span>
   );
 }
 
