@@ -1,6 +1,7 @@
 import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
+import {readerSignature, reuseIdenticalRead, sha256, stampFingerprint} from './goldline-read-reuse';
 import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
 import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
@@ -73,8 +74,11 @@ export async function runInventoryRead(args: {
   // company. The batch poller sets this on its fallback path (a batch slot that errored/expired), so
   // a failed batch read is retried synchronously instead of being re-submitted to a batch forever.
   forceSync?: boolean;
+  // QA fix 9: a NEW page (fresh upload or the pump) may copy the read of an identical file read by
+  // this same deploy, so one page always gives one result. A re-read never sets this.
+  reuse?: boolean;
 }): Promise<ReadResult> {
-  const {companyId, uploadId, filename, fileSize, storeScope, batchStore, emit, forceSync} = args;
+  const {companyId, uploadId, filename, fileSize, storeScope, batchStore, emit, forceSync, reuse} = args;
   const bytes = args.bytes instanceof Uint8Array ? args.bytes : new Uint8Array(args.bytes);
   const pdfBase64 = Buffer.from(bytes).toString('base64');
   // Accumulates what we learn about this page so the read_logs row is complete no matter
@@ -82,8 +86,39 @@ export async function runInventoryRead(args: {
   const rec: ReadLogInput = {companyId, uploadId, filename, fileSize, source: uploadSource(filename)};
   // One token tally for the whole page read: classify + extract (and any retry) all record
   // into it, and each log row below snapshots it, so the page's Claude cost is in the DB.
+  const sha = sha256(bytes);
+  const readerSig = readerSignature();
+  await stampFingerprint(uploadId, {sha});
   return withReadUsage(async () => {
   try {
+    if (reuse && readerSig) {
+      const copied = await reuseIdenticalRead(companyId, uploadId, sha, readerSig).catch((e) => {
+        console.error('goldline read: reuse failed, reading fresh', msg(e));
+        return null;
+      });
+      const page = copied?.rows as ExtractedPage | undefined;
+      if (copied && page && !outOfScopeStores(storeScope, [page.store_code]).length) {
+        await setUploadStatus(uploadId, 'needs_review', {pageCount: copied.page});
+        const flagged = page.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length;
+        await logReadEvent({...rec, page: copied.page, formVersion: copied.formVersion ?? undefined, status: 'needs_review', stage: 'reused', rowCount: page.rows.length, docConfidence: copied.docConfidence ?? undefined, flagged, detail: {reusedFrom: copied.fromId, readerSig}, usage: readUsageSnapshot()});
+        return {
+          http: 200,
+          body: {
+            uploadId,
+            status: 'needs_review',
+            page: copied.page,
+            rows: page.rows.length,
+            docConfidence: copied.docConfidence,
+            flagged,
+            formVersion: copied.formVersion,
+            rotated: copied.orientation === 180,
+            reused: true,
+            reusedFrom: copied.fromId,
+            header: {storeCode: page.store_code || null, storeName: page.store_name || null, periodStart: page.period_start ?? null, periodEnd: page.period_end ?? null, consultant: page.consultant ?? null},
+          },
+        };
+      }
+    }
     // Phase 0: classify the page (number, kind, orientation, form version, handwritten
     // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
     // read store code to the known registry, persist the classification + a semantic
@@ -300,6 +335,7 @@ export async function runInventoryRead(args: {
     }
     emit?.({type: 'stage', stage: 'saving'});
     await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
+    await stampFingerprint(uploadId, {readerSig});
     await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
     await logReadEvent({
       ...rec,

@@ -1,3 +1,4 @@
+import {readerSignature, stampFingerprint} from './goldline-read-reuse';
 import 'server-only';
 import {revalidateTag} from 'next/cache';
 import {
@@ -144,6 +145,7 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
       }
       const docConfidence = avgConfidence(extracted);
       await saveExtraction({companyId: p.companyId, uploadId: p.uploadId, page: p.page, extracted, docConfidence});
+      await stampFingerprint(p.uploadId, {readerSig: readerSignature()});
       await setUploadStatus(p.uploadId, 'needs_review', {pageCount: p.page, anthropicBatchId: null});
       await logReadEvent({
         companyId: p.companyId,

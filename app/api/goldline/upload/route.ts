@@ -341,6 +341,7 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     storeScope: ctx.storeScope,
     batchStore,
     emit,
+    reuse: true,
   });
   return json(result.body, result.http);
 }
