@@ -107,9 +107,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   // can review the selection, add more, or drop any before confirming.
   const pick = (files: FileList | null | undefined) => {
     if (!files?.length || disabled) return;
+    // Copy the files out NOW. A FileList is live: clearing the input below empties it, and
+    // React may run the updater later (it does when another render is queued, e.g. right
+    // after typing the upload's name), so the pick vanished (user report 2026-11-25).
+    const picked = Array.from(files);
     setPending((prev) => {
       const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      return [...prev, ...Array.from(files).filter((f) => !seen.has(`${f.name}:${f.size}`))];
+      return [...prev, ...picked.filter((f) => !seen.has(`${f.name}:${f.size}`))];
     });
     if (inputRef.current) inputRef.current.value = '';
   };
