@@ -8,6 +8,9 @@
 -- store_scope(company) gives, per store: its last month with any units sold, whether
 -- it sold in the latest 3 loaded months, and the scope that applies (override first).
 -- One pass over sales; the restock (P3) reads `in_scope` from here.
+--
+-- Once s3_sales_units_encryption.sql is applied, the live sales readers are in s3 (and then
+-- s5_sales_period_totals.sql): if this file is ever re-run, re-run s3 and s5 after it.
 
 create or replace function public.store_scope(p_company text)
 returns table (store_code text, last_sale_month date, sold_recently boolean, override boolean, in_scope boolean)

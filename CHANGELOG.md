@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 · Nichido prod release prep: the missing SQL, a lock, and Production is coop-cedar
+
+Preparing v1.25.0 (Nichido only) showed four gaps between the `staging` branch and what Nichido Staging actually runs.
+
+- **`s3_sales_units_encryption.sql` (and the s2 that checks units) were only on `develop`**, while this branch's app already calls `sales_units()`. Both are here now, so Prod can be built from this branch.
+- **`p0b_upload_batch_kind_name.sql`** (new): `upload_batches.kind` and `uploads.batch_name` had no file of their own.
+- **`server_upload_lock.sql`** (new): the three pump functions were callable with the public API key (Supabase's default grants; they read the Vault and start paid reads). Only pg_cron needs them. Apply on Staging too.
+- **`server_upload_read_window.sql`** said "not applied" although Staging runs it; its header now says when to use it.
+
+Decision (2026-11-24): **Production is `coop-cedar.vercel.app`** (our Vercel Pro project). `coop-brand-os` can't build the 600 s reader. The environment switcher links follow (`src/coop-env.ts`); which environment a deployment is still comes from its database. Apply order and the local rehearsal: `docs/nichido-prod-cutover.md`.
+
 ## 2026-11-24 — Review: every row shows its own product name
 
 Since #686 names were looked up by printed code. On page 4 several accessories share a code (five "ACCS 288"), so they all showed one brush's name, and older Legacy reads with codes like ACCS185 showed only the code. Names now come per row (`src/row-names.ts`): the Nth row with a code takes the Nth printed line with it, then the shared list for that page, then the other pages (for a misread page number), then the name printed on the paper. Long names wrap, so the table no longer runs wider than its pane. The Legacy band-total check had the same shared-code mistake and now counts each accessory once.
