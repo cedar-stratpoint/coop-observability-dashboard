@@ -24,6 +24,10 @@ Based on a "Back goes back" UX reel (Glide): Back should keep your place, leave 
 - Not built: "the page leaves the way it came" (a shared-element transition from row to page). Rule 1 does most of the work; a View Transitions spike would come first.
 
 Verified in a local browser (Playwright, staging data): same URL, exact scroll and marked + focused row on return for Inventory, Restock, Orders, Uploads, scan board (incl. stepping pages), Flags; the next Back leaves the page each time; dialogs close on Back; phone-width cards. Code: `src/back-nav.ts` (pure, unit-tested in `test/back-nav.test.ts`), `components/analyst/back-nav.tsx`, `[data-kept]` styles in `app/globals.css`.
+## 2026-11-24 — Scan review: the page no longer drops to the upside-down browser viewer
+
+The scan pane gave up on its own page view after a fixed 10 seconds and fell back to the browser's PDF viewer, which shows the stored file as scanned (often upside down) with no row box. A split scan page is about 2.7 MB, plus a 1.3 MB page renderer on first open, so ordinary connections crossed 10 s (reproduced at ~2 Mbps: fallback at 38 s). It now falls back only if the download stops making progress for 20 s, shows "Loading the scan · N%" while it comes in, cancels a half-drawn page when the reviewer steps to the next one (so two pages never draw on one canvas), and if it does fall back says so with a Try again button. Also: the 3px bar on the hovered row no longer sits on the first letters of the item code (the item column gets a fixed left padding).
+
 ## 2026-11-24 — Scan page: cards in a row are the same size
 
 Per BA and Per store cards no longer size to their own content. The grids had `items-start`, so a card with fewer pills or no Change BA footer (e.g. "No BA on the form") came out shorter than its neighbours. Cards now stretch to the tallest in their row, with the bottom action (Change BA, Confirm store, Review) pinned to the bottom so it lines up across the row.
