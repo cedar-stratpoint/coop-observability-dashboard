@@ -10,7 +10,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
-import {ink, LegKey, Mark, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, StateChip, toneOf, URGENCY} from '@/components/analyst/audit-shared';
+import {ink, LegKey, Mark, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, toneOf, URGENCY} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By store (NICH-17). One store and month: every product's three legs
 // (Watsons · Inventory · PO), the state and what to do, in the notebook's two groups.
@@ -27,6 +27,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   const [pick, setPick] = useState<AuditState | null>(null);
   const [onlyAction, setOnlyAction] = useState(true);
   const [q, setQ] = useState('');
+  const [side, setSide] = useState<'active' | 'inactive'>('active');
   const sel = data.selected;
 
   const rows = useMemo(() => {
@@ -39,6 +40,9 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   }, [data.rows, pick, onlyAction, q]);
   const active = rows.filter((r) => r.onPo);
   const inactive = rows.filter((r) => !r.onPo);
+  // Active and Inactive are tabs, not two stacked tables, so Inactive is one click away
+  // instead of a long scroll. Picking a state opens the tab it belongs to.
+  const view = pick ? (AUDIT_META[pick].legs.po ? 'active' : 'inactive') : side;
 
   const setParam = (key: 'store' | 'month', value: string) => {
     const sp = new URLSearchParams();
@@ -132,14 +136,21 @@ export function AuditMatrix({data}: {data: AuditResult}) {
           {rows.length === 0 ? (
             <Card>
               <CardContent className="px-6 py-12 text-center text-sm text-muted-foreground">
-                {q ? 'No product matches that search.' : 'Nothing here. Every product at this store lines up.'}
+                {q ? 'No product matches that search.' : pick ? `No products are at “${AUDIT_META[pick].label}” at this store.` : 'Nothing here. Every product at this store lines up.'}
               </CardContent>
             </Card>
           ) : (
-            <div className="flex flex-col gap-5">
-              {active.length > 0 && <Group title="Active" hint="On the PO form" rows={active} store={sel.code} />}
-              {inactive.length > 0 && <Group title="Inactive" hint="Not on the PO form" rows={inactive} store={sel.code} />}
-            </div>
+            <Group
+              key={`${view}|${pick ?? ''}|${q}|${onlyAction}`}
+              view={view}
+              counts={{active: active.length, inactive: inactive.length}}
+              onView={(v) => {
+                setPick(null);
+                setSide(v);
+              }}
+              rows={view === 'active' ? active : inactive}
+              store={sel.code}
+            />
           )}
           <p className="text-xs text-muted-foreground">
             Inventory counts as yes only with stock on hand; a counted zero is a no. This page flags only. Retiring a product is a separate step and keeps its history.
@@ -150,45 +161,85 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   );
 }
 
-const STATE_PAGE = 12;
+const PAGE = 10;
 
-function Group({title, hint, rows, store}: {title: string; hint: string; rows: AuditRow[]; store: string}) {
+const VIEWS = {active: {title: 'Active', hint: 'On the PO form'}, inactive: {title: 'Inactive', hint: 'Not on the PO form'}} as const;
+
+function Group({
+  view,
+  counts,
+  onView,
+  rows,
+  store,
+}: {
+  view: 'active' | 'inactive';
+  counts: Record<'active' | 'inactive', number>;
+  onView: (v: 'active' | 'inactive') => void;
+  rows: AuditRow[];
+  store: string;
+}) {
   // Same order as the choices above: most urgent first, then the bigger group.
   const count = (st: AuditState) => rows.filter((r) => r.state === st).length;
   const states = AUDIT_STATES.filter((st) => count(st) > 0).sort((a, b) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || count(b) - count(a));
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <div className="flex items-baseline gap-2 border-b border-border px-4 py-3">
-        <h3 className="font-heading text-base font-semibold">{title}</h3>
-        <span className="text-xs text-muted-foreground">{hint}</span>
-        <span className="ml-auto text-xs text-muted-foreground tabular-nums">{rows.length} products</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[40rem] text-sm">
-          <thead>
-            <tr className="text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <th className="py-2 pr-3 pl-4 font-medium">Product</th>
-              <th className="w-28 px-2 py-2 text-center font-medium">Watsons</th>
-              <th className="w-28 px-2 py-2 text-center font-medium">Inventory</th>
-              <th className="w-20 px-2 py-2 text-center font-medium">PO</th>
-              <th className="w-10 py-2 pr-3" aria-label="Open" />
-            </tr>
-          </thead>
-          {states.map((st) => (
-            <StateRows key={st} state={st} rows={rows.filter((r) => r.state === st)} store={store} />
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+        <div role="tablist" aria-label="Active or inactive products" className="inline-flex rounded-lg bg-muted p-1">
+          {(['active', 'inactive'] as const).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              type="button"
+              aria-selected={view === v}
+              onClick={() => onView(v)}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-[color,background-color,box-shadow] duration-150',
+                view === v ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground [@media(hover:hover)]:hover:text-foreground',
+              )}
+            >
+              {VIEWS[v].title}
+              <span className={cn('rounded-full px-1.5 text-xs tabular-nums', view === v ? 'bg-muted' : 'bg-transparent')}>{counts[v]}</span>
+            </button>
           ))}
-        </table>
+        </div>
+        <span className="text-xs text-muted-foreground">{VIEWS[view].hint}</span>
       </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          No {VIEWS[view].title.toLowerCase()} products to show here{counts[view === 'active' ? 'inactive' : 'active'] ? `. ${VIEWS[view === 'active' ? 'inactive' : 'active'].title} has ${counts[view === 'active' ? 'inactive' : 'active']}.` : '.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                <th className="py-2 pr-3 pl-4 font-medium">Product</th>
+                <th className="w-28 px-2 py-2 text-center font-medium">Watsons</th>
+                <th className="w-28 px-2 py-2 text-center font-medium">Inventory</th>
+                <th className="w-20 px-2 py-2 text-center font-medium">PO</th>
+                <th className="w-10 py-2 pr-3" aria-label="Open" />
+              </tr>
+            </thead>
+            {states.map((st) => (
+              <StateRows key={st} state={st} rows={rows.filter((r) => r.state === st)} store={store} />
+            ))}
+          </table>
+        </div>
+      )}
     </Card>
   );
 }
 
-/** One state's rows under a header that carries the state, who acts, and the step, once. */
+/** One state's rows under a header that carries the state, who acts, and the step, once; 10 per page. */
 function StateRows({state, rows, store}: {state: AuditState; rows: AuditRow[]; store: string}) {
-  const [all, setAll] = useState(false);
+  const router = useRouter();
+  const [page, setPage] = useState(0);
   const m = AUDIT_META[state];
   const c = toneOf(state);
-  const shown = all ? rows : rows.slice(0, STATE_PAGE);
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const at = Math.min(page, pages - 1);
+  const shown = rows.slice(at * PAGE, at * PAGE + PAGE);
+  const hrefOf = (r: AuditRow) => `/stock/${encodeURIComponent(r.item_code)}?store=${encodeURIComponent(store)}`;
   return (
     <tbody>
       <tr>
@@ -197,21 +248,25 @@ function StateRows({state, rows, store}: {state: AuditState; rows: AuditRow[]; s
             <StateChip state={state} />
             <span className="font-heading text-sm font-semibold tabular-nums">{rows.length}</span>
             <span className="text-xs text-muted-foreground">
-              {m.owner !== 'None' && <span className="font-medium" style={{color: ink(c)}}>{m.owner} · </span>}
+              {m.owner !== 'None' && <span className="font-medium" style={{color: ink(c)}}>{m.owner === 'Admin' ? 'You' : m.owner} · </span>}
               {m.action}
             </span>
           </div>
         </td>
       </tr>
       {shown.map((r) => (
-        <tr key={r.item_code} className="group/row relative cursor-pointer transition-colors duration-150 focus-within:bg-muted/40 [@media(hover:hover)]:hover:bg-muted/40">
-          <td className="relative py-2 pr-3 pl-4">
-            <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-r" style={{background: c, opacity: NEEDS_ACTION.has(state) ? 0.9 : 0.25}} />
-            {/* The whole row opens the product's inventory page for this store (stretched link). */}
+        // The row opens the product's inventory page for this store. The name is the real
+        // link (keyboard, new tab); the row click is a convenience for the mouse.
+        <tr
+          key={r.item_code}
+          onClick={() => router.push(hrefOf(r))}
+          className="group/row cursor-pointer transition-colors duration-150 focus-within:bg-muted/40 [@media(hover:hover)]:hover:bg-muted/40"
+        >
+          <td className="py-2 pr-3 pl-4">
             <Link
-              href={`/stock/${encodeURIComponent(r.item_code)}?store=${encodeURIComponent(store)}`}
-              title={`Open ${r.product ?? r.item_code} at this store`}
-              className="block max-w-[28rem] truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:underline"
+              href={hrefOf(r)}
+              onClick={(e) => e.stopPropagation()}
+              className="block max-w-[28rem] truncate font-medium outline-none focus-visible:underline"
             >
               {r.shade ?? r.product ?? r.item_code}
             </Link>
@@ -238,12 +293,10 @@ function StateRows({state, rows, store}: {state: AuditState; rows: AuditRow[]; s
           </td>
         </tr>
       ))}
-      {rows.length > STATE_PAGE && (
+      {pages > 1 && (
         <tr>
-          <td colSpan={5} className="px-4 pt-1 pb-3">
-            <button type="button" onClick={() => setAll(!all)} className="text-xs font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
-              {all ? 'Show fewer' : `Show all ${rows.length}`}
-            </button>
+          <td colSpan={5} className="px-4 pt-1.5 pb-3">
+            <Pager page={at} pages={pages} total={rows.length} size={PAGE} onPage={setPage} label={m.label} />
           </td>
         </tr>
       )}

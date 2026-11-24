@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconciliation: cleaner tiles, every state reachable, Active/Inactive tabs and pages
+
+- **Tiles without the side stripe.** The coloured bar on the left of each tile (and each table row) read as template filler. A tile now leads with its count, the state under it with a small tone dot, and "Active · Nichido" (status and who acts) top right. When picked it gets a soft ring and tint in its tone.
+- **Hick's law, without hiding anything.** The primary tiles stay limited to states that need a step and have products, most urgent first. Every other state (the no-action ones and anything at 0) is a small chip in one "Everything else" row, Active then Inactive, still clickable, so the full eight-state matrix is always one click away at little attention cost. Picking an empty state says so ("No products are at Phasing out at this store.").
+- **Active / Inactive are tabs** with their counts on the By store table, so Inactive is one click instead of a long scroll; picking a state opens its tab.
+- **Pages.** Each state group on By store shows 10 rows with a pager (`‹ 1 2 … 24 › · 1 to 10 of 236`) instead of "Show all"; By product pages 25 products at a time with the same pager.
+- **Row link fix.** The whole-row link drew its click area over the table, so hovering one row could open another (the 84711 tooltip over Pink Lemonade). Rows now handle the click themselves; the product name stays the real link for keyboard and new tab.
+
 ## 2026-11-24 — Review: period boxes no longer come up empty
 
 The period date boxes on the page review (and the store batch review) were blank whenever they fell back to the reader's own text. The reader stores the period as written on the form ("10/16/2026", "09/15", "SEPTEMBER 16, 2026"; 1,210 of 1,311 stored reads on staging), but a date box accepts only YYYY-MM-DD and blanks anything else. That fallback ran for a page opened on its own (a direct or "earlier copy" link) and for the ~109 pages whose page sort found no date. Each end now takes the page sort's year-checked date first, else converts the written date (`src/period-date.ts`: numeric month-first, written months, two-digit years; impossible days like Sep 31 rejected), borrowing the year from the other end when one is missing. A period with no year on either end stays empty rather than guessed. Example: page 1 of Scan2026-11-20_114605 opened directly now shows Oct 16 to Oct 31, 2024 (the reader's text said 2026).
