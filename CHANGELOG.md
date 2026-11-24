@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Uploads: the Form pages strip only shows for one store's form
+
+The Form pages (1 to 5) strip is for a single store's form. A big scan read its pages out of order, so until a page number restart turned up it showed a partial "1 ✓ … 5 ✓" strip. It is now decided by size up front: shown only when the upload is one scan of at most 10 pages (5 printed pages, or 10 scanned two-sided) with no restart (`isSingleFormUpload`). The forms board still covers multi-store scans.
+
 ## 2026-11-24 · Nichido prod release prep: the missing SQL, a lock, and Production is coop-cedar
 
 Preparing v1.25.0 (Nichido only) showed four gaps between the `staging` branch and what Nichido Staging actually runs.
