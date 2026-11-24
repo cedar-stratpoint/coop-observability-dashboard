@@ -73,6 +73,8 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 34 | `read_fingerprint.sql` | Lance | Identical re-uploads reuse their read |
 | 35 | `s2_sales_drop_plaintext.sql` | Lance | About a week after the app is live: one way, the old build can't run after it |
 
+**Applied on prod Nov 24 (20 to 34):** in that order after a backup (`backup_20261124`), with v1.25.0 deployed in the same window; sales figures and six readers checked equal to the backup, totals drift 0. 35 (`s2`) still to do.
+
 **Rehearsed Nov 24 (20 to 34 for v1.25.0):** on a local PostgreSQL 17 rebuilt from main's files (sales functions byte-identical to Prod) with 472,604 synthetic sales rows in Prod's mix, every file ran in one transaction, clean again on a second run. `sales_rollup`, `sales_by_sku`, `store_scope`, `forecast_months`, `forecast_history` and `sku_months` returned the same figures before s3, after s3 and after s5; drift 0, also after new writes and after s2. The result has Staging's 37 functions and the same columns on the 15 tables involved. Synthetic data, so row values specific to Prod are not covered.
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).

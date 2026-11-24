@@ -8,6 +8,36 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Nichido on prod: v1.25.0 and v1.25.1 (release notes)
+
+Nichido shipped to prod on Nov 24 as two releases on `main`. Production is now **coop-cedar.vercel.app** (our Vercel Pro project); `coop-brand-os` stays on v1.23.0 until the co-worker redirects it.
+
+- **v1.25.0** (PR #696, `8ac8238`): everything Nichido on `staging` through #694 and #695. Customers, vouchers, the Zoomy inventory header, Shopee labels, Ask Coop changes and the l7-spike test route stayed out on purpose. v1.24.0 is left to the customers release (#657).
+- **v1.25.1** (PR #701, `e14c9b5`): the page check's 2,000-token room (#700) plus #697, #698 and #699. No SQL.
+
+**Nichido prod database (Nov 24):** backup `backup_20261124` first, then `docs/nichido-prod-cutover.md` steps 20 to 34 (all but `s2`). After `s3` and `s5`, all 472,604 sales rows kept their figures and six readers matched the backup; totals drift 0; revenue ₱382,845,653. Also: the 23 Sept scan items (no links), staging's PO form activated (EXT193 by hand, 42 items held), reader flags as on Staging, pump wired to coop-cedar, upload size limit raised so a 114 MB scan uploads.
+
+**First real scans on prod (Nov 24):** three scans, 163 pages, 125 read, 38 set aside (blanks and sales sheets), 0 failed. A 4-page test read the same as Staging, number for number.
+
+**Still open:** `s2` (drop the plain sales columns and the backup) about a week after the redirect; Shopee keys and worker on coop-cedar; the coop-brand-os redirect; stock email links.
+
+## 2026-11-24 · v1.25.0 Nichido on prod: restock and orders, reconcile, the scan pipeline
+
+Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.
+
+**Ships:** Restock recommendations, Orders, receiving and hit or miss (F11, F12); encrypted sales units and totals kept per period; Reconcile with the PO form; Uploads by card, Per store / Per BA / Per file, sorting board, duplicates; scan beside the numbers with row boxes; server-side scan upload; fixed-template and batch reads, all behind flags; the company menu by workflow; Back keeps your place. Entries with the decisions are on `staging`, by date.
+
+**Decisions (2026-11-24):**
+- Production is `coop-cedar.vercel.app`. `coop-brand-os` can't build the 600 s reader and redirects there.
+- Prod reader flags equal Staging's, after one test scan. The history check stays off.
+- The 23 items from the Sept scan go in without links; Coop links strong matches itself.
+- Staging's PO form is activated on prod, with EXT193 by hand. HFMBLS stays off until Justin confirms.
+- Two app-wide settings ship: the 30 s client page cache and functions in Singapore.
+
+**Left out on purpose:** customers, vouchers, Zoomy inventory header, Shopee labels, Ask Coop changes, the l7-spike test route.
+
+**Before this deploys:** `docs/nichido-prod-cutover.md` 20 to 34 on Nichido prod, sales uploads paused. The app needs `sales_units()` and `po_forms`.
+
 ## 2026-11-25 — PO form page: product lines fold, and the page breathes
 
 The product list showed every product of all 66 lines in a two-column grid, so a one-product line stood as tall as Accessories (53) beside it, and the page was a long scroll. Now (Hick's law):
