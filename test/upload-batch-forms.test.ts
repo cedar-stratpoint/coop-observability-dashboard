@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {batchReadiness, groupForms, isLiveProcessing, scanOrder, scanPosition, scanPageLabel, scanPageNumber, STALE_PROCESSING_MS, storeConflict, type BatchPageInfo} from '../src/upload-batch';
+import {batchReadiness, groupForms, isLiveProcessing, isSingleFormUpload, scanOrder, scanPosition, scanPageLabel, scanPageNumber, STALE_PROCESSING_MS, storeConflict, type BatchPageInfo} from '../src/upload-batch';
 
 describe('isLiveProcessing', () => {
   const now = Date.parse('2026-11-09T12:00:00Z');
@@ -99,5 +99,21 @@ describe('batchReadiness store-change guard', () => {
       pages: [info({uploadId: 'a', page: 1, detectedStore: '473'}), info({uploadId: 'b', page: 2, detectedStore: '473'})],
     });
     expect(r.ready).toBe(true);
+  });
+});
+
+describe('isSingleFormUpload', () => {
+  it('shows the Form pages strip for one store’s form, two-sided included', () => {
+    expect(isSingleFormUpload({totalPages: 5, scans: 1, forms: 1})).toBe(true);
+    expect(isSingleFormUpload({totalPages: 10, scans: 1, forms: 1})).toBe(true);
+    expect(isSingleFormUpload({totalPages: 0, scans: 1, forms: 0})).toBe(true); // nothing read yet
+  });
+  it('hides it for a big scan before any page number restarts (pages read out of order)', () => {
+    expect(isSingleFormUpload({totalPages: 98, scans: 1, forms: 1})).toBe(false);
+    expect(isSingleFormUpload({totalPages: 11, scans: 1, forms: 1})).toBe(false);
+  });
+  it('hides it for several scans or a restart', () => {
+    expect(isSingleFormUpload({totalPages: 6, scans: 2, forms: 1})).toBe(false);
+    expect(isSingleFormUpload({totalPages: 8, scans: 1, forms: 2})).toBe(false);
   });
 });

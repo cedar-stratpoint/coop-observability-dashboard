@@ -6,7 +6,7 @@ import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
 import {useUploadQueue, type QueueItem, type ServerBatchState} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, uploadStatus, uploadType, CATEGORY_LABEL, type ItemCategory, type QueueGroup, type UploadStatusFacet, type UploadType} from '@/components/analyst/upload-queue-format';
-import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
+import {batchCoverage, FORM_PAGES, groupForms, isSingleFormUpload, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {planServerScans} from '@/components/analyst/server-scan-plan';
@@ -82,12 +82,17 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   // scan's forms board handles per-form coverage. groupForms starts a new form at each page-
   // number drop, so >1 group means a multi-store scan. Order by scan position first so the drops
   // reflect the physical page sequence.
-  const singleForm =
-    groupForms(
+  // Big uploads are decided by size up front (Nov 24): pages finish reading out of order, so
+  // the restart that proves several forms can arrive late, and the strip used to flash.
+  const singleForm = isSingleFormUpload({
+    totalPages: Math.max(sb?.totalPages ?? 0, pdfItems.length),
+    scans: q.serverRun?.length ?? 1,
+    forms: groupForms(
       [...donePdf]
         .sort((a, b) => (scanPosition(a.name)?.index ?? 0) - (scanPosition(b.name)?.index ?? 0))
         .map((i) => ({page: i.page ?? null})),
-    ).length <= 1;
+    ).length,
+  });
   const startedAt = Math.min(...q.items.map((i) => i.startedAt ?? Infinity));
   const left = busy ? eta(Number.isFinite(startedAt) ? startedAt : null, s.percent, now) : null;
   const canReview = !busy && Boolean(q.batch.id) && s.readyForReview > 0;
