@@ -10,7 +10,8 @@ import {fileListParams, fileNeighbours, fileReviewQuery, parseFileFilter} from '
 import {scanPageLabel} from '@/src/upload-batch';
 import type {FormVersion} from '@/src/goldline-extract';
 import {duplicateMatchFor, scanScopeIds} from '@/src/goldline-triage-data';
-import {committedSnapshotFor} from '@/src/goldline-inventory-data';
+import {committedSnapshotFor, previousCounts} from '@/src/goldline-inventory-data';
+import {historyNotes, latestBefore} from '@/src/goldline-history-check';
 import {UploadReview} from '@/components/analyst/upload-review';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
 import {firstIsoDate, isoPeriod} from '@/src/period-date';
@@ -160,6 +161,15 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const read = await getPageSuggestion(ctx.companyId, upload.id);
     periodDefault = isoPeriod([read.periodStart, extraction.data?.period_start], [read.periodEnd, extraction.data?.period_end]);
   }
+  // History check (flags only): rows the same store's last committed count can't explain.
+  let rowNotes: Record<number, string> = {};
+  if (extraction && upload.status === 'needs_review') {
+    const head = extraction.data;
+    const store = suggestion?.storeCode ?? (head?.store_code?.trim() || null);
+    const start = suggestion?.periodStart ?? periodDefault?.start ?? null;
+    const prev = await previousCounts(ctx.companyId, store, start, codes);
+    if (start && prev.length) rowNotes = historyNotes(head?.rows ?? [], latestBefore(prev, start), upload.form_version);
+  }
   // Phase 2: a re-upload / duplicate of the same form page, with a count diff. Only
   // meaningful while this page is still under review (not after it's committed itself).
   const duplicate = upload.kind === 'inventory_pdf' && upload.status === 'needs_review'
@@ -187,6 +197,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       nav={nav}
       suggestion={suggestion}
       periodDefault={periodDefault}
+      rowNotes={rowNotes}
       bas={bas}
     />
     </div>

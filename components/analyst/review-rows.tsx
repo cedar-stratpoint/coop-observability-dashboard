@@ -66,6 +66,8 @@ type Props = {
   productNames: Record<string, string>;
   catalog: Record<string, CatalogLite>;
   flagged: number[]; // row indices under the threshold
+  /** Row index → an extra note to show with the row's reason (the history check). */
+  rowNotes?: Record<number, string>;
   resolved: ReadonlySet<number>;
   active: number | null; // the flag the navigator is on
   view: ReviewView;
@@ -89,7 +91,7 @@ type Props = {
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
  *  alternative reading, combined so a flagged row shows a single reason, not three
  *  stacked amber lines. */
-function reasonText(r: ExtractedRow, version?: string | null, known?: boolean): string | null {
+function reasonText(r: ExtractedRow, version?: string | null, known?: boolean, extra?: string): string | null {
   const parts: string[] = [];
   const m = marksText(r);
   if (m) parts.push(m);
@@ -97,6 +99,7 @@ function reasonText(r: ExtractedRow, version?: string | null, known?: boolean): 
   // it is often a plain remark ("O/S"), not an alternative value.
   const note = readerNote(r.alt, noteLayout(version, r), {known});
   if (note) parts.push(note);
+  if (extra) parts.push(extra);
   return parts.length ? parts.join(' · ') : null;
 }
 
@@ -112,6 +115,7 @@ export function ReviewRows({
   productNames,
   catalog,
   flagged,
+  rowNotes,
   resolved,
   active,
   view,
@@ -214,8 +218,8 @@ export function ReviewRows({
               )}
               {/* Secondary: one reason line (marks + alt combined), then the Legacy
                   deducted context as a quieter tertiary line. */}
-              {reasonText(r, version, Boolean(productNames[r.item_code])) && (
-                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]))}</span>
+              {reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i]) && (
+                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i])}</span>
               )}
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
@@ -292,7 +296,7 @@ export function ReviewRows({
             {printedNameHint(r, productNames[r.item_code]) && (
               <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
             )}
-            {reasonText(r, version, Boolean(productNames[r.item_code])) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]))}</span>}
+            {reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span

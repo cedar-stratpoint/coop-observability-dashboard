@@ -16,9 +16,12 @@ import {sanitizeClassification, type PageClassification} from './goldline-segmen
 import {
   buildLegacyManifestPrompt,
   LEGACY_EXTRACTION_SCHEMA,
+  legacyBandCheck,
   legacyPageToCore,
   type LegacyExtractedRow,
+  type FamilyTotal,
 } from './goldline-legacy-extract';
+import {printedPageItems} from './goldline-printed-page';
 import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 import {
@@ -507,13 +510,16 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
       throw new Error('Extraction JSON did not match the expected Legacy page shape');
     }
     const p = parsed as LegacyPage;
+    const {rows} = legacyPageToCore(p.rows);
+    // Band totals (written per heading band) catch misreads that still add up within a row.
+    legacyBandCheck(rows, printedPageItems('legacy', page), Array.isArray(p.family_totals) ? p.family_totals : []);
     return {
       store_code: typeof p.store_code === 'string' ? p.store_code : '',
       store_name: p.store_name ?? undefined,
       period_start: p.period_start ?? null,
       period_end: p.period_end ?? null,
       consultant: p.consultant ?? null,
-      rows: legacyPageToCore(p.rows).rows,
+      rows,
       reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
     };
   }
@@ -682,6 +688,7 @@ type LegacyPage = {
   period_end?: string | null;
   consultant?: string | null;
   rows: LegacyExtractedRow[];
+  family_totals?: FamilyTotal[];
 };
 
 /** Runtime guard for a Legacy extraction: a rows array of {item_code} objects. */

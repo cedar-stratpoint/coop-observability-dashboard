@@ -24,7 +24,7 @@
 
 import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
 import {generatedTemplateItems} from './goldline-form-templates.generated';
-import {printedNames, printedPageItems} from './goldline-printed-page';
+import {printedNames, printedPageItems, type PrintedItem} from './goldline-printed-page';
 
 /** One Legacy item row, in printed column order (handwritten int or null each). */
 export type LegacyExtractedRow = {
@@ -113,6 +113,68 @@ export function legacyPageToCore(rows: LegacyExtractedRow[]): {layout: LegacyLay
   return {layout, rows: rows.map((r) => legacyRowToCore(r, layout))};
 }
 
+/** Consecutive printed rows under one heading band, with the band's price when its rows share
+ *  one (mixed bands like Make-Up Collection print a price per item: null). Pure. */
+export function bandsOf(items: PrintedItem[]): Array<{group: string; price: number | null; items: PrintedItem[]}> {
+  const bands: Array<{group: string; price: number | null; items: PrintedItem[]}> = [];
+  for (const it of items) {
+    const g = it.group ?? '';
+    const last = bands[bands.length - 1];
+    if (last && last.group === g) last.items.push(it);
+    else bands.push({group: g, price: null, items: [it]});
+  }
+  for (const b of bands) {
+    const prices = new Set(b.items.map((i) => i.price));
+    b.price = prices.size === 1 ? b.items[0].price : null;
+  }
+  return bands;
+}
+
+export type FamilyTotal = {family: string; amount: number};
+const bandKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9#&]+/g, '');
+
+/**
+ * Band totals: compare the handwritten "Total Amount of Ending Inventory" for each printed
+ * heading band with sum(ending) × the printed price. A band that disagrees has a misread or
+ * misplaced number somewhere in it, even when every row adds up on its own (QA: BMEPP02 read
+ * 60 + 18 = 78 where the paper has 20 + 18 = 38; the band's written total, ₱10,275, exposes it).
+ * The band's counted rows drop under the review flag line with a plain note; nothing is changed.
+ * Only a written total that is a whole number of units at the band's price is trusted. Bands with
+ * mixed prices are checked against each row's own price. Mutates and returns `rows`.
+ */
+export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: FamilyTotal[]): {checked: number; mismatched: number} {
+  let checked = 0;
+  let mismatched = 0;
+  const byCode = new Map(rows.map((r) => [r.item_code, r] as const));
+  const paper = totals.filter((t) => t && typeof t.amount === 'number' && Number.isFinite(t.amount)).map((t) => ({k: bandKey(t.family), amount: t.amount}));
+  for (const band of bandsOf(items)) {
+    if (!band.group || band.items.some((i) => i.price == null)) continue;
+    const k = bandKey(band.group);
+    const written = paper.find((t) => t.k === k || (t.k.length > 4 && (t.k.includes(k) || k.includes(t.k))));
+    if (!written) continue;
+    const bandRows = band.items.map((i) => byCode.get(i.code)).filter((r): r is CoreRow => Boolean(r));
+    if (!bandRows.length) continue;
+    // Only a written total that is a whole number of units at the printed price can say the
+    // counts are off. One that isn't (ICY POUT ₱14,910 at ₱285 = 52.3 units) means the total
+    // itself was misread or summed differently on the paper; flagging the band's rows for it
+    // only buries the real flags (QA re-read of San Pablo p.7: 19 rows flagged, 15 of them for that).
+    const price = band.price ?? null;
+    if (price != null && price > 0 && Math.abs(written.amount / price - Math.round(written.amount / price)) > 1e-6) continue;
+    checked++;
+    const sum = band.items.reduce((a, i) => a + (byCode.get(i.code)?.ending_on_hand ?? 0) * (i.price as number), 0);
+    if (Math.abs(sum - written.amount) <= 1) continue;
+    mismatched++;
+    const peso = (n: number) => `₱${n.toLocaleString('en-US')}`;
+    const note = `Written total for this band is ${peso(written.amount)}; these rows add up to ${peso(sum)}`;
+    for (const r of bandRows) {
+      if (r.ending_on_hand == null) continue; // an empty row can't be the misread; keep it quiet
+      r.confidence = Math.min(r.confidence ?? 1, 0.55);
+      r.alt = r.alt ? `${r.alt}; ${note}` : note;
+    }
+  }
+  return {checked, mismatched};
+}
+
 /**
  * Legacy self-check using the form's own PRINTED identities, so Legacy is validated
  * even though it has no three-location sum:
@@ -156,14 +218,28 @@ export function buildLegacyManifestPrompt(page: number): string {
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
   }
-  const list = items.map((i) => `${i.code} ${i.product}`).join(' · ');
+  // Rows grouped under their printed heading (when the printed list has them), so the reader
+  // can name a band when it transcribes the band's written total.
+  const printed = printedPageItems('legacy', page);
+  const banded = printed.some((i) => i.group);
+  const list = banded
+    ? bandsOf(printed)
+        .map((b) => `[${b.group}${b.price != null ? ` ₱${b.price}` : ''}] ${b.items.map((i) => `${i.code} ${i.product}`).join(' · ')}`)
+        .join('\n  ')
+    : items.map((i) => `${i.code} ${i.product}`).join(' · ');
   return [
     `PAGE ${page} of ${PAGE_COUNT}. Form version LEGACY (the older 7-column "deducted" form).`,
     'Columns, left to right (handwritten int or null). Put each number in the field for',
     'the column POSITION it is written in, whatever is handwritten over the header:',
     '  beginning (col1) · delivery (col2) · begin_plus_delivery (col3) · deducted_pcs (col4)',
     '  · ending_on_hand (col6, "Ending Inventory / Stock on Hand").',
-    '  Skip col5 and col7 — those are peso amounts, derived downstream (leave them out).',
+    '  Skip col5 (a peso amount) in the rows.',
+    'Band totals: col7 ("Total Amount of Ending Inventory") has a handwritten peso amount per',
+    'heading band, often with a bracket spanning the band. Transcribe each into "family_totals"',
+    'with the band\'s heading exactly as listed below in [brackets] and the amount as a number.',
+    'It should equal (sum of the band\'s ending) × the band\'s printed price; if it does not, look',
+    'again in that band for a missed number, a misread digit, or a number on the wrong row. Still',
+    'return only what is written.',
     'Most consultants use col1, col2 and col3 as Stockroom, Drawer and Selling area (often',
     'written over the printed headers); then col1 + col2 + col3 = col6. On a page filled',
     'the printed way instead, col3 = col1 + col2 and col6 = col3 − col4. Use whichever holds',
@@ -172,7 +248,9 @@ export function buildLegacyManifestPrompt(page: number): string {
     'Name columns in "alt" by what this page uses them for (Stockroom, Drawer, Selling area,',
     'or Beginning, Delivery, Beginning + Delivery, Deducted) and Ending, never "col3".',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
-    'Item rows on this page, in printed order — read a value or null for each:',
+    banded
+      ? 'Item rows on this page, in printed order under their [heading ₱price] — read a value or null for each:'
+      : 'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,
   ].join('\n');
 }
@@ -205,6 +283,15 @@ export const LEGACY_EXTRACTION_SCHEMA = {
         required: ['item_code', 'ending_on_hand', 'confidence'],
       },
     },
+    family_totals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {family: {type: 'string'}, amount: {type: 'number'}},
+        required: ['family', 'amount'],
+      },
+    },
   },
-  required: ['rows'],
+  required: ['rows', 'family_totals'],
 } as const;

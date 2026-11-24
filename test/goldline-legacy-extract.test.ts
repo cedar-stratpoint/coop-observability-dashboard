@@ -138,3 +138,56 @@ describe('buildLegacyManifestPrompt rows', () => {
     expect(buildLegacyManifestPrompt(1)).toMatch(/never "col3"/);
   });
 });
+
+import {bandsOf, legacyBandCheck} from '../src/goldline-legacy-extract';
+import {printedPageItems} from '../src/goldline-printed-page';
+
+describe('legacyBandCheck (written band totals)', () => {
+  const items = printedPageItems('legacy', 3);
+  const core = (code: string, drawer: number | null, sell: number | null, end: number | null) =>
+    ({item_code: code, stockroom: null, drawer, selling_area: sell, delivery: null, ending_on_hand: end, confidence: 0.85, alt: null}) as const;
+
+  it('flags a band whose rows each add up but miss the written total (QA: BMEPP02 60 + 18 = 78, paper 20 + 18 = 38)', () => {
+    // San Pablo p.7 Brow Master rows as Coop read them; the paper writes ₱10,275 beside the band.
+    const rows = [core('BMEPC01', 20, 8, 28), core('BMEPP02', 60, 18, 78), core('BMEPG03', null, null, null), core('BMEPM04', 12, 10, 22), core('BMEPBS05', 15, 7, 22)].map((r) => ({...r}));
+    // The fresh read of that page transcribed the band's written total as ₱16,275 (93 units at ₱175).
+    const res = legacyBandCheck(rows, items, [{family: 'BROW MASTER EYE PENCIL', amount: 16275}]);
+    expect(res).toEqual({checked: 1, mismatched: 1});
+    const pecan = rows.find((r) => r.item_code === 'BMEPP02')!;
+    expect(pecan.confidence).toBeLessThan(0.6);
+    expect(pecan.alt).toBe('Written total for this band is ₱16,275; these rows add up to ₱26,250');
+    expect(rows.find((r) => r.item_code === 'BMEPG03')!.confidence).toBe(0.85); // empty row stays quiet
+  });
+
+  it('ignores a written total that is not a whole number of units at the printed price', () => {
+    // ICY POUT, San Pablo p.7: ₱14,910 at ₱285 is 52.3 units, so the total itself is off.
+    const rows = [{...core('IPSLS01', 4, 2, 6)}, {...core('IPSLS02', 2, 2, 4)}];
+    expect(legacyBandCheck(rows, items, [{family: 'ICY POUT SERUM LIP STAIN', amount: 14910}])).toEqual({checked: 0, mismatched: 0});
+    expect(rows.every((r) => r.confidence === 0.85)).toBe(true);
+  });
+
+  it('leaves a band alone when it matches its written total', () => {
+    const rows = [core('BMEPC01', 20, 8, 28), core('BMEPP02', 20, 18, 38), core('BMEPM04', 12, 10, 22), core('BMEPBS05', 15, 7, 22)].map((r) => ({...r}));
+    const sum = (28 + 38 + 22 + 22) * 175;
+    expect(legacyBandCheck(rows, items, [{family: 'Brow Master Eye Pencil', amount: sum}])).toEqual({checked: 1, mismatched: 0});
+    expect(rows.every((r) => r.confidence === 0.85)).toBe(true);
+  });
+
+  it('checks nothing without a written total or a printed band list', () => {
+    const rows = [{...core('BMEPP02', 60, 18, 78)}];
+    expect(legacyBandCheck(rows, items, [])).toEqual({checked: 0, mismatched: 0});
+    expect(legacyBandCheck(rows, [], [{family: 'BROW MASTER EYE PENCIL', amount: 1}])).toEqual({checked: 0, mismatched: 0});
+  });
+
+  it('groups printed rows into bands with a shared price', () => {
+    const b = bandsOf(items).find((x) => x.group === 'BROW MASTER EYE PENCIL')!;
+    expect(b.price).toBe(175);
+    expect(b.items.map((i) => i.code)).toContain('BMEPP02');
+  });
+
+  it('lists Legacy rows under their [heading ₱price] and asks for band totals', () => {
+    const p = buildLegacyManifestPrompt(3);
+    expect(p).toContain('[BROW MASTER EYE PENCIL ₱175]');
+    expect(p).toContain('family_totals');
+  });
+});
