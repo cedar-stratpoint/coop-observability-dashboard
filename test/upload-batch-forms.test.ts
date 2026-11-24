@@ -1,5 +1,38 @@
 import {describe, expect, it} from 'vitest';
-import {groupForms, scanOrder, scanPosition} from '../src/upload-batch';
+import {batchReadiness, groupForms, isLiveProcessing, scanOrder, scanPosition, scanPageLabel, scanPageNumber, STALE_PROCESSING_MS, storeConflict, type BatchPageInfo} from '../src/upload-batch';
+
+describe('isLiveProcessing', () => {
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  const at = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
+  it('is false for any non-processing status', () => {
+    expect(isLiveProcessing({status: 'needs_review', created_at: at(0)}, now)).toBe(false);
+    expect(isLiveProcessing({status: 'committed', created_at: at(999)}, now)).toBe(false);
+  });
+  it('is true for a recently-created processing page (still reading)', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: at(2)}, now)).toBe(true);
+  });
+  it('is false for a page stuck processing past the stale window (orphaned read)', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: at(STALE_PROCESSING_MS / 60_000 + 1)}, now)).toBe(false);
+    expect(isLiveProcessing({status: 'processing', created_at: at(24 * 60)}, now)).toBe(false); // a day old
+  });
+  it('treats an unparseable timestamp as live, so the gate is never relaxed by mistake', () => {
+    expect(isLiveProcessing({status: 'processing', created_at: 'not-a-date'}, now)).toBe(true);
+  });
+});
+
+describe('scanPageLabel', () => {
+  it('labels a split sheet by its scan position, not a form page', () => {
+    expect(scanPageLabel('Scan2026-10-30_171554 (page 50 of 98).pdf').title).toBe('Page 50 of 98');
+    expect(scanPageLabel('whole-form.pdf')).toEqual({title: 'whole-form.pdf', sub: null, index: 0});
+  });
+});
+
+describe('scanPageNumber', () => {
+  it('reads the sheet position in the scan, or null for a whole file', () => {
+    expect(scanPageNumber('Scan2026-10-30_171554 (page 52 of 98).pdf')).toBe(52);
+    expect(scanPageNumber('whole-form.pdf')).toBeNull();
+  });
+});
 
 describe('scanPosition', () => {
   it('reads where a split page sat in its scan', () => {
@@ -35,5 +68,36 @@ describe('groupForms', () => {
   });
   it('keeps a page scanned twice in its form (the review asks to remove the copy)', () => {
     expect(groupForms(pages(1, 2, 2, 3)).length).toBe(1);
+  });
+});
+
+describe('storeConflict', () => {
+  it('is no conflict when stores agree or are unread', () => {
+    expect(storeConflict([{detectedStore: '473'}, {detectedStore: '473'}, {detectedStore: null}]).conflict).toBe(false);
+    expect(storeConflict([{detectedStore: null}, {detectedStore: undefined}]).conflict).toBe(false);
+  });
+  it('flags a genuine second store and lists both', () => {
+    const r = storeConflict([{detectedStore: '473'}, {detectedStore: '5300'}, {detectedStore: '473'}]);
+    expect(r.conflict).toBe(true);
+    expect(r.stores).toEqual(['473', '5300']);
+  });
+});
+
+describe('batchReadiness store-change guard', () => {
+  const info = (p: Partial<BatchPageInfo>): BatchPageInfo => ({uploadId: 'u', page: 1, flagged: 0, resolved: 0, status: 'needs_review', ...p});
+  it('blocks commit when pages read different stores', () => {
+    const r = batchReadiness({
+      storeCode: '473', periodStart: '2026-09-01', periodEnd: '2026-09-15',
+      pages: [info({uploadId: 'a', page: 1, detectedStore: '473'}), info({uploadId: 'b', page: 2, detectedStore: '5300'})],
+    });
+    expect(r.ready).toBe(false);
+    if (!r.ready) expect(r.reason).toMatch(/different stores/);
+  });
+  it('is ready when stores agree and everything else passes', () => {
+    const r = batchReadiness({
+      storeCode: '473', periodStart: '2026-09-01', periodEnd: '2026-09-15',
+      pages: [info({uploadId: 'a', page: 1, detectedStore: '473'}), info({uploadId: 'b', page: 2, detectedStore: '473'})],
+    });
+    expect(r.ready).toBe(true);
   });
 });

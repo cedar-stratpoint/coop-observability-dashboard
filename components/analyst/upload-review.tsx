@@ -1,9 +1,10 @@
 'use client';
 
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
@@ -12,7 +13,13 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
+import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
+import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
+import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
+import {estimateRowBoxes} from '@/src/row-box-fill';
+import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
+import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
@@ -25,6 +32,46 @@ const LOW = LOW_BELOW; // below this a row is flagged for human eyes (shared wit
 const peso = (n: number) => `₱${n.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
 
 type EditRow = ExtractedRow;
+
+/** The one-page view's place in the scan (from the Per file list): its label, the ‹ ›
+ *  neighbours in that same filtered list, and the list itself for a fresh-tab Back. */
+export type PageCrumb = {label: string; href: string};
+export type PageNav = {
+  source: string;
+  label: string;
+  prevHref: string | null;
+  nextHref: string | null;
+  backHref: string;
+  /** The clickable trail shown top-left: the scan, then the chosen store/BA when scoped. The
+   *  last segment links to where Back goes. */
+  crumbs: PageCrumb[];
+};
+/** Coop's suggestion for this page's header. `storeFrom` says where the store came from. */
+export type PageSuggestionView = {storeCode: string | null; storeFrom: 'page' | 'batch' | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+
+// What the last committed page of a scan used, so the next page (pages 2 to 5 rarely print a
+// store) can start from it, plus a one-line "committed" note to show after moving on. Kept
+// per tab in sessionStorage: a convenience, never the source of truth.
+type Carry = {storeCode: string; periodStart: string; periodEnd: string; ba: string; done?: string};
+const carryKey = (source: string) => `coop.perfile.carry.${source}`;
+function readCarry(source: string): Carry | null {
+  try {
+    const v = JSON.parse(window.sessionStorage.getItem(carryKey(source)) ?? 'null');
+    return v && typeof v.storeCode === 'string' ? (v as Carry) : null;
+  } catch {
+    return null;
+  }
+}
+function writeCarry(source: string, c: Carry) {
+  try {
+    window.sessionStorage.setItem(carryKey(source), JSON.stringify(c));
+  } catch {
+    /* storage blocked: the next page just starts from its own suggestion */
+  }
+}
+
+const navBtn =
+  'inline-flex size-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-[transform,border-color,color] duration-150 ease-out hover:border-foreground/30 hover:text-foreground active:scale-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none';
 
 function toIntOrNull(s: string): number | null {
   const t = s.trim();
@@ -40,10 +87,16 @@ export function UploadReview({
   extraction,
   scanUrl,
   productNames = {},
+  rowNames,
   inventoryHref = null,
   catalog = {},
   pageStrip = null,
   stores = [],
+  nav = null,
+  suggestion = null,
+  periodDefault = null,
+  rowNotes = {},
+  bas,
 }: {
   company: string;
   canEdit: boolean;
@@ -53,6 +106,8 @@ export function UploadReview({
   scanUrl?: string | null;
   /** item_code → printed product name (from the page manifest), for the rows table. */
   productNames?: Record<string, string>;
+  /** Each row's own product name, in row order. */
+  rowNames?: (string | null)[];
   /** Inventory page for the store + period this scan was committed to, once committed. */
   inventoryHref?: string | null;
   /** item_code → printed product line + price (catalog), for the form grid and totals check. */
@@ -61,24 +116,111 @@ export function UploadReview({
   pageStrip?: FormPageStrip | null;
   /** The company's stores, for the store picker. */
   stores?: StoreOption[];
+  /** Set when opened from a scan's Per file list: the one-page view with ‹ › arrows. */
+  nav?: PageNav | null;
+  /** Coop's prefill for store / period / BA in the one-page view. */
+  suggestion?: PageSuggestionView | null;
+  /** The period to prefill (YYYY-MM-DD) when there is no suggestion (page opened on its own). */
+  periodDefault?: {start: string | null; end: string | null} | null;
+  /** Row index → a history-check note (the store's last count can't explain the row); flagged. */
+  rowNotes?: Record<number, string>;
+  /** The BA list (each store's current BA and every name), for the BA field. */
+  bas?: {byStore: Record<string, string>; names: string[]};
 }) {
   const router = useRouter();
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
+  // Re-read a failed page in place (synchronous, heartbeat-kept-alive), then refresh to pick up
+  // the new status/reason — so a "couldn't read" page is retried without leaving this screen.
+  const [rereading, setRereading] = useState(false);
+  // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
+  const rot = useScanRotation(upload.id, upload.orientation);
+  // The ‹ › stepper replaces in place, so keep the scan board's remembered row on this page:
+  // Back then marks the page you were last on.
+  useTrackReturnRow('scan', upload.id, '/uploads/');
+  // The row the reviewer points at (hover or focus): boxed on the scan beside the rows when the read
+  // located it.
+  const [pointRow, setPointRow] = useState<number | null>(null);
+  const rereadPage = () => {
+    setRereading(true);
+    sendReread({company, uploadId: upload.id})
+      .promise.catch(() => {})
+      .finally(() => {
+        setRereading(false);
+        router.refresh();
+      });
+  };
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // When the lightbox was opened from a row's "locate on scan", the approximate band to draw.
+  const [lightboxHighlight, setLightboxHighlight] = useState<ScanHighlight | undefined>(undefined);
+  // Sentinel at the end of the full confidence summary; the sticky condensed bar shows once it
+  // scrolls above the app header.
+  const confEnd = useRef<HTMLDivElement>(null);
 
   const head = extraction?.data;
   const [rows, setRows] = useState<EditRow[]>(() => (head?.rows ?? []).map((r) => ({...r})));
-  const [storeCode, setStoreCode] = useState(head?.store_code ?? '');
-  const [periodStart, setPeriodStart] = useState(head?.period_start ?? '');
-  const [periodEnd, setPeriodEnd] = useState(head?.period_end ?? '');
+  const [storeCode, setStoreCode] = useState(suggestion?.storeCode ?? head?.store_code ?? '');
+  // Never the reader's raw text ("10/16/2026"): a date box blanks any value not YYYY-MM-DD.
+  const [periodStart, setPeriodStart] = useState(suggestion?.periodStart ?? periodDefault?.start ?? '');
+  const [periodEnd, setPeriodEnd] = useState(suggestion?.periodEnd ?? periodDefault?.end ?? '');
+  // The BA written on the form. Blank saves under the store's BA from earlier forms.
+  const [ba, setBa] = useState(suggestion?.consultant ?? head?.consultant ?? '');
+  const storeBa = bas?.byStore[storeCode] ?? null;
+  // Which header fields were carried over from the page committed just before this one.
+  const [carried, setCarried] = useState(false);
+  const [justDone, setJustDone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!nav) return;
+    const c = readCarry(nav.source);
+    if (!c) return;
+    // The note shows once, on the page the reviewer moved to after committing.
+    if (c.done) {
+      setJustDone(c.done);
+      writeCarry(nav.source, {...c, done: undefined});
+    }
+    if (committed || !canEdit) return;
+    // Only fill what this page's own reading left empty: its own read always wins.
+    const fill = (mine: string | null | undefined, theirs: string, set: (v: string) => void) => {
+      if (mine || !theirs) return false;
+      set(theirs);
+      return true;
+    };
+    const used = [
+      fill(suggestion?.storeCode, c.storeCode, setStoreCode),
+      fill(suggestion?.periodStart, c.periodStart, setPeriodStart),
+      fill(suggestion?.periodEnd, c.periodEnd, setPeriodEnd),
+      fill(suggestion?.consultant, c.ba, setBa),
+    ].some(Boolean);
+    setCarried(used);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page (the route keys this component by upload id)
+  }, []);
+
+  // ← / → step pages, unless the reviewer is typing in a field (where arrows move the caret).
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || lightboxOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const href = e.key === 'ArrowLeft' ? nav.prevHref : e.key === 'ArrowRight' ? nav.nextHref : null;
+      if (!href) return;
+      e.preventDefault();
+      router.replace(href);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nav, router, lightboxOpen]);
   // Flags = rows under the threshold, fixed at load (editing a value doesn't change
   // the reader's confidence). A flag is resolved by editing its row or "Looks right".
   const flagged = useMemo(
-    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW).map((x) => x.i),
-    [head],
+    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null).map((x) => x.i),
+    [head, rowNotes],
   );
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState<number | null>(null);
+  // Jumping to a flag (the navigator) points the scan at that row too.
+  useEffect(() => {
+    if (active != null) setPointRow(active);
+  }, [active]);
   const [view, setView] = useState<ReviewView>(flagged.length ? 'needs' : 'all');
   const [formTotal, setFormTotal] = useState('');
   const [query, setQuery] = useState(''); // the rows search, lifted so jumping to a flag can clear it
@@ -88,6 +230,8 @@ export function UploadReview({
   const docConfidence = extraction?.docConfidence ?? null;
   const open = unresolvedFlags(flagged, resolved);
   const totals = useMemo(() => pageTotal(rows, catalog), [rows, catalog]);
+  // Rows the position request missed still get a (dashed) pointer, placed between their neighbours.
+  const boxEstimates = useMemo(() => estimateRowBoxes(head?.rows ?? [], (c) => catalog[c]?.productLine, (c) => productNames[c]), [head, catalog, productNames]);
   const check = reconcile(totals.total, formTotal);
 
   function updateCell(index: number, key: ColKey, raw: string) {
@@ -126,7 +270,7 @@ export function UploadReview({
       storeCode,
       periodStart,
       periodEnd,
-      consultant: head?.consultant ?? null,
+      consultant: nav ? ba.trim() || null : head?.consultant ?? null,
       rows: rows.map((r) => ({
         item_code: r.item_code,
         stockroom: r.stockroom,
@@ -138,6 +282,16 @@ export function UploadReview({
     });
     setBusy(false);
     if (res.ok) {
+      if (nav) {
+        // One page at a time: remember this header for the next page, then move on to it.
+        const done = `${nav.label} committed: ${res.committed} ${res.committed === 1 ? 'row' : 'rows'} into Store ${storeCode.trim()}.`;
+        writeCarry(nav.source, {storeCode: storeCode.trim(), periodStart, periodEnd, ba: ba.trim(), done: nav.nextHref ? done : undefined});
+        if (nav.nextHref) {
+          setBusy(true); // stays disabled while the next page loads, so it can't commit twice
+          router.replace(nav.nextHref);
+          return;
+        }
+      }
       setNotice({kind: 'ok', text: `Committed ${res.committed} inventory rows.`});
       router.refresh();
     } else {
@@ -145,11 +299,133 @@ export function UploadReview({
     }
   }
 
-  // Two-column only when there's a scan to show beside the workbench (inventory PDF).
-  const twoCol = Boolean(scanUrl && extraction);
+  // Where the prefilled store came from, said plainly, so a wrong guess is easy to spot.
+  const suggestionNote = !storeCode.trim()
+    ? 'Coop couldn’t read a store on this page. Pick it from the form; the next pages start from it.'
+    : carried && !suggestion?.storeCode
+      ? `Store ${storeCode} carried over from the page you committed before. Change it if this page is another store’s.`
+      : suggestion?.storeCode && storeCode === suggestion.storeCode
+        ? suggestion.storeFrom === 'page'
+          ? `Coop read Store ${storeCode} on this page. Change it if that’s wrong.`
+          : `Suggested from this scan’s batch (Store ${storeCode}). Check it against the page.`
+        : 'Committed into this store and period. Pages with the same store and period add up to one Inventory count.';
+
+  // Two-column whenever there's a scan beside the content: the workbench when a page was
+  // read, or the "set aside" explainer when it wasn't (a blank back or a sales sheet).
+  const twoCol = Boolean(scanUrl);
+
+  // A scanned page with nothing to review: a blank back, a sales sheet, or an unread page.
+  // Give it a plain explainer instead of the empty review workbench.
+  const isCsv = upload.kind === 'pos_csv' || upload.kind === 'pos_xlsx';
+  const setAside =
+    upload.page_kind === 'sales'
+      ? {pill: 'Sales report', title: 'Sales report, set aside', body: upload.reject_reason ?? 'This page is a sales report, not an inventory form. Sales are handled on their own, so it was set aside.', tone: 'var(--muted-foreground)'}
+      : upload.page_kind === 'blank'
+        ? {pill: 'Blank page', title: 'Blank page, set aside', body: upload.reject_reason ?? 'This looks like a blank page (a back side with no form), so it was set aside.', tone: 'var(--muted-foreground)'}
+        : upload.status === 'failed'
+          ? {pill: 'Couldn’t read', title: 'Coop couldn’t read this page', body: upload.reject_reason ?? 'Coop couldn’t read this scan reliably. Re-read it, or review it by hand.', tone: 'var(--status-crit)'}
+          : {pill: 'Set aside', title: 'Set aside', body: upload.reject_reason ?? 'This page was set aside, so there is nothing to review or commit here.', tone: 'var(--muted-foreground)'};
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-[140rem] flex-col gap-5 px-4 py-6 xl:px-6">
+      {nav ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-3">
+            {/* Clickable breadcrumb: the scan, then the chosen store/BA (when scoped). The ←
+                does a browser-style Back (the arrows replace history, so one step back is the
+                board the way it was left); each crumb is a direct link for a fresh tab or a jump
+                further up. */}
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => {
+                  // Step back only when the previous entry really is the board/uploads (a deep
+                  // link in a tab with other history would otherwise leave Coop). Browsers
+                  // without the Navigation API keep the old history-length check.
+                  const prev = previousEntryUrl();
+                  const canStep = 'navigation' in window ? prev?.startsWith('/uploads') : window.history.length > 1;
+                  markReturn('scan');
+                  if (canStep) router.back();
+                  // Not one step behind (reloaded, or arrived another way): go to the list as
+                  // it was left (its page, filters, scroll), else the fixed parent.
+                  else router.push(returnTarget('scan', nav.backHref, '/uploads/'), {scroll: false});
+                }}
+                aria-label="Back"
+                className="shrink-0 transition-colors hover:text-foreground"
+              >
+                <ArrowLeft className="size-3.5" />
+              </button>
+              {nav.crumbs.map((c, i) => (
+                <span key={`${c.href}-${i}`} className="flex min-w-0 items-center gap-1">
+                  {i > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />}
+                  {/* The nearest crumb is where this review was opened from: it returns to that
+                      list as it was left (page, filters, scroll, the page marked), stepping back
+                      through history when the list is right behind. Crumbs further up are plain. */}
+                  {i === nav.crumbs.length - 1 ? (
+                    <ReturnLink
+                      listKey="scan"
+                      fallback={c.href}
+                      detailPrefix="/uploads/"
+                      replace
+                      className={cn('truncate transition-colors hover:text-foreground', nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]')}
+                      title={c.label}
+                    >
+                      {c.label}
+                    </ReturnLink>
+                  ) : (
+                    <Link
+                      href={c.href}
+                      // A breadcrumb goes UP the hierarchy, so it replaces this page rather than
+                      // pushing a new entry. Pushing left this review in history, so the board's
+                      // own "‹ Uploads" Back then returned here instead of the uploads list (a loop).
+                      replace
+                      className={cn(
+                        'truncate transition-colors hover:text-foreground',
+                        i === nav.crumbs.length - 1 && nav.crumbs.length > 1 ? 'max-w-[14rem] font-medium text-foreground/80' : 'max-w-[13rem]',
+                      )}
+                      title={c.label}
+                    >
+                      {c.label}
+                    </Link>
+                  )}
+                </span>
+              ))}
+            </nav>
+            {/* Page stepper, upper right. An arrow shows only when there is a page that way;
+                the empty slot keeps the other arrow from jumping under the cursor. Switching
+                pages is instant (no slide): it is repeated many times in a session. */}
+            <nav aria-label="Pages in this scan" className="flex shrink-0 items-center gap-1.5">
+              {nav.prevHref ? (
+                <Link href={nav.prevHref} replace aria-label="Previous page" title="Previous page (←)" className={navBtn}>
+                  <ChevronLeft className="size-4" />
+                </Link>
+              ) : (
+                <span aria-hidden className="size-8" />
+              )}
+              <span
+                aria-current="page"
+                className="inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold tabular-nums"
+                style={{color: toneText('var(--primary)'), background: 'color-mix(in oklab, var(--primary) 14%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)'}}
+              >
+                {nav.label}
+              </span>
+              {nav.nextHref ? (
+                <Link href={nav.nextHref} replace aria-label="Next page" title="Next page (→)" className={navBtn}>
+                  <ChevronRight className="size-4" />
+                </Link>
+              ) : (
+                <span aria-hidden className="size-8" />
+              )}
+            </nav>
+          </div>
+          <h1 className="font-heading text-xl font-semibold tracking-tight">{committed ? 'This page is committed' : extraction ? 'Review this page' : 'This page'}</h1>
+          {justDone && (
+            <p aria-live="polite" className="inline-flex items-center gap-1.5 text-xs" style={{color: toneText('var(--status-good)')}}>
+              <CheckCircle2 className="size-3.5" /> {justDone}
+            </p>
+          )}
+        </div>
+      ) : (
       <div className="flex flex-col gap-1">
         <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" /> Back to uploads
@@ -187,7 +463,7 @@ export function UploadReview({
                   </span>
                 );
               return (
-                <Link key={p.page} href={`/uploads/${p.uploadId}`} className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
+                <Link key={p.page} href={`/uploads/${p.uploadId}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
                   {inner}
                 </Link>
               );
@@ -201,6 +477,7 @@ export function UploadReview({
           </nav>
         )}
       </div>
+      )}
 
       {committed && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
@@ -219,7 +496,7 @@ export function UploadReview({
         {/* Left: scan preview, pinned under the app header while the rows scroll (desktop);
             sized to the viewport so it's always fully in view. Click to enlarge. */}
         {scanUrl && (
-          <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[28%] lg:shrink-0">
+          <div className={cn('lg:shrink-0', extraction ? 'lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%] 2xl:w-[45%]' : 'lg:w-[17rem]')}>
             <Card>
               <CardHeader className="gap-0">
                 <div className="flex items-center justify-between gap-2">
@@ -234,40 +511,21 @@ export function UploadReview({
                 </div>
               </CardHeader>
               <CardContent>
-                {/* Click the thumbnail to enlarge. The iframe is pointer-events-none so the
-                    click lands on the button overlay, not the embedded PDF viewer. */}
-{/* Phones can't show a PDF inside the page — open it in the phone's viewer instead. */}
-                <a
-                  href={scanUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm transition-colors active:bg-muted md:hidden"
-                >
-                  <FileText aria-hidden className="size-5 shrink-0 text-muted-foreground" />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="font-medium">View the scan</span>
-                    <span className="text-xs text-muted-foreground">Opens the PDF to compare with the rows below</span>
-                  </span>
-                  <ExternalLink aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setLightboxOpen(true)}
-                  className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
-                  aria-label="Enlarge scan"
-                >
-                  <iframe
-                    src={scanUrl}
-                    title="Scanned inventory form"
-                    tabIndex={-1}
-                    className="pointer-events-none h-[360px] w-full lg:h-[min(640px,calc(100dvh-12rem))]"
-                  />
-                  <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-xs font-medium text-foreground">
-                      <Maximize2 className="size-3" /> Click to enlarge
-                    </span>
-                  </span>
-                </button>
+                {/* The scan beside the numbers: pinch or the buttons to zoom, drag to pan, click to enlarge
+                    (centered, fit to the screen). Upside-down pages show upright; Rotate fixes a wrong guess.
+                    Phones get the same pane stacked above the rows. */}
+                <ScanPageViewer
+                  url={scanUrl}
+                  rotation={rot.deg}
+                  onRotate={rot.toggle}
+                  onEnlarge={() => {
+                    setLightboxHighlight(undefined);
+                    setLightboxOpen(true);
+                  }}
+                  pointBox={scanPointBox(pointRow != null ? rows[pointRow] : null, head?.slant, rot.flipped, pointRow != null ? boxEstimates[pointRow] : null)}
+                  tilt={head?.slant?.angle}
+                  className={cn('rounded-md border border-border', extraction ? 'h-[45dvh] lg:h-[calc(100dvh-12rem)]' : 'h-[20rem]')}
+                />
               </CardContent>
             </Card>
           </div>
@@ -276,18 +534,14 @@ export function UploadReview({
         {/* Right: the review content (~72% when two-column). */}
         <div className="flex min-w-0 flex-1 flex-col gap-5">
 
-      {/* CSV / no-extraction summary */}
-      {!extraction && (
+      {/* A sales CSV / POS export: commits straight to sales, nothing to review. */}
+      {!extraction && isCsv && (
         <Card>
           <CardHeader>
-            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : upload.kind === 'pos_xlsx' ? 'POS Sales Data' : 'Upload'}</CardTitle>
+            <CardTitle>{upload.kind === 'pos_csv' ? 'Sales CSV' : 'POS Sales Data'}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            <p className="text-muted-foreground">
-              {upload.kind === 'pos_csv' || upload.kind === 'pos_xlsx'
-                ? 'Sales files commit directly to the sales table, so there is nothing to review here.'
-                : 'No extraction is staged for this file.'}
-            </p>
+            <p className="text-muted-foreground">Sales files commit directly to the sales table, so there is nothing to review here.</p>
             <p>
               Status: <span className="font-medium">{upload.status}</span>
             </p>
@@ -296,9 +550,48 @@ export function UploadReview({
         </Card>
       )}
 
+      {/* A scanned page that was set aside (blank back, sales sheet) or couldn't be read:
+          a plain explainer beside its modest preview, not the empty review workbench. */}
+      {!extraction && !isCsv && (
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3 py-6">
+            <span
+              className="inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium"
+              style={{color: toneText(setAside.tone), background: `color-mix(in oklab, ${setAside.tone} 14%, transparent)`}}
+            >
+              {setAside.pill}
+            </span>
+            <h2 className="font-heading text-lg font-semibold tracking-tight">{setAside.title}</h2>
+            <p className="max-w-prose text-sm text-muted-foreground">{setAside.body}</p>
+            <p className="text-xs text-muted-foreground">
+              {upload.status === 'failed'
+                ? 'It won’t be committed until it reads. '
+                : 'It won’t be committed, which is expected. '}
+              {nav?.nextHref && 'Use the arrows above, or ← and →, to move to the next page.'}
+            </p>
+            {upload.status === 'failed' && canEdit && (
+              <Button onClick={rereadPage} disabled={rereading} className="mt-1">
+                {rereading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                {rereading ? 'Re-reading…' : 'Re-read this page'}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* PDF review workbench */}
       {extraction && (
         <>
+          <ConfidenceSticky
+            watch={confEnd}
+            docConfidence={docConfidence}
+            rowConfidences={rows.map((r) => r.confidence)}
+            page={extraction.page}
+            onReviewFlagged={() => {
+              setView('needs');
+              goToFlag(open[0] ?? flagged[0] ?? null);
+            }}
+          />
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -308,7 +601,7 @@ export function UploadReview({
                 ) : null}
               </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-5">
+            <CardContent className="flex flex-col gap-7">
               <DocumentConfidence
                 docConfidence={docConfidence}
                 rowConfidences={rows.map((r) => r.confidence)}
@@ -317,10 +610,13 @@ export function UploadReview({
                   goToFlag(open[0] ?? flagged[0] ?? null);
                 }}
               />
+              <div ref={confEnd} aria-hidden className="h-0" />
 
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 text-xs font-medium text-muted-foreground">Which store and period is this count for?</legend>
-                <div className="flex flex-wrap items-end gap-3">
+              <fieldset className="flex flex-col gap-3">
+                <legend className="mb-3 text-xs font-medium text-muted-foreground">
+                  {nav ? 'Store, period and BA for this page' : 'Which store and period is this count for?'}
+                </legend>
+                <div className="flex flex-wrap items-end gap-4">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-medium">Store</span>
                     <StoreCodeField value={storeCode} onChange={setStoreCode} stores={stores} disabled={committed || !canEdit} />
@@ -346,8 +642,29 @@ export function UploadReview({
                       className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
                     />
                   </label>
+                  {nav && (
+                    <label className="flex min-w-48 flex-1 flex-col gap-1">
+                      <span className="text-xs font-medium">BA on the form</span>
+                      <input
+                        value={ba}
+                        onChange={(e) => setBa(e.target.value)}
+                        list="ba-names"
+                        maxLength={80}
+                        placeholder={storeBa ?? 'Full name'}
+                        autoComplete="off"
+                        disabled={committed || !canEdit}
+                        className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
+                      />
+                      <datalist id="ba-names">
+                        {(bas?.names ?? []).map((n) => (
+                          <option key={n} value={n} />
+                        ))}
+                      </datalist>
+                    </label>
+                  )}
                 </div>
-                {(extraction.page ?? 1) > 1 && !committed && (
+                {nav && !committed && <p className="text-xs text-muted-foreground">{suggestionNote}</p>}
+                {!nav && (extraction.page ?? 1) > 1 && !committed && (
                   <p className="text-xs text-muted-foreground">
                     Pages 2 to 5 don&apos;t print the store or period. Use the same ones as this store&apos;s page 1 so all pages land in
                     one Inventory count.
@@ -393,11 +710,16 @@ export function UploadReview({
 
           <ReviewRows
             rows={rows}
+            onPoint={scanUrl ? setPointRow : undefined}
+            pointed={pointRow}
             query={query}
             onQuery={setQuery}
+            version={upload.form_version}
             productNames={productNames}
+            rowNames={rowNames}
             catalog={catalog}
             flagged={flagged}
+            rowNotes={rowNotes}
             resolved={resolved}
             active={active}
             view={view}
@@ -420,7 +742,7 @@ export function UploadReview({
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={commit} disabled={busy || rows.length === 0 || open.length > 0}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                {busy ? 'Committing…' : 'Confirm & commit'}
+                {busy ? 'Committing…' : nav ? (nav.nextHref ? 'Commit and go to next page' : 'Commit this page') : 'Confirm & commit'}
               </Button>
               {open.length > 0 && !notice && (
                 <button type="button" onClick={() => goToFlag(open[0])} className="text-xs text-muted-foreground underline-offset-4 hover:underline">
@@ -443,7 +765,7 @@ export function UploadReview({
       </div>
 
       {/* Enlarged scan — full-screen lightbox. Escape / click backdrop / × to close. */}
-      {scanUrl && lightboxOpen && (
+      {scanUrl && lightboxOpen && createPortal(
         <div
           className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8"
           role="dialog"
@@ -453,24 +775,39 @@ export function UploadReview({
             if (e.key === 'Escape') setLightboxOpen(false);
           }}
         >
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <a href={scanUrl} target="_blank" rel="noopener noreferrer">
-              <Button variant="secondary" size="sm">
-                <ExternalLink className="size-3.5" /> Open in new tab
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {lightboxHighlight ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-background/90 px-2.5 py-1 text-xs font-medium">
+                <Crosshair className="size-3.5" style={{color: 'var(--primary)'}} /> {lightboxHighlight.label}
+                {lightboxHighlight.approximate && <span className="text-muted-foreground">· approximate</span>}
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <a href={scanUrl} target="_blank" rel="noopener noreferrer">
+                <Button variant="secondary" size="sm">
+                  <ExternalLink className="size-3.5" /> Open in new tab
+                </Button>
+              </a>
+              <Button variant="secondary" size="sm" autoFocus onClick={() => setLightboxOpen(false)}>
+                <X className="size-4" /> Close
               </Button>
-            </a>
-            <Button variant="secondary" size="sm" autoFocus onClick={() => setLightboxOpen(false)}>
-              <X className="size-4" /> Close
-            </Button>
+            </div>
           </div>
-          <iframe src={scanUrl} title="Scanned inventory form (enlarged)" className="min-h-0 w-full flex-1 rounded-md bg-white" />
+          {/* The page rendered to a canvas with the approximate row band drawn in the page's own
+              coordinate space (same viewer the batch review uses), so the band stays locked on. */}
+          <div className="min-h-0 w-full flex-1">
+            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} tilt={head?.slant?.angle} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
+          </div>
           <button
             type="button"
             aria-label="Close"
             onClick={() => setLightboxOpen(false)}
             className="absolute inset-0 -z-10 cursor-default"
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

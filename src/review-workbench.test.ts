@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {groupByFamily, pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from './review-workbench';
+import {groupByFamily, pageTotal, printedNameConflict, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from './review-workbench';
 
 const cat: Record<string, CatalogLite> = {
   FBPP01: {productLine: 'Flawless Beauty Pressed Powder', unitPrice: 150},
@@ -53,5 +53,30 @@ describe('flags', () => {
     expect(stepFlag([1, 9], 9, 1)).toBe(1);
     expect(stepFlag([1, 9], 1, -1)).toBe(9);
     expect(stepFlag([], null, 1)).toBeNull();
+  });
+});
+
+describe('printedNameConflict', () => {
+  it('does not flag a pure family/type prefix the paper drops', () => {
+    expect(printedNameConflict('Caramel Swirl', 'Lip Stain Caramel Swirl')).toBe(false);
+    expect(printedNameConflict('Pink Lemonade', 'Lip Stain Pink Lemonade')).toBe(false);
+    // paper may also carry a "(Bestseller)" tag on top of the dropped prefix
+    expect(printedNameConflict('Honey Waffle (Bestseller)', 'Lip Stain Honey Waffle')).toBe(false);
+  });
+
+  it('does not flag spacing/punctuation/tag-only differences', () => {
+    expect(printedNameConflict('BB 03  Beige', 'bb03 beige')).toBe(false);
+    expect(printedNameConflict('Honey Waffle (Bestseller)', 'Honey Waffle')).toBe(false);
+  });
+
+  it('still flags a genuine mismatch (misread code / out-of-date label)', () => {
+    expect(printedNameConflict('BB 04 Beige', 'BB 03 Beige')).toBe(true);
+    expect(printedNameConflict('Golden Tan', 'Lip Stain Pink Lemonade')).toBe(true);
+  });
+
+  it('stays quiet when either name is blank', () => {
+    expect(printedNameConflict('', 'Lip Stain Caramel Swirl')).toBe(false);
+    expect(printedNameConflict('Caramel Swirl', null)).toBe(false);
+    expect(printedNameConflict(undefined, undefined)).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {pageCoverage} from './goldline-inventory';
+import type {PrevCount} from './goldline-history-check';
 
 // Server-only reads for the Goldline Inventory page. Every query is filtered by the
 // active company_id — the service-role key bypasses RLS, so that filter is the
@@ -75,4 +76,24 @@ export async function committedSnapshotFor(
     .limit(1)
     .maybeSingle();
   return (res.data as {store_code: string; period_start: string; period_end: string} | null) ?? null;
+}
+
+/**
+ * The same store's committed counts of these items that end before `before` (YYYY-MM-DD), for
+ * the review's history check. One store and one page's codes (≤ ~70 items × its past periods).
+ */
+export async function previousCounts(companyId: string, store: string | null, before: string | null, codes: string[]): Promise<PrevCount[]> {
+  if (!nichidoConfigured() || !store || !before || codes.length === 0) return [];
+  const supa = db();
+  return (await fetchAllRows('inventory', (from, to) =>
+    supa
+      .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
+      .select('item_code,period_end,ending_on_hand')
+      .eq('company_id', companyId)
+      .eq('store_code', store)
+      .lt('period_end', before)
+      .in('item_code', codes)
+      .order('id')
+      .range(from, to),
+  )) as unknown as PrevCount[];
 }

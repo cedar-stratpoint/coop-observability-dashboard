@@ -40,7 +40,16 @@ export function StorePicker({
     <NativeSelect
       aria-label="Store"
       value={value ?? ''}
-      onChange={(e) => router.push(e.target.value ? `${pathname}?${param}=${encodeURIComponent(e.target.value)}` : pathname)}
+      // A store is a filter on this page, not a step: replace, so Back leaves the page instead of
+      // walking back through every store you looked at.
+      onChange={(e) => {
+        // Keep the page's other params (its filters) and change only the store.
+        const q = new URLSearchParams(window.location.search);
+        if (e.target.value) q.set(param, e.target.value);
+        else q.delete(param);
+        q.delete('page');
+        router.replace(q.size ? `${pathname}?${q}` : pathname, {scroll: false});
+      }}
     >
       {allLabel && <option value="">{allLabel}</option>}
       {stores.map((s) => (

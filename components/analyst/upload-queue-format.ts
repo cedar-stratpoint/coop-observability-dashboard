@@ -2,12 +2,69 @@
 // global progress indicator so they always say the same thing.
 
 import {progressFor} from '@/src/upload-progress';
+import {scanPosition} from '@/src/upload-batch';
 import type {QueueItem} from '@/components/analyst/upload-queue';
 
 export function itemPercent(i: QueueItem, now: number): number {
   if (i.state === 'done' || i.state === 'failed' || i.state === 'cancelled') return 100;
   if (i.state !== 'running') return 0;
   return progressFor(i.kind, i.phase, i.uploadFrac, Math.max(0, now - i.phaseAt));
+}
+
+/**
+ * The plain-language bucket a page falls in, for the per-page pill and the filter. The
+ * three "set aside" kinds (sales report, blank back-side, not-an-inventory-page) are
+ * normal parts of a mixed scan, not errors, so they read calmly; only a genuine
+ * processing error is 'failed'.
+ */
+export type ItemCategory = 'working' | 'success' | 'sales' | 'blank' | 'other' | 'failed' | 'cancelled';
+
+export function itemCategory(i: QueueItem): ItemCategory {
+  if (i.state === 'done') return 'success';
+  if (i.state === 'cancelled') return 'cancelled';
+  if (i.state !== 'failed') return 'working'; // queued / waiting_period / running
+  if (i.pageKind === 'sales') return 'sales';
+  if (i.pageKind === 'blank') return 'blank';
+  if (i.pageKind === 'unknown') return 'other'; // read, but not an inventory page
+  return 'failed'; // a real processing error
+}
+
+/** Short pill labels + the filter order. 'working'/'cancelled' aren't offered as filters. */
+export const CATEGORY_LABEL: Record<ItemCategory, string> = {
+  working: 'In progress',
+  success: 'Read',
+  sales: 'Sales report',
+  blank: 'Blank page',
+  other: 'Not an inventory page',
+  failed: 'Couldn’t read',
+  cancelled: 'Cancelled',
+};
+export const FILTER_ORDER: ItemCategory[] = ['success', 'failed', 'sales', 'blank', 'other'];
+
+// Two orthogonal facets for the scan file filter, the same shape as the scan-detail view:
+// a page's TYPE (what it is) and its STATUS (where it is in the lifecycle). The old single
+// bucket mixed the two, so "Sales report"/"Blank page" doubled as both a kind and an outcome.
+export type UploadType = 'inventory' | 'sales' | 'blank';
+/** What the page is, once known. A page still reading, or one that couldn't be classified,
+ *  has no type (it shows under Status), so it is never duplicated across both facets. */
+export function uploadType(i: QueueItem): UploadType | null {
+  if (i.pageKind === 'sales') return 'sales';
+  if (i.pageKind === 'blank') return 'blank';
+  if (i.pageKind === 'inventory') return 'inventory';
+  if (i.state === 'done') return 'inventory'; // read as an inventory page, kind not restated
+  return null;
+}
+
+export type UploadStatusFacet = 'waiting' | 'processing' | 'needs_review' | 'set_aside' | 'failed' | 'cancelled';
+/** Where the page is in the read/review lifecycle. A parked sales/blank/non-inventory page is
+ *  "set aside", distinct from a real read error ("failed"). */
+export function uploadStatus(i: QueueItem): UploadStatusFacet {
+  if (i.state === 'running') return 'processing';
+  if (i.state === 'queued' || i.state === 'waiting_period') return 'waiting';
+  if (i.state === 'done') return 'needs_review';
+  if (i.state === 'cancelled') return 'cancelled';
+  if (i.pageKind === 'sales' || i.pageKind === 'blank' || i.pageKind === 'unknown') return 'set_aside';
+  return 'failed';
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -36,7 +93,7 @@ export function itemLabel(i: QueueItem): string {
       if (i.kind === 'csv') return `Saved ${i.rowsCommitted ?? 0} sales rows`;
       if (i.kind === 'xlsx') return watsonsLabel(i);
       return i.page
-        ? `Page ${i.page} · ${i.flagged ? `${i.flagged} to check` : 'nothing flagged'}`
+        ? `Form page ${i.page} · ${i.flagged ? `${i.flagged} to check` : 'nothing flagged'}`
         : 'Read — ready for review';
     case 'running':
       switch (i.phase) {
@@ -60,12 +117,20 @@ export function itemLabel(i: QueueItem): string {
 export type QueueSummary = {
   total: number; // excluding cancelled
   done: number;
-  failed: number;
+  failed: number; // GENUINE processing errors only (not set-aside pages)
+  setAside: number; // sales report / blank / not-an-inventory-page — normal, not errors
   running: number;
   waiting: number; // queued + waiting for period
   readyForReview: number; // PDFs read and awaiting review
   percent: number;
 };
+
+/** Sales report, blank back-side, or a non-inventory page: expected in a mixed scan,
+ *  set aside rather than read — not a failure. */
+export function isSetAside(i: QueueItem): boolean {
+  const c = itemCategory(i);
+  return c === 'sales' || c === 'blank' || c === 'other';
+}
 
 export function summarize(items: QueueItem[], now: number): QueueSummary {
   const live = items.filter((i) => i.state !== 'cancelled');
@@ -73,12 +138,84 @@ export function summarize(items: QueueItem[], now: number): QueueSummary {
   return {
     total: live.length,
     done: live.filter((i) => i.state === 'done').length,
-    failed: live.filter((i) => i.state === 'failed').length,
+    failed: live.filter((i) => itemCategory(i) === 'failed').length,
+    setAside: live.filter(isSetAside).length,
     running: live.filter((i) => i.state === 'running').length,
     waiting: live.filter((i) => i.state === 'queued' || i.state === 'waiting_period').length,
     readyForReview: live.filter((i) => i.state === 'done' && i.serverStatus === 'needs_review').length,
     percent: Math.min(100, percent),
   };
+}
+
+/** One collapsed row in the queue list: either a single file, or all the pages that
+ *  were split out of one multi-page PDF, so a 98-page scan is one line, not 98. */
+export type QueueGroup = {
+  key: string;
+  /** The source PDF name ("Scan….pdf") for a split group, else the single file name. */
+  source: string;
+  items: QueueItem[];
+  isSplit: boolean; // true when this is a multi-page PDF split into pages
+  size: number; // sum of live page sizes
+  done: number;
+  failed: number; // GENUINE processing errors only
+  setAside: number; // sales / blank / not-an-inventory-page
+  running: number;
+  waiting: number;
+  total: number; // live (non-cancelled)
+  percent: number;
+};
+
+/**
+ * Group queue items by the PDF they were split from (filename "… (page N of M).pdf"),
+ * so the list shows one summarized row per source scan instead of one row per page.
+ * A single file (CSV, XLSX, or a one-page PDF) is its own group of one. Order follows
+ * first appearance so the list stays stable.
+ */
+export function groupQueueItems(items: QueueItem[], now: number): QueueGroup[] {
+  const order: string[] = [];
+  const buckets = new Map<string, QueueItem[]>();
+  for (const it of items) {
+    const src = scanPosition(it.name)?.source;
+    const key = src ? `pdf:${src}` : `one:${it.id}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      order.push(key);
+    }
+    buckets.get(key)!.push(it);
+  }
+  return order.map((key) => {
+    const group = buckets.get(key)!;
+    const live = group.filter((i) => i.state !== 'cancelled');
+    const isSplit = key.startsWith('pdf:') && group.length > 1;
+    const source = isSplit ? `${key.slice(4)}.pdf` : group[0].name;
+    const percent = live.length ? live.reduce((a, i) => a + itemPercent(i, now), 0) / live.length : 0;
+    return {
+      key,
+      source,
+      items: group,
+      isSplit,
+      size: live.reduce((a, i) => a + i.size, 0),
+      done: live.filter((i) => i.state === 'done').length,
+      failed: live.filter((i) => itemCategory(i) === 'failed').length,
+      setAside: live.filter(isSetAside).length,
+      running: live.filter((i) => i.state === 'running').length,
+      waiting: live.filter((i) => i.state === 'queued' || i.state === 'waiting_period').length,
+      total: live.length,
+      percent: Math.min(100, percent),
+    };
+  });
+}
+
+/** A short status line for a collapsed split group: "12 of 98 read · 2 flagged". */
+export function groupLabel(g: QueueGroup): string {
+  if (!g.isSplit) return '';
+  const parts: string[] = [];
+  if (g.done < g.total) parts.push(`${g.done} of ${g.total} read`);
+  else parts.push(`${g.total} ${g.total === 1 ? 'page' : 'pages'} read`);
+  if (g.setAside) parts.push(`${g.setAside} set aside`);
+  if (g.failed) parts.push(`${g.failed} failed`);
+  if (g.waiting && g.done < g.total) parts.push(`${g.waiting} waiting`);
+  return parts.join(' · ');
 }
 
 /** "~1 min left" from elapsed and progress; null until there's enough signal. */

@@ -4,11 +4,13 @@ import {useMemo} from 'react';
 import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
-import {groupByFamily, type CatalogLite} from '@/src/review-workbench';
+import {groupByFamily, pageTotal, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
+import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols';
+import {noteLayout, readerNote} from './reader-note';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -17,14 +19,10 @@ import {cn} from '@/lib/utils';
 //    printed family headings with their price, flagged rows still highlighted.
 // Commit is gated by the parent until every flag is resolved.
 
-export const COLS = [
-  {key: 'stockroom', label: 'Stk', title: 'Bilang sa stockroom / steel cabinet'},
-  {key: 'drawer', label: 'Drw', title: 'Bilang sa drawer ng module'},
-  {key: 'selling_area', label: 'Sell', title: 'Bilang sa selling area'},
-  {key: 'delivery', label: 'Dlv', title: 'Delivery'},
-  {key: 'ending_on_hand', label: 'End', title: 'Ending inventory (stock on hand)'},
-] as const;
-export type ColKey = (typeof COLS)[number]['key'];
+// COLS / ColKey / colsForVersion live in the pure, testable ./review-grid-cols module;
+// re-exported here so existing importers (batch-review) keep working unchanged.
+export {COLS, colsForVersion};
+export type {ColKey};
 
 /** Full field names for the phone layout (the table uses the short form labels). */
 const MOBILE_LABEL: Record<ColKey, string> = {stockroom: 'Stockroom', drawer: 'Drawer', selling_area: 'Selling', delivery: 'Delivery', ending_on_hand: 'Ending'};
@@ -41,6 +39,19 @@ function marksText(r: ExtractedRow): string | null {
   return m.map((x) => `${MARK_LABEL[x.mark] ?? x.mark}: ${FIELD_LABEL[x.field] ?? x.field}${x.written ? ` (written ${x.written})` : ''}`).join(' · ');
 }
 
+/** The deducted-model values Legacy forms carry in `extra` (no three-location split),
+ *  as a read-only context line "Beginning 20 · +Delivery 25 · Deducted 8" — shown only
+ *  for a Legacy row (v1/v2 have no `extra`). Blank values are omitted. */
+function legacyExtraText(r: ExtractedRow): string | null {
+  const e = r.extra;
+  if (!e) return null;
+  const bits: string[] = [];
+  if (e.beginning != null) bits.push(`Beginning ${e.beginning}`);
+  if (e.begin_plus_delivery != null) bits.push(`Beginning + Delivery ${e.begin_plus_delivery}`);
+  if (e.deducted_pcs != null) bits.push(`Deducted ${e.deducted_pcs}`);
+  return bits.length ? bits.join(' · ') : null;
+}
+
 export function reviewRowEl(index: number): HTMLElement | null {
   const all = document.querySelectorAll<HTMLElement>(`[data-review-row="${index}"]`);
   for (const el of all) if (el.offsetParent !== null) return el;
@@ -53,11 +64,18 @@ const BAND_TONE: Record<Band, string> = {high: 'var(--status-good)', medium: 'va
 type Props = {
   rows: ExtractedRow[];
   productNames: Record<string, string>;
+  /** Row index → its own product name: several printed rows can share a code, so a code lookup isn't enough. */
+  rowNames?: (string | null)[];
   catalog: Record<string, CatalogLite>;
   flagged: number[]; // row indices under the threshold
+  /** Row index → an extra note to show with the row's reason (the history check). */
+  rowNotes?: Record<number, string>;
   resolved: ReadonlySet<number>;
   active: number | null; // the flag the navigator is on
   view: ReviewView;
+  /** The page's detected form version (legacy/v1/v2), so the count columns render in the
+   *  version's printed left-to-right order. Display only; absent falls back to V1 order. */
+  version?: string | null;
   query: string;
   onQuery: (q: string) => void;
   editable: boolean;
@@ -65,16 +83,46 @@ type Props = {
   onCell: (index: number, key: ColKey, raw: string) => void;
   onResolve: (index: number) => void;
   onStep: (dir: 1 | -1) => void;
+  /** The row the reviewer is pointing at (hover or keyboard focus), so the scan beside the rows can
+   *  box it. Absent when there's no scan pane. */
+  onPoint?: (index: number) => void;
+  /** The row currently pointed at: tinted to match the box drawn on the scan. */
+  pointed?: number | null;
 };
+
+/** The one-line "why this row is doubtful": the reader's cell marks and/or the
+ *  alternative reading, combined so a flagged row shows a single reason, not three
+ *  stacked amber lines. */
+function reasonText(r: ExtractedRow, version?: string | null, known?: boolean, extra?: string): string | null {
+  const parts: string[] = [];
+  const m = marksText(r);
+  if (m) parts.push(m);
+  // The reader's note in column names (no "col3" / "off_manifest"), with no "Maybe:" prefix:
+  // it is often a plain remark ("O/S"), not an alternative value.
+  const note = readerNote(r.alt, noteLayout(version, r), {known});
+  if (note) parts.push(note);
+  if (extra) parts.push(extra);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/** 'Paper reads: "BB 04 Beige"' — shown when the name printed on the row disagrees with
+ *  the manifest name for its code, so a misread code or an out-of-date printed label is
+ *  visible to the reviewer instead of being silently resolved to the manifest name. */
+function printedNameHint(r: ExtractedRow, catalogName: string | undefined): string | null {
+  return printedNameConflict(r.printed_name, catalogName) ? `Paper reads: “${r.printed_name}”` : null;
+}
 
 export function ReviewRows({
   rows,
   productNames,
+  rowNames,
   catalog,
   flagged,
+  rowNotes,
   resolved,
   active,
   view,
+  version,
   query,
   onQuery,
   editable,
@@ -82,22 +130,32 @@ export function ReviewRows({
   onCell,
   onResolve,
   onStep,
+  onPoint,
+  pointed,
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
+  // Count columns in this version's printed order (V2 leads with Delivery); display only.
+  const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
   const q = query.trim().toLowerCase();
   const indexed = useMemo(() => rows.map((r, i) => ({...r, i})), [rows]);
+  const nameOf = (r: (typeof indexed)[number]) => (rowNames ? rowNames[r.i] : productNames[r.item_code]) ?? r.printed_name ?? null;
+  const knownName = (r: (typeof indexed)[number]) => (rowNames ? rowNames[r.i] : productNames[r.item_code]) ?? undefined;
   const matches = (r: (typeof indexed)[number]) =>
-    !q || r.item_code.toLowerCase().includes(q) || (productNames[r.item_code] ?? '').toLowerCase().includes(q);
+    !q || r.item_code.toLowerCase().includes(q) || (nameOf(r) ?? '').toLowerCase().includes(q);
   const visible = indexed.filter((r) => (view === 'all' || flaggedSet.has(r.i)) && matches(r));
   const groups = view === 'all' ? groupByFamily(visible, catalog) : null;
+  // Rows under a heading whose items print different prices (Make-Up Collection: BESP ₱320,
+  // CPC001 ₱350) show their own price, like the paper's per-item price lines.
+  const ownPrice = new Set(groups?.filter((g) => g.price == null).flatMap((g) => g.items.map((r) => r.i)) ?? []);
+  const priceOf = (code: string) => catalog[code]?.unitPrice ?? null;
   const resolvedCount = flagged.filter((i) => resolved.has(i)).length;
   const pos = active == null ? 0 : flagged.indexOf(active) + 1;
 
   const header = (
     <tr className="border-b border-border text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-      <th className="py-2 pr-3 font-medium">Item</th>
-      {COLS.map((c) => (
-        <th key={c.key} className="py-2 pr-2 text-right font-medium" title={c.title}>
+      <th className="py-2 pr-3 pl-3 font-medium">Item</th>
+      {cols.map((c) => (
+        <th key={c.key} className="py-2 pr-2 text-right leading-tight font-medium" title={c.title}>
           {c.label}
         </th>
       ))}
@@ -105,6 +163,26 @@ export function ReviewRows({
       {editable && <th className="py-2 font-medium sr-only">Decision</th>}
     </tr>
   );
+
+  // A heading bar as printed: the band's name, its price when every item shares one, and on the
+  // right the band's total amount (on hand × printed price), like the bracketed totals the
+  // consultant writes beside each band.
+  const heading = (g: {family: string; price: number | null; items: (typeof indexed)[number][]}) => {
+    const t = pageTotal(g.items, catalog);
+    return (
+      <span className="flex items-baseline justify-between gap-3">
+        <span>
+          {g.family}
+          {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+        </span>
+        {t.priced > 0 && (
+          <span className="shrink-0 font-mono font-normal text-muted-foreground tabular-nums" title="Total amount: on hand × printed price">
+            ₱{t.total.toLocaleString('en-US')}
+          </span>
+        )}
+      </span>
+    );
+  };
 
   const line = (r: (typeof indexed)[number]) => {
     const isFlag = flaggedSet.has(r.i);
@@ -116,22 +194,45 @@ export function ReviewRows({
         key={`${r.item_code}-${r.i}`}
         id={`review-row-${r.i}`}
         data-review-row={r.i}
+        onPointerEnter={onPoint ? () => onPoint(r.i) : undefined}
+        onFocus={onPoint ? () => onPoint(r.i) : undefined}
         className={cn(
           'scroll-mt-24 border-b border-border/60 transition-colors',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
+          pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
-        <td className="py-1.5 pr-3 align-top">
-          <span className="font-mono text-xs">{r.item_code}</span>
-          {productNames[r.item_code] && <span className="block max-w-[14rem] truncate text-xs text-muted-foreground">{productNames[r.item_code]}</span>}
-          {view === 'needs' && catalog[r.item_code]?.productLine && (
-            <span className="block max-w-[14rem] truncate text-[11px] text-muted-foreground/80">{catalog[r.item_code]?.productLine}</span>
-          )}
-          {r.alt && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
-          {marksText(r) && <span className="block text-[11px]" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
+        {/* pl-3 keeps the item clear of the 3px bar on the pointed row. */}
+        <td className="py-3 pr-3 pl-3 align-top">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {/* Primary: code + name. */}
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-xs font-medium">{r.item_code}</span>
+                {nameOf(r) && <span className="min-w-0 text-xs text-muted-foreground">{nameOf(r)}</span>}
+                {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+                )}
+              </div>
+              {printedNameHint(r, knownName(r)) && (
+                <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, knownName(r))}</span>
+              )}
+              {view === 'needs' && catalog[r.item_code]?.productLine && (
+                <span className="mt-0.5 block max-w-[16rem] truncate text-[11px] text-muted-foreground/70">{catalog[r.item_code]?.productLine}</span>
+              )}
+              {/* Secondary: one reason line (marks + alt combined), then the Legacy
+                  deducted context as a quieter tertiary line. */}
+              {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && (
+                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>
+              )}
+              {legacyExtraText(r) && (
+                <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
+              )}
+            </div>
+          </div>
         </td>
-        {COLS.map((col) => (
+        {cols.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
             <input
               inputMode="numeric"
@@ -182,18 +283,26 @@ export function ReviewRows({
       <li
         key={`${r.item_code}-${r.i}`}
         data-review-row={r.i}
+        onFocus={onPoint ? () => onPoint(r.i) : undefined}
         className={cn(
           'flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
+          pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
         )}
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <span className="font-mono text-xs">{r.item_code}</span>
-            {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
-            {r.alt && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>Maybe: {r.alt}</span>}
-            {marksText(r) && <span className="block text-xs" style={{color: toneText('var(--status-warn)')}}>{marksText(r)}</span>}
+            <span className="font-mono text-xs font-medium">{r.item_code}</span>
+            {nameOf(r) && <span className="block text-sm">{nameOf(r)}</span>}
+            {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
+              <span className="block font-mono text-xs text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+            )}
+            {printedNameHint(r, knownName(r)) && (
+              <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, knownName(r))}</span>
+            )}
+            {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
+            {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
@@ -203,7 +312,7 @@ export function ReviewRows({
           </span>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
-          {COLS.map((col) => (
+          {cols.map((col) => (
             <label key={col.key} className="flex min-w-0 flex-col gap-1">
               <span className="truncate text-[10.5px] text-muted-foreground">{MOBILE_LABEL[col.key]}</span>
               <input
@@ -300,10 +409,7 @@ export function ReviewRows({
             {groups
               ? groups.map((g) => (
                   <li key={`${g.family}-${g.items[0].i}`}>
-                    <div className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">
-                      {g.family}
-                      {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
-                    </div>
+                    <div className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">{heading(g)}</div>
                     <ul role="list" className="flex flex-col divide-y divide-border">{g.items.map(card)}</ul>
                   </li>
                 ))
@@ -316,9 +422,8 @@ export function ReviewRows({
                 groups.map((g) => (
                   <tbody key={`${g.family}-${g.items[0].i}`}>
                     <tr className="bg-muted/50">
-                      <th colSpan={COLS.length + (editable ? 3 : 2)} scope="rowgroup" className="px-2 py-1.5 text-left text-xs font-semibold">
-                        {g.family}
-                        {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+                      <th colSpan={cols.length + (editable ? 3 : 2)} scope="rowgroup" className="px-2 py-1.5 text-left text-xs font-semibold">
+                        {heading(g)}
                       </th>
                     </tr>
                     {g.items.map(line)}

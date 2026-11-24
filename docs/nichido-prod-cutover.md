@@ -6,10 +6,10 @@
 
 | # | Step | Who | Notes |
 |---|---|---|---|
-| 1 | `supabase/nichido/prod_2026-10-29_release.sql` on prod | Lance (write access opened for one pass) | One transaction, counts checked before every delete. Adds `f2c` (decommission columns); syncs MUBBEP ↔ 70075146 and its decision (Oct 28); keeps one form run (Cubao, Oct 8 to 9, pages 1 to 5) and removes the 41 test scans with their counts, readings and flags. Sales files untouched |
-| 2 | Remove the 41 test scan files from the `goldline-uploads` bucket | Lance | Storage API with the prod service-role key (list from the SQL's dropped `storage_path`s) |
+| 1 | `supabase/nichido/prod_2026-10-29_release.sql` on prod (**done Oct 29**: 5 scans, 263 counts, 211 links, 1 decision; sales decrypt to ₱382,845,653, same as Staging) | Lance (write access opened for one pass) | One transaction, counts checked before every delete. Adds `f2c` (decommission columns); syncs MUBBEP ↔ 70075146 and its decision (Oct 28); keeps one form run (Cubao, Oct 8 to 9, pages 1 to 5) and removes the 41 test scans with their counts, readings and flags. Sales files untouched |
+| 2 | Remove the test scan files from the `goldline-uploads` bucket (**done Oct 29**: 48 removed, the 41 plus 7 older copies with no upload row; 17 left, all in use) | Lance | Storage API with the prod service-role key, prod project only |
 | 3 | Prod Vercel env: `NICHIDO_URL=https://pfwrkqsjmetibslltmok.supabase.co`, `NICHIDO_SERVICE_ROLE_KEY` (prod), `GOLDLINE_ANTHROPIC_API_KEY` (a new key) | The co-worker who owns prod Vercel | Before step 4. Without them the Nichido pages show nothing (no fallback). `nichidoPairOk` refuses a Staging Nichido URL on prod |
-| 4 | Merge `release/nichido-to-main` → `main` (v1.17.0) | Lance, on the go-ahead | Nichido only (see the list below); Ask Coop and Offline Sales work on staging is not in it |
+| 4 | Merge `release/nichido-to-main` → `main` (v1.17.0) (**done Oct 29**, PR #336, merge `975664a`, prod `/api/health` serves it) | Lance, on the go-ahead | Nichido only (see the list below); Ask Coop and Offline Sales work on staging is not in it |
 | 5 | Smoke test on prod | Lance | Overview shows revenue for Feb and Mar (decrypts with prod's key); SKU linking: 42 · 57 · 10, totals 315 \| 263; Inventory shows Cubao Oct 8 to 9; Uploads lists 5 scans + 12 sales files; a scan reads |
 | 6 | Justin's and the owner's sign-in emails (D4) | Lance | `company_admin` on Goldline in the prod archive |
 
@@ -52,6 +52,28 @@ Apply in this order, in the SQL editor, one file at a time, stopping on any erro
 | 13 | `f2e_sku_decision_log.sql` | Lance | `sku_decision_log` (each SKU linking decision with the rows it changed, for Undo). **Applied on prod Oct 29** for v1.18.0 |
 | 14 | `f2f_sku_months.sql` | Lance | `sku_months()` (units and stores per Watsons SKU per monthly file, for SKU linking's months view). **Applied on prod Oct 29** for v1.19.0 (315 SKUs, 260 in all 12 files, 14 in one, same as Staging) |
 | 15 | `f2g_service_role_timeout.sql` | Lance | Statement timeout 30 s for `service_role` (was PostgREST's 8 s), so a slow `sales_rollup` under load doesn't fail the page. **Applied on prod Oct 29** with v1.19.1 |
+| 16 | `p3b_recommendations.sql` | Rick | `restock_runs`, `recommendations`, `save_restock_run()`, `decide_recommendations()` (F11) |
+| 17 | `p3c_item_history.sql` | Rick | `forecast_item_history()` (Restock product page) |
+| 18 | `p3d_purchase_orders.sql` | Rick | `purchase_orders` (one per store per day, `po_date`), `po_lines`, `shipments` + `received` status / `received_qty` / `received_on`, `make_purchase_orders()` (puts approved lines on POs and ships them), `receive_po_lines()`, `po_dates()` (Orders date list), and `decide_recommendations()` redefined so changing a shipped line cancels its shipment (F12). Apply **after** p3b (it redefines p3b's function) and deploy with the build that reads it: an older build doesn't know the `received` status and would stop counting a received shipment as on the way. **Applied on Nichido Staging Nov 3** |
+| 19 | `p3e_hit_rate.sql` | Rick | `restock_decisions()` (Restock Hit or miss board: decided lines of the last N runs as one jsonb array). Needs p3b. **Applied on Nichido Staging Nov 4** |
+| 20 | `p0_page_classification.sql` | Lance | Page classification columns on `uploads`, `upload_batches.form_version` |
+| 21 | `p1_inventory_version.sql` | Lance | `inventory.form_version` / `extra`, `commit_batch()`. Needs 20 |
+| 22 | `p0b_upload_batch_kind_name.sql` | Lance | `upload_batches.kind`, `uploads.batch_name` (were only in goldline_schema.sql) |
+| 23 | `o1_read_logs.sql` | Lance | `read_logs`, 90-day purge job |
+| 24 | 16 to 19 above | Rick | p3b, p3c, p3d, p3e: run here, before s3 |
+| 25 | `s3_sales_units_encryption.sql` | Lance | Units join the ciphertext, `sales_units()`. Re-seals every row (12 s for 472,604 rows locally). **Deploy the app in the same window, no sales uploads in between:** the old build reads a month uploaded after it as 0 units |
+| 26 | `s5_sales_period_totals.sql` | Lance | Totals tables and triggers. `select private.sales_totals_drift('goldline')` must be all 0. After this, re-running s3 needs s5 again |
+| 27 | `p4_po_form.sql` | Lance | PO form. Before the app: Restock reads it too |
+| 28 | `p5_audit_counts.sql` | Lance | Reconcile's read-only functions. Before the app |
+| 29 | `server_upload_p1_pump.sql` | Lance | Queue pump, idle until both Vault secrets exist |
+| 30 | `server_upload_resilience.sql` | Lance | Auto-retry of stalled reads |
+| 31 | `server_upload_read_window.sql` | Lance | 600 s reads. Our Vercel Pro project only |
+| 32 | `server_upload_l7_batch_poll.sql` | Lance | Batch read polling |
+| 33 | `server_upload_lock.sql` | Lance | Takes the three pump functions away from the API roles. Right after the line above |
+| 34 | `read_fingerprint.sql` | Lance | Identical re-uploads reuse their read |
+| 35 | `s2_sales_drop_plaintext.sql` | Lance | About a week after the app is live: one way, the old build can't run after it |
+
+**Rehearsed Nov 24 (20 to 34 for v1.25.0):** on a local PostgreSQL 17 rebuilt from main's files (sales functions byte-identical to Prod) with 472,604 synthetic sales rows in Prod's mix, every file ran in one transaction, clean again on a second run. `sales_rollup`, `sales_by_sku`, `store_scope`, `forecast_months`, `forecast_history` and `sku_months` returned the same figures before s3, after s3 and after s5; drift 0, also after new writes and after s2. The result has Staging's 37 functions and the same columns on the 15 tables involved. Synthetic data, so row values specific to Prod are not covered.
 
 **Verified Oct 26:** files 1 and 4 to 8 ran clean on an empty PostgreSQL 17 database with Supabase's roles and `storage.buckets` stubbed, and clean again on a second run (safe to re-run). The result matches Nichido Staging's columns, functions, constraints and indexes exactly, except two auto-generated unique-constraint names on `inventory` and `sales` that Staging got from its old `gl_` rename (no code refers to them by name).
 

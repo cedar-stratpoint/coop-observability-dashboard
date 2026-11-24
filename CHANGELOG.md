@@ -10,6 +10,23 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-24 · v1.25.0 Nichido on prod: restock and orders, reconcile, the scan pipeline
+
+Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.
+
+**Ships:** Restock recommendations, Orders, receiving and hit or miss (F11, F12); encrypted sales units and totals kept per period; Reconcile with the PO form; Uploads by card, Per store / Per BA / Per file, sorting board, duplicates; scan beside the numbers with row boxes; server-side scan upload; fixed-template and batch reads, all behind flags; the company menu by workflow; Back keeps your place. Entries with the decisions are on `staging`, by date.
+
+**Decisions (2026-11-24):**
+- Production is `coop-cedar.vercel.app`. `coop-brand-os` can't build the 600 s reader and redirects there.
+- Prod reader flags equal Staging's, after one test scan. The history check stays off.
+- The 23 items from the Sept scan go in without links; Coop links strong matches itself.
+- Staging's PO form is activated on prod, with EXT193 by hand. HFMBLS stays off until Justin confirms.
+- Two app-wide settings ship: the 30 s client page cache and functions in Singapore.
+
+**Left out on purpose:** customers, vouchers, Zoomy inventory header, Shopee labels, Ask Coop changes, the l7-spike test route.
+
+**Before this deploys:** `docs/nichido-prod-cutover.md` 20 to 34 on Nichido prod, sales uploads paused. The app needs `sales_units()` and `po_forms`.
+
 ## 2026-11-23 — Event lead contacts: search box
 
 The contact list on `/customers/leads` (and each event page's lead block, same component) gains a search box: name, email, Instagram handle (with or without "@"), pet, or mobile (spaces and dashes ignored). It narrows the list, the "n of N" count and the Copy emails button together, alongside the Prize and Collected filters. **Decision:** client-side, over the leads the page already holds (no new read), with the matcher as one pure function, `matchesLeadSearch` (`src/spin-leads-types.ts`, `test/spin-leads-search.test.ts`).

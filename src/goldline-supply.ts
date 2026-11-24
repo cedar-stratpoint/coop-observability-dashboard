@@ -13,7 +13,8 @@
 // • Ship by = the store's stock-out date − its transit days ("Now" once that's today or
 //   past, or the item is already out). Arrives = today + transit days, if sent today.
 // • A shipment is in transit until the store's latest count covers its arrival date
-//   (that count's "Delivery" column records it), so it's never counted twice.
+//   (that count's "Delivery" column records it), so it's never counted twice. Once
+//   received on a PO (F12), its arrival is the received date and its qty what arrived.
 // • Warehouse, per item, across every store loaded: after covering all stores' needs,
 //   what's left lasts (left ÷ total daily pace) days → produce by = that date − the
 //   line's production days ("Now" when that's past, or the needs already exceed stock).
@@ -35,6 +36,33 @@ export type SupplyConfig = {
 };
 
 export type Shipment = {id: string; storeCode: string; itemCode: string; qty: number; shippedOn: string; arrivesOn: string};
+
+/** Shipment columns the planners read; status in SHIPMENT_OPEN (received ones too, F12). */
+export const SHIPMENT_COLS = 'id,store_code,item_code,qty,shipped_on,arrives_on,status,received_qty,received_on';
+export const SHIPMENT_OPEN = ['in_transit', 'received'];
+export type ShipmentRow = {
+  id: string;
+  store_code: string;
+  item_code: string;
+  qty: number;
+  shipped_on: string;
+  arrives_on: string;
+  status?: string;
+  received_qty?: number | null;
+  received_on?: string | null;
+};
+
+/**
+ * A shipment as the planners see it. A received one (F12) counts what actually arrived,
+ * on the day it arrived, so it stays "on the way" only until the store's next count
+ * covers that day (the count then holds it). A receipt of 0 drops out.
+ */
+export function shipmentOf(r: ShipmentRow): Shipment | null {
+  const received = r.status === 'received' && r.received_qty != null && r.received_on != null;
+  const qty = received ? (r.received_qty as number) : r.qty;
+  if (qty <= 0) return null;
+  return {id: r.id, storeCode: r.store_code, itemCode: r.item_code, qty, shippedOn: r.shipped_on, arrivesOn: received ? (r.received_on as string) : r.arrives_on};
+}
 
 export type StoreBlock = {
   storeCode: string;

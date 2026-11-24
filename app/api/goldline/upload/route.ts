@@ -11,31 +11,36 @@ import {revalidateTag} from 'next/cache';
 import {PDFDocument} from 'pdf-lib';
 import {
   createUpload,
+  downloadUpload,
   getBatch,
+  getUpload,
   goldlineConfigured,
-  saveExtraction,
   setUploadStatus,
   upsertSales,
 } from '@/src/goldline-data';
-import {detectPage, extractInventoryPage, extractionConfigured, type ExtractedPage} from '@/src/goldline-extract-run';
-import {getWriterProfile} from '@/src/goldline-writer-data';
-import {humanizeExtractError, INVENTORY_PAGES, MANIFESTS} from '@/src/goldline-extract';
+import {extractionConfigured} from '@/src/goldline-extract-run';
+import {runInventoryRead, type Emit} from '@/src/goldline-read-pipeline';
 
 // Goldline upload endpoint. Accepts ONE file (multipart/form-data, field `file`)
 // scoped to the active company (?company=<slug>):
 //   • .csv  → parse → idempotent upsert into sales (needs period_start/_end)
 //   • .xlsx → Watsons POS Sales Data: one month, every store. The month comes from the
 //             file; stores and Watsons SKUs are added, then the month's sales replaced
-//   • .pdf  → store → Claude Vision detects the page → extracts that page's items →
-//             staged in extractions for review (page 6 / non-form → out of scope)
+//   • .pdf  → store → Claude Vision CLASSIFIES the page (number, kind, orientation,
+//             form version, handwritten header) → snaps the store code to the registry,
+//             records a page_key + duplicate flag → rotates if upside-down → extracts
+//             that page's items → staged in extractions for review (page 6 / blank /
+//             non-form → set aside, out of scope)
 // Tenant isolation is enforced here (getDataContext + canEditData); the data-blind
 // Coop Admin and read-only analysts are refused. File-type gating is the first check.
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// PDF path runs two sequential Vision calls (detect 20s + extract 85s = 105s); 160s
-// gives headroom so a slow call throws in-code (catch → failed) rather than a hard kill.
-export const maxDuration = 160;
+// PDF path runs two sequential Vision calls (classify 20s + extract 150s = 170s). The
+// densest pages (page 4, the accessories list) measured ~85s+ to read and were timing
+// out at the old 85s cap, so the extract budget is 150s; 300s maxDuration keeps headroom
+// so a slow call throws in-code (catch → failed) rather than a hard platform kill.
+export const maxDuration = 300;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -44,28 +49,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-// Progress events for the Uploads screen. Only REAL milestones are sent (stored,
-// page found, reading, saving) — the client draws its bar from these, never from a
-// fake timer alone. Opt-in: a request with `Accept: application/x-ndjson` gets one
-// JSON object per line and a final {type:'result'}; any other caller gets the
-// unchanged single JSON response.
-export type UploadStage =
-  | {type: 'stage'; stage: 'stored'}
-  | {type: 'stage'; stage: 'parsing'}
-  | {type: 'stage'; stage: 'detecting'}
-  | {type: 'stage'; stage: 'reading'; page: number; items: number}
-  | {type: 'stage'; stage: 'saving'};
-type Emit = (e: UploadStage) => void;
+// Progress events for the Uploads screen (the NDJSON stream re-emits them). The stage
+// union + Emit live with the shared read pipeline that produces them.
 type Outcome = {body: Record<string, unknown>; status: number};
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** Page-level confidence = mean of the per-row confidences (0 when empty). */
-function avgConfidence(page: ExtractedPage): number {
-  const cs = page.rows.map((r) => r.confidence).filter((c) => typeof c === 'number');
-  if (!cs.length) return 0;
-  return cs.reduce((a, b) => a + b, 0) / cs.length;
-}
 
 /** Accept only a full ISO date (YYYY-MM-DD) for the sales period. */
 function isoDate(v: FormDataEntryValue | null): string | null {
@@ -148,6 +136,32 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
   } catch {
     return json({error: 'Expected multipart/form-data.'}, 400);
   }
+
+  // Re-read: no new file, just an existing page read again from the bucket. Goes through
+  // the same streamed path as a fresh upload (heartbeat keeps the long read's connection
+  // alive) and the same runInventoryRead pipeline, so the UI updates when it finishes.
+  const rereadId = form.get('reread_upload_id');
+  if (typeof rereadId === 'string' && rereadId) {
+    if (!extractionConfigured()) return json({error: 'The reader is not configured, so this page can’t be re-read.'}, 503);
+    const stored = await downloadUpload(companyId, rereadId);
+    if (!stored) return json({error: 'Couldn’t load this page’s file to re-read. Try re-uploading it instead.'}, 404);
+    track.uploadId = rereadId;
+    const batchStore = stored.batchId ? (await getBatch(companyId, stored.batchId))?.store_code ?? null : null;
+    emit({type: 'stage', stage: 'stored'});
+    const result = await runInventoryRead({
+      companyId,
+      uploadId: rereadId,
+      bytes: stored.bytes,
+      filename: stored.filename,
+      fileSize: stored.fileSize,
+      storeScope: ctx.storeScope,
+      batchStore,
+      emit,
+    });
+    revalidateTag(glTags.uploads(companyId), {expire: 0});
+    return json(result.body, result.http);
+  }
+
   const file = form.get('file');
   if (!(file instanceof File)) return json({error: 'No file provided (field "file").'}, 400);
 
@@ -195,8 +209,9 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
   }
 
   let uploadId: string;
+  let reused = false;
   try {
-    uploadId = await createUpload({
+    const created = await createUpload({
       companyId,
       kind: cls.kind,
       filename: file.name,
@@ -205,11 +220,21 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
       uploadedBy,
       batchId: cls.kind === 'inventory_pdf' ? batchId : null,
     });
+    uploadId = created.id;
+    reused = created.reused;
   } catch (e) {
     console.error('goldline upload: store failed', e);
     return json({error: 'Could not store the file. Please try again.'}, 500);
   }
   track.uploadId = uploadId;
+  // This page is already in the batch — a retry of one the server had already saved.
+  // Don't insert a second row or re-run OCR; return the existing page's current state so
+  // the uploader marks it done instead of adding a duplicate.
+  if (reused) {
+    const existing = await getUpload(companyId, uploadId);
+    return json({uploadId, status: existing?.status ?? 'processing', reused: true});
+  }
+  revalidateTag(glTags.uploads(companyId), {expire: 0}); // a new upload: refresh the cached /uploads list
   // The batch may have been committed while this page was uploading; a page added
   // after that could never be committed, so stop here with a clear reason.
   if (batchId && cls.kind === 'inventory_pdf') {
@@ -305,61 +330,18 @@ async function handle(req: Request, emit: Emit, track: {uploadId?: string} = {})
     });
   }
 
-  const pdfBase64 = Buffer.from(bytes).toString('base64');
-  try {
-    // Auto-detect which page this scan is (from the footer), then extract with that
-    // page's manifest. Page 6 is the daily Sales Report (not inventory); 0 = not a
-    // recognizable form page. Both are a clean, out-of-scope stop, not a failure.
-    emit({type: 'stage', stage: 'detecting'});
-    const page = await detectPage(pdfBase64);
-    if (page === 0) {
-      const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
-      await setUploadStatus(uploadId, 'failed', {rejectReason: reason});
-      return json({uploadId, status: 'failed', error: reason}, 422);
-    }
-    if (!INVENTORY_PAGES.includes(page)) {
-      const reason = 'This is page 6, the daily Sales Report, not an inventory page. Only inventory pages (1 to 5) are read here.';
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
-      return json({uploadId, status: 'rejected', error: reason}, 422);
-    }
-
-    emit({type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0});
-    // The writer profile: an earlier reviewed copy of this page + notes from past
-    // corrections, learned from this database's committed scans (empty on any error).
-    const profile = await getWriterProfile(companyId, page, batchStore, ctx.storeScope);
-    const extracted = await extractInventoryPage(pdfBase64, page, profile);
-    // Same store-scope fence for the scanned form's store.
-    const outPdf = outOfScopeStores(ctx.storeScope, [extracted.store_code]);
-    if (outPdf.length) {
-      const reason = `Scanned form is for store ${extracted.store_code}, outside your access.`;
-      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
-      return json({uploadId, status: 'rejected', error: reason}, 403);
-    }
-    emit({type: 'stage', stage: 'saving'});
-    await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
-    await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
-    return json({
-      uploadId,
-      status: 'needs_review',
-      page,
-      rows: extracted.rows.length,
-      docConfidence: avgConfidence(extracted),
-      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
-      // The printed header (page 1 only carries it) — lets a batch prefill store/period.
-      header: {
-        storeCode: extracted.store_code || null,
-        storeName: extracted.store_name || null,
-        periodStart: extracted.period_start ?? null,
-        periodEnd: extracted.period_end ?? null,
-        consultant: extracted.consultant ?? null,
-      },
-    });
-  } catch (e) {
-    // Log the raw error server-side; show the reviewer a human-readable reason; keep a
-    // scrubbed copy in error_detail for diagnosis (never shown prominently in the UI).
-    console.error('goldline upload: extraction failed', msg(e));
-    const friendly = humanizeExtractError(e);
-    await setUploadStatus(uploadId, 'failed', {rejectReason: friendly, errorDetail: msg(e)});
-    return json({uploadId, status: 'failed', error: friendly}, 422);
-  }
+  // Read the page through the shared pipeline (classify → snap → rotate → extract → save),
+  // the same one the re-read action uses, so a re-read can never diverge from a fresh read.
+  const result = await runInventoryRead({
+    companyId,
+    uploadId,
+    bytes,
+    filename: file.name,
+    fileSize: file.size,
+    storeScope: ctx.storeScope,
+    batchStore,
+    emit,
+    reuse: true,
+  });
+  return json(result.body, result.http);
 }

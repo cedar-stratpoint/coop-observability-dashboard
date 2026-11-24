@@ -1,11 +1,16 @@
 'use server';
 
-import {revalidatePath} from 'next/cache';
-import {expireSalesTotals} from '@/src/goldline-ref-data';
+import {revalidatePath, revalidateTag} from 'next/cache';
+import {expireSalesTotals, glTags} from '@/src/goldline-ref-data';
 import {runChecks} from '@/src/goldline-checks-data';
 import {learnFormBa, resolveFormBa} from '@/src/goldline-ba-data';
 import {getDataContext} from '@/src/active-context';
 import {canEditData, outOfScopeStores} from '@/src/company';
+import {isSettledStatus, type ServerBatchProgress, type ServerPageProgress} from '@/src/server-upload-progress';
+import {summarizeScanRows, type ScanReadingSummary} from '@/src/scan-reading';
+import {uploadSource} from '@/src/goldline-upload-groups';
+import {serverUploadEnabled} from '@/src/goldline-server-upload';
+import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
 import {
   BatchConflictError,
@@ -15,13 +20,22 @@ import {
   createBatch,
   deleteImpact,
   deleteUpload,
+  deleteScanGroup,
+  deleteBatch,
   getBatch,
   getBatchPages,
   getUpload,
+  latestActiveScan,
+  listStores,
+  scanGroupSummary,
+  scanBatchSummary,
+  setUploadsBa,
+  setUploadsStore,
   splitBatchIntoForms,
   updateBatchInfo,
   uploadStores,
   type DeleteImpact,
+  type ScanGroupSummary,
   type SplitForm,
   type ReviewedInventoryRow,
 } from '@/src/goldline-data';
@@ -114,6 +128,7 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
     // A sales file's rows are gone with it, so the cached sales totals are too.
     if (upload && upload.kind !== 'inventory_pdf') expireSalesTotals(ctx.companyId);
     await runChecks(ctx.companyId, touched?.length ? touched : undefined).catch((e) => console.error('runChecks after delete', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath('/stock');
     revalidatePath('/overview');
@@ -187,6 +202,7 @@ export async function commitReview(input: {
     await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath(`/uploads/${input.uploadId}`);
     revalidatePath('/flags');
@@ -329,6 +345,7 @@ export async function commitBatchAction(input: {
     await learnFormBa(ctx.companyId, {store, periodStart: input.periodStart, name: consultant, written: input.consultant, by: (await auth())?.user?.email ?? null});
     // The P2 checks follow every change to counts; a failing check never fails the commit.
     await runChecks(ctx.companyId, [store]).catch((e) => console.error('runChecks after commit', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     revalidatePath(`/uploads/batch/${input.batchId}`);
     revalidatePath('/stock');
@@ -362,6 +379,7 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
   try {
     const session = await auth();
     const forms = await splitBatchIntoForms(ctx.companyId, input.batchId, session?.user?.email ?? null);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
     revalidatePath('/uploads');
     return {ok: true, forms};
   } catch (e) {
@@ -369,3 +387,178 @@ export async function splitFormsAction(input: {company: string | null; batchId: 
     return {ok: false, error: 'Couldn’t split the scan into forms. Each page is saved; open Uploads to review them.'};
   }
 }
+
+/**
+ * Server-driven upload (P2): the browser polls this for a batch's live page progress while
+ * the pump reads it, so the uploader shows each page land in place without the in-memory
+ * queue. Company-scoped + flag-gated (off = no server batches exist, so it returns empty).
+ * Reads straight from the DB (not cached) so each poll is fresh. Inventory pages only.
+ */
+export async function serverBatchProgressAction(input: {
+  company: string | null;
+  batchId: string;
+}): Promise<{ok: true; progress: ServerBatchProgress} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!serverUploadEnabled(ctx.companyId)) return {ok: false, error: 'Server-driven upload is not enabled for this company.'};
+  if (!/^[0-9a-f-]{36}$/i.test(input.batchId ?? '')) return {ok: false, error: 'Upload batch not found.'};
+  try {
+    const rows = await getBatchPages(ctx.companyId, input.batchId);
+    const pages: ServerPageProgress[] = rows
+      .filter((p) => p.upload.kind === 'inventory_pdf')
+      .map((p) => {
+        const rows = p.extraction?.data?.rows ?? null;
+        return {
+          uploadId: p.upload.id,
+          filename: p.upload.filename,
+          status: p.upload.status,
+          page: p.extraction?.page ?? null,
+          formVersion: p.upload.form_version ?? null,
+          pageKind: p.upload.page_kind ?? null,
+          flagged: rows ? rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length : null,
+          rows: rows ? rows.length : null,
+        };
+      });
+    return {ok: true, progress: {batchId: input.batchId, pages, settled: pages.every((p) => isSettledStatus(p.status))}};
+  } catch (e) {
+    console.error('serverBatchProgressAction', e);
+    return {ok: false, error: 'Couldn’t read the scan’s progress.'};
+  }
+}
+
+/**
+ * Server-driven upload: the company's most recent scan still being read, for the refresh-
+ * surviving "reading" indicator (floating dock off Uploads, card on Uploads). Unlike
+ * serverBatchProgressAction it needs no batchId from the client — it discovers the active
+ * batch from DB state, so it works on any page and after a refresh. Company-scoped and
+ * flag-gated (off ⇒ always null, so no polling cost for other tenants). Returns null when
+ * nothing is in flight.
+ */
+export async function activeScanProgressAction(input: {
+  company: string | null;
+}): Promise<{ok: true; scan: ScanReadingSummary | null} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!serverUploadEnabled(ctx.companyId)) return {ok: true, scan: null};
+  try {
+    const found = await latestActiveScan(ctx.companyId);
+    if (!found) return {ok: true, scan: null};
+    // uploadSource keys the scan the same way the /uploads/scan/[source] page does, so its
+    // banner can match its own scan exactly.
+    const source = uploadSource(found.filename ?? found.batchId);
+    return {ok: true, scan: summarizeScanRows(found.statuses.map((status) => ({status})), found.batchId, source)};
+  } catch (e) {
+    console.error('activeScanProgressAction', e);
+    return {ok: false, error: 'Couldn’t check scan progress.'};
+  }
+}
+
+/** What deleting a whole scan drop would remove — for the confirmation before the user commits. */
+export async function scanGroupSummaryAction(input: {company: string | null; source: string; batchId?: string | null}): Promise<{ok: true; summary: ScanGroupSummary} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  try {
+    const batchId = (input.batchId ?? '').trim();
+    const summary = batchId
+      ? await scanBatchSummary(ctx.companyId, batchId)
+      : await scanGroupSummary(ctx.companyId, (input.source ?? '').trim());
+    return {ok: true, summary};
+  } catch (e) {
+    console.error('scanGroupSummaryAction', e);
+    return {ok: false, error: 'Couldn’t read this scan.'};
+  }
+}
+
+/** Delete a whole scan drop and everything it produced. Irreversible — the UI confirms first. */
+export async function deleteScanGroupAction(input: {company: string | null; source: string; batchId?: string | null}): Promise<{ok: true; deleted: number} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot delete uploads.'};
+  const batchId = (input.batchId ?? '').trim();
+  const source = (input.source ?? '').trim();
+  if (!batchId && !source) return {ok: false, error: 'No scan to delete.'};
+  try {
+    const deleted = batchId
+      ? await deleteBatch(ctx.companyId, batchId)
+      : await deleteScanGroup(ctx.companyId, source);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads');
+    revalidatePath('/uploads/forms');
+    return {ok: true, deleted};
+  } catch (e) {
+    console.error('deleteScanGroupAction', e);
+    return {ok: false, error: 'Delete didn’t finish. Some files may remain, try again.'};
+  }
+}
+
+/**
+ * Guided "which store?" — assign a store to a form whose store the scan couldn't read.
+ * Stamps the store onto the form's pages (so it leaves "needs a store"), then makes each
+ * affected batch commit-ready under that store: re-splitting a multi-store batch, or
+ * setting the store on a single-form batch. Only ever touches classification + the open
+ * batch, never committed inventory.
+ */
+export async function assignFormStoreAction(input: {company: string | null; uploadIds: string[]; storeCode: string}): Promise<{ok: true} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  const store = (input.storeCode ?? '').trim();
+  if (!store) return {ok: false, error: 'Pick a store first.'};
+  if (outOfScopeStores(ctx.storeScope, [store]).length) return {ok: false, error: `Store ${store} is outside your access.`};
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return {ok: false, error: 'No pages to assign.'};
+  try {
+    const name = (await listStores(ctx.companyId)).find((s) => s.code === store)?.name ?? null;
+    const batches = await setUploadsStore(ctx.companyId, ids, store, name);
+    // Make the form commit-ready under the store: a multi-form batch re-splits and each
+    // form's batch is pre-filled; a single-form batch gets the store set directly.
+    const by = (await auth())?.user?.email ?? null;
+    for (const batchId of batches) {
+      const forms = await splitBatchIntoForms(ctx.companyId, batchId, by);
+      if (forms.length === 1) {
+        const f = forms[0];
+        await updateBatchInfo(ctx.companyId, batchId, {storeCode: f.storeCode, periodStart: f.periodStart, periodEnd: f.periodEnd});
+      }
+    }
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads/forms');
+    revalidatePath('/uploads');
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_store', status: 'ok', storeCode: store, detail: {uploadIds: ids, batches}});
+    return {ok: true};
+  } catch (e) {
+    console.error('assignFormStoreAction', e);
+    const reason = e instanceof Error && e.message ? e.message : String(e);
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_store', status: 'failed', storeCode: store, error: reason, detail: {uploadIds: ids}});
+    // Surface the real reason (the pages are still saved) so a staging failure is
+    // diagnosable instead of a dead end; the raw detail is short and operator-facing.
+    const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
+    return {ok: false, error: `Couldn’t assign the store${detail}. The pages are saved; try again or set it from the form.`};
+  }
+}
+
+/** Point a form's pages at one BA (beauty advisor), so a scan read many ways regroups under
+ *  the chosen person. Stamps the consultant on the pages; the forms board re-reads it. */
+export async function assignFormBaAction(input: {company: string | null; uploadIds: string[]; baName: string}): Promise<{ok: true} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  const ba = (input.baName ?? '').trim();
+  if (!ba) return {ok: false, error: 'Pick a BA first.'};
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return {ok: false, error: 'No pages to assign.'};
+  try {
+    await setUploadsBa(ctx.companyId, ids, ba);
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads/forms');
+    revalidatePath('/uploads');
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_ba', status: 'ok', detail: {ba, uploadIds: ids}});
+    return {ok: true};
+  } catch (e) {
+    console.error('assignFormBaAction', e);
+    const reason = e instanceof Error && e.message ? e.message : String(e);
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_ba', status: 'failed', error: reason, detail: {ba, uploadIds: ids}});
+    const detail = e instanceof Error && e.message ? ` (${e.message})` : '';
+    return {ok: false, error: `Couldn’t assign the BA${detail}. The pages are saved; try again or set it from the form.`};
+  }
+}
+

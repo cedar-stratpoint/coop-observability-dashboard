@@ -1,0 +1,371 @@
+import 'server-only';
+import {unstable_cache} from 'next/cache';
+import {nichidoConfigured, nichidoDb} from './nichido-client';
+import {fetchAllRows} from './pos-fetch-paginate';
+import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
+import {knownStoreCodes} from './goldline-store-registry';
+import {reconcileBaNames} from './goldline-ba-reconcile';
+import {glTags} from './goldline-ref-data';
+import {uploadSource} from './goldline-upload-groups';
+import type {FormVersion} from './goldline-extract';
+
+// Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
+// upload route persisted on `uploads` (page_no, page_kind, orientation, form_version,
+// classification jsonb, page_key), regroups the shuffled bundle into store · period ·
+// version forms with the shared, tested `segmentBundle`, and shapes it for the board.
+// Server-only, Nichido project. Mock fallback mirrors the real Sept scan so the board
+// renders populated with the Supabase env unset.
+
+/** One store-day form as the board shows it: identity + page coverage + flags + the
+ *  per-page upload state so the card can link into review and show progress. */
+export type TriageForm = {
+  key: string;
+  storeCode: string | null;
+  storeName: string | null;
+  consultant: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  version: FormVersion;
+  present: number[];
+  missing: number[];
+  duplicates: Array<{page: number; count: number}>;
+  flags: string[];
+  uploadIds: string[];
+  batchId: string | null;
+  // 'form' = a single store's batch (opens in batch-review to commit together). 'scan' = part
+  // of a server-ingested scan (open each page in the per-file review, never batch-review).
+  // null when the form's pages don't all share one batch.
+  batchKind: 'form' | 'scan' | null;
+  needsReview: number; // pages awaiting human review
+  committed: number; // pages already committed
+};
+
+/** A page set aside by the bundle: the page-6 sales report or a blank back side. */
+export type ParkedPage = {uploadId: string; filename: string; kind: 'sales' | 'blank' | 'unplaceable'};
+
+export type TriageResult = {
+  configured: boolean;
+  forms: TriageForm[];
+  parked: ParkedPage[];
+  totals: {forms: number; inventoryPages: number; sales: number; blank: number; unplaceable: number};
+  mock: boolean;
+};
+
+export type UploadClsRow = {
+  id: string;
+  filename: string;
+  status: string;
+  batch_id: string | null;
+  page_no: number | null;
+  page_kind: string | null;
+  orientation: number | null;
+  form_version: string | null;
+  classification: Record<string, unknown> | null;
+  created_at: string;
+};
+
+/** The `uploads` columns a classification mapping needs — the shared select string so
+ *  the triage board and the batch split read the same shape. `created_at` gives the
+ *  scan order, which the blank-store contiguity grouping needs. */
+export const UPLOAD_CLS_COLS = 'id,filename,status,batch_id,page_no,page_kind,orientation,form_version,classification,created_at';
+
+/** Pages in scan order (oldest first) — the order a scan's pages were uploaded, which
+ *  the contiguity grouping reads to cut blank-store runs into forms. */
+export function inScanOrder(rows: UploadClsRow[]): UploadClsRow[] {
+  return [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+}
+
+/** The consultant (BA) a page read, from its classification jsonb (null if absent). */
+export function consultantOf(u: UploadClsRow): string | null {
+  const c = (u.classification ?? {}) as Record<string, unknown>;
+  return typeof c.consultant === 'string' && c.consultant.trim() !== '' ? c.consultant.trim() : null;
+}
+
+/** Map a persisted upload row to the ClassifiedPage shape `segmentBundle` consumes.
+ *  Prefers the top-level classifier columns; store/period/consultant come from the
+ *  classification jsonb (using the snapped store code the grouping was keyed on). */
+export function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
+  const c = (u.classification ?? {}) as Record<string, unknown>;
+  const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  return {
+    id: u.id,
+    page: typeof u.page_no === 'number' ? u.page_no : 0,
+    kind: (u.page_kind as ClassifiedPage['kind']) ?? 'unknown',
+    orientation: u.orientation === 180 ? 180 : 0,
+    version: (u.form_version as FormVersion) ?? 'unknown',
+    store_code: str(snap.code) ?? str(c.store_code),
+    store_name: str(c.store_name),
+    period_start: str(c.period_start),
+    period_end: str(c.period_end),
+    consultant: str(c.consultant),
+    confidence: typeof c.confidence === 'number' ? c.confidence : 0,
+  };
+}
+
+function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds: Map<string, 'form' | 'scan'>): TriageForm {
+  const ids = g.slots.flatMap((s) => s.ids);
+  const rows = ids.map((id) => byId.get(id)).filter((r): r is UploadClsRow => Boolean(r));
+  const first = rows[0]?.classification as Record<string, unknown> | undefined;
+  const batchIds = new Set(rows.map((r) => r.batch_id).filter(Boolean));
+  const batchId = batchIds.size === 1 ? [...batchIds][0] : null;
+  return {
+    key: g.key,
+    storeCode: g.store_code,
+    storeName: (first?.store_name as string) ?? null,
+    consultant: (first?.consultant as string) ?? null,
+    periodStart: g.period_start,
+    periodEnd: g.period_end,
+    version: g.version,
+    present: g.present,
+    missing: g.missing,
+    duplicates: g.duplicates.map((d) => ({page: d.page, count: d.ids.length})),
+    flags: g.flags,
+    uploadIds: ids,
+    batchId,
+    batchKind: batchId ? batchKinds.get(batchId) ?? 'form' : null,
+    needsReview: rows.filter((r) => r.status === 'needs_review').length,
+    committed: rows.filter((r) => r.status === 'committed').length,
+  };
+}
+
+/**
+ * Build the triage board for a company from its classified inventory-PDF uploads.
+ * With `source` given, scopes to one scan drop (every page whose filename shares that
+ * source name) — the per-scan "forms found" view. The company-wide inbox omits it.
+ * With `batchId` also given, scopes to ONE upload of that scan (one drop), so re-uploads of
+ * the same file don't aggregate into one inflated view; omit it for the legacy by-filename view.
+ */
+export async function triageBoard(companyId: string, opts?: {source?: string; batchId?: string}): Promise<TriageResult> {
+  if (!nichidoConfigured()) return mockTriage();
+  const source = opts?.source ?? null;
+  const batchId = opts?.batchId ?? null;
+  // Cached so back-navigation and repeat opens don't re-read + re-segment every time. Any
+  // write to uploads (upload, assign, re-read, delete) revalidates glTags.uploads, so an
+  // edit still shows immediately; the 30s window only covers idle repeat views.
+  return unstable_cache(
+    () => loadTriageBoard(companyId, source, batchId),
+    ['gl-triage', companyId, source ?? 'all', batchId ?? 'all'],
+    {tags: [glTags.uploads(companyId)], revalidate: 30},
+  )();
+}
+
+/** The ordered upload ids for one scope within a scan, computed the same way the board groups
+ *  so the per-file review's ‹ › arrows step through exactly that store's (or BA's) pages. Store
+ *  scope = every page of that store's forms; BA scope = every page under that canonical BA. */
+export async function scanScopeIds(
+  companyId: string,
+  source: string,
+  scope: {kind: 'store'; code: string} | {kind: 'ba'; name: string},
+  knownBas: string[] = [],
+): Promise<Set<string>> {
+  const board = await triageBoard(companyId, {source});
+  let forms = board.forms;
+  if (scope.kind === 'store') {
+    forms = forms.filter((f) => f.storeCode === scope.code);
+  } else {
+    const canon = reconcileBaNames(board.forms.map((f) => f.consultant), knownBas, {foldFirstName: true});
+    const nameOf = (c: string | null) => (c?.trim() ? canon.get(c.trim()) ?? c.trim() : 'No BA on the form');
+    forms = forms.filter((f) => nameOf(f.consultant) === scope.name);
+  }
+  return new Set(forms.flatMap((f) => f.uploadIds));
+}
+
+/** Map each batch id the rows touch to its kind ('form' | 'scan'), so a form card can link to
+ *  batch-review (a store's form) or the per-file review (a scan's page). Chunked by id so a big
+ *  inbox never over-long a single `in()`. */
+async function loadBatchKinds(
+  supa: ReturnType<typeof nichidoDb>,
+  companyId: string,
+  rows: Array<{batch_id: string | null}>,
+): Promise<Map<string, 'form' | 'scan'>> {
+  const ids = [...new Set(rows.map((r) => r.batch_id).filter((b): b is string => Boolean(b)))];
+  const out = new Map<string, 'form' | 'scan'>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    // pagination-ok: bounded to <=200 explicit ids per chunk.
+    const res = await supa.from('upload_batches').select('id,kind').eq('company_id', companyId).in('id', chunk);
+    if (res.error) throw new Error(`upload_batches kind read failed: ${res.error.message}`);
+    for (const b of (res.data ?? []) as Array<{id: string; kind: string}>) {
+      out.set(b.id, b.kind === 'scan' ? 'scan' : 'form');
+    }
+  }
+  return out;
+}
+
+async function loadTriageBoard(companyId: string, source: string | null, batchId: string | null = null): Promise<TriageResult> {
+  const supa = nichidoDb();
+  // Scope the read to one scan at the DB so opening a scan reads its own pages, not the
+  // whole company's classified pages. The pages are "<source> (page N of M).pdf", so a
+  // prefix LIKE pulls exactly this scan (plus, at worst, a name that shares the prefix —
+  // the exact uploadSource filter below still narrows it, so this only ever over-matches,
+  // never under-matches). LIKE metacharacters in the source are escaped.
+  const likePrefix = source ? `${source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%` : null;
+  const all = (await fetchAllRows('uploads', (from, to) => {
+    let q = supa
+      .from('uploads') // pagination-ok: paged by fetchAllRows via .range(from, to) below
+      .select(UPLOAD_CLS_COLS)
+      .eq('company_id', companyId)
+      .eq('kind', 'inventory_pdf')
+      .not('classified_at', 'is', null);
+    if (likePrefix) q = q.like('filename', likePrefix);
+    if (batchId) q = q.eq('batch_id', batchId);
+    return q.order('created_at', {ascending: false}).range(from, to);
+  })) as unknown as UploadClsRow[];
+  const bySource = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
+  // batchId (when the view is scoped to one upload drop) pins it to that single batch, so
+  // re-uploads of the same scan file don't pile into one view.
+  const rows = batchId ? bySource.filter((r) => r.batch_id === batchId) : bySource;
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  // Re-snap store codes against the current registry, then reconcile OCR year noise
+  // (the handwritten year is the noisiest field) to the bundle's dominant year before
+  // grouping — so neither a drifted store code ("DS 5300") nor a misread year spins a
+  // page off into its own fake form. Snapped pages are flagged on their form.
+  const known = await knownStoreCodes(companyId);
+  // Scan order first (blank-store runs need it), snap stores, then cut blank runs into
+  // forms, then reconcile years, then group.
+  const pages = assignBlankFormRuns(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known));
+  const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(pages));
+
+  const parked: ParkedPage[] = [
+    ...sales.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'sales' as const})),
+    ...blanks.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'blank' as const})),
+    ...unplaceable.map((p) => ({uploadId: p.id, filename: byId.get(p.id)?.filename ?? '', kind: 'unplaceable' as const})),
+  ];
+  const inventoryPages = forms.reduce((n, g) => n + g.slots.reduce((m, s) => m + s.ids.length, 0), 0);
+
+  // Each batch's kind ('form' vs server-ingested 'scan') so a form card links to the right
+  // place: batch-review for a single store's form, the per-file review for a scan's page.
+  const batchKinds = await loadBatchKinds(supa, companyId, rows);
+
+  return {
+    configured: true,
+    forms: forms.map((g) => toTriageForm(g, byId, batchKinds)),
+    parked,
+    totals: {forms: forms.length, inventoryPages, sales: sales.length, blank: blanks.length, unplaceable: unplaceable.length},
+    mock: false,
+  };
+}
+
+/** A prior upload of the same page, with the row-level diff against the current one. */
+export type DuplicateMatch = {
+  uploadId: string;
+  filename: string;
+  status: string;
+  createdAt: string;
+  committed: boolean;
+  diff: ExtractionDiff | null; // null if either side has no extraction to compare
+};
+
+/**
+ * Phase 2 — for an upload that shares a page_key with earlier uploads (a re-upload or
+ * an in-bundle duplicate), return the most recent prior one plus a diff of its extracted
+ * counts against this upload's. Flag-only: the reviewer decides which to keep. Empty
+ * when the upload has no page_key or no prior match.
+ */
+export async function duplicateMatchFor(companyId: string, uploadId: string): Promise<DuplicateMatch | null> {
+  if (!nichidoConfigured()) return null;
+  const supa = nichidoDb();
+  const self = await supa.from('uploads').select('page_key').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  if (self.error) throw new Error(`uploads read failed: ${self.error.message}`);
+  const pageKey = (self.data as {page_key: string | null} | null)?.page_key ?? null;
+  if (!pageKey) return null;
+
+  const priors = await supa
+    .from('uploads')
+    .select('id,filename,status,created_at')
+    .eq('company_id', companyId)
+    .eq('page_key', pageKey)
+    .neq('id', uploadId)
+    .order('created_at', {ascending: false})
+    .limit(1);
+  if (priors.error) throw new Error(`uploads duplicate read failed: ${priors.error.message}`);
+  const prior = (priors.data ?? [])[0] as {id: string; filename: string; status: string; created_at: string} | undefined;
+  if (!prior) return null;
+
+  const [curExt, priorExt] = await Promise.all([
+    readRows(supa, companyId, uploadId),
+    readRows(supa, companyId, prior.id),
+  ]);
+  const diff = curExt && priorExt ? diffExtractions(curExt, priorExt) : null;
+
+  return {
+    uploadId: prior.id,
+    filename: prior.filename,
+    status: prior.status,
+    createdAt: prior.created_at,
+    committed: prior.status === 'committed',
+    diff,
+  };
+}
+
+/** The extraction rows (for the diff) of one upload, or null if none staged. */
+async function readRows(
+  supa: ReturnType<typeof nichidoDb>,
+  companyId: string,
+  uploadId: string,
+): Promise<DiffRow[] | null> {
+  const res = await supa
+    .from('extractions')
+    .select('rows')
+    .eq('company_id', companyId)
+    .eq('upload_id', uploadId)
+    .order('page', {ascending: true})
+    .limit(1)
+    .maybeSingle();
+  if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
+  const rows = (res.data as {rows?: {rows?: DiffRow[]}} | null)?.rows?.rows;
+  return Array.isArray(rows) ? rows : null;
+}
+
+// ── Mock: the real Sept bundle, so the board renders populated with no DB ───────────
+function mockTriage(): TriageResult {
+  const f = (p: Partial<TriageForm> & Pick<TriageForm, 'storeCode' | 'consultant' | 'version' | 'periodStart' | 'periodEnd'>): TriageForm => ({
+    key: `${p.storeCode}|${p.periodStart}|${p.version}`,
+    storeName: null,
+    present: [1, 2, 3, 4, 5],
+    missing: [],
+    duplicates: [],
+    flags: [],
+    uploadIds: [],
+    batchId: null,
+    batchKind: null,
+    needsReview: 5,
+    committed: 0,
+    ...p,
+  });
+  const forms: TriageForm[] = [
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'legacy',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', missing: [], flags: [], needsReview: 5}),
+    f({storeCode: null, storeName: 'Robinsons dept store', consultant: 'Alyza Mae Beral', version: 'v1',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', flags: ['unknown-store'], needsReview: 5}),
+    f({storeCode: '854', storeName: 'Gaisano Mall Davao', consultant: 'Vanessa Diamante', version: 'v1',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', duplicates: [{page: 2, count: 2}], flags: ['duplicate-pages'], needsReview: 5}),
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
+      periodStart: '2026-09-16', periodEnd: '2026-09-30', present: [1, 2, 4, 5], missing: [3], flags: ['incomplete', 'store-corrected'], needsReview: 4}),
+    f({storeCode: '5300', storeName: 'SM Sta Rosa', consultant: 'Ma. Sofia Lucero', version: 'v1',
+      periodStart: '2026-09-09', periodEnd: '2026-09-15', flags: ['period-mismatch', 'period-partial'], needsReview: 5}),
+    f({storeCode: '473', storeName: 'Watsons SM San Pablo', consultant: 'Leonisa Ramos', version: 'v2',
+      periodStart: '2026-10-01', periodEnd: '2026-10-15', flags: ['store-corrected'], needsReview: 2, committed: 3}),
+    // A page whose misread year (2020) was reconciled to 2026, so it groups with its
+    // real cut-off and carries the year-auto-corrected flag.
+    f({storeCode: '2166', storeName: 'Gaisano Mall Digos', consultant: 'Rhea Mae Bermil', version: 'v1',
+      periodStart: '2026-09-01', periodEnd: '2026-09-15', present: [5], missing: [1, 2, 3, 4], flags: ['incomplete', 'year-reconciled'], needsReview: 1}),
+    // A page whose period couldn't be read at all — always last.
+    f({storeCode: null, storeName: null, consultant: 'Unknown', version: 'unknown',
+      periodStart: null, periodEnd: null, present: [3], missing: [1, 2, 4, 5], flags: ['period-missing', 'unknown-store', 'unknown-version'], needsReview: 1}),
+  ];
+  return {
+    configured: false,
+    forms,
+    parked: [
+      {uploadId: 'm-s1', filename: 'Scan p3 (sales report).pdf', kind: 'sales'},
+      {uploadId: 'm-s2', filename: 'Scan p6 (sales report).pdf', kind: 'sales'},
+      {uploadId: 'm-b1', filename: 'Scan p45 (blank back).pdf', kind: 'blank'},
+    ],
+    totals: {forms: forms.length, inventoryPages: 29, sales: 2, blank: 1, unplaceable: 0},
+    mock: true,
+  };
+}

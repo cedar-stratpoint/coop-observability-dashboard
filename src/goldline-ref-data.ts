@@ -1,4 +1,5 @@
 import 'server-only';
+import {cache} from 'react';
 import {revalidateTag, unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
@@ -24,6 +25,8 @@ export const glTags = {
   supply: (companyId: string) => `gl-supply:${companyId}`,
   forecast: (companyId: string) => `gl-forecast:${companyId}`,
   sales: (companyId: string) => `gl-sales:${companyId}`,
+  uploads: (companyId: string) => `gl-uploads:${companyId}`,
+  poForm: (companyId: string) => `gl-po-form:${companyId}`,
 };
 
 export type GlProduct = {
@@ -190,9 +193,11 @@ export function readSalesRollup(companyId: string, opts: {fresh?: boolean} = {})
  * Which sales files are committed, as a short key. The cached totals are stored under it,
  * so a new, re-loaded or deleted sales file always gets fresh totals, on every server,
  * even if a slow refresh that began before the change finishes after it (it lands under
- * the old key). A few dozen rows, read on each load.
+ * the old key). A few dozen rows, read once per request (React cache: a page asks for it
+ * once per cached sales read, 2 to 4 times a load). No write path reads it before
+ * changing sales in the same request; they use readSalesRollup({fresh}) / expireSalesTotals.
  */
-export async function salesVersion(companyId: string): Promise<string> {
+export const salesVersion = cache(async (companyId: string): Promise<string> => {
   const rows = (await fetchAllRows('uploads', (from, to) =>
     db()
       .from('uploads')
@@ -207,7 +212,7 @@ export async function salesVersion(companyId: string): Promise<string> {
   let h = 0x811c9dc5;
   for (const ch of rows.map((r) => r.id).join(',')) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
   return `${rows.length}-${h.toString(36)}`;
-}
+});
 
 // A copy on this server too. SKU linking's decisions refresh the /stock pages
 // (revalidatePath), and Next drops data cached while rendering those pages along with
