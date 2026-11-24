@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.25.2 Nichido: PO form tiles, uploads search, name-then-file fix
+
+Release on `main` cut from v1.25.1 with four staging PRs, picked as is (the three files they touch were identical on prod and staging beforehand, so nothing else rides along). **No SQL:** Nichido prod already has `po_forms` and the `audit_counts` with shelf counts from the Nov 24 cutover (checked read-only: 3 functions, one active PO form with 243 products).
+
+- **#702** PO form page: product lines fold, lines with something to decide first, more whitespace.
+- **#705** PO form lines as tiles (ring + share on the form + what needs a look); a tile opens its products in a side panel.
+- **#706** Uploads: search in the Files header, matching the upload's given name as well as the file name.
+- **#707** Uploads: a file picked after typing the upload's name was dropped (live `FileList` cleared before React read it).
+
 ## 2026-11-24 · v1.25.1 Nichido: page check room, accessories commit, Form pages strip, kept-row ring
 
 Prod hotfix after the first real scans on coop-cedar: the page check's 2,000-token room, plus #697, #698 and #699 from staging (entries below). No SQL.
