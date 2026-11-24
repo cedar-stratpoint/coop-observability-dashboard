@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconciliation: the tiles are the only filter
+
+Review on staging found the page confusing: three controls filtered the same list (the tiles, the Active/Inactive tabs, the "Only products that need a step" checkbox) and they fought, e.g. clicking a tab silently dropped the picked tile. **Decision: one filter, the tiles.** Exactly one tile or chip is always selected (no toggling off) and the table lists only that state; the page opens on the most urgent step. The Active/Inactive tabs and the checkbox are gone (Active/Inactive is on every tile and chip). The table header now says what it shows: the state, who acts and the step. Search is the one exception: it looks across every state, shows each match's state, and clears the tile highlight while it is in use; picking a tile clears the search. Same on By product. Changing store or month opens on that selection's own most urgent state.
+
 ## 2026-11-24 — Reconciliation: every combo shows its marks, and each state explains itself
 
 Review on staging read the four tiles as "missing the other combos". They were there, as chips at 0 in the "Everything else" row, but only as words. Now each chip carries the same Watsons · Inventory · PO marks as the tiles, so all eight combinations read as one matrix at a glance. Every tile and chip also has a tooltip (hover after a short pause, or keyboard focus at once): the state, Active or Inactive, the three marks in words ("No Watsons sale this month", "Not on the form, or counted zero", "On the PO form, so still delivered"), then who acts and the step. The tile tooltip matches the tile's width so it never runs off screen.

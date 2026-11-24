@@ -19,5 +19,6 @@ export default async function Page(props: {searchParams: Promise<{store?: string
   }
   const sp = await props.searchParams;
   const data = await auditData(ctx.companyId, {store: sp.store ?? null, month: sp.month ?? null});
-  return <AuditMatrix data={data} />;
+  // Keyed by store and month: a new selection opens on its own most urgent state.
+  return <AuditMatrix key={`${data.selected?.code ?? ''}|${data.selected?.month ?? ''}`} data={data} />;
 }

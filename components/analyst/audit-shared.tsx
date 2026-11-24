@@ -58,6 +58,18 @@ export function StateChip({state}: {state: AuditState}) {
 /** How urgent a state's tone is, for ordering the choices (most urgent first). */
 export const URGENCY: Record<(typeof AUDIT_META)[AuditState]['tone'], number> = {crit: 0, warn: 1, out: 2, neutral: 3, good: 4};
 
+/** The states that need a step and have products, most urgent first (the primary tiles). */
+export function rankedSteps(summary: Record<AuditState, number>): AuditState[] {
+  return AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(
+    (a, b) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a],
+  );
+}
+
+/** The state a page opens on: the most urgent step, else the biggest state, else All good. */
+export function defaultState(summary: Record<AuditState, number>): AuditState {
+  return rankedSteps(summary)[0] ?? [...AUDIT_STATES].sort((a, b) => summary[b] - summary[a])[0] ?? 'ok';
+}
+
 /**
  * The matrix as ranked choices (Hick's law, Nov 24). Every state stays one click away, but
  * not every state asks for the same attention:
@@ -75,15 +87,15 @@ export function MatrixLegend({
 }: {
   summary: AuditSummary;
   active: AuditState | null;
-  onPick: (s: AuditState | null) => void;
+  onPick: (s: AuditState) => void;
   unit: string;
 }) {
-  const rank = (a: AuditState, b: AuditState) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a];
-  const steps = AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(rank);
+  const steps = rankedSteps(summary);
   const rest = AUDIT_STATES.filter((s) => !steps.includes(s));
   const restActive = rest.filter((s) => AUDIT_META[s].legs.po);
   const restInactive = rest.filter((s) => !AUDIT_META[s].legs.po);
-  const pick = (s: AuditState) => onPick(active === s ? null : s);
+  // The tiles are the page's only filter, and one is always selected (no toggling off).
+  const pick = (s: AuditState) => onPick(s);
 
   return (
     <div className="flex flex-col gap-3">
