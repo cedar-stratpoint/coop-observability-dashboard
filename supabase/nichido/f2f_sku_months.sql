@@ -7,8 +7,8 @@
 -- read is never cut at PostgREST's row cap: {"<sku>": [["YYYY-MM-01", units, stores], ...]}.
 -- Units only; the money is not read.
 --
--- Once s3_sales_units_encryption.sql is applied, re-run s3 after this file: units are
--- encrypted there and s3 holds the decrypting sku_months (s2 then drops plain units).
+-- Once s3_sales_units_encryption.sql is applied, the live sales readers are in s3 (and then
+-- s5_sales_period_totals.sql): if this file is ever re-run, re-run s3 and s5 after it.
 
 create or replace function public.sku_months(p_company text)
 returns jsonb

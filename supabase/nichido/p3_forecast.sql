@@ -1,7 +1,5 @@
 -- F10 · Forecast inputs (Nichido project). Additive and safe to re-run.
 -- Run on Nichido STAGING (Nichido-Supabase-Staging) first; PROD after review.
--- Once s3_sales_units_encryption.sql is applied, re-run s3 after this file: s3 holds the
--- decrypting versions of the sales readers below (units are encrypted, then dropped by s2).
 --
 -- Decided Oct 26 (meeting) and Oct 27:
 --   • A restock run covers the next `window_months` calendar months after the run date
@@ -16,6 +14,9 @@
 --   forecast_history()  per store × item: units in each requested month, through the
 --                       Watsons SKU link (products.sku_code). Whole-month rows only, the
 --                       same rule as the form-vs-sales check (src/goldline-checks-data.ts).
+--
+-- Once s3_sales_units_encryption.sql is applied, the live sales readers are in s3 (and then
+-- s5_sales_period_totals.sql): if this file is ever re-run, re-run s3 and s5 after it.
 
 create table if not exists public.forecast_settings (
   company_id     text primary key references public.companies(id) on delete cascade,
