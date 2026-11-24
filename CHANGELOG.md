@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconcile: Store and Month pickers get the inset chevron
+
+The Store and Month pickers on Reconcile (matrix and By product) were plain `<select>`s, so the browser drew its own arrow pressed against the right edge, unlike every other Coop picker. They now use `NativeSelect` (drawn, inset, muted chevron), kept at Reconcile's taller, rounder field size. Changing the store or month now replaces history instead of pushing (same rule as the Back work: a filter is not a Back step), so Back leaves Reconcile in one press.
+
 ## 2026-11-24 — Reconciliation: fewer, ranked choices (Hick's law) and rows open the product page
 
 The eight equal state tiles made every visit start with eight choices, most of them empty or "no action". Now only the states that **need a step and have products** get a tile, ranked most urgent first (critical, then warning, then retire candidates; ties by count), each with its Watsons · Inventory · PO dots, an Active/Inactive tag and who acts (Nichido, Watsons, Accounting, You). "No action" states with products ("All good", "Phasing out") sit in one quiet clickable line, and empty states are listed as "At 0". The By store table orders its state groups the same way. With nothing to do the row reads "Nothing needs a step."

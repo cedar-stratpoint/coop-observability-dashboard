@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {ChevronRight, Search} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
+import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
@@ -16,6 +17,10 @@ import {ink, LegKey, Mark, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, Sta
 
 const FIELD =
   'h-9 rounded-lg border border-border bg-card px-2.5 text-sm outline-none transition-colors duration-150 [@media(hover:hover)]:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
+
+// The store / month pickers: NativeSelect draws an inset chevron (the browser's own arrow sits
+// flush against the right edge), sized to match FIELD.
+const SELECT = 'h-9 rounded-lg bg-card pr-9 pl-3 duration-150';
 
 export function AuditMatrix({data}: {data: AuditResult}) {
   const router = useRouter();
@@ -39,7 +44,8 @@ export function AuditMatrix({data}: {data: AuditResult}) {
     const sp = new URLSearchParams();
     sp.set('store', key === 'store' ? value : (sel?.code ?? ''));
     sp.set('month', key === 'month' ? value : (sel?.month ?? ''));
-    router.push(`/stock/audit?${sp.toString()}`);
+    // A store or month is a filter on this page, not a step: replace, so Back leaves Reconcile.
+    router.replace(`/stock/audit?${sp.toString()}`, {scroll: false});
   };
   const query = sel ? `month=${sel.month}` : undefined;
 
@@ -77,23 +83,23 @@ export function AuditMatrix({data}: {data: AuditResult}) {
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Store
-              <select className={cn(FIELD, 'min-w-[16rem]')} value={sel.code} onChange={(e) => setParam('store', e.target.value)}>
+              <NativeSelect wrapperClassName="min-w-[16rem]" className={SELECT} value={sel.code} onChange={(e) => setParam('store', e.target.value)}>
                 {data.stores.map((s) => (
                   <option key={s.code} value={s.code}>
                     {s.name ? `${s.code} · ${titleName(s.name)}` : s.code}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Month
-              <select className={FIELD} value={sel.month} onChange={(e) => setParam('month', e.target.value)}>
+              <NativeSelect className={SELECT} value={sel.month} onChange={(e) => setParam('month', e.target.value)}>
                 {data.months.map((m) => (
                   <option key={m} value={m}>
                     {monthLabel(m)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <div className="ml-auto text-right">
               <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.summary.needsAction}</p>

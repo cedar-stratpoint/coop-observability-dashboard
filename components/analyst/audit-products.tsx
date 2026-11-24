@@ -6,6 +6,7 @@ import {useRouter} from 'next/navigation';
 import {ChevronRight, Search} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
+import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
@@ -17,6 +18,10 @@ import {ink, LegKey, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, tint, ton
 
 const FIELD =
   'h-9 rounded-lg border border-border bg-card px-2.5 text-sm outline-none transition-colors duration-150 [@media(hover:hover)]:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
+
+// The store / month pickers: NativeSelect draws an inset chevron (the browser's own arrow sits
+// flush against the right edge), sized to match FIELD.
+const SELECT = 'h-9 rounded-lg bg-card pr-9 pl-3 duration-150';
 
 const PAGE = 60;
 
@@ -67,13 +72,14 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Month
-              <select className={FIELD} value={data.month} onChange={(e) => router.push(`/stock/audit/products?month=${e.target.value}`)}>
+              {/* A month is a filter, not a step: replace, so Back leaves the page. */}
+              <NativeSelect className={SELECT} value={data.month} onChange={(e) => router.replace(`/stock/audit/products?month=${e.target.value}`, {scroll: false})}>
                 {data.months.map((m) => (
                   <option key={m} value={m}>
                     {monthLabel(m)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <div className="ml-auto flex gap-6 text-right">
               <div>
