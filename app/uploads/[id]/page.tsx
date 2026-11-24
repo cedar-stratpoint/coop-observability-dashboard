@@ -12,6 +12,7 @@ import {MANIFESTS} from '@/src/goldline-extract';
 import {committedSnapshotFor} from '@/src/goldline-inventory-data';
 import {UploadReview} from '@/components/analyst/upload-review';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
+import {firstIsoDate, isoPeriod} from '@/src/period-date';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,8 +132,9 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const head = extraction?.data;
     const v = (x: string | null | undefined) => (x && x.trim() ? x.trim() : null); // '' is "not read"
     const pageStore = v(read.storeCode) ?? v(head?.store_code);
-    const pageStart = v(read.periodStart) ?? v(head?.period_start);
-    const pageEnd = v(read.periodEnd) ?? v(head?.period_end);
+    // The page sort's date (YYYY-MM-DD, year-checked) first; else the reader's written date
+    // converted ("10/16/2026"), since a non-ISO value blanks the date box.
+    const {start: pageStart, end: pageEnd} = isoPeriod([read.periodStart, head?.period_start], [read.periodEnd, head?.period_end]);
     // The batch's store is only a fair guess for a page of the same count: in a shuffled
     // pile the batch carries one form's store, and a page dated another period is another
     // form. Better an honest blank (filled from the last committed page) than a wrong store.
@@ -141,11 +143,18 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     suggestion = {
       storeCode: pageStore ?? batchStore,
       storeFrom: pageStore ? ('page' as const) : batchStore ? ('batch' as const) : null,
-      periodStart: pageStart ?? v(batch?.period_start),
-      periodEnd: pageEnd ?? v(batch?.period_end),
+      periodStart: pageStart ?? firstIsoDate(batch?.period_start),
+      periodEnd: pageEnd ?? firstIsoDate(batch?.period_end),
       consultant: v(read.consultant) ?? v(head?.consultant),
     };
     bas = baReg;
+  }
+  // Opened on its own (not from the scan's page list, e.g. a direct or "earlier copy" link):
+  // still fill the period boxes from the page sort's date, else the reader's converted text.
+  let periodDefault: {start: string | null; end: string | null} | null = null;
+  if (!suggestion && extraction) {
+    const read = await getPageSuggestion(ctx.companyId, upload.id);
+    periodDefault = isoPeriod([read.periodStart, extraction.data?.period_start], [read.periodEnd, extraction.data?.period_end]);
   }
   // Phase 2: a re-upload / duplicate of the same form page, with a count diff. Only
   // meaningful while this page is still under review (not after it's committed itself).
@@ -173,6 +182,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       stores={stores}
       nav={nav}
       suggestion={suggestion}
+      periodDefault={periodDefault}
       bas={bas}
     />
     </div>

@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Review: period boxes no longer come up empty
+
+The period date boxes on the page review (and the store batch review) were blank whenever they fell back to the reader's own text. The reader stores the period as written on the form ("10/16/2026", "09/15", "SEPTEMBER 16, 2026"; 1,210 of 1,311 stored reads on staging), but a date box accepts only YYYY-MM-DD and blanks anything else. That fallback ran for a page opened on its own (a direct or "earlier copy" link) and for the ~109 pages whose page sort found no date. Each end now takes the page sort's year-checked date first, else converts the written date (`src/period-date.ts`: numeric month-first, written months, two-digit years; impossible days like Sep 31 rejected), borrowing the year from the other end when one is missing. A period with no year on either end stays empty rather than guessed. Example: page 1 of Scan2026-11-20_114605 opened directly now shows Oct 16 to Oct 31, 2024 (the reader's text said 2026).
+
 ## 2026-11-24 — Reconcile: Store and Month pickers get the inset chevron
 
 The Store and Month pickers on Reconcile (matrix and By product) were plain `<select>`s, so the browser drew its own arrow pressed against the right edge, unlike every other Coop picker. They now use `NativeSelect` (drawn, inset, muted chevron), kept at Reconcile's taller, rounder field size. Changing the store or month now replaces history instead of pushing (same rule as the Back work: a filter is not a Back step), so Back leaves Reconcile in one press.
