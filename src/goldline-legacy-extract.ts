@@ -130,7 +130,8 @@ export function bandsOf(items: PrintedItem[]): Array<{group: string; price: numb
   return bands;
 }
 
-export type FamilyTotal = {family: string; amount: number};
+/** A band's written total, and the unit price the consultant wrote for it when they changed the printed one. */
+export type FamilyTotal = {family: string; amount: number; written_price?: number | null};
 const bandKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9#&]+/g, '');
 
 /**
@@ -146,7 +147,7 @@ export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: F
   let checked = 0;
   let mismatched = 0;
   const byCode = new Map(rows.map((r) => [r.item_code, r] as const));
-  const paper = totals.filter((t) => t && typeof t.amount === 'number' && Number.isFinite(t.amount)).map((t) => ({k: bandKey(t.family), amount: t.amount}));
+  const paper = totals.filter((t) => t && typeof t.amount === 'number' && Number.isFinite(t.amount)).map((t) => ({k: bandKey(t.family), amount: t.amount, price: typeof t.written_price === 'number' && t.written_price > 0 ? t.written_price : null}));
   for (const band of bandsOf(items)) {
     if (!band.group || band.items.some((i) => i.price == null)) continue;
     const k = bandKey(band.group);
@@ -154,14 +155,13 @@ export function legacyBandCheck(rows: CoreRow[], items: PrintedItem[], totals: F
     if (!written) continue;
     const bandRows = band.items.map((i) => byCode.get(i.code)).filter((r): r is CoreRow => Boolean(r));
     if (!bandRows.length) continue;
-    // Only a written total that is a whole number of units at the printed price can say the
-    // counts are off. One that isn't (ICY POUT ₱14,910 at ₱285 = 52.3 units) is skipped. KNOWN GAP:
-    // it is often a handwritten price change, not a bad total (₱14,910 = 70 x 213, ₱9,353 = 47 x 199,
-    // ₱3,861 = 39 x 99 on San Pablo p.7), so this can hide a real misread (IPSLS08 read 5, likely 15).
-    const price = band.price ?? null;
+    // The price the consultant wrote for the band wins over the printed one: on San Pablo p.7 the
+    // answer key reconciles ₱14,910 = 70 x 213, ₱9,353 = 47 x 199, ₱3,861 = 39 x 99, ₱7,110 = 45 x 158.
+    // Only a total that is a whole number of units at that price can say the counts are off.
+    const price = written.price ?? band.price ?? null;
     if (price != null && price > 0 && Math.abs(written.amount / price - Math.round(written.amount / price)) > 1e-6) continue;
     checked++;
-    const sum = band.items.reduce((a, i) => a + (byCode.get(i.code)?.ending_on_hand ?? 0) * (i.price as number), 0);
+    const sum = band.items.reduce((a, i) => a + (byCode.get(i.code)?.ending_on_hand ?? 0) * (written.price ?? (i.price as number)), 0);
     if (Math.abs(sum - written.amount) <= 1) continue;
     mismatched++;
     const peso = (n: number) => `₱${n.toLocaleString('en-US')}`;
@@ -237,14 +237,15 @@ export function buildLegacyManifestPrompt(page: number): string {
     'Band totals: col7 ("Total Amount of Ending Inventory") has a handwritten peso amount per',
     'heading band, often with a bracket spanning the band. Transcribe each into "family_totals"',
     'with the band\'s heading exactly as listed below in [brackets] and the amount as a number.',
-    'It should equal (sum of the band\'s ending) × the band\'s printed price; if it does not, look',
-    'again in that band for a missed number, a misread digit, or a number on the wrong row. Still',
-    'return only what is written.',
+    'If a different unit price is handwritten beside the band or its product names (a 213 near a',
+    'printed ₱285), put it in that total\'s "written_price"; it is a price, never a count. Else null.',
     'Most consultants use col1, col2 and col3 as Stockroom, Drawer and Selling area (often',
     'written over the printed headers); then col1 + col2 + col3 = col6. On a page filled',
-    'the printed way instead, col3 = col1 + col2 and col6 = col3 − col4. Use whichever holds',
-    'on this page to resolve a doubtful digit: prefer the reading that makes it hold, lower',
-    'the confidence, and put the other candidate in "alt".',
+    'the printed way instead, col3 = col1 + col2 and col6 = col3 − col4.',
+    'Sums only tell you where to look again. Consultants do write sums that do not add up, so',
+    'never change a digit, or pick one reading over another, to make a row or a band add up:',
+    'return what is written. If a digit is doubtful, lower the confidence and put the other',
+    'candidate in "alt". This overrides any general rule about making rows add up.',
     'Name columns in "alt" by what this page uses them for (Stockroom, Drawer, Selling area,',
     'or Beginning, Delivery, Beginning + Delivery, Deducted) and Ending, never "col3".',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
@@ -288,8 +289,8 @@ export const LEGACY_EXTRACTION_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        properties: {family: {type: 'string'}, amount: {type: 'number'}},
-        required: ['family', 'amount'],
+        properties: {family: {type: 'string'}, amount: {type: 'number'}, written_price: {type: ['number', 'null']}},
+        required: ['family', 'amount', 'written_price'],
       },
     },
   },

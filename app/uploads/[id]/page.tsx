@@ -11,7 +11,7 @@ import {scanPageLabel} from '@/src/upload-batch';
 import type {FormVersion} from '@/src/goldline-extract';
 import {duplicateMatchFor, scanScopeIds} from '@/src/goldline-triage-data';
 import {committedSnapshotFor, previousCounts} from '@/src/goldline-inventory-data';
-import {historyNotes, latestBefore} from '@/src/goldline-history-check';
+import {historyCheckEnabled, historyNotes, latestBefore} from '@/src/goldline-history-check';
 import {UploadReview} from '@/components/analyst/upload-review';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
 import {firstIsoDate, isoPeriod} from '@/src/period-date';
@@ -163,7 +163,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   }
   // History check (flags only): rows the same store's last committed count can't explain.
   let rowNotes: Record<number, string> = {};
-  if (extraction && upload.status === 'needs_review') {
+  if (extraction && upload.status === 'needs_review' && historyCheckEnabled(ctx.companyId)) {
     const head = extraction.data;
     const store = suggestion?.storeCode ?? (head?.store_code?.trim() || null);
     const start = suggestion?.periodStart ?? periodDefault?.start ?? null;

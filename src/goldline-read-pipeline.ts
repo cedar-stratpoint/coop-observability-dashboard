@@ -292,6 +292,8 @@ export async function runInventoryRead(args: {
         rec.detail = {...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}), boxes: locateRows.length};
       }
       const anthropicBatchId = await submitAnchoredBatch(requests);
+      // The reader is the code that SUBMITTED the read; the poller that ingests it later may be a newer deploy.
+      await stampFingerprint(uploadId, {readerSig});
       await setUploadStatus(uploadId, 'queued_batch', {pageCount: page, anthropicBatchId});
       await logReadEvent({...rec, status: 'queued_batch', stage: 'submitted', usage: readUsageSnapshot()});
       return {http: 202, body: {uploadId, status: 'queued_batch', page, batchId: anthropicBatchId, formVersion: av}};
