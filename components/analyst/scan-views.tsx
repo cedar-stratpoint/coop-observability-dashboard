@@ -9,7 +9,7 @@ import {AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Sea
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel, scanPosition} from '@/src/upload-batch';
-import {STATUS_FILTER_ORDER, TYPE_ORDER, VERSION_FILTER_ORDER, fileReviewQuery, groupFiles, matchesFilter, pageType, parseFileFilter, type PageType} from '@/src/scan-file-nav';
+import {STATUS_FILTER_ORDER, TYPE_ORDER, VERSION_FILTER_ORDER, facetCounts, fileReviewQuery, groupFiles, matchesFilter, pageType, parseFileFilter, type PageType} from '@/src/scan-file-nav';
 import {baSlug, reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {fmtTriagePeriod, VERSION_LABEL, VERSION_COLOR} from '@/src/goldline-triage-format';
 import type {FormVersion} from '@/src/goldline-extract';
@@ -192,6 +192,10 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
 
   // The three facets combine with AND; Version applies only to inventory forms.
   const shown = groups.filter((g) => matchesFilter(g.best, filters));
+  // The numbers on the chips follow the other filters; which chips exist follows the whole scan,
+  // so a chip never disappears under the pointer (one that leads nowhere is dimmed instead).
+  const counts = facetCounts(groups.map((g) => g.best), filters);
+  const filtered = typeFilter !== 'all' || statusFilter !== 'all' || versionFilter !== 'all';
   const total = shown.length;
   const pageCount = Math.max(1, Math.ceil(total / size));
   const safePage = Math.min(page, pageCount);
@@ -229,11 +233,11 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by type">
             <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Type</span>
             <FilterChip active={typeFilter === 'all'} onClick={() => chooseType('all')}>
-              All <span className="tabular-nums opacity-70">{groups.length}</span>
+              All <span className="tabular-nums opacity-70">{counts.type.all}</span>
             </FilterChip>
             {typesPresent.map((t) => (
-              <FilterChip key={t} active={typeFilter === t} onClick={() => chooseType(t)}>
-                {TYPE_LABEL[t]} <span className="tabular-nums opacity-70">{typeCounts[t]}</span>
+              <FilterChip key={t} active={typeFilter === t} disabled={counts.type[t] === 0} onClick={() => chooseType(t)}>
+                {TYPE_LABEL[t]} <span className="tabular-nums opacity-70">{counts.type[t]}</span>
               </FilterChip>
             ))}
           </div>
@@ -242,11 +246,11 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by review status">
             <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Status</span>
             <FilterChip active={statusFilter === 'all'} onClick={() => chooseStatus('all')}>
-              All <span className="tabular-nums opacity-70">{statusesPresent.reduce((a, s) => a + (statusCounts[s] ?? 0), 0)}</span>
+              All <span className="tabular-nums opacity-70">{counts.status.all}</span>
             </FilterChip>
             {statusesPresent.map((s) => (
-              <FilterChip key={s} active={statusFilter === s} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
-                {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{statusCounts[s]}</span>
+              <FilterChip key={s} active={statusFilter === s} disabled={counts.status[s] === 0} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
+                {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{counts.status[s]}</span>
               </FilterChip>
             ))}
           </div>
@@ -255,11 +259,11 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by form version">
             <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Version</span>
             <FilterChip active={versionFilter === 'all'} onClick={() => chooseVersion('all')}>
-              All <span className="tabular-nums opacity-70">{versionsPresent.reduce((a, v) => a + (versionCounts[v] ?? 0), 0)}</span>
+              All <span className="tabular-nums opacity-70">{counts.fv.all}</span>
             </FilterChip>
             {versionsPresent.map((v) => (
-              <FilterChip key={v} active={versionFilter === v} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
-                {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{versionCounts[v]}</span>
+              <FilterChip key={v} active={versionFilter === v} disabled={counts.fv[v] === 0} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
+                {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{counts.fv[v]}</span>
               </FilterChip>
             ))}
           </div>
@@ -267,9 +271,14 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
       </div>
 
       {shown.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card py-10 text-center text-sm text-muted-foreground">
-          No pages in this filter.
-        </p>
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-10 text-center text-sm text-muted-foreground">
+          <p>No page matches these filters together.</p>
+          {filtered && (
+            <Button variant="outline" size="sm" onClick={() => setQuery({type: null, status: null, fv: null, lp: null})}>
+              Clear filters
+            </Button>
+          )}
+        </div>
       ) : (
       <div className="overflow-hidden rounded-xl border border-border bg-card">
       <ul role="list" className="flex flex-col divide-y divide-border">
@@ -455,14 +464,17 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
 
 /** A rounded filter chip used across the Type, Status, and Version rows. A leading dot colors
  *  a facet value (version or status); the crit tone tints a chip that must never blend in. */
-function FilterChip({active, onClick, tone = 'default', dotColor, children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
+function FilterChip({active, disabled = false, onClick, tone = 'default', dotColor, children}: {active: boolean; disabled?: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
+  // Nothing to show with the other filters on: dimmed and not clickable. The chosen chip always
+  // stays live, so an empty combination from a link can be undone.
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled && !active}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40',
         tone === 'crit'
           ? active
             ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'

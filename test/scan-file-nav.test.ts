@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {fileListParams, fileNeighbours, fileReviewQuery, groupFiles, parseFileFilter, type NavFile} from '../src/scan-file-nav';
+import {fileListParams, fileNeighbours, fileReviewQuery, groupFiles, parseFileFilter, type NavFile, facetCounts, matchesFilter} from '../src/scan-file-nav';
 
 const f = (id: string, n: number, status: string, extra: Partial<NavFile> = {}): NavFile => ({
   id,
@@ -58,5 +58,34 @@ describe('scan file nav', () => {
     expect(fileReviewQuery(filter, 'v1')).toBe('from=file&type=inventory&status=needs_review&fv=v1&version=v1');
     expect(fileReviewQuery(parseFileFilter({}), null)).toBe('from=file');
     expect(fileListParams(filter, null).toString()).toBe('view=file&type=inventory&status=needs_review&fv=v1');
+  });
+});
+
+describe('facetCounts', () => {
+  // The 98-page scan from the report: 70 forms to review (10 Legacy, 30 V1, 30 V2), 14 sales, 14 blank.
+  const mk = (n: number, page_kind: string, status: string, form_version: string | null = null) => Array.from({length: n}, () => ({page_kind, status, form_version}));
+  const pages = [...mk(10, 'inventory', 'needs_review', 'legacy'), ...mk(30, 'inventory', 'needs_review', 'v1'), ...mk(30, 'inventory', 'needs_review', 'v2'), ...mk(14, 'sales', 'rejected'), ...mk(14, 'blank', 'rejected')];
+  const f = (o: object) => ({type: 'all', status: 'all', fv: 'all', ...o}) as Parameters<typeof facetCounts>[1];
+
+  it('counts the whole scan with no filter on', () => {
+    const c = facetCounts(pages, f({}));
+    expect(c.type).toEqual({all: 98, inventory: 70, sales: 14, blank: 14});
+    expect([c.status.all, c.status.needs_review, c.status.rejected]).toEqual([98, 70, 28]);
+    expect(c.fv).toEqual({all: 98, legacy: 10, v1: 30, v2: 30});
+  });
+  it('shows 0 blank pages while Status is Needs review', () => {
+    expect(facetCounts(pages, f({status: 'needs_review'})).type).toEqual({all: 70, inventory: 70, sales: 0, blank: 0});
+  });
+  it('shows Needs review 0 and Set aside 14 while Type is Blank page', () => {
+    const c = facetCounts(pages, f({type: 'blank'}));
+    expect([c.status.all, c.status.needs_review, c.status.rejected]).toEqual([14, 0, 14]);
+    expect(c.fv).toEqual({all: 14, legacy: 0, v1: 0, v2: 0});
+  });
+  it("makes the chosen chip's number the length of the list", () => {
+    for (const filter of [f({status: 'needs_review', fv: 'v1'}), f({type: 'blank', status: 'needs_review'}), f({type: 'inventory', fv: 'legacy'})]) {
+      const len = pages.filter((p) => matchesFilter(p, filter)).length;
+      const c = facetCounts(pages, filter);
+      expect([c.type[filter.type], c.status[filter.status], c.fv[filter.fv]]).toEqual([len, len, len]);
+    }
   });
 });
