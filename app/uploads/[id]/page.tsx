@@ -1,4 +1,5 @@
 import {pageItemNames} from '@/src/goldline-legacy-extract';
+import {rowNames} from '@/src/row-names';
 import {printedPageItems, withPrintedHeadings} from '@/src/goldline-printed-page';
 import {notFound, redirect} from 'next/navigation';
 import {getDataContext} from '@/src/active-context';
@@ -190,6 +191,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       extraction={extraction}
       scanUrl={scanUrl}
       productNames={productNames}
+      rowNames={rowNames(extraction?.data?.rows ?? [], upload.form_version, extraction?.page)}
       inventoryHref={inventoryHref}
       catalog={catalog}
       pageStrip={pageStrip}

@@ -87,6 +87,7 @@ export function UploadReview({
   extraction,
   scanUrl,
   productNames = {},
+  rowNames,
   inventoryHref = null,
   catalog = {},
   pageStrip = null,
@@ -105,6 +106,8 @@ export function UploadReview({
   scanUrl?: string | null;
   /** item_code → printed product name (from the page manifest), for the rows table. */
   productNames?: Record<string, string>;
+  /** Each row's own product name, in row order. */
+  rowNames?: (string | null)[];
   /** Inventory page for the store + period this scan was committed to, once committed. */
   inventoryHref?: string | null;
   /** item_code → printed product line + price (catalog), for the form grid and totals check. */
@@ -713,6 +716,7 @@ export function UploadReview({
             onQuery={setQuery}
             version={upload.form_version}
             productNames={productNames}
+            rowNames={rowNames}
             catalog={catalog}
             flagged={flagged}
             rowNotes={rowNotes}

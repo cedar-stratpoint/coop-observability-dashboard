@@ -12,7 +12,7 @@ Dates are local working dates (GMT+8). Newest first.
 
 ## 2026-11-24 · v1.25.0 Nichido on prod: restock and orders, reconcile, the scan pipeline
 
-Nichido-only release cut from `staging` at 73f9559 plus PR #695 (SQL and the switcher). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.
+Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.
 
 **Ships:** Restock recommendations, Orders, receiving and hit or miss (F11, F12); encrypted sales units and totals kept per period; Reconcile with the PO form; Uploads by card, Per store / Per BA / Per file, sorting board, duplicates; scan beside the numbers with row boxes; server-side scan upload; fixed-template and batch reads, all behind flags; the company menu by workflow; Back keeps your place. Entries with the decisions are on `staging`, by date.
 
