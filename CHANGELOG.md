@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Same page, same result: an identical re-upload reuses its read
+
+QA fix 9 (San Pablo reruns). Uploading one page twice gave different results: 89% vs 92% confidence on p.1, and on p.7 identical counts but confidence moving ~5 points on 46 rows and some notes rewritten. The reader model (Sonnet 5.5) takes no temperature setting, so its self-rated confidence and wording drift run to run (a fresh read of p.7 twice today: 71% then 80%). A read now records the page file's SHA-256 and the reader that read it (model + deployed commit; new columns `uploads.content_sha256`, `uploads.reader_sig`, migration `supabase/nichido/read_fingerprint.sql`, applied to Nichido Staging). A new upload (or the pump's read) of an identical file read by the same deploy copies that read (classification + rows) instead of reading again: same result, ~2 s, no read cost. "Re-read" and the batch fallback always read fresh, a new deploy always reads fresh (so a reader change is measured, not served from an old read), and local dev never reuses. Verified locally: two uploads of San Pablo p.7 under different names, the second copied the first in 2 s with identical rows, confidence and flags.
 ## 2026-11-24 — Flag wrong counts that still add up: written band totals (Legacy) and the store's last count
 
 QA fix 8 (San Pablo reruns). Misreads that still add up within their row went unflagged (BMEPP02 read 60 + 18 = 78 where the paper has 20 + 18 = 38; MPEPH, BPDB01, IPSLS03), so a reviewer checking only flagged rows could commit them. Two checks, both flags only:

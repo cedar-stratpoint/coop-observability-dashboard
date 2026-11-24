@@ -72,6 +72,7 @@ export async function POST(req: Request): Promise<Response> {
     storeScope: null,
     batchStore,
     // No emit: this isn't a streamed response, so the heartbeat is a no-op.
+    reuse: true,
   });
   revalidateTag(glTags.uploads(companyId), {expire: 0});
   return json(result.body, result.http);
