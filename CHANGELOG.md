@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-24 · Page check: room for a longer answer
+
+On prod's first real scans (Nov 24), 2 of 163 pages were set aside as "doesn't look like a Nichido inventory form page" although they were normal V2 form pages; staging had read both. The page check (`classifyPage`) answers within 800 tokens, and both answers stopped at exactly 800: the cut-off reply couldn't be parsed, so the page fell back to "unknown". The limit is now 2,000. Only the rare long answer uses it, and output is billed as used. Pages set aside before this need **Re-read this page**.
+
 ## 2026-11-24 · v1.25.0 Nichido on prod: restock and orders, reconcile, the scan pipeline
 
 Nichido-only release cut from `staging` at 6de4524 (through #694 and #695). v1.24.0 is left to the customers release (PR #657), which this doesn't include or wait for.

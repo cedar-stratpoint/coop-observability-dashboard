@@ -396,9 +396,10 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
   const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
     model: cheapReadModel(),
-    // 800 (not 500): a truncated response yields unterminated JSON, which we'd rather
-    // not hit at all — the classify output is tiny, so the headroom is cheap.
-    max_tokens: 800,
+    // 2000: a truncated response yields unterminated JSON, which degrades to an all-unknown
+    // classification and sets a real form page aside. 800 was hit on prod (Nov 24, 2 of 163
+    // pages, output exactly 800); billed on actual output, so the headroom is cheap.
+    max_tokens: 2000,
     system: cheapSystem(buildPageClassifyPrompt()),
     output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
     // A document-only user turn is rejected (400); always pair the PDF with text.
