@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 · Page check: room for a longer answer
+
+On prod's first real scans (Nov 24), 2 of 163 pages were set aside as "doesn't look like a Nichido inventory form page" although they were normal V2 form pages; staging had read both. The page check (`classifyPage`) answers within 800 tokens, and both answers stopped at exactly 800: the cut-off reply couldn't be parsed, so the page fell back to "unknown". The limit is now 2,000. Only the rare long answer uses it, and output is billed as used. Pages set aside before this need **Re-read this page**.
+
 ## 2026-11-24 — Page 4 can be committed: accessories save under their own product codes
 
 The form prints accessories under shared price codes (five "ACCS 288", three "ACCS 150", four "ACCS 125"), and inventory keeps one count per item code, so committing a page 4 read against the printed form failed ("ON CONFLICT DO UPDATE command cannot affect row a second time"; a store batch with page 4 was refused). At commit, page and batch, each printed accessory line now saves under the product code named in it ("Stippling Brush #185" -> ACCS185; Belt Bag -> ACCSBELTBAG), paired in printed order: 19 of 19 on every form version, prices agree. Everything else keeps its code. If two rows would still share a code, the commit stops with a message naming the rows. The review still shows the printed code. Verified with a throwaway copy of a V1 page 4 committed through the app to a made-up store: 68 rows saved, 19 accessories under their own codes; test data removed.
