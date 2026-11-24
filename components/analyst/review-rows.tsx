@@ -9,7 +9,8 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
-import {COLS, colsForVersion, type ColKey} from './review-grid-cols';
+import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols';
+import {noteLayout, readerNote} from './reader-note';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -46,7 +47,7 @@ function legacyExtraText(r: ExtractedRow): string | null {
   if (!e) return null;
   const bits: string[] = [];
   if (e.beginning != null) bits.push(`Beginning ${e.beginning}`);
-  if (e.begin_plus_delivery != null) bits.push(`+Delivery ${e.begin_plus_delivery}`);
+  if (e.begin_plus_delivery != null) bits.push(`Beginning + Delivery ${e.begin_plus_delivery}`);
   if (e.deducted_pcs != null) bits.push(`Deducted ${e.deducted_pcs}`);
   return bits.length ? bits.join(' · ') : null;
 }
@@ -88,11 +89,14 @@ type Props = {
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
  *  alternative reading, combined so a flagged row shows a single reason, not three
  *  stacked amber lines. */
-function reasonText(r: ExtractedRow): string | null {
+function reasonText(r: ExtractedRow, version?: string | null, known?: boolean): string | null {
   const parts: string[] = [];
   const m = marksText(r);
   if (m) parts.push(m);
-  if (r.alt) parts.push(`Maybe: ${r.alt}`);
+  // The reader's note in column names (no "col3" / "off_manifest"), with no "Maybe:" prefix:
+  // it is often a plain remark ("O/S"), not an alternative value.
+  const note = readerNote(r.alt, noteLayout(version, r), {known});
+  if (note) parts.push(note);
   return parts.length ? parts.join(' · ') : null;
 }
 
@@ -124,7 +128,7 @@ export function ReviewRows({
 }: Props) {
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
-  const cols = useMemo(() => colsForVersion(version), [version]);
+  const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
   const q = query.trim().toLowerCase();
   const indexed = useMemo(() => rows.map((r, i) => ({...r, i})), [rows]);
   const matches = (r: (typeof indexed)[number]) =>
@@ -138,7 +142,7 @@ export function ReviewRows({
     <tr className="border-b border-border text-left text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
       <th className="py-2 pr-3 pl-3 font-medium">Item</th>
       {cols.map((c) => (
-        <th key={c.key} className="py-2 pr-2 text-right font-medium" title={c.title}>
+        <th key={c.key} className="py-2 pr-2 text-right leading-tight font-medium" title={c.title}>
           {c.label}
         </th>
       ))}
@@ -173,7 +177,7 @@ export function ReviewRows({
               {/* Primary: code + name. */}
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-xs font-medium">{r.item_code}</span>
-                {productNames[r.item_code] && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code]}</span>}
+                {(productNames[r.item_code] ?? r.printed_name) && <span className="truncate text-xs text-muted-foreground">{productNames[r.item_code] ?? r.printed_name}</span>}
               </div>
               {printedNameHint(r, productNames[r.item_code]) && (
                 <span className="mt-0.5 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
@@ -183,8 +187,8 @@ export function ReviewRows({
               )}
               {/* Secondary: one reason line (marks + alt combined), then the Legacy
                   deducted context as a quieter tertiary line. */}
-              {reasonText(r) && (
-                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r)}</span>
+              {reasonText(r, version, Boolean(productNames[r.item_code])) && (
+                <span className="mt-1 block text-[11px] leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]))}</span>
               )}
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
@@ -254,11 +258,11 @@ export function ReviewRows({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <span className="font-mono text-xs font-medium">{r.item_code}</span>
-            {productNames[r.item_code] && <span className="block truncate text-sm">{productNames[r.item_code]}</span>}
+            {(productNames[r.item_code] ?? r.printed_name) && <span className="block truncate text-sm">{productNames[r.item_code] ?? r.printed_name}</span>}
             {printedNameHint(r, productNames[r.item_code]) && (
               <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, productNames[r.item_code])}</span>
             )}
-            {reasonText(r) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r)}</span>}
+            {reasonText(r, version, Boolean(productNames[r.item_code])) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(productNames[r.item_code]))}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
           </div>
           <span

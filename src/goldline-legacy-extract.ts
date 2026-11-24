@@ -9,16 +9,21 @@
 //   col5 Total Amount Deducted (value)
 //   col6 Ending Inventory (Stock on Hand)
 //   col7 Total Amount of Ending Inventory (value)
-// There is NO stockroom/drawer/selling split (the "Stockroom/Drawer/Selling" seen on
-// some scans are the consultant's hand notes over the printed Beginning/Delivery/
-// Beginning+Delivery headers — we key off the PRINTED meaning, never the handwriting).
+// In practice the consultants fill this form as a THREE-LOCATION count: they write
+// "Stockroom / Drawer / Selling" over the printed Beginning / Delivery / Beginning+Delivery
+// headers, and col1 + col2 + col3 = col6 (Ending). On staging every Legacy page with counts
+// (104 pages, 3 stores, 3,964 rows) adds up that way and not one row fits the printed
+// identities, so the old "always key off the printed meaning" mapping filed drawer counts
+// as Delivery and selling counts as Beginning+Delivery (QA, Nov 23/24).
 //
-// For reconciliation we only need the common core {delivery, ending_on_hand}; the rest
-// (beginning, begin+delivery, deducted pcs/amount) is kept verbatim in a jsonb sidecar
-// so nothing is lost and the printed identities can be self-checked. PURE module (no
-// network/SDK/DB) so it unit-tests; the live call reuses the shared extract runner.
+// So the reader still returns each cell by its printed column POSITION, and the page's own
+// arithmetic decides what the columns mean (legacyPageLayout): a page whose rows add up as
+// col1 + col2 + col3 = Ending is filed as stockroom / drawer / selling_area / ending; any other
+// page keeps the printed deducted model (delivery + ending core, the rest in a jsonb sidecar).
+// PURE module (no network/SDK/DB) so it unit-tests; the live call reuses the shared runner.
 
 import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
+import {generatedTemplateItems} from './goldline-form-templates.generated';
 
 /** One Legacy item row, in printed column order (handwritten int or null each). */
 export type LegacyExtractedRow = {
@@ -47,9 +52,43 @@ export type CoreRow = {
   extra?: Record<string, number | null>;
 };
 
-/** Map a Legacy row to the common core (delivery + ending), keeping the deducted-model
- *  fields in `extra` so they survive into the inventory sidecar. */
-export function legacyRowToCore(r: LegacyExtractedRow): CoreRow {
+/** How a Legacy page's handwritten columns are used. `locations`: col1-col3 are stockroom /
+ *  drawer / selling area and add up to Ending. `printed`: the printed deducted model. */
+export type LegacyLayout = 'locations' | 'printed';
+
+/** Decide a page's layout from its own arithmetic: `locations` when at least 80% of the rows
+ *  that have an Ending and any of col1-col3 satisfy col1 + col2 + col3 = Ending (blank = 0),
+ *  with at least 3 such rows; otherwise `printed`, the form's own meaning. Pure. */
+export function legacyPageLayout(rows: LegacyExtractedRow[]): LegacyLayout {
+  let n = 0;
+  let fit = 0;
+  for (const r of rows) {
+    const parts = [r.beginning, r.delivery, r.begin_plus_delivery];
+    if (r.ending_on_hand == null || parts.every((v) => v == null)) continue;
+    n++;
+    if (parts.reduce<number>((a, v) => a + (v ?? 0), 0) === r.ending_on_hand) fit++;
+  }
+  return n >= 3 && fit >= 0.8 * n ? 'locations' : 'printed';
+}
+
+/** Map one Legacy row to the common core. `locations`: col1/col2/col3 become stockroom /
+ *  drawer / selling area (no delivery column in that use; a deducted count, if any, is kept
+ *  in `extra`). `printed`: delivery + ending, with the deducted-model fields in `extra` so
+ *  they survive into the inventory sidecar. */
+export function legacyRowToCore(r: LegacyExtractedRow, layout: LegacyLayout = 'printed'): CoreRow {
+  if (layout === 'locations') {
+    return {
+      item_code: r.item_code,
+      stockroom: r.beginning,
+      drawer: r.delivery,
+      selling_area: r.begin_plus_delivery,
+      delivery: null,
+      ending_on_hand: r.ending_on_hand,
+      confidence: r.confidence,
+      alt: r.alt ?? null,
+      ...(r.deducted_pcs != null ? {extra: {deducted_pcs: r.deducted_pcs}} : {}),
+    };
+  }
   return {
     item_code: r.item_code,
     stockroom: null,
@@ -65,6 +104,12 @@ export function legacyRowToCore(r: LegacyExtractedRow): CoreRow {
       deducted_pcs: r.deducted_pcs,
     },
   };
+}
+
+/** Map a whole Legacy page: decide its layout once from its arithmetic, then map each row. */
+export function legacyPageToCore(rows: LegacyExtractedRow[]): {layout: LegacyLayout; rows: CoreRow[]} {
+  const layout = legacyPageLayout(rows);
+  return {layout, rows: rows.map((r) => legacyRowToCore(r, layout))};
 }
 
 /**
@@ -93,23 +138,41 @@ export function legacyRowMathOff(r: LegacyExtractedRow): {rule: string; written:
 
 /** Per-page manifest text for the Legacy 7-column form. Same item rows as the other
  *  versions (the product list is identical across versions), different columns. */
+/** The Legacy form's own printed rows for a page (it carries items the shared page list lacks,
+ *  e.g. Double Espresso, Macchiato and LEL091 on page 3), else the shared page list. */
+export function legacyPageItems(page: number): Array<{code: string; product: string}> {
+  return generatedTemplateItems('legacy', page) ?? MANIFESTS[page] ?? [];
+}
+
+/** code → printed product name for a page of the given form version: the Legacy form's own
+ *  rows on a Legacy page, the shared page list otherwise. */
+export function pageItemNames(version: string | null | undefined, page: number | null | undefined): Record<string, string> {
+  const names: Record<string, string> = {};
+  const items = version === 'legacy' ? legacyPageItems(page ?? 0) : MANIFESTS[page ?? 0] ?? [];
+  for (const it of items) names[it.code] = it.product;
+  return names;
+}
+
 export function buildLegacyManifestPrompt(page: number): string {
-  const items = MANIFESTS[page];
+  const items = legacyPageItems(page);
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
   }
   const list = items.map((i) => `${i.code} ${i.product}`).join(' · ');
   return [
     `PAGE ${page} of ${PAGE_COUNT}. Form version LEGACY (the older 7-column "deducted" form).`,
-    'Columns, left to right (handwritten int or null). Map each cell by its PRINTED',
-    'header meaning, NOT by any handwritten sub-label:',
-    '  beginning (col1, "Beginning Inventory") · delivery (col2, "Delivery MM/DD") ·',
-    '  begin_plus_delivery (col3, "Beginning + Delivery") · deducted_pcs (col4, "Total',
-    '  PCS Deducted") · ending_on_hand (col6, "Ending Inventory / Stock on Hand").',
+    'Columns, left to right (handwritten int or null). Put each number in the field for',
+    'the column POSITION it is written in, whatever is handwritten over the header:',
+    '  beginning (col1) · delivery (col2) · begin_plus_delivery (col3) · deducted_pcs (col4)',
+    '  · ending_on_hand (col6, "Ending Inventory / Stock on Hand").',
     '  Skip col5 and col7 — those are peso amounts, derived downstream (leave them out).',
-    'Printed identities you can use to resolve a doubtful digit: col3 = col1 + col2, and',
-    'col6 = col3 − col4. If a reading makes them hold, prefer it, lower confidence, put',
-    'the other candidate in "alt".',
+    'Most consultants use col1, col2 and col3 as Stockroom, Drawer and Selling area (often',
+    'written over the printed headers); then col1 + col2 + col3 = col6. On a page filled',
+    'the printed way instead, col3 = col1 + col2 and col6 = col3 − col4. Use whichever holds',
+    'on this page to resolve a doubtful digit: prefer the reading that makes it hold, lower',
+    'the confidence, and put the other candidate in "alt".',
+    'Name columns in "alt" by what this page uses them for (Stockroom, Drawer, Selling area,',
+    'or Beginning, Delivery, Beginning + Delivery, Deducted) and Ending, never "col3".',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
     'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,

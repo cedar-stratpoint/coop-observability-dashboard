@@ -1,3 +1,4 @@
+import {pageItemNames} from '@/src/goldline-legacy-extract';
 import {notFound, redirect} from 'next/navigation';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
@@ -8,7 +9,6 @@ import {fileListParams, fileNeighbours, fileReviewQuery, parseFileFilter} from '
 import {scanPageLabel} from '@/src/upload-batch';
 import type {FormVersion} from '@/src/goldline-extract';
 import {duplicateMatchFor, scanScopeIds} from '@/src/goldline-triage-data';
-import {MANIFESTS} from '@/src/goldline-extract';
 import {committedSnapshotFor} from '@/src/goldline-inventory-data';
 import {UploadReview} from '@/components/analyst/upload-review';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
@@ -60,7 +60,8 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // Product names come from the detected page's manifest (item_code → printed product),
   // so the reviewer sees names next to the codes.
   const productNames: Record<string, string> = {};
-  for (const item of MANIFESTS[extraction?.page ?? 0] ?? []) productNames[item.code] = item.product;
+  // A Legacy page names its rows from the Legacy form's own list (it has rows the shared list lacks).
+  Object.assign(productNames, pageItemNames(upload.form_version, extraction?.page));
   // Once committed, link straight to the store + period this scan fed in Inventory.
   const snap = upload.status === 'committed' ? await committedSnapshotFor(ctx.companyId, upload.id) : null;
   const inventoryHref = snap

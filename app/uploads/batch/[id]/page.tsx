@@ -1,9 +1,9 @@
+import {pageItemNames} from '@/src/goldline-legacy-extract';
 import {notFound, redirect} from 'next/navigation';
 import {auth} from '@/auth';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {catalogForCodes, getBatch, getBatchPages, listStores, reconcileStaleReads, splitBatchIntoForms} from '@/src/goldline-data';
-import {MANIFESTS} from '@/src/goldline-extract';
 import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
@@ -59,8 +59,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   const pages: BatchReviewPage[] = orderPages(
     pdfPages.map((p) => {
       const pageNo = p.extraction?.page ?? null;
-      const names: Record<string, string> = {};
-      for (const item of MANIFESTS[pageNo ?? 0] ?? []) names[item.code] = item.product;
+      const names = pageItemNames(p.upload.form_version, pageNo);
       return {
         page: pageNo,
         upload: p.upload,

@@ -2,6 +2,8 @@ import {describe, expect, it} from 'vitest';
 import {
   buildLegacyManifestPrompt,
   legacyRowMathOff,
+  legacyPageLayout,
+  legacyPageToCore,
   legacyRowToCore,
   type LegacyExtractedRow,
 } from '../src/goldline-legacy-extract';
@@ -88,5 +90,51 @@ describe('rowBandFor', () => {
   it('is null for an item not on the page, or a page with no manifest', () => {
     expect(rowBandFor('NOPE', 1)).toBeNull();
     expect(rowBandFor('FBPP01', 6)).toBeNull(); // page 6 is the sales report, no manifest
+  });
+});
+
+describe('legacyPageLayout / legacyPageToCore', () => {
+  // SM San Pablo p.7 (QA Nov 23/24): "Stockroom / Drawer / Selling" written over the printed
+  // headers; IPSLS01 has drawer 4, selling 2, ending 6.
+  const sanPablo = [
+    row({item_code: 'IPSLS01', delivery: 4, begin_plus_delivery: 2, ending_on_hand: 6}),
+    row({item_code: 'IPSLS02', delivery: 2, begin_plus_delivery: 2, ending_on_hand: 4}),
+    row({item_code: 'TCPBT02', beginning: 20, begin_plus_delivery: 11, ending_on_hand: 31}),
+    row({item_code: 'MUIS09', beginning: 4, begin_plus_delivery: 5, ending_on_hand: 9}),
+    row({item_code: 'IPSLS09'}), // blank row: ignored by the vote
+  ];
+
+  it('files a page whose columns add up to Ending as stockroom / drawer / selling', () => {
+    expect(legacyPageLayout(sanPablo)).toBe('locations');
+    const {layout, rows} = legacyPageToCore(sanPablo);
+    expect(layout).toBe('locations');
+    expect(rows[0]).toMatchObject({stockroom: null, drawer: 4, selling_area: 2, delivery: null, ending_on_hand: 6});
+    expect(rows[2]).toMatchObject({stockroom: 20, drawer: null, selling_area: 11, delivery: null, ending_on_hand: 31});
+    expect(rows[0].extra).toBeUndefined();
+  });
+
+  it('keeps the printed deducted model when the page follows it', () => {
+    const printed = [
+      row({beginning: 20, delivery: 5, begin_plus_delivery: 25, deducted_pcs: 8, ending_on_hand: 17}),
+      row({beginning: 10, delivery: 0, begin_plus_delivery: 10, deducted_pcs: 4, ending_on_hand: 6}),
+      row({beginning: 3, delivery: 2, begin_plus_delivery: 5, deducted_pcs: 5, ending_on_hand: 0}),
+    ];
+    expect(legacyPageLayout(printed)).toBe('printed');
+    expect(legacyPageToCore(printed).rows[0]).toMatchObject({stockroom: null, delivery: 5, ending_on_hand: 17});
+  });
+
+  it('needs at least 3 counted rows and an 80% fit before re-filing', () => {
+    expect(legacyPageLayout(sanPablo.slice(0, 2))).toBe('printed');
+    const mixed = [...sanPablo.slice(0, 3), row({beginning: 5, delivery: 5, ending_on_hand: 3}), row({beginning: 1, ending_on_hand: 9})];
+    expect(legacyPageLayout(mixed)).toBe('printed'); // 3 of 5 fit = 60%
+  });
+});
+
+describe('buildLegacyManifestPrompt rows', () => {
+  it("lists the Legacy form's own printed rows (Double Espresso is on Legacy page 3)", () => {
+    expect(buildLegacyManifestPrompt(3)).toContain('24HRMESGDE Double Espresso');
+  });
+  it('asks for notes in column names, not column numbers', () => {
+    expect(buildLegacyManifestPrompt(1)).toMatch(/never "col3"/);
   });
 });

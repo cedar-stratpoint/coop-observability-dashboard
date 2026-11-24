@@ -117,7 +117,8 @@ function extraNum(r: CountRow, key: string): number | null {
  * Row math, only when an ending is written and the inputs are. Version-aware:
  * - V1 / V2 (and older rows): ending (col 5) = stockroom + drawer + selling area; the
  *   delivery column is not part of it (Justin, Q23, answered Oct 27).
- * - Legacy (7-column deducted, counts live in `extra`): ending = beginning + delivery
+ * - Legacy filed as stockroom / drawer / selling: the same three-location sum as V1/V2.
+ * - Legacy on the printed model (7-column deducted, counts live in `extra`): ending = beginning + delivery
  *   − deducted (using the written "beginning + delivery" when present, else computing
  *   it), so Legacy forms are validated even though they have no three-location split.
  * Returns the written ending vs the expected one, or null when consistent / not enough
@@ -125,7 +126,10 @@ function extraNum(r: CountRow, key: string): number | null {
  */
 export function rowMathOff(r: CountRow): {written: number; counted: number} | null {
   if (r.ending_on_hand == null) return null;
-  if (r.form_version === 'legacy') {
+  // A Legacy row filed as stockroom / drawer / selling (the way consultants fill it) is checked
+  // like V1/V2 below; only a Legacy row on the printed deducted model uses the deducted math.
+  const located = r.stockroom != null || r.drawer != null || r.selling_area != null;
+  if (r.form_version === 'legacy' && !located) {
     const bd = extraNum(r, 'begin_plus_delivery');
     const dp = extraNum(r, 'deducted_pcs');
     const b = extraNum(r, 'beginning');
