@@ -10,6 +10,7 @@ import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/gol
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
+import {estimateRowBoxes} from '@/src/row-box-fill';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
@@ -249,7 +250,11 @@ export function BatchReview({
   useEffect(() => {
     if (curState?.active != null) setPointRow(curState.active);
   }, [curState?.active]);
-  const pointBox = scanPointBox(pointRow != null ? curState?.rows[pointRow] : null, cur?.extraction?.data?.slant, rot.flipped);
+  const boxEstimates = useMemo(
+    () => estimateRowBoxes(cur?.extraction?.data?.rows ?? [], (c) => catalog[c]?.productLine, (c) => cur?.productNames[c]),
+    [cur?.extraction, cur?.productNames, catalog],
+  );
+  const pointBox = scanPointBox(pointRow != null ? curState?.rows[pointRow] : null, cur?.extraction?.data?.slant, rot.flipped, pointRow != null ? boxEstimates[pointRow] : null);
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));
@@ -626,6 +631,7 @@ export function BatchReview({
                         onRotate={rot.toggle}
                         onEnlarge={() => setLightbox({url: cur.scanUrl!})}
                         pointBox={pointBox}
+                        tilt={cur.extraction?.data?.slant?.angle}
                         className="h-[45dvh] rounded-md border border-border lg:h-[calc(100dvh-11rem)]"
                       />
                       <span className="truncate text-[11px] text-muted-foreground" title={cur.upload.filename}>
@@ -768,7 +774,7 @@ export function BatchReview({
               iframe overlay drifted). Falls back to the browser PDF viewer if it can't
               render. The band is approximate — see the "Show in scan" button. */}
           <div className="min-h-0 w-full flex-1">
-            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
+            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} tilt={cur?.extraction?.data?.slant?.angle} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
           </div>
         </div>,
         document.body,

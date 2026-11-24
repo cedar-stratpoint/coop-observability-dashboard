@@ -38,4 +38,10 @@ describe('scanPointBox', () => {
     expect(scanPointBox({item_code: 'X', box: {y_top: 0.5, y_bottom: 0.5}}, null, false)).toBeNull();
     expect(scanPointBox(null, null, false)).toBeNull();
   });
+  it('uses an estimated box only when the row has none, and says so', () => {
+    const est = {y_top: 0.5, y_bottom: 0.52};
+    expect(scanPointBox(row, null, false, est)).not.toHaveProperty('estimated');
+    expect(scanPointBox({item_code: 'X'}, null, false, est)).toMatchObject({top: 0.5, estimated: true});
+    expect(scanPointBox(null, null, false, est)).toBeNull();
+  });
 });

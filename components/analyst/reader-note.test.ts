@@ -19,6 +19,12 @@ describe('readerNote', () => {
     expect(readerNote('off_manifest: printed row not in reference list, printed name TO1 - Black; blank counts', 'legacy-printed', {known: true})).toBe('Blank counts');
     expect(readerNote('O/S; not in reference list', 'legacy-locations')).toBe('O/S; not on the usual list for this page');
   });
+  it('leaves nothing of "printed but not in reference list" behind (scan page 7, page 70)', () => {
+    const known = (s: string) => readerNote(s, 'legacy-locations', {known: true});
+    expect(known('O/S; off_manifest: printed but not in reference list')).toBe('O/S');
+    expect(known('off_manifest: printed but not in reference list; blank row')).toBe('Blank row');
+    expect(known("off_manifest: printed but not in reference list; printed name 'Macchiato'; O/S marked")).toBe('O/S marked');
+  });
   it('names columns by each layout', () => {
     expect(readerNote('col4 could be 7', 'v1')).toBe('Delivery could be 7');
     expect(readerNote('col1 could be 7', 'v2')).toBe('Delivery could be 7');

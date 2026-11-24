@@ -16,6 +16,7 @@ import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {ConfidenceSticky} from '@/components/analyst/confidence-sticky';
 import {ScanPageViewer, type ScanHighlight} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
+import {estimateRowBoxes} from '@/src/row-box-fill';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
@@ -226,6 +227,8 @@ export function UploadReview({
   const docConfidence = extraction?.docConfidence ?? null;
   const open = unresolvedFlags(flagged, resolved);
   const totals = useMemo(() => pageTotal(rows, catalog), [rows, catalog]);
+  // Rows the position request missed still get a (dashed) pointer, placed between their neighbours.
+  const boxEstimates = useMemo(() => estimateRowBoxes(head?.rows ?? [], (c) => catalog[c]?.productLine, (c) => productNames[c]), [head, catalog, productNames]);
   const check = reconcile(totals.total, formTotal);
 
   function updateCell(index: number, key: ColKey, raw: string) {
@@ -516,7 +519,8 @@ export function UploadReview({
                     setLightboxHighlight(undefined);
                     setLightboxOpen(true);
                   }}
-                  pointBox={scanPointBox(pointRow != null ? rows[pointRow] : null, head?.slant, rot.flipped)}
+                  pointBox={scanPointBox(pointRow != null ? rows[pointRow] : null, head?.slant, rot.flipped, pointRow != null ? boxEstimates[pointRow] : null)}
+                  tilt={head?.slant?.angle}
                   className={cn('rounded-md border border-border', extraction ? 'h-[45dvh] lg:h-[calc(100dvh-12rem)]' : 'h-[20rem]')}
                 />
               </CardContent>
@@ -790,7 +794,7 @@ export function UploadReview({
           {/* The page rendered to a canvas with the approximate row band drawn in the page's own
               coordinate space (same viewer the batch review uses), so the band stays locked on. */}
           <div className="min-h-0 w-full flex-1">
-            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
+            <ScanPageViewer url={scanUrl} highlight={lightboxHighlight} tilt={head?.slant?.angle} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
           </div>
           <button
             type="button"

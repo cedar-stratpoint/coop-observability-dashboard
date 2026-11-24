@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Scan review: every row points at the scan; a line follows the mouse
+
+- **Rows without a located position get an estimated pointer**, drawn dashed. On older Legacy reads those were exactly the flagged rows (not on the list sent for positions), so Needs review showed no pointer. `estimateRowBoxes` counts printed lines, heading bars included, between located neighbours and gives up when they are too few or oddly spaced. Checked by hiding located rows one at a time on 114 stored reads (many are repeats of the same pages): 99.9% within half a row; 85 of 5,953 got no estimate. A page read with no positions at all still has no pointer.
+- **A line under the mouse on the scan**, leaning with the page's slant, as on the answer key (page pane and enlarged view, mouse only).
+- Reader notes no longer show a leftover "printed but".
 ## 2026-11-24 — Follow-ups to the QA fixes: handwritten prices, no forcing of sums, history check off, reuse signature
 
 - **Band totals use the price the consultant wrote.** The Legacy reader returns each band's `written_price` when one is handwritten, and the check uses it instead of the printed price. The hand-checked key for San Pablo p.7 reconciles four bands that way (₱14,910 = 70 × 213, ₱9,353 = 47 × 199, ₱3,861 = 39 × 99, ₱7,110 = 45 × 158), so IPSLS08 read 5 (key: 15) is now caught. It can still flag right rows: the Brow Master band on that page matches the key on every row but its written total does not.
