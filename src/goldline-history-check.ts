@@ -5,6 +5,12 @@
 // them not caught elsewhere, and 32 right rows). Located Legacy rows carry no Delivery, so a restocked
 // item there is flagged too. Pure.
 
+/** Off unless the company is listed in GOLDLINE_HISTORY_CHECK_COMPANIES: offline it flagged 32 right
+ *  rows for 4 wrong ones, and Legacy rows filed as locations carry no Delivery. */
+export function historyCheckEnabled(companyId: string, env: string | undefined = process.env.GOLDLINE_HISTORY_CHECK_COMPANIES): boolean {
+  return (env ?? '').split(',').map((s) => s.trim()).filter(Boolean).includes(companyId);
+}
+
 export type PrevCount = {item_code: string; period_end: string; ending_on_hand: number | null};
 
 type Row = {

@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Follow-ups to the QA fixes: handwritten prices, no forcing of sums, history check off, reuse signature
+
+- **Band totals use the price the consultant wrote.** The Legacy reader returns each band's `written_price` when one is handwritten, and the check uses it instead of the printed price. The hand-checked key for San Pablo p.7 reconciles four bands that way (₱14,910 = 70 × 213, ₱9,353 = 47 × 199, ₱3,861 = 39 × 99, ₱7,110 = 45 × 158), so IPSLS08 read 5 (key: 15) is now caught. It can still flag right rows: the Brow Master band on that page matches the key on every row but its written total does not.
+- **The Legacy reader no longer bends digits to make sums work.** Sums only say where to look again. The old instruction had the same push, so this is not a regression fix; accuracy on the answer key is not measured yet.
+- **History check off by default** (`GOLDLINE_HISTORY_CHECK_COMPANIES`): offline it flagged 32 right rows for 4 wrong ones.
+- **Reuse signature is stamped at submit**, not when the batch poller ingests the read, so a newer deploy cannot claim an older deploy's read.
+
 ## 2026-11-24 — Scan page: filter numbers follow the other filters
 
 On the Per file list each chip counted the whole scan, so Blank page read 14 while Status was Needs review and the list was empty. Every chip (and each All) now shows how many pages it would list with the other two filters kept as they are (`facetCounts` in `src/scan-file-nav.ts`). A chip that would list nothing is dimmed and not clickable, except the chosen one; an empty combination (reachable from a link) offers Clear filters. Which chips exist still follows the whole scan, so they don't jump around.

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {historyNote, historyNotes, latestBefore} from './goldline-history-check';
+import {historyCheckEnabled, historyNote, historyNotes, latestBefore} from './goldline-history-check';
 
 const prev = (code: string, end: string, ending: number | null) => ({item_code: code, period_end: end, ending_on_hand: ending});
 
@@ -36,5 +36,12 @@ describe('latestBefore / historyNotes', () => {
     expect(historyNotes([{item_code: 'A', stockroom: 9, ending_on_hand: 9}, {item_code: 'B', ending_on_hand: 1}], m, 'v1')).toEqual({
       0: 'Ending 9 is more than the last count (7 on Aug 31) with no delivery',
     });
+  });
+});
+
+describe('historyCheckEnabled', () => {
+  it('is off unless the company is listed', () => {
+    expect(historyCheckEnabled('goldline', undefined)).toBe(false);
+    expect(historyCheckEnabled('goldline', 'other, goldline')).toBe(true);
   });
 });

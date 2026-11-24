@@ -131,6 +131,12 @@ describe('legacyPageLayout / legacyPageToCore', () => {
 });
 
 describe('buildLegacyManifestPrompt rows', () => {
+  it('never asks the reader to make a row add up', () => {
+    const p = buildLegacyManifestPrompt(3);
+    expect(p).not.toMatch(/prefer the reading that makes/);
+    expect(p).toContain('never change a digit');
+    expect(p).toContain('written_price');
+  });
   it("lists the Legacy form's own printed rows (Double Espresso is on Legacy page 3)", () => {
     expect(buildLegacyManifestPrompt(3)).toContain('24HRMESGDE Double Espresso');
   });
@@ -164,6 +170,18 @@ describe('legacyBandCheck (written band totals)', () => {
     const rows = [{...core('IPSLS01', 4, 2, 6)}, {...core('IPSLS02', 2, 2, 4)}];
     expect(legacyBandCheck(rows, items, [{family: 'ICY POUT SERUM LIP STAIN', amount: 14910}])).toEqual({checked: 0, mismatched: 0});
     expect(rows.every((r) => r.confidence === 0.85)).toBe(true);
+  });
+
+  // San Pablo p.7, hand-checked answer key: ICY POUT endings 6 4 10 9 8 12 6 15 = 70 units at a handwritten ₱213.
+  const icy = [6, 4, 10, 9, 8, 12, 6, 15].map((e, i) => core(`IPSLS0${i + 1}`, null, e, e));
+  const icyTotal = [{family: 'ICY POUT SERUM LIP STAIN', amount: 14910, written_price: 213}];
+  it('accepts the answer-key counts at the price the consultant wrote', () => {
+    expect(legacyBandCheck(icy.map((r) => ({...r})), items, icyTotal)).toEqual({checked: 1, mismatched: 0});
+  });
+  it('flags the band when IPSLS08 is read 5 instead of 15', () => {
+    const rows = icy.map((r) => ({...r, ending_on_hand: r.item_code === 'IPSLS08' ? 5 : r.ending_on_hand}));
+    expect(legacyBandCheck(rows, items, icyTotal)).toEqual({checked: 1, mismatched: 1});
+    expect(rows[7].confidence).toBeLessThan(0.6);
   });
 
   it('leaves a band alone when it matches its written total', () => {
