@@ -2,13 +2,14 @@
 
 import {useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {Search} from 'lucide-react';
+import Link from 'next/link';
+import {ChevronRight, Search} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {AUDIT_META, AUDIT_STATES, NEEDS_ACTION, type AuditState} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
-import {ink, LegKey, Mark, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, StateChip, toneOf} from '@/components/analyst/audit-shared';
+import {ink, LegKey, Mark, MatrixLegend, monthLabel, PoSourceBar, ReconTabs, StateChip, toneOf, URGENCY} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By store (NICH-17). One store and month: every product's three legs
 // (Watsons · Inventory · PO), the state and what to do, in the notebook's two groups.
@@ -130,8 +131,8 @@ export function AuditMatrix({data}: {data: AuditResult}) {
             </Card>
           ) : (
             <div className="flex flex-col gap-5">
-              {active.length > 0 && <Group title="Active" hint="On the PO form" rows={active} />}
-              {inactive.length > 0 && <Group title="Inactive" hint="Not on the PO form" rows={inactive} />}
+              {active.length > 0 && <Group title="Active" hint="On the PO form" rows={active} store={sel.code} />}
+              {inactive.length > 0 && <Group title="Inactive" hint="Not on the PO form" rows={inactive} store={sel.code} />}
             </div>
           )}
           <p className="text-xs text-muted-foreground">
@@ -145,8 +146,10 @@ export function AuditMatrix({data}: {data: AuditResult}) {
 
 const STATE_PAGE = 12;
 
-function Group({title, hint, rows}: {title: string; hint: string; rows: AuditRow[]}) {
-  const states = AUDIT_STATES.filter((st) => rows.some((r) => r.state === st));
+function Group({title, hint, rows, store}: {title: string; hint: string; rows: AuditRow[]; store: string}) {
+  // Same order as the choices above: most urgent first, then the bigger group.
+  const count = (st: AuditState) => rows.filter((r) => r.state === st).length;
+  const states = AUDIT_STATES.filter((st) => count(st) > 0).sort((a, b) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || count(b) - count(a));
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <div className="flex items-baseline gap-2 border-b border-border px-4 py-3">
@@ -162,10 +165,11 @@ function Group({title, hint, rows}: {title: string; hint: string; rows: AuditRow
               <th className="w-28 px-2 py-2 text-center font-medium">Watsons</th>
               <th className="w-28 px-2 py-2 text-center font-medium">Inventory</th>
               <th className="w-20 px-2 py-2 text-center font-medium">PO</th>
+              <th className="w-10 py-2 pr-3" aria-label="Open" />
             </tr>
           </thead>
           {states.map((st) => (
-            <StateRows key={st} state={st} rows={rows.filter((r) => r.state === st)} />
+            <StateRows key={st} state={st} rows={rows.filter((r) => r.state === st)} store={store} />
           ))}
         </table>
       </div>
@@ -174,7 +178,7 @@ function Group({title, hint, rows}: {title: string; hint: string; rows: AuditRow
 }
 
 /** One state's rows under a header that carries the state, who acts, and the step, once. */
-function StateRows({state, rows}: {state: AuditState; rows: AuditRow[]}) {
+function StateRows({state, rows, store}: {state: AuditState; rows: AuditRow[]; store: string}) {
   const [all, setAll] = useState(false);
   const m = AUDIT_META[state];
   const c = toneOf(state);
@@ -182,7 +186,7 @@ function StateRows({state, rows}: {state: AuditState; rows: AuditRow[]}) {
   return (
     <tbody>
       <tr>
-        <td colSpan={4} className="border-t border-border px-4 pt-4 pb-2.5">
+        <td colSpan={5} className="border-t border-border px-4 pt-4 pb-2.5">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <StateChip state={state} />
             <span className="font-heading text-sm font-semibold tabular-nums">{rows.length}</span>
@@ -194,12 +198,17 @@ function StateRows({state, rows}: {state: AuditState; rows: AuditRow[]}) {
         </td>
       </tr>
       {shown.map((r) => (
-        <tr key={r.item_code} className="transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted/40">
+        <tr key={r.item_code} className="group/row relative cursor-pointer transition-colors duration-150 focus-within:bg-muted/40 [@media(hover:hover)]:hover:bg-muted/40">
           <td className="relative py-2 pr-3 pl-4">
             <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-r" style={{background: c, opacity: NEEDS_ACTION.has(state) ? 0.9 : 0.25}} />
-            <span className="block max-w-[28rem] truncate font-medium" title={r.product ?? r.item_code}>
+            {/* The whole row opens the product's inventory page for this store (stretched link). */}
+            <Link
+              href={`/stock/${encodeURIComponent(r.item_code)}?store=${encodeURIComponent(store)}`}
+              title={`Open ${r.product ?? r.item_code} at this store`}
+              className="block max-w-[28rem] truncate font-medium outline-none after:absolute after:inset-0 after:content-[''] focus-visible:underline"
+            >
               {r.shade ?? r.product ?? r.item_code}
-            </span>
+            </Link>
             <span className="block max-w-[28rem] truncate text-[11px] text-muted-foreground">
               {r.shade && r.line ? `${r.line} · ` : ''}
               <span className="font-mono">{r.item_code}</span>
@@ -215,11 +224,17 @@ function StateRows({state, rows}: {state: AuditState; rows: AuditRow[]}) {
           <td className="px-2 py-2">
             <Leg on={r.onPo} label="PO" />
           </td>
+          <td className="py-2 pr-3 text-right">
+            <ChevronRight
+              aria-hidden
+              className="ml-auto size-4 text-muted-foreground/40 transition-[transform,color] duration-150 ease-out group-hover/row:translate-x-0.5 group-hover/row:text-foreground group-focus-within/row:text-foreground"
+            />
+          </td>
         </tr>
       ))}
       {rows.length > STATE_PAGE && (
         <tr>
-          <td colSpan={4} className="px-4 pt-1 pb-3">
+          <td colSpan={5} className="px-4 pt-1 pb-3">
             <button type="button" onClick={() => setAll(!all)} className="text-xs font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
               {all ? 'Show fewer' : `Show all ${rows.length}`}
             </button>

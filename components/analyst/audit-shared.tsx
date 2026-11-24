@@ -54,9 +54,14 @@ export function StateChip({state}: {state: AuditState}) {
   );
 }
 
+/** How urgent a state's tone is, for ordering the choices (most urgent first). */
+export const URGENCY: Record<(typeof AUDIT_META)[AuditState]['tone'], number> = {crit: 0, warn: 1, out: 2, neutral: 3, good: 4};
+
 /**
- * The notebook matrix as 8 filter tiles, in two groups. Each tile shows its W · I · P
- * pattern, the count and the label. Clicking filters the table (click again to clear).
+ * The matrix as a short, ranked set of choices (Hick's law, Nov 24). Instead of eight
+ * equal tiles, only the states that need a step AND have products get a tile, most urgent
+ * first; everything else (no-action states, empty states) folds into one quiet line. Each
+ * tile still shows its Watsons · Inventory · PO pattern. Clicking filters the table.
  */
 export function MatrixLegend({
   summary,
@@ -69,70 +74,107 @@ export function MatrixLegend({
   onPick: (s: AuditState | null) => void;
   unit: string;
 }) {
-  const groups: Array<{title: string; hint: string; states: AuditState[]}> = [
-    {title: 'Active', hint: 'On the PO form', states: AUDIT_STATES.slice(0, 4)},
-    {title: 'Inactive', hint: 'Not on the PO form', states: AUDIT_STATES.slice(4)},
-  ];
+  const rank = (a: AuditState, b: AuditState) => URGENCY[AUDIT_META[a].tone] - URGENCY[AUDIT_META[b].tone] || summary[b] - summary[a];
+  const steps = AUDIT_STATES.filter((s) => NEEDS_ACTION.has(s) && summary[s] > 0).sort(rank);
+  const calm = AUDIT_STATES.filter((s) => !NEEDS_ACTION.has(s) && summary[s] > 0);
+  const empty = AUDIT_STATES.filter((s) => summary[s] === 0);
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {groups.map((g) => (
-        <section key={g.title} aria-label={`${g.title} products`} className="flex flex-col gap-2">
-          <div className="flex items-baseline gap-2 px-0.5">
-            <h2 className="font-heading text-sm font-semibold">{g.title}</h2>
-            <span className="text-xs text-muted-foreground">{g.hint}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {g.states.map((s) => {
-              const m = AUDIT_META[s];
-              const on = active === s;
-              const n = summary[s];
-              const c = toneOf(s);
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => onPick(on ? null : s)}
-                  className={cn(
-                    'group relative flex flex-col gap-2.5 overflow-hidden rounded-xl border bg-card p-3 text-left',
-                    'transition-[transform,border-color,box-shadow] duration-150 ease-out active:scale-[0.98]',
-                    'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
-                    on ? 'border-transparent shadow-sm' : 'border-border [@media(hover:hover)]:hover:border-foreground/20',
-                    n === 0 && !on && 'opacity-60',
-                  )}
-                  style={on ? {boxShadow: `0 0 0 1.5px ${c}`, background: tint(c, 7)} : undefined}
-                >
-                  <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{background: c, opacity: NEEDS_ACTION.has(s) ? 1 : 0.35}} />
+    <div className="flex flex-col gap-3">
+      {steps.length === 0 ? (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5">
+          <Mark on />
+          <p className="text-sm">
+            <span className="font-medium">Nothing needs a step.</span> <span className="text-muted-foreground">Every product here lines up.</span>
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-2.5" style={{gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 13.5rem), 1fr))`}}>
+          {steps.map((s, i) => {
+            const m = AUDIT_META[s];
+            const on = active === s;
+            const c = toneOf(s);
+            const lead = i === 0;
+            return (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={on}
+                onClick={() => onPick(on ? null : s)}
+                className={cn(
+                  'group relative flex flex-col gap-3 overflow-hidden rounded-xl border bg-card p-4 text-left',
+                  'transition-[transform,border-color,box-shadow] duration-150 ease-out active:scale-[0.98]',
+                  'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
+                  on ? 'border-transparent shadow-sm' : 'border-border [@media(hover:hover)]:hover:border-foreground/20',
+                )}
+                style={on ? {boxShadow: `0 0 0 1.5px ${c}`, background: tint(c, 8)} : lead ? {background: tint(c, 5)} : undefined}
+              >
+                <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{background: c}} />
+                <span className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1" aria-label={`Watsons ${m.legs.watsons ? 'yes' : 'no'}, Inventory ${m.legs.inventory ? 'yes' : 'no'}, PO ${m.legs.po ? 'yes' : 'no'}`}>
                     <Mark size="sm" on={m.legs.watsons} />
                     <Mark size="sm" on={m.legs.inventory} />
                     <Mark size="sm" on={m.legs.po} />
                   </span>
+                  <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{m.legs.po ? 'Active' : 'Inactive'}</span>
+                </span>
+                <span className="flex items-end justify-between gap-3">
                   <span className="flex flex-col">
-                    <span className="font-heading text-2xl leading-none font-semibold tabular-nums">{n.toLocaleString('en-US')}</span>
-                    <span className="mt-1 text-xs font-medium" style={{color: n ? ink(c) : undefined}}>
+                    <span className="font-heading text-3xl leading-none font-semibold tabular-nums">{summary[s].toLocaleString('en-US')}</span>
+                    <span className="mt-1.5 text-sm font-medium" style={{color: ink(c)}}>
                       {m.label}
                     </span>
                   </span>
-                  <span className="sr-only">
-                    {n} {unit}
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{color: ink(c), background: tint(c, 12)}}>
+                    {m.owner === 'Admin' ? 'You' : m.owner}
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                </span>
+                <span className="sr-only">
+                  {summary[s]} {unit}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {(calm.length > 0 || empty.length > 0) && (
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+          {calm.length > 0 && (
+            <>
+              <span>No step needed:</span>
+              {calm.map((s, i) => (
+                <span key={s} className="inline-flex items-center">
+                  <button
+                    type="button"
+                    aria-pressed={active === s}
+                    onClick={() => onPick(active === s ? null : s)}
+                    className={cn(
+                      'rounded-md px-1.5 py-0.5 font-medium underline-offset-4 transition-colors duration-150',
+                      active === s ? 'bg-muted text-foreground' : 'text-foreground [@media(hover:hover)]:hover:underline',
+                    )}
+                  >
+                    {AUDIT_META[s].label} <span className="tabular-nums">{summary[s]}</span>
+                  </button>
+                  {i < calm.length - 1 && <span aria-hidden>·</span>}
+                </span>
+              ))}
+            </>
+          )}
+          {calm.length > 0 && empty.length > 0 && <span aria-hidden className="px-1">|</span>}
+          {empty.length > 0 && <span>At 0: {empty.map((s) => AUDIT_META[s].label).join(' · ')}</span>}
+        </p>
+      )}
     </div>
   );
 }
 
-/** W · I · P column key, shown once above the legend so the dots read. */
+/** W · I · P key, shown once above the choices so the dots read. */
 export function LegKey() {
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1">
-        Each tile reads <strong className="font-medium text-foreground">Watsons · Inventory · PO</strong>
+      <span>
+        Dots read <strong className="font-medium text-foreground">Watsons · Inventory · PO</strong>
       </span>
       <span className="inline-flex items-center gap-1">
         <Mark size="sm" on /> yes

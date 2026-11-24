@@ -191,6 +191,13 @@ function ProductRow({r, open, onToggle, month}: {r: ProductAuditRow; open: boole
           <td />
           <td colSpan={4} className="py-3 pr-4">
             <div className="flex flex-col gap-3">
+              <Link
+                href={`/stock/${encodeURIComponent(r.item_code)}`}
+                className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline"
+              >
+                Open the product page (all stores)
+                <ChevronRight className="size-3.5" aria-hidden />
+              </Link>
               {AUDIT_STATES.filter((s) => r.counts[s] > 0).map((s) => (
                 <div key={s} className="flex flex-col gap-1.5 sm:flex-row sm:gap-3">
                   <span className="flex w-40 shrink-0 items-center gap-1.5 text-xs font-medium" style={{color: ink(toneOf(s))}}>

@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-24 — Reconciliation: fewer, ranked choices (Hick's law) and rows open the product page
+
+The eight equal state tiles made every visit start with eight choices, most of them empty or "no action". Now only the states that **need a step and have products** get a tile, ranked most urgent first (critical, then warning, then retire candidates; ties by count), each with its Watsons · Inventory · PO dots, an Active/Inactive tag and who acts (Nichido, Watsons, Accounting, You). "No action" states with products ("All good", "Phasing out") sit in one quiet clickable line, and empty states are listed as "At 0". The By store table orders its state groups the same way. With nothing to do the row reads "Nothing needs a step."
+
+**Each product row on By store opens that product's inventory page for the store** (`/stock/<item>?store=<store>`, the whole row is the link, chevron on the right). On By product, an expanded product has "Open the product page (all stores)".
+
 ## 2026-11-24 — Scan review: the breadcrumb back to the scan keeps your place too
 
 Follow-up to "Back keeps your place": on the scan page's Per file list, opening a page from list page 2 (say, Needs review at 10 per page) and returning by the review's breadcrumb (the scan name) landed on page 1 with nothing marked. Only the small ← arrow used the new return trip; the breadcrumb was a fixed link without the list page. The nearest breadcrumb now returns to the list exactly as it was left (stepping back through history when the list is right behind, else replacing as before), and the ← fallback after a reload does the same. The return also waits a few frames for the row: the per-viewer page size is read from storage after the list first renders, so the row could be missing on the first frame. Verified locally on the Oct 16 to 31 part 2 scan: breadcrumb, ←, and reload then breadcrumb all land on page 2 with the page marked (the same replay on the old code lands on page 1).
