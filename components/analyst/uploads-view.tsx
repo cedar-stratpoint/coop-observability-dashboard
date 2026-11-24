@@ -94,7 +94,7 @@ function GroupTile({
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
   return (
-    <div data-kept-id={keptId(g.key)} className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md focus-within:ring-3 focus-within:ring-ring/40">
+    <div data-kept-id={keptId(g.key)} data-kept-tile className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/40">
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <FileStack className="size-4" />

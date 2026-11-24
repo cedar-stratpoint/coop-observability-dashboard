@@ -322,7 +322,7 @@ export function GoldlineFlags({
               ) : (
                 <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                   {rows.map((t) => (
-                    <li key={t.key} data-kept-id={keptId(t.key)}>
+                    <li key={t.key} data-kept-id={keptId(t.key)} data-kept-tile className="rounded-xl">
                       <Tile t={t} onOpen={() => openTile(t.key)} />
                     </li>
                   ))}

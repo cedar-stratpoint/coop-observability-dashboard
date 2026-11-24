@@ -370,6 +370,7 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
       href={href}
       data-row
       data-kept-id={form.uploadIds.join(' ') || undefined}
+      data-kept-tile
       onClick={() => leaveList('scan', form.uploadIds[0] ?? null, href)}
       className="group flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
     >
