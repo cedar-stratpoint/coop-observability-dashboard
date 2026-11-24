@@ -92,6 +92,7 @@ export function UploadReview({
   stores = [],
   nav = null,
   suggestion = null,
+  periodDefault = null,
   bas,
 }: {
   company: string;
@@ -114,6 +115,8 @@ export function UploadReview({
   nav?: PageNav | null;
   /** Coop's prefill for store / period / BA in the one-page view. */
   suggestion?: PageSuggestionView | null;
+  /** The period to prefill (YYYY-MM-DD) when there is no suggestion (page opened on its own). */
+  periodDefault?: {start: string | null; end: string | null} | null;
   /** The BA list (each store's current BA and every name), for the BA field. */
   bas?: {byStore: Record<string, string>; names: string[]};
 }) {
@@ -149,8 +152,9 @@ export function UploadReview({
   const head = extraction?.data;
   const [rows, setRows] = useState<EditRow[]>(() => (head?.rows ?? []).map((r) => ({...r})));
   const [storeCode, setStoreCode] = useState(suggestion?.storeCode ?? head?.store_code ?? '');
-  const [periodStart, setPeriodStart] = useState(suggestion?.periodStart ?? head?.period_start ?? '');
-  const [periodEnd, setPeriodEnd] = useState(suggestion?.periodEnd ?? head?.period_end ?? '');
+  // Never the reader's raw text ("10/16/2026"): a date box blanks any value not YYYY-MM-DD.
+  const [periodStart, setPeriodStart] = useState(suggestion?.periodStart ?? periodDefault?.start ?? '');
+  const [periodEnd, setPeriodEnd] = useState(suggestion?.periodEnd ?? periodDefault?.end ?? '');
   // The BA written on the form. Blank saves under the store's BA from earlier forms.
   const [ba, setBa] = useState(suggestion?.consultant ?? head?.consultant ?? '');
   const storeBa = bas?.byStore[storeCode] ?? null;

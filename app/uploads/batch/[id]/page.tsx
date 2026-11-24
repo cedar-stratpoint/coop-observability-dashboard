@@ -8,6 +8,7 @@ import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
+import {isoPeriod} from '@/src/period-date';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +74,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // Page 1 prints the store + period — use it when the batch fields are still empty.
   const header = pages.find((p) => p.page === 1)?.extraction?.data;
 
+  const period = isoPeriod([batch.period_start, header?.period_start], [batch.period_end, header?.period_end]);
   return (
     <BatchReview
       company={ctx.companyId}
@@ -80,8 +82,9 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       batch={batch}
       defaults={{
         storeCode: batch.store_code ?? header?.store_code ?? '',
-        periodStart: batch.period_start ?? header?.period_start ?? '',
-        periodEnd: batch.period_end ?? header?.period_end ?? '',
+        // YYYY-MM-DD only: the reader's written date ("10/16/2026") would blank the date box.
+        periodStart: period.start ?? '',
+        periodEnd: period.end ?? '',
         consultant: header?.consultant ?? null,
       }}
       pages={pages}
