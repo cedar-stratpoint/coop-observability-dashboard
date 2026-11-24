@@ -1,6 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
+import {salesUnits} from './goldline-sales-units';
 import {
   DEFAULT_SETTINGS,
   monthBounds,
@@ -15,6 +16,7 @@ import {
   type MarkedRow,
   type MonthCheck,
 } from './goldline-checks';
+import {receiptsByMonth} from './goldline-po';
 
 // Runs the P2 checks over committed counts and keeps `flags` in step (F6, F7):
 //   * a new finding opens a flag
@@ -61,20 +63,32 @@ async function loadInputs(companyId: string, stores?: string[]) {
   const counts = (await fetchAllRows('inventory', (from, to) => {
     let q = supa
       .from('inventory') // pagination-ok: paged by fetchAllRows (.range below)
-      .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand,consultant,source_upload_id')
+      .select('store_code,item_code,period_start,period_end,stockroom,drawer,selling_area,delivery,ending_on_hand,consultant,source_upload_id,form_version,extra')
       .eq('company_id', companyId);
     if (stores) q = q.in('store_code', stores);
     return q.order('id').range(from, to);
   })) as unknown as CountRow[];
   const counted = [...new Set(counts.map((c) => c.store_code))];
-  if (!counted.length) return {counts, counted, adjustments: [], marked: [], products: [], sales: [], salesMonths: new Set<string>(), settings: DEFAULT_SETTINGS};
+  if (!counted.length) return {counts, counted, adjustments: [], marked: [], products: [], sales: [], salesMonths: new Set<string>(), receipts: new Map<string, number>(), settings: DEFAULT_SETTINGS};
 
   const months = [...new Set(counts.map((c) => c.period_end.slice(0, 7)))].sort();
   const uploadIds = [...new Set(counts.map((c) => c.source_upload_id).filter((u): u is string => !!u))];
-  const [adjustments, products, settings, extractions] = await Promise.all([
+  const [adjustments, received, products, settings, extractions] = await Promise.all([
     fetchAllRows('adjustments', (from, to) =>
       supa.from('adjustments').select('store_code,item_code,period_end,qty').eq('company_id', companyId).in('store_code', counted).order('id').range(from, to),
     ) as unknown as Promise<Adjustment[]>,
+    // What arrived on purchase orders (F12): it counts as delivered over the form's column.
+    fetchAllRows('po_lines', (from, to) =>
+      supa
+        .from('po_lines') // pagination-ok: paged by fetchAllRows (.range below)
+        .select('store_code,item_code,received_qty,received_on')
+        .eq('company_id', companyId)
+        .in('store_code', counted)
+        .not('received_qty', 'is', null)
+        .gte('received_on', `${months[0]}-01`)
+        .order('id')
+        .range(from, to),
+    ) as unknown as Promise<Array<{store_code: string; item_code: string; received_qty: number; received_on: string}>>,
     fetchAllRows('products', (from, to) =>
       supa.from('products').select('item_code,sku_code').eq('company_id', companyId).order('item_code').range(from, to),
     ) as unknown as Promise<Array<{item_code: string; sku_code: string | null}>>,
@@ -95,16 +109,7 @@ async function loadInputs(companyId: string, stores?: string[]) {
   ]);
 
   // POS units only for counted stores and the months they were counted in.
-  const sales = (await fetchAllRows('sales', (from, to) =>
-    supa
-      .from('sales')
-      .select('store_code,sku_code,period_start,period_end,units')
-      .eq('company_id', companyId)
-      .in('store_code', counted)
-      .gte('period_start', `${months[0]}-01`)
-      .order('id')
-      .range(from, to),
-  )) as unknown as SaleRow[];
+  const sales: SaleRow[] = await salesUnits(companyId, {fromStart: `${months[0]}-01`, stores: counted});
   // A store has POS data for a month only when it has whole-month rows for it (a Watsons
   // file, or a CSV covering the 1st to the last day). Partial-period CSVs don't count.
   const wholeMonth = sales.filter((r) => {
@@ -124,7 +129,8 @@ async function loadInputs(companyId: string, stores?: string[]) {
       if (c) marked.push({store_code: c.store_code, item_code: c.item_code, period_start: c.period_start, period_end: c.period_end, upload_id: e.upload_id, marks: r.marks});
     }
   }
-  return {counts, counted, adjustments, marked, products, sales: wholeMonth, salesMonths, settings};
+  const receipts = receiptsByMonth(received.map((r) => ({storeCode: r.store_code, itemCode: r.item_code, qty: r.received_qty, receivedOn: r.received_on})));
+  return {counts, counted, adjustments, marked, products, sales: wholeMonth, salesMonths, receipts, settings};
 }
 
 /** POS units per store, item and month, through the Watsons SKU links. */
@@ -152,7 +158,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
   if (!flagStores.length) return {opened: 0, updated: 0, resolved: 0, months: []};
 
   const idx = posIndex(inp.products, inp.sales);
-  const monthly = monthlyChecks({counts: inp.counts, adjustments: inp.adjustments, posSold: idx.posSold, salesMonths: inp.salesMonths, linked: idx.linked, settings: inp.settings});
+  const monthly = monthlyChecks({counts: inp.counts, adjustments: inp.adjustments, posSold: idx.posSold, salesMonths: inp.salesMonths, linked: idx.linked, settings: inp.settings, receipts: inp.receipts});
   const findings: Finding[] = [...rowFindings(inp.counts, inp.marked), ...monthly.findings];
 
   const existing = (await fetchAllRows('flags', (from, to) =>
@@ -207,7 +213,7 @@ export async function monthCoverage(companyId: string): Promise<MonthCoverage[]>
   const inp = await loadInputs(companyId);
   if (!inp.counted.length) return [];
   const idx = posIndex(inp.products, inp.sales);
-  const {months} = monthlyChecks({counts: inp.counts, adjustments: inp.adjustments, posSold: idx.posSold, salesMonths: inp.salesMonths, linked: idx.linked, settings: inp.settings});
+  const {months} = monthlyChecks({counts: inp.counts, adjustments: inp.adjustments, posSold: idx.posSold, salesMonths: inp.salesMonths, linked: idx.linked, settings: inp.settings, receipts: inp.receipts});
   const by = new Map<string, MonthCoverage>();
   for (const m of months) {
     const r = by.get(m.month) ?? {month: m.month, match: 0, flag: 0, baseline: 0, waiting_sales: 0, unlinked: 0, not_counted: 0};

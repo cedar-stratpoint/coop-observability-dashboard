@@ -18,7 +18,9 @@ export const leafActive = (href: string, pathname: string, channel: string | nul
   }
   if (href === '/offline-sales/orders') return pathname.startsWith('/offline-sales/orders');
   if (href === '/offline-sales/events') return pathname.startsWith('/offline-sales/events');
-  // Goldline: SKU linking (/stock/skus) owns its subtree; Inventory owns the rest of /stock.
-  if (href === '/stock') return pathUnder('/stock', pathname) && !pathname.startsWith('/stock/skus');
+  // Goldline: SKU linking (/stock/skus), Restock (/stock/restock), Orders (/stock/orders) and Audit (/stock/audit) own their subtrees; Inventory owns the rest of /stock.
+  // The PO form (/stock/po-form) is part of the reconciliation, so Audit owns it too.
+  if (href === '/stock') return pathUnder('/stock', pathname) && !pathname.startsWith('/stock/skus') && !pathname.startsWith('/stock/restock') && !pathname.startsWith('/stock/orders') && !pathname.startsWith('/stock/audit') && !pathname.startsWith('/stock/po-form');
+  if (href === '/stock/audit') return pathUnder('/stock/audit', pathname) || pathUnder('/stock/po-form', pathname);
   return pathUnder(href.split('?')[0], pathname);
 };

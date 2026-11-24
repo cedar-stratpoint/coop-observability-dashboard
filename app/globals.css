@@ -179,6 +179,11 @@
   --status-good: #3B7A5A;
   --status-warn: #B4780A;
   --status-crit: #B4462F;
+  /* Restock hit or miss charts (validated: lightness, chroma, colour-blind separation;
+     the status trio fails as a chart set). Rejected = miss with a hatch, always labelled. */
+  --hit: #008673;
+  --miss: #C9601C;
+  --miss-soft: #F6E3D6;
 }
 
 /* Dark = warm charcoal (class-driven; seeded before paint in app/layout.tsx). */
@@ -226,6 +231,9 @@
   --status-good: #4FAE7C;
   --status-warn: #D8A33E;
   --status-crit: #E0876B;
+  --hit: #1AA58C;
+  --miss: #D2733A;
+  --miss-soft: #3A2A1E;
 }
 
 /* Smooth the flip between themes without animating layout. */
@@ -279,11 +287,108 @@ html.coop-splash-seen .coop-splash { display: none; }
   animation: coop-shine 3.4s ease-in-out infinite;
 }
 
+/* "Back keeps your place": the row you came back to gets an accent rail + tint for ~1.4s, then
+   fades (components/analyst/back-nav.tsx sets data-kept on → fading → removed). It appears
+   instantly (the "on" state has a 0s transition) and only the fade-out animates. Color only, no
+   movement, so it stays as-is under reduced motion. !important beats a row's own
+   transition-colors duration so the fade is never a 150ms snap. */
+[data-kept],
+[data-kept] > td:first-child {
+  transition-property: background-color, box-shadow !important;
+  transition-duration: 900ms !important;
+  transition-timing-function: ease-out !important;
+}
+[data-kept='on'],
+[data-kept='on'] > td:first-child {
+  transition-duration: 0s !important;
+}
+[data-kept='on'] {
+  background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+}
+[data-kept='on']:not(tr),
+[data-kept='on'] > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .coop-intro-rise,
   .coop-app-in,
   .coop-chip-hint,
   .coop-shine { animation: none; }
+}
+
+/* Upload progress — a sheen that keeps gliding across the filled portion so a long scan
+   read (one page can take ~80s) reads as "still working", not frozen. Purposeful labor
+   illusion for a minutes-long, occasional wait, not an attention pulse; transform-only, so
+   the global reduced-motion rule below collapses it to a flat gradient fill. The fill width
+   stays the real progress. */
+@keyframes gl-progress-sheen {
+  0%   { transform: translateX(-130%) skewX(-18deg); }
+  100% { transform: translateX(280%) skewX(-18deg); }
+}
+.gl-progress-fill {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--primary) 78%, black 6%),
+    var(--primary) 68%,
+    color-mix(in oklab, var(--primary) 72%, white 24%)
+  );
+}
+.gl-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 44%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, white 40%, transparent), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  animation: gl-progress-sheen 1.7s linear infinite;
+}
+
+/* Indeterminate variant: a work-in-progress read has no real percent (one await), so a
+   short fill travels across the track to show steady labor — the same gradient + sheen as
+   the determinate bar. Reduced motion (below) parks it as a static partial fill. */
+@keyframes gl-progress-slide {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+.gl-progress-indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  animation: gl-progress-slide 1.4s ease-in-out infinite;
+}
+
+/* The "reading" bar: a FULL ochre track with a soft highlight gliding across it, so an
+   in-progress read reads as a filled, working bar (not a partial sliver). Transform-only
+   sheen (cheap, no layout). Under reduced motion the full fill stays and the sheen is dropped. */
+@keyframes gl-reading-sheen {
+  0%   { transform: translateX(-130%) skewX(-16deg); }
+  100% { transform: translateX(320%) skewX(-16deg); }
+}
+.gl-reading-bar {
+  position: relative;
+  overflow: hidden;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--primary) 60%, black 6%),
+    var(--primary) 50%,
+    color-mix(in oklab, var(--primary) 64%, white 22%)
+  );
+}
+.gl-reading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, white 42%, transparent), transparent);
+  transform: translateX(-130%) skewX(-16deg);
+  animation: gl-reading-sheen 1.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gl-reading-bar::after { animation: none; display: none; }
 }
 
 /* Reduced motion, app-wide. Only 15 of ~80 animating components carry their own
@@ -310,6 +415,15 @@ html.coop-splash-seen .coop-splash { display: none; }
    app's theme, so they stay visible in dark mode. */
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
+
+/* Goldline purchase orders (F12): printing a PO prints only its paper form, without the
+   dashboard around it. */
+@media print {
+  body:has(.po-print) * { visibility: hidden; }
+  body:has(.po-print) .po-print,
+  body:has(.po-print) .po-print * { visibility: visible; }
+  body:has(.po-print) .po-print { position: absolute; inset: 0 0 auto 0; }
+}
 
 /* Business Health Report fill-in: the missing cells of the closing month (amber outline) and the cell Fill in / Enter lands on (accent ring, pulse, tag). */
 td.bhr-need { box-shadow: inset 0 0 0 1.5px var(--bhr-warn); background: var(--amber-bg); }

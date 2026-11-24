@@ -23,12 +23,15 @@
 -- executable by service_role only. Run on Nichido STAGING first, PROD after review.
 -- The private storage bucket `goldline-uploads` is created at the end.
 --
--- Sales money is encrypted at rest AFTER this file: it creates sales with plain
--- gross_retail / net_of_vat (what migrate-goldline.ts copies into), then
--- s1_sales_encryption.sql moves them into sales.amounts_enc with a Vault key and
--- replaces sales_rollup / sales_by_sku, and s2_sales_drop_plaintext.sql drops the plain
--- columns. A fresh project: this file → (copy) → s1 → s2. The two functions below are
--- the pre-encryption versions; s1 holds the live ones.
+-- Sales figures are encrypted at rest AFTER this file: it creates sales with plain
+-- gross_retail / net_of_vat / units (what migrate-goldline.ts copies into), then
+-- s1_sales_encryption.sql moves the money into sales.amounts_enc with a Vault key,
+-- s3_sales_units_encryption.sql adds units to that ciphertext and replaces every reader of
+-- units, s5_sales_period_totals.sql keeps the totals added up, and s2_sales_drop_plaintext.sql
+-- drops the plain columns. A fresh project: this file → (copy) → s1 → (p3_forecast, p3c) → s3 →
+-- s5 → s2. The sales readers below are the pre-encryption versions; s3 and s5 hold the live
+-- ones. Don't re-run s3 after s5 without re-running s5: both define sales_rollup, sales_by_sku,
+-- store_scope, forecast_months and sku_months, and s5's are the fast ones.
 
 -- ---------------------------------------------------------------------------------
 -- Company mirror (FK target only; not the auth source).
@@ -182,8 +185,22 @@ create table if not exists public.upload_batches (
 );
 create index if not exists upload_batches_company_idx on public.upload_batches (company_id, created_at desc);
 
+-- 'form' = one store's multi-page form (manual upload): reviewed and committed together in
+-- batch-review. 'scan' = a server-ingested whole-scan batch spanning many pages / stores: its
+-- pages are reviewed one at a time in the per-file review and worked from the triage board,
+-- never routed into batch-review. Prod cutover: after adding the column, backfill existing
+-- scans with  update public.upload_batches set kind='scan' where id in
+--   (select batch_id from public.uploads where batch_id is not null group by batch_id having count(*) > 8);
+alter table public.upload_batches add column if not exists kind text not null default 'form'
+  check (kind in ('form','scan'));
+
 alter table public.uploads add column if not exists batch_id uuid references public.upload_batches(id) on delete set null;
 create index if not exists uploads_batch_idx on public.uploads (batch_id);
+
+-- Optional human name the user typed for a group upload at drop time (e.g. "October Watsons
+-- batch"). Copied onto every split page so source-grouped views can show it as the title with
+-- the filename as a quiet subtitle. Null when the user named nothing (we fall back to filename).
+alter table public.uploads add column if not exists batch_name text;
 
 alter table public.upload_batches enable row level security;
 revoke all on public.upload_batches from anon, authenticated;

@@ -1,0 +1,387 @@
+import 'server-only';
+import {outOfScopeStores} from './company';
+import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
+import {readerSignature, reuseIdenticalRead, sha256, stampFingerprint} from './goldline-read-reuse';
+import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {getFormTemplate} from './goldline-form-template-data';
+import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {renderReadImages} from './goldline-page-bands';
+import {boxCustomId, buildLocateParams, locateRowsFor} from './goldline-row-boxes';
+import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
+import {applyOrientation} from './goldline-orient';
+import {knownStoreCodes} from './goldline-store-registry';
+import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
+import {getWriterProfile} from './goldline-writer-data';
+import {humanizeExtractError, MANIFESTS} from './goldline-extract';
+import {uploadSource} from './goldline-upload-groups';
+import {logReadEvent, type ReadLogInput} from './goldline-read-log';
+
+// The per-page inventory read, shared by the upload route (a fresh scan) and the
+// re-read action (a stored page read again). ONE pipeline so the two can never drift:
+// classify → snap the store to the registry → flag duplicates → rotate if upside-down →
+// extract against the detected version → save + mark needs_review, with sales/blank/
+// non-form pages set aside and any failure surfaced with a human reason. The caller owns
+// storing the file and checking the key; this owns everything from the bytes onward.
+
+export type UploadStage =
+  | {type: 'stage'; stage: 'stored'}
+  | {type: 'stage'; stage: 'parsing'}
+  | {type: 'stage'; stage: 'detecting'}
+  | {type: 'stage'; stage: 'reading'; page: number; items: number}
+  | {type: 'stage'; stage: 'saving'};
+export type Emit = (e: UploadStage) => void;
+
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Page-level confidence = mean of the per-row confidences (0 when empty). */
+export function avgConfidence(page: ExtractedPage): number {
+  const cs = page.rows.map((r) => r.confidence).filter((c) => typeof c === 'number');
+  if (!cs.length) return 0;
+  return cs.reduce((a, b) => a + b, 0) / cs.length;
+}
+
+// The classify (~20s) and read (~60-85s) calls run silently. On a streamed upload a
+// proxy's idle-read timeout can cut the NDJSON connection during that silence, before
+// the final result line — the client then sees a bare 200 and "couldn't finish reading".
+// Re-emit the current stage on a 12s heartbeat so bytes keep flowing and the stream
+// stays open until the real result (success or a clean failure) is written. The re-read
+// action passes no emit (it doesn't stream), so the heartbeat is a no-op there.
+export async function withHeartbeat<T>(emit: Emit | undefined, beat: UploadStage, work: () => Promise<T>): Promise<T> {
+  const iv = setInterval(() => emit?.(beat), 12_000);
+  try {
+    return await work();
+  } finally {
+    clearInterval(iv);
+  }
+}
+
+export type ReadResult = {http: number; body: Record<string, unknown>};
+
+/**
+ * Read ONE stored inventory page (already saved to the uploads row + bucket). Returns the
+ * HTTP status + body the route sends to the uploader; the re-read action reads `body.status`.
+ */
+export async function runInventoryRead(args: {
+  companyId: string;
+  uploadId: string;
+  bytes: ArrayBuffer | Uint8Array;
+  filename: string;
+  fileSize: number;
+  storeScope: string[] | null | undefined;
+  batchStore: string | null;
+  emit?: Emit;
+  // L7 batch mode: when true, read the anchored page INLINE even if batch mode is enabled for the
+  // company. The batch poller sets this on its fallback path (a batch slot that errored/expired), so
+  // a failed batch read is retried synchronously instead of being re-submitted to a batch forever.
+  forceSync?: boolean;
+  // QA fix 9: a NEW page (fresh upload or the pump) may copy the read of an identical file read by
+  // this same deploy, so one page always gives one result. A re-read never sets this.
+  reuse?: boolean;
+}): Promise<ReadResult> {
+  const {companyId, uploadId, filename, fileSize, storeScope, batchStore, emit, forceSync, reuse} = args;
+  const bytes = args.bytes instanceof Uint8Array ? args.bytes : new Uint8Array(args.bytes);
+  const pdfBase64 = Buffer.from(bytes).toString('base64');
+  // Accumulates what we learn about this page so the read_logs row is complete no matter
+  // which branch (set aside / read / failed) the page takes — including the catch below.
+  const rec: ReadLogInput = {companyId, uploadId, filename, fileSize, source: uploadSource(filename)};
+  // One token tally for the whole page read: classify + extract (and any retry) all record
+  // into it, and each log row below snapshots it, so the page's Claude cost is in the DB.
+  const sha = sha256(bytes);
+  const readerSig = readerSignature();
+  await stampFingerprint(uploadId, {sha});
+  return withReadUsage(async () => {
+  try {
+    if (reuse && readerSig) {
+      const copied = await reuseIdenticalRead(companyId, uploadId, sha, readerSig).catch((e) => {
+        console.error('goldline read: reuse failed, reading fresh', msg(e));
+        return null;
+      });
+      const page = copied?.rows as ExtractedPage | undefined;
+      if (copied && page && !outOfScopeStores(storeScope, [page.store_code]).length) {
+        await setUploadStatus(uploadId, 'needs_review', {pageCount: copied.page});
+        const flagged = page.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length;
+        await logReadEvent({...rec, page: copied.page, formVersion: copied.formVersion ?? undefined, status: 'needs_review', stage: 'reused', rowCount: page.rows.length, docConfidence: copied.docConfidence ?? undefined, flagged, detail: {reusedFrom: copied.fromId, readerSig}, usage: readUsageSnapshot()});
+        return {
+          http: 200,
+          body: {
+            uploadId,
+            status: 'needs_review',
+            page: copied.page,
+            rows: page.rows.length,
+            docConfidence: copied.docConfidence,
+            flagged,
+            formVersion: copied.formVersion,
+            rotated: copied.orientation === 180,
+            reused: true,
+            reusedFrom: copied.fromId,
+            header: {storeCode: page.store_code || null, storeName: page.store_name || null, periodStart: page.period_start ?? null, periodEnd: page.period_end ?? null, consultant: page.consultant ?? null},
+          },
+        };
+      }
+    }
+    // Phase 0: classify the page (number, kind, orientation, form version, handwritten
+    // header) so a shuffled/rotated/multi-store bundle can be sorted. Then snap the
+    // read store code to the known registry, persist the classification + a semantic
+    // page_key, and flag any duplicate / re-upload — all before extraction.
+    emit?.({type: 'stage', stage: 'detecting'});
+    const classifyStart = Date.now();
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    rec.classifyMs = Date.now() - classifyStart;
+    // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
+    // a real inventory page misread. Re-classify once (a blind second read) before setting it
+    // aside; keep the retry when it now reads as a form, or reads more confidently. A confident
+    // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
+    let setAsideRetry: {kind: string; confidence: number} | null = null;
+    if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+      if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
+        setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
+        cls = retry;
+      }
+    }
+    const page = cls.page;
+    rec.page = page;
+    rec.pageKind = cls.kind;
+    rec.formVersion = cls.version;
+    rec.orientation = cls.orientation;
+    rec.storeFrom = cls.store_code;
+
+    // Reconcile the store code against the registry (best-effort: no registry = raw).
+    let registry: string[] = [];
+    try {
+      registry = await knownStoreCodes(companyId);
+    } catch (e) {
+      console.error('goldline read: store registry read failed', msg(e));
+    }
+    const snap = snapStoreCode(cls.store_code, registry);
+    rec.storeCode = snap.code;
+    rec.detail = {classify: cls, snap, ...(setAsideRetry ? {setAsideRetry} : {})};
+    const inv = isInventoryPage(cls);
+    const pk = inv
+      ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
+      : null;
+
+    // Duplicate / re-upload: same semantic page_key seen before. Flag, never drop.
+    let duplicateOf: Array<{id: string; status: string; created_at: string}> = [];
+    if (pk) {
+      try {
+        duplicateOf = await findDuplicatePageKey(companyId, pk, uploadId);
+      } catch (e) {
+        console.error('goldline read: duplicate check failed', msg(e));
+      }
+    }
+
+    // Persist the classifier output on the upload row (metadata; best-effort).
+    await saveClassification({
+      uploadId,
+      pageNo: page,
+      pageKind: cls.kind,
+      orientation: cls.orientation,
+      formVersion: cls.version,
+      pageKey: pk,
+      classification: {...cls, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
+    }).catch((e) => console.error('goldline read: saveClassification failed', msg(e)));
+
+    // Page-6 sales report and blanks/unrecognized pages are a clean, out-of-scope stop.
+    if (cls.kind === 'sales' || page === 6) {
+      const reason = 'This is the page 6 Sales Report, not an inventory page. It has been set aside (out of scope for now).';
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'sales', usage: readUsageSnapshot()});
+      return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: cls.kind}};
+    }
+    if (!inv) {
+      // A blank back-side is a normal, expected part of a scan — set it aside quietly,
+      // like the sales report, rather than showing it as a failure.
+      if (cls.kind === 'blank') {
+        const reason = 'This looks like a blank page (a back side with no form). It has been set aside.';
+        await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+        await logReadEvent({...rec, status: 'rejected', stage: 'classified', pageKind: 'blank', usage: readUsageSnapshot()});
+        return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: 'blank'}};
+      }
+      const reason = 'This doesn’t look like a Nichido inventory form page. Please upload a clear scan of an inventory page (pages 1 to 5).';
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason, pageCount: page});
+      await logReadEvent({...rec, status: 'rejected', stage: 'classified', usage: readUsageSnapshot()});
+      return {http: 422, body: {uploadId, status: 'rejected', error: reason, pageKind: cls.kind}};
+    }
+
+    // Upright copy for extraction: rotate 180° pages before reading (no-op if upright).
+    const extractB64 = cls.orientation === 180
+      ? Buffer.from(await applyOrientation(bytes, 180)).toString('base64')
+      : pdfBase64;
+
+    const reading: UploadStage = {type: 'stage', stage: 'reading', page, items: MANIFESTS[page]?.length ?? 0};
+    emit?.(reading);
+    // The writer profile: an earlier reviewed copy of this page + notes from past
+    // corrections, learned from this database's committed scans (empty on any error).
+    const profile = await getWriterProfile(companyId, page, batchStore, storeScope);
+    // Phase 1: extract against the detected form version (legacy uses the 7-column
+    // deducted schema; v1/v2 the three-location one). Unknown falls back to v1. The read
+    // is the long, silent call, so keep the stream alive with a heartbeat while it runs.
+    const readStart = Date.now();
+    // Template-anchored read (flag-gated): fill the page's fixed template with only the handwritten
+    // numbers, so no row is dropped or invented.
+    //
+    // Safeguard (B): the anchor VERSION comes from an unbiased read of where the "Delivery" column
+    // is physically printed (locateDeliveryColumn), NOT from the classifier. V1 and V2 differ only
+    // by that position (V1 = col 4, V2 = col 1), and the classifier confidently mis-reads some V2
+    // pages as V1 (QA page 16 at 0.90) — which would make the anchored read fill every count from
+    // the wrong column. The layout read gets the position right, so it decides the version; only
+    // when it is inconclusive do we fall back to the confidence-gated classifier version, and when
+    // that too is unsure we stay on the free read (which maps cells by printed meaning). Flag-off is
+    // byte-identical to today.
+    let av: 'v1' | 'v2' | null = null;
+    let versionSource: 'locator' | 'classify' | null = null;
+    let deliveryColumn: number | null = null;
+    if (templateReadEnabled(companyId)) {
+      deliveryColumn = await locateDeliveryColumn(extractB64);
+      const located = versionFromDeliveryColumn(deliveryColumn);
+      if (located) {
+        av = located;
+        versionSource = 'locator';
+      } else {
+        av = anchorVersion(cls.version, cls.confidence);
+        if (av) versionSource = 'classify';
+      }
+    }
+    const template = av ? await getFormTemplate(companyId, av, page) : null;
+    // The layout proved the version; if it differs from the classifier's, correct the persisted tag
+    // + page key so the triage board and the eventual commit carry the right version.
+    if (template && av && av !== cls.version) {
+      rec.formVersion = av;
+      const correctedPk = inv
+        ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: av, page})
+        : null;
+      await saveClassification({
+        uploadId,
+        pageNo: page,
+        pageKind: cls.kind,
+        orientation: cls.orientation,
+        formVersion: av,
+        pageKey: correctedPk,
+        classification: {...cls, version: av, version_corrected_from: cls.version, version_source: versionSource, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
+      }).catch((e) => console.error('goldline read: saveClassification (version correction) failed', msg(e)));
+    }
+    // L7 batch mode (flag-gated): the fast classify + locate are done and the version/template are
+    // known, so instead of running the expensive anchored read inline, submit it to the Anthropic
+    // Message Batches API (50% off) and leave the page 'queued_batch' for the poller to ingest. Only
+    // the template (anchored) path batches; the free read and forceSync (the poller's fallback) stay
+    // inline. Classify + locate usage is already tallied; the anchored read's usage is recorded by
+    // the poller when the batch returns. Flag-off is byte-identical to the synchronous read below.
+    // Sharper page images (flag-gated): a 1600 px page + 300 dpi bands replace the PDF for the read.
+    // Best-effort: null (render failed or flag off) sends the PDF exactly as before.
+    const images = readBandsEnabled(companyId) ? await renderReadImages(extractB64) : null;
+    const pageBlocks = images?.blocks ?? null;
+    if (pageBlocks) {
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        bands: pageBlocks.filter((b) => b.type === 'image').length - 1,
+      };
+    }
+    // Legacy has no template, so L7 left it inline at full price; batch it too when its flag is on.
+    const batchLegacy = !template && cls.version === 'legacy' && batchLegacyEnabled(companyId);
+    if ((template || batchLegacy) && !forceSync && batchReadEnabled(companyId)) {
+      const batchParams = template
+        ? buildAnchoredParams(extractB64, template, profile, pageBlocks)
+        : buildInventoryReadParams(extractB64, page, profile, 'legacy', pageBlocks);
+      // Row boxes for review (flag-gated): a second, small request in the same batch asks where each
+      // printed row sits on the page. Its own result never affects the read; the poller attaches it.
+      const requests: {custom_id: string; params: unknown}[] = [{custom_id: uploadId, params: batchParams}];
+      const locateRows = images && readBoxesEnabled(companyId) ? locateRowsFor(template, page, cls.version) : [];
+      if (images && locateRows.length) {
+        requests.push({custom_id: boxCustomId(uploadId, images.locate.h, images.locate.slant), params: buildLocateParams(images.locate, locateRows)});
+        rec.detail = {...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}), boxes: locateRows.length};
+      }
+      const anthropicBatchId = await submitAnchoredBatch(requests);
+      // The reader is the code that SUBMITTED the read; the poller that ingests it later may be a newer deploy.
+      await stampFingerprint(uploadId, {readerSig});
+      await setUploadStatus(uploadId, 'queued_batch', {pageCount: page, anthropicBatchId});
+      await logReadEvent({...rec, status: 'queued_batch', stage: 'submitted', usage: readUsageSnapshot()});
+      return {http: 202, body: {uploadId, status: 'queued_batch', page, batchId: anthropicBatchId, formVersion: av}};
+    }
+    let extracted: ExtractedPage;
+    let anchored: AnchoredMapResult | null = null;
+    if (template) {
+      const useTemplate = template;
+      anchored = await withHeartbeat(emit, reading, () => extractInventoryPageAnchored(extractB64, useTemplate, profile, pageBlocks));
+      extracted = anchored.page;
+    } else {
+      extracted = await withHeartbeat(emit, reading, () => extractInventoryPage(extractB64, page, profile, cls.version, pageBlocks));
+    }
+    rec.readMs = Date.now() - readStart;
+    if (anchored) {
+      // Keep the anchored read's signals + the version self-check in the read log so they are
+      // debuggable without re-running.
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        anchored: {
+          version: av,
+          versionSource,
+          deliveryColumn,
+          classifyVersion: cls.version,
+          filledBlanks: anchored.filledBlanks,
+          extras: anchored.extras,
+          priceNotes: anchored.priceNotes,
+          deliverySeen: anchored.deliverySeen,
+          deliveryExpected: anchored.deliveryExpected,
+          versionMismatch: anchored.versionMismatch,
+        },
+      };
+    }
+    // Same store-scope fence for the scanned form's store.
+    const outPdf = outOfScopeStores(storeScope, [extracted.store_code]);
+    if (outPdf.length) {
+      const reason = `Scanned form is for store ${extracted.store_code}, outside your access.`;
+      await setUploadStatus(uploadId, 'rejected', {rejectReason: reason});
+      await logReadEvent({...rec, status: 'rejected', stage: 'read', storeCode: extracted.store_code, rowCount: extracted.rows.length, usage: readUsageSnapshot()});
+      return {http: 403, body: {uploadId, status: 'rejected', error: reason}};
+    }
+    emit?.({type: 'stage', stage: 'saving'});
+    await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
+    await stampFingerprint(uploadId, {readerSig});
+    await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
+    await logReadEvent({
+      ...rec,
+      status: 'needs_review',
+      stage: 'read',
+      rowCount: extracted.rows.length,
+      docConfidence: avgConfidence(extracted),
+      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
+      offManifest: extracted.rows.filter((r) => r.off_manifest).length,
+      usage: readUsageSnapshot(),
+    });
+    return {
+      http: 200,
+      body: {
+        uploadId,
+        status: 'needs_review',
+        page,
+        rows: extracted.rows.length,
+        docConfidence: avgConfidence(extracted),
+        flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
+        // Phase 0 classification: the form version detected, whether the page was rotated
+        // upright, the store-code snap, and any duplicate / re-upload of this same page.
+        formVersion: cls.version,
+        rotated: cls.orientation === 180,
+        store: {code: snap.code, status: snap.status, from: snap.from ?? null, candidates: snap.candidates ?? null},
+        duplicateOf: duplicateOf.map((d) => ({uploadId: d.id, status: d.status, at: d.created_at})),
+        // The handwritten header (now read on every page) — lets a batch prefill store/period.
+        header: {
+          storeCode: extracted.store_code || snap.code || null,
+          storeName: extracted.store_name || null,
+          periodStart: extracted.period_start ?? cls.period_start ?? null,
+          periodEnd: extracted.period_end ?? cls.period_end ?? null,
+          consultant: extracted.consultant ?? cls.consultant ?? null,
+        },
+      },
+    };
+  } catch (e) {
+    // Log the raw error server-side; show the reviewer a human-readable reason; keep a
+    // scrubbed copy in error_detail for diagnosis (never shown prominently in the UI).
+    console.error('goldline read: extraction failed', msg(e));
+    const friendly = humanizeExtractError(e);
+    await setUploadStatus(uploadId, 'failed', {rejectReason: friendly, errorDetail: msg(e)});
+    await logReadEvent({...rec, status: 'failed', stage: rec.readMs != null ? 'read' : 'classified', error: msg(e), detail: {...(rec.detail as object | null), error: msg(e)}, usage: readUsageSnapshot()});
+    return {http: 422, body: {uploadId, status: 'failed', error: friendly}};
+  }
+  });
+}

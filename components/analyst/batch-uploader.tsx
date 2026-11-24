@@ -1,14 +1,21 @@
 'use client';
 
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
-import {AlertTriangle, ArrowRight, Check, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, X} from 'lucide-react';
-import {useUploadQueue, type QueueItem} from '@/components/analyst/upload-queue';
-import {eta, itemLabel, itemPercent, summarize} from '@/components/analyst/upload-queue-format';
-import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES} from '@/src/upload-batch';
+import {AlertDialog} from '@base-ui/react/alert-dialog';
+import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
+import {useUploadQueue, type QueueItem, type ServerBatchState} from '@/components/analyst/upload-queue';
+import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, uploadStatus, uploadType, CATEGORY_LABEL, type ItemCategory, type QueueGroup, type UploadStatusFacet, type UploadType} from '@/components/analyst/upload-queue-format';
+import {batchCoverage, FORM_PAGES, groupForms, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
+import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
+import {planServerScans} from '@/components/analyst/server-scan-plan';
+import {VersionPill} from '@/components/analyst/version-pill';
+import {VERSION_COLOR, VERSION_LABEL} from '@/src/goldline-triage-format';
+import type {FormVersion} from '@/src/goldline-extract';
 import {UploadIllustration} from '@/components/analyst/upload-illustration';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
+import {Pagination} from '@/components/analyst/pagination';
 import type {SplitForm, StoreOption} from '@/src/goldline-data';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
@@ -30,7 +37,24 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const q = useUploadQueue();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  // Files staged but not yet submitted — they show on screen and a scan starts reading
+  // only once the user hits Upload. The user can keep adding or remove any first.
+  const [pending, setPending] = useState<File[]>([]);
+  // Confirm before kicking off a read: the Upload button sits right under the tray, so an
+  // accidental click shouldn't start processing a 100-page scan.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // When files are added, bring the tray into view. Typing a name first pushes the tray below
+  // the tall drop zone, so a drop looked like it did nothing (user report 2026-11-23).
+  const trayRef = useRef<HTMLDivElement>(null);
+  const prevPending = useRef(0);
+  useEffect(() => {
+    const grew = pending.length > prevPending.current;
+    prevPending.current = pending.length;
+    if (!grew || !trayRef.current) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    trayRef.current.scrollIntoView({block: 'nearest', behavior: reduce ? 'auto' : 'smooth'});
+  }, [pending.length]);
   const running = Boolean(q?.items.some((i) => i.state === 'running'));
   useEffect(() => {
     if (!running) return;
@@ -43,20 +67,52 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
   const s = summarize(q.items, now);
   const busy = s.running + s.waiting > 0;
   const hasItems = q.items.length > 0;
+  // Server-driven path (P2): the whole scan is uploaded once and read server-side. While the
+  // PDF is uploading / being split (before the first page rows arrive) show a dedicated
+  // status; once rows arrive they render in the normal list, polled live.
+  const serverMode = q.serverMode;
+  const sb = q.serverBatch;
+  const serverUploading = serverMode && Boolean(sb) && (sb!.phase === 'uploading' || sb!.phase === 'ingesting' || (sb!.phase === 'reading' && !hasItems));
   const pdfItems = q.items.filter((i) => i.kind === 'pdf' && i.state !== 'cancelled');
-  const coverage = batchCoverage(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null})));
+  const donePdf = pdfItems.filter((i) => i.state === 'done');
+  const coverage = batchCoverage(donePdf.map((i) => ({page: i.page ?? null})));
+  // The Form-pages (1 to 5) coverage + "uploaded twice" guard assume a batch is ONE store's
+  // form. A whole multi-store scan (the server-driven path) holds ~50 forms, so a 1-to-5 tally
+  // across it false-flags every page as a duplicate. Only show the widget for a single form; the
+  // scan's forms board handles per-form coverage. groupForms starts a new form at each page-
+  // number drop, so >1 group means a multi-store scan. Order by scan position first so the drops
+  // reflect the physical page sequence.
+  const singleForm =
+    groupForms(
+      [...donePdf]
+        .sort((a, b) => (scanPosition(a.name)?.index ?? 0) - (scanPosition(b.name)?.index ?? 0))
+        .map((i) => ({page: i.page ?? null})),
+    ).length <= 1;
   const startedAt = Math.min(...q.items.map((i) => i.startedAt ?? Infinity));
   const left = busy ? eta(Number.isFinite(startedAt) ? startedAt : null, s.percent, now) : null;
   const canReview = !busy && Boolean(q.batch.id) && s.readyForReview > 0;
   // Page numbers restarting (…5, 1…) mean the scan holds several stores' forms; they're
   // split into one batch each once every page is read (q.forms).
-  const manyForms = Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1;
+  // Several stores in one scan: on the server path the batch page splits by form, so the
+  // uploader just shows the single live list and routes to review — no client-side split UI.
+  const manyForms = !serverMode && (Boolean(q.forms) || groupForms(pdfItems.filter((i) => i.state === 'done').map((i) => ({page: i.page ?? null}))).length > 1);
 
+  // Stage the chosen files (append + de-dupe) instead of reading them straight away — a
+  // 98-page scan shouldn't start processing the instant a file is picked, and the user
+  // can review the selection, add more, or drop any before confirming.
   const pick = (files: FileList | null | undefined) => {
     if (!files?.length || disabled) return;
-    void q.addFiles(Array.from(files));
+    setPending((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      return [...prev, ...Array.from(files).filter((f) => !seen.has(`${f.name}:${f.size}`))];
+    });
     if (inputRef.current) inputRef.current.value = '';
   };
+  const confirmPending = () => {
+    if (pending.length) void q.addFiles(pending);
+    setPending([]);
+  };
+  const removePending = (i: number) => setPending((prev) => prev.filter((_, idx) => idx !== i));
 
   const dropProps = {
     onDragEnter: (e: React.DragEvent) => {
@@ -91,13 +147,50 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{!hasItems ? 'Add files' : q.forms ? `${q.forms.length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
+            <h2 className="font-heading text-base font-semibold">{serverUploading ? ((q.serverRun?.length ?? 1) > 1 ? `Uploading ${q.serverRun!.length} scans` : 'Uploading scan') : !hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
-              {hasItems
-                ? busy
-                  ? `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
-                  : `${s.done} of ${s.total} read${s.failed ? ` · ${s.failed} failed` : ''}.`
-                : `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per file.`}
+              {serverUploading ? (
+                sb!.phase === 'uploading'
+                  ? `${sb!.part && sb!.part.total > 1 ? `Scan ${sb!.part.index} of ${sb!.part.total}` : 'The whole scan'} is ${Math.round(sb!.uploadFrac * 100)}% uploaded. Keep this page open until the upload finishes.`
+                  : sb!.part && sb!.part.index < sb!.part.total
+                    ? `Scan ${sb!.part.index} of ${sb!.part.total} uploaded. Keep this page open for the next one.`
+                  : sb!.phase === 'ingesting'
+                    ? 'Uploaded. Splitting it into pages…'
+                    : 'Uploaded. Reading starts in a moment…'
+              ) : hasItems ? (
+                busy ? (
+                  `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
+                ) : (
+                  // Colour-coded so the split reads on first glance: green for what came
+                  // through, neutral for pages set aside (sales/blank), red only for real
+                  // failures.
+                  <>
+                    <span
+                      className="font-medium tabular-nums"
+                      style={{color: s.done > 0 ? 'color-mix(in oklab, var(--status-good) 72%, var(--foreground))' : undefined}}
+                    >
+                      {s.done} of {s.total} read
+                    </span>
+                    {s.setAside > 0 && (
+                      <>
+                        <span aria-hidden> · </span>
+                        <span className="font-medium tabular-nums">{s.setAside} set aside</span>
+                      </>
+                    )}
+                    {s.failed > 0 && (
+                      <>
+                        <span aria-hidden> · </span>
+                        <span className="font-medium tabular-nums" style={{color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))'}}>
+                          {s.failed} failed
+                        </span>
+                      </>
+                    )}
+                    .
+                  </>
+                )
+              ) : (
+                `One store’s form, or many stores scanned into one PDF: Coop splits it into one form per store. Up to ${MAX_BATCH_FILES} pages, 25 MB per page (a whole multi-page scan can be much larger).`
+              )}
             </p>
           </div>
           {hasItems && !busy && (
@@ -120,7 +213,31 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
           </p>
         )}
 
-        {!hasItems ? (
+        {/* Optional name for the drop: on the server-driven path it's stored on every page, so
+            the scan tile and header read it instead of the file name. Hidden once files are in. */}
+        {q.serverUpload && !serverUploading && !hasItems && configured && canEdit && (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              Name this upload <span className="font-normal text-muted-foreground/70">(optional)</span>
+            </span>
+            <input
+              type="text"
+              value={q.uploadName}
+              onChange={(e) => q.setUploadName(e.target.value)}
+              disabled={disabled}
+              maxLength={120}
+              placeholder="e.g. October Watsons batch"
+              className={fieldCls}
+            />
+            <span className="text-[11px] text-muted-foreground">
+              Shown on the scan tile and header. Leave blank to use the file name.
+            </span>
+          </label>
+        )}
+
+        {serverUploading ? (
+          <ServerUploadStatus sb={sb!} files={q.serverRun ?? []} />
+        ) : !hasItems ? (
           <div
             role="button"
             tabIndex={disabled ? -1 : 0}
@@ -135,7 +252,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             }}
             {...dropProps}
             className={cn(
-              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center outline-none transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
+              'group flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 text-center outline-none',
+              pending.length > 0 ? 'py-4' : 'py-10',
+              ' transition-[background-color,border-color] duration-150 ease-out focus-visible:ring-3 focus-visible:ring-ring/40',
               dragging ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/30 hover:bg-muted/40',
               disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
@@ -144,11 +263,11 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               <span className="flex size-11 items-center justify-center rounded-full bg-primary/15 text-primary">
                 <Loader2 className="size-5 animate-spin" aria-hidden />
               </span>
-            ) : (
+            ) : pending.length === 0 ? (
               <UploadIllustration active={dragging} className="mb-1" />
-            )}
+            ) : null}
             <span className="text-sm">
-              <span className="font-medium">{q.preparing ? 'Preparing pages…' : dragging ? 'Drop to add them' : 'Drop files here'}</span>
+              <span className="font-medium">{q.preparing ? 'Preparing pages…' : dragging ? 'Drop to add them' : pending.length > 0 ? 'Drop more files here' : 'Drop files here'}</span>
               {!dragging && !q.preparing && (
                 <>
                   <span className="text-muted-foreground"> or </span>
@@ -156,6 +275,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 </>
               )}
             </span>
+            {pending.length === 0 && (
             <span className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
                 <FileTypeBadge filename="x.pdf" /> Inventory form (pages or whole form)
@@ -167,6 +287,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 <FileTypeBadge filename="x.xlsx" /> POS Sales Data (Watsons, one month)
               </span>
             </span>
+            )}
           </div>
         ) : (
           <>
@@ -177,9 +298,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.round(s.percent)}
-                className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                className="h-2 w-full overflow-hidden rounded-full bg-muted"
               >
-                <div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none" style={{width: `${s.percent}%`}} />
+                <div className="gl-progress-fill h-full min-w-[0.5rem] rounded-full bg-primary transition-[width] duration-500 ease-out motion-reduce:transition-none" style={{width: `${s.percent}%`}} />
               </div>
             )}
 
@@ -222,8 +343,9 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
               )}
             </fieldset>
 
-            {/* Form pages coverage. */}
-            {pdfItems.length > 0 && (
+            {/* Form pages coverage — single-form batches only (a multi-store scan has ~50 forms,
+                where a whole-batch 1-to-5 tally is meaningless; the forms board covers those). */}
+            {pdfItems.length > 0 && singleForm && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Form pages">
                 <span className="mr-1 text-muted-foreground">Form pages</span>
                 {FORM_PAGES.map((n) => {
@@ -259,9 +381,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             )}
 
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Files in this batch">
-              {q.items.map((i) => (
-                <FileRow key={i.id} i={i} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} onRetry={() => q.retry(i.id)} onCancel={() => q.cancel(i.id)} onRemove={() => q.remove(i.id)} />
-              ))}
+              {groupQueueItems(q.items, now).map((g) =>
+                g.isSplit ? (
+                  <GroupRow key={g.key} g={g} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} api={q} serverMode={serverMode} />
+                ) : (
+                  <FileRow key={g.items[0].id} i={g.items[0]} batchId={manyForms ? null : (q.batch.id ?? null)} now={now} serverMode={serverMode} onRetry={() => q.retry(g.items[0].id)} onCancel={() => q.cancel(g.items[0].id)} onRemove={() => q.remove(g.items[0].id)} />
+                ),
+              )}
             </ul>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -281,15 +407,402 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             </div>
           </>
         )}
+
+        {/* Staging tray: the files picked but not yet submitted. Shown on screen so the
+            user can add more (drop/browse above) or remove any, then confirm with Upload. */}
+        {pending.length > 0 && (
+          <div ref={trayRef} className="flex scroll-mb-6 flex-col gap-3 rounded-xl border border-border bg-muted/20 p-3.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-sm font-medium" aria-live="polite">
+                {pending.length} {pending.length === 1 ? 'file' : 'files'} ready to upload
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                {fmtSize(pending.reduce((a, f) => a + f.size, 0))}
+              </span>
+            </div>
+            <ul className="flex max-h-56 flex-col divide-y divide-border overflow-y-auto rounded-lg border border-border bg-background">
+              {pending.map((f, i) => (
+                <li key={`${f.name}-${f.size}-${i}`} className="flex items-center gap-2.5 px-3 py-2">
+                  <FileTypeBadge filename={f.name} />
+                  <span className="min-w-0 flex-1 truncate text-sm" title={f.name}>{f.name}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(f.size)}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${f.name}`}
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => removePending(i)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">Add more above, or remove any, then upload.</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setPending([])}>Clear</Button>
+                <AlertDialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
+                  <AlertDialog.Trigger
+                    render={
+                      <Button size="sm" disabled={disabled}>
+                        <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
+                      </Button>
+                    }
+                  />
+                  <AlertDialog.Portal>
+                    <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+                    <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+                      <div className="flex items-start gap-3">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                          <Upload className="size-4" aria-hidden />
+                        </span>
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <AlertDialog.Title className="font-heading text-base font-semibold">
+                            Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}?
+                          </AlertDialog.Title>
+                          <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                            {fmtSize(pending.reduce((a, f) => a + f.size, 0))} total
+                          </span>
+                        </div>
+                      </div>
+                      <AlertDialog.Description className="text-sm text-muted-foreground">
+                        This starts reading {pending.length === 1 ? 'it' : 'them'} now.{' '}
+                        {pending.length > 1 && planServerScans(pending, q.serverUpload, q.uploadName).kind === 'server'
+                          ? 'Each PDF is uploaded as its own scan, one after another, and read on the server. Keep this page open until the last one has uploaded. '
+                          : pending.some((f) => f.name.toLowerCase().endsWith('.pdf'))
+                            ? 'A multi-page PDF is split into pages and read in the background. '
+                            : ''}
+                        You can keep working while it runs.
+                      </AlertDialog.Description>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <AlertDialog.Close render={<Button variant="ghost" size="sm" />}>Cancel</AlertDialog.Close>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            confirmPending();
+                            setConfirmOpen(false);
+                          }}
+                        >
+                          <Upload className="size-3.5" /> Upload {pending.length} {pending.length === 1 ? 'file' : 'files'}
+                        </Button>
+                      </div>
+                    </AlertDialog.Popup>
+                  </AlertDialog.Portal>
+                </AlertDialog.Root>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void}) {
+// Server-driven upload (P2): the scan PDFs are going to storage / being split, before the
+// per-page rows arrive. The file still uploads FROM THIS BROWSER, so the one thing the user
+// must do is keep the page open until every PDF is up; after that the reading lives on the
+// server and leaving is safe. That instruction leads, in the warning colour, until it's true.
+function ServerUploadStatus({sb, files}: {sb: ServerBatchState; files: {name: string; size: number}[]}) {
+  const total = Math.max(sb.part?.total ?? 1, files.length || 1);
+  const current = sb.part?.index ?? 1;
+  const pct = sb.phase === 'uploading' ? Math.round(sb.uploadFrac * 100) : 100;
+  const uploadsLeft = sb.phase === 'uploading' || current < total;
+  const step = sb.phase === 'uploading' ? 'Uploading' : sb.phase === 'ingesting' ? 'Splitting into pages' : 'Starting the read';
+  const many = total > 1;
+  return (
+    <div className="flex flex-col gap-3">
+      <div
+        role="status"
+        className={cn(
+          'flex items-start gap-3 rounded-xl border px-4 py-3.5 transition-colors duration-200 ease-out',
+          uploadsLeft
+            ? 'border-[color:var(--status-warn)]/40 bg-[color:var(--status-warn)]/10'
+            : 'border-[color:var(--status-good)]/35 bg-[color:var(--status-good)]/10',
+        )}
+      >
+        {uploadsLeft ? (
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+        ) : (
+          <Check className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-good)'}} aria-hidden />
+        )}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-semibold">
+            {uploadsLeft ? 'Keep this page open' : many ? 'All scans uploaded' : 'Scan uploaded'}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {uploadsLeft
+              ? many
+                ? `The scans upload from this browser, one after another. Once scan ${total} of ${total} is up, reading carries on on the server and you can leave.`
+                : 'The scan uploads from this browser. Once it is up, reading carries on on the server and you can leave.'
+              : 'Reading carries on on the server. You can leave this page or refresh; it won\u2019t stop.'}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-4 py-4">
+        {many && (
+          <ol className="flex flex-col gap-1.5" aria-label="Scans in this upload">
+            {files.map((f, i) => {
+              const n = i + 1;
+              const state = n < current ? 'up' : n === current ? 'now' : 'next';
+              return (
+                <li key={`${f.name}-${i}`} className="flex items-center gap-2.5 text-sm">
+                  <span
+                    className={cn(
+                      'grid size-5 shrink-0 place-items-center rounded-full font-mono text-[10px] font-semibold',
+                      state === 'up' ? 'bg-[color:var(--status-good)]/15 text-[color:var(--status-good)]' : state === 'now' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {state === 'up' ? <Check className="size-3" aria-hidden /> : n}
+                  </span>
+                  <span className={cn('min-w-0 flex-1 truncate', state === 'next' && 'text-muted-foreground')} title={f.name}>{f.name}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {state === 'up' ? 'uploaded' : state === 'now' ? (sb.phase === 'uploading' ? `${pct}%` : step.toLowerCase()) : 'waiting'}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        <div className="flex items-center gap-2.5">
+          <Loader2 className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
+          <span className="text-sm font-medium">{many ? `Scan ${current} of ${total} · ${step.toLowerCase()}` : step === 'Uploading' ? 'Uploading scan' : step}</span>
+          <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{pct}%</span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="Upload progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          className="h-2 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className={cn('h-full min-w-[0.5rem] rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none', sb.phase !== 'uploading' && 'gl-progress-fill')}
+            style={{width: `${pct}%`}}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// How many per-page rows to show at once when a scan group is expanded — a 98-page
+// scan paginates instead of unrolling the whole list.
+const PAGES_PER_VIEW = 12;
+const VERSION_FILTER_ORDER: FormVersion[] = ['legacy', 'v1', 'v2'];
+
+// Three orthogonal facets, the same as the scan-detail view (no chip means two things at
+// once): TYPE (what the page is), STATUS (where it is in the lifecycle), and form VERSION.
+const TYPE_FILTER_ORDER: UploadType[] = ['inventory', 'sales', 'blank'];
+const TYPE_LABEL: Record<UploadType, string> = {inventory: 'Inventory form', sales: 'Sales report', blank: 'Blank page'};
+// Live states (Waiting, Processing) sit first; they vanish once a scan finishes.
+const STATUS_FILTER_ORDER: UploadStatusFacet[] = ['waiting', 'processing', 'needs_review', 'failed', 'set_aside', 'cancelled'];
+const STATUS_LABEL: Record<UploadStatusFacet, string> = {waiting: 'Waiting', processing: 'Processing', needs_review: 'Needs review', failed: 'Couldn’t read', set_aside: 'Set aside', cancelled: 'Cancelled'};
+const STATUS_DOT: Record<UploadStatusFacet, string> = {
+  waiting: 'var(--muted-foreground)',
+  processing: 'var(--muted-foreground)',
+  needs_review: 'var(--status-warn)',
+  failed: 'var(--status-crit)',
+  set_aside: 'var(--version-legacy, #6d4c9a)',
+  cancelled: 'var(--muted-foreground)',
+};
+
+// A multi-page scan collapses to ONE row: the source PDF, an aggregate "N of M read"
+// line and progress, with a chevron to expand the per-page rows. Keeps a 98-page
+// upload from flooding the list (plan §06 UX). Collapsed by default; the expanded
+// per-page rows are paged so even a 98-page scan stays navigable.
+function GroupRow({g, batchId, now, api, serverMode = false}: {g: QueueGroup; batchId: string | null; now: number; api: NonNullable<ReturnType<typeof useUploadQueue>>; serverMode?: boolean}) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<'all' | UploadType>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | UploadStatusFacet>('all');
+  const [versionFilter, setVersionFilter] = useState<'all' | FormVersion>('all');
+
+  // Facet 1 — TYPE (what the page is). A page still reading, or one that couldn't be read,
+  // has no type and no chip here; it is found under Status.
+  const typeCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const i of g.items) {
+      const t = uploadType(i);
+      if (t) c[t] = (c[t] ?? 0) + 1;
+    }
+    return c;
+  }, [g.items]);
+  const typesPresent = TYPE_FILTER_ORDER.filter((t) => (typeCounts[t] ?? 0) > 0);
+
+  // Facet 2 — STATUS (lifecycle). Live states (Waiting, Processing) appear only while the
+  // scan is still reading and vanish once every page is done, so they never clutter a
+  // finished scan (Hick's Law).
+  const statusCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const i of g.items) c[uploadStatus(i)] = (c[uploadStatus(i)] ?? 0) + 1;
+    return c;
+  }, [g.items]);
+  const statusesPresent = STATUS_FILTER_ORDER.filter((s) => (statusCounts[s] ?? 0) > 0);
+  // A live status filter whose pages all finished (the scan caught up): fall back to All so
+  // the list doesn't read as empty.
+  useEffect(() => {
+    if ((statusFilter === 'processing' || statusFilter === 'waiting') && (statusCounts[statusFilter] ?? 0) === 0) setStatusFilter('all');
+  }, [statusFilter, statusCounts.processing, statusCounts.waiting]);
+
+  // Facet 3 — form VERSION, a sub-filter of inventory forms (only they carry a version).
+  const versionCounts = useMemo(() => {
+    const c = {} as Record<string, number>;
+    for (const i of g.items) if (uploadType(i) === 'inventory' && i.formVersion && i.formVersion !== 'unknown') c[i.formVersion] = (c[i.formVersion] ?? 0) + 1;
+    return c;
+  }, [g.items]);
+  const versionsPresent = VERSION_FILTER_ORDER.filter((v) => (versionCounts[v] ?? 0) > 0);
+
+  // Pages the user just hit retry on: keep them in view while they re-read (even under a
+  // filter they no longer match) so the row shows "Retrying…" in place instead of popping
+  // out the instant the icon is clicked.
+  const [retrying, setRetrying] = useState<Set<string>>(() => new Set());
+  const handleRetry = (id: string) => {
+    setRetrying((s) => new Set(s).add(id));
+    api.retry(id);
+  };
+  // The three facets combine (AND). A page the user just retried stays in view while it
+  // re-reads, counted as Processing, even if it no longer matches the chosen filter.
+  const matchType = (i: QueueItem) => typeFilter === 'all' || uploadType(i) === typeFilter;
+  const matchStatus = (i: QueueItem) => statusFilter === 'all' || uploadStatus(i) === statusFilter || (retrying.has(i.id) && statusFilter === 'processing');
+  const matchVersion = (i: QueueItem) => versionFilter === 'all' || (uploadType(i) === 'inventory' && i.formVersion === versionFilter);
+  const filtered = g.items.filter((i) => matchType(i) && matchStatus(i) && matchVersion(i));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGES_PER_VIEW));
+  const safePage = Math.min(page, pageCount);
+  const shown = filtered.slice((safePage - 1) * PAGES_PER_VIEW, safePage * PAGES_PER_VIEW);
+  const chooseType = (t: 'all' | UploadType) => {
+    setTypeFilter(t);
+    setPage(1);
+  };
+  const chooseStatus = (s: 'all' | UploadStatusFacet) => {
+    setStatusFilter(s);
+    setPage(1);
+  };
+  const chooseVersion = (v: 'all' | FormVersion) => {
+    setVersionFilter(v);
+    setPage(1);
+  };
+  const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
+  const working = g.running > 0 || g.waiting > 0;
+  const allDone = g.done === g.total && g.total > 0;
+  return (
+    <li className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-3 px-3.5 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+      >
+        <FileTypeBadge filename="scan.pdf" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="truncate text-sm font-medium" title={g.source}>{g.source}</span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{g.total} pages · {fmtSize(g.size)}</span>
+          </div>
+          <span className="truncate text-xs" style={g.failed ? {color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))'} : undefined}>
+            {groupLabel(g)}
+          </span>
+          {working && (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+              <div className="gl-progress-fill h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none" style={{width: `${pct}%`}} />
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {allDone && <Check className="size-4" style={{color: 'var(--status-good)'}} aria-label="All pages read" />}
+          <ChevronDown aria-hidden className={cn('size-4 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
+        </div>
+      </button>
+      {open && (
+        <div className="flex flex-col border-t border-border bg-muted/20">
+          {/* Filter chips — three orthogonal facets (Type, Status, Version), matching the
+              scan-detail view. Each row appears only when there's more than one value to sort
+              between; the rows combine with AND. Status values carry a colored dot. */}
+          {(typesPresent.length >= 2 || statusesPresent.length >= 2 || versionsPresent.length >= 2) && (
+            <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3.5">
+              {typesPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by type">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Type</span>
+                  <FilterChip active={typeFilter === 'all'} onClick={() => chooseType('all')}>
+                    All <span className="tabular-nums opacity-70">{g.items.length}</span>
+                  </FilterChip>
+                  {typesPresent.map((t) => (
+                    <FilterChip key={t} active={typeFilter === t} onClick={() => chooseType(t)}>
+                      {TYPE_LABEL[t]} <span className="tabular-nums opacity-70">{typeCounts[t]}</span>
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+              {statusesPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by status">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Status</span>
+                  <FilterChip active={statusFilter === 'all'} onClick={() => chooseStatus('all')}>
+                    All <span className="tabular-nums opacity-70">{g.items.length}</span>
+                  </FilterChip>
+                  {statusesPresent.map((s) => (
+                    <FilterChip key={s} active={statusFilter === s} dotColor={STATUS_DOT[s]} onClick={() => chooseStatus(s)}>
+                      {STATUS_LABEL[s]} <span className="tabular-nums opacity-70">{statusCounts[s]}</span>
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+              {versionsPresent.length >= 2 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter pages by form version">
+                  <span className="w-14 shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Version</span>
+                  <FilterChip active={versionFilter === 'all'} onClick={() => chooseVersion('all')}>
+                    All <span className="tabular-nums opacity-70">{versionsPresent.reduce((a, v) => a + (versionCounts[v] ?? 0), 0)}</span>
+                  </FilterChip>
+                  {versionsPresent.map((v) => (
+                    <FilterChip key={v} active={versionFilter === v} dotColor={VERSION_COLOR[v]} onClick={() => chooseVersion(v)}>
+                      {VERSION_LABEL[v]} <span className="tabular-nums opacity-70">{versionCounts[v]}</span>
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <ul className="flex flex-col divide-y divide-border pl-3" aria-label={`Pages of ${g.source}`}>
+            {shown.map((i) => (
+              <FileRow key={i.id} i={i} batchId={batchId} now={now} serverMode={serverMode} retrying={retrying.has(i.id)} onRetry={() => handleRetry(i.id)} onCancel={() => api.cancel(i.id)} onRemove={() => api.remove(i.id)} />
+            ))}
+          </ul>
+          {pageCount > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2">
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                Showing {(safePage - 1) * PAGES_PER_VIEW + 1} to {Math.min(safePage * PAGES_PER_VIEW, filtered.length)} of {filtered.length}
+              </span>
+              <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label={`Pages of ${g.source}`} />
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** A calm status pill: muted for the "set aside" kinds, red only for a genuine error. */
+function CategoryPill({cat}: {cat: ItemCategory}) {
+  const crit = cat === 'failed';
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={crit ? {color: 'color-mix(in oklab, var(--status-crit) 72%, var(--foreground))', background: 'color-mix(in oklab, var(--status-crit) 14%, transparent)'} : {background: 'var(--muted)', color: 'var(--foreground)'}}
+    >
+      {CATEGORY_LABEL[cat]}
+    </span>
+  );
+}
+
+function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false, serverMode = false}: {i: QueueItem; batchId: string | null; now: number; onRetry: () => void; onCancel: () => void; onRemove: () => void; retrying?: boolean; serverMode?: boolean}) {
   const pct = itemPercent(i, now);
   const failed = i.state === 'failed';
   const done = i.state === 'done';
+  const cat = itemCategory(i);
+  // The user just hit retry and it's re-reading: show "Retrying…" in place (spinner +
+  // a soft active tint), so the click lands as visible feedback, not a vanishing row.
+  const isRetrying = retrying && (i.state === 'queued' || i.state === 'running');
   // A read page opens the batch review on that page's tab (the same view as "Review &
   // commit"), so there is one place to review. The whole row is the target (stretched
   // link), so there's no small "Open" to aim for.
@@ -297,9 +810,10 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
   return (
     <li
       className={cn(
-        'relative flex items-center gap-3 px-3.5 py-2.5',
+        'relative flex items-center gap-3.5 px-4 py-3.5 transition-colors duration-300 ease-out',
         i.state === 'cancelled' && 'opacity-50',
-        href && 'transition-colors duration-150 ease-out hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
+        isRetrying && 'bg-primary/5',
+        href && 'hover:bg-muted/60 has-[a:focus-visible]:bg-muted/60',
       )}
     >
       {href && (
@@ -311,20 +825,57 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
         />
       )}
       <FileTypeBadge filename={i.name} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="truncate text-sm font-medium" title={i.name}>
-            {i.name}
+          <span className="flex min-w-0 items-baseline gap-2">
+            {/* The page's place in the scan leads (the one thing that differs per row, so it
+                carries the weight); the source scan name sits beside it as a quiet pill (it
+                repeats down the list). A lone file keeps its own name and shows no pill. */}
+            <span className="truncate text-[0.9375rem] font-semibold tracking-tight" title={i.name}>
+              {scanPageLabel(i.name).title}
+            </span>
+            {scanPosition(i.name)?.source && (
+              <span
+                className="max-w-[12rem] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                title={i.name}
+              >
+                {scanPosition(i.name)!.source}
+              </span>
+            )}
           </span>
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{fmtSize(i.size)}</span>
         </div>
-        <span
-          className={cn('truncate text-xs', failed ? 'text-destructive' : 'text-muted-foreground')}
-          style={done && i.flagged ? {color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'} : undefined}
-          title={failed ? i.error : undefined}
-        >
-          {itemLabel(i)}
-        </span>
+        {isRetrying ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium" style={{color: 'color-mix(in oklab, var(--primary) 70%, var(--foreground))'}}>
+            <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+            <span className="truncate">Retrying…{i.state === 'running' ? ' reading the page' : ''}</span>
+          </span>
+        ) : cat === 'sales' || cat === 'blank' || cat === 'other' ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <CategoryPill cat={cat} /> <span className="truncate">set aside, not counted</span>
+          </span>
+        ) : cat === 'failed' ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <CategoryPill cat={cat} /> <span className="truncate">{i.error ?? 'Please try again.'}</span>
+          </span>
+        ) : cat === 'success' && i.page ? (
+          // A read inventory page: version pill, then the quiet form-page meta, with amber
+          // reserved for the one thing that needs attention — "N to check".
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+            <VersionPill version={i.formVersion} />
+            <span className="text-muted-foreground">Form page {i.page}</span>
+            <span aria-hidden className="text-muted-foreground/50">·</span>
+            {i.flagged ? (
+              <span className="font-medium" style={{color: 'color-mix(in oklab, var(--status-warn) 72%, var(--foreground))'}}>
+                {i.flagged} to check
+              </span>
+            ) : (
+              <span className="text-muted-foreground">nothing flagged</span>
+            )}
+          </span>
+        ) : (
+          <span className="truncate text-xs text-muted-foreground">{itemLabel(i)}</span>
+        )}
         {i.state === 'running' && (
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
             <div className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none" style={{width: `${pct}%`}} />
@@ -340,18 +891,44 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove}: {i: QueueItem; 
             <RotateCcw className="size-3.5" />
           </Button>
         )}
-        {(i.state === 'running' || i.state === 'queued' || i.state === 'waiting_period') && (
+        {!serverMode && (i.state === 'running' || i.state === 'queued' || i.state === 'waiting_period') && (
           <Button variant="ghost" size="icon-sm" aria-label={`Cancel ${i.name}`} onClick={onCancel}>
             <X className="size-3.5" />
           </Button>
         )}
-        {(failed || i.state === 'cancelled') && (
+        {!serverMode && (failed || i.state === 'cancelled') && (
           <Button variant="ghost" size="icon-sm" aria-label={`Remove ${i.name} from the list`} onClick={onRemove}>
             <Trash2 className="size-3.5" />
           </Button>
         )}
       </div>
     </li>
+  );
+}
+
+/** A toggle chip for the per-scan page filter (All / Read / Couldn't read / …). `crit`
+ *  tints the failures chip red so it stands out from the calm set-aside buckets; `dotColor`
+ *  adds a small leading dot (used by the version chips to echo their pill color). */
+function FilterChip({active, onClick, tone = 'default', dotColor, children}: {active: boolean; onClick: () => void; tone?: 'default' | 'crit'; dotColor?: string; children: React.ReactNode}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        tone === 'crit'
+          ? active
+            ? 'border-[color:var(--status-crit)] bg-[color:var(--status-crit)]/15 text-[color:var(--status-crit)]'
+            : 'border-[color:var(--status-crit)]/40 bg-[color:var(--status-crit)]/5 text-[color:var(--status-crit)] hover:bg-[color:var(--status-crit)]/12'
+          : active
+            ? 'border-primary bg-primary/15 text-foreground'
+            : 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+      )}
+    >
+      {dotColor && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{background: dotColor}} />}
+      {children}
+    </button>
   );
 }
 
@@ -364,8 +941,41 @@ const pageList = (pages: number[]) => {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDay = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}` : iso);
 
-/** Several stores in one scan: each form found, its own batch to review. */
+type FormRow = SplitForm & {baLabel: string | null};
+type StoreGroup = {key: string; code: string | null; name: string; forms: FormRow[]};
+
+// Hick's Law: a 98-page scan can split into dozens of forms, and the same store's
+// periods pile up as near-identical rows. Collapse that into one group per store
+// (name once, its periods under it) and page through a handful of stores at a time,
+// so the reviewer picks a store, not scans a wall. Forms with no store read sit first.
+const STORES_PER_PAGE = 6;
+
+/** Several stores in one scan: forms grouped by store, BA names reconciled, paged. */
 function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null; splitting: boolean; busy: boolean; stores: StoreOption[]}) {
+  const [page, setPage] = useState(1);
+  const nameOf = useMemo(() => new Map(stores.map((s) => [s.code, s.name])), [stores]);
+  // Real forms are what the panel lists; the origin "needs sorting" lane is surfaced apart.
+  const realForms = useMemo(() => (forms ?? []).filter((f) => !f.unsorted), [forms]);
+  const unsorted = forms?.find((f) => f.unsorted) ?? null;
+  const groups = useMemo<StoreGroup[]>(() => {
+    if (!forms) return [];
+    // One canonical BA spelling across the scan, so "LEONISA RAMOS" and "Leonisa Ramo"
+    // read as one person (no registry here — cluster the written names among themselves).
+    const baCanon = reconcileBaNames(realForms.map((f) => f.consultant));
+    const canonBa = (c: string | null) => (c?.trim() ? baCanon.get(c.trim()) ?? c.trim() : null);
+    const by = new Map<string, StoreGroup>();
+    for (const f of realForms) {
+      const key = f.storeCode ?? '__nostore__';
+      const g =
+        by.get(key) ??
+        {key, code: f.storeCode, name: f.storeCode ? nameOf.get(f.storeCode) ?? `Store ${f.storeCode}` : 'Store not on the form', forms: []};
+      g.forms.push({...f, baLabel: canonBa(f.consultant)});
+      by.set(key, g);
+    }
+    // Forms missing a store come first (they need one picked), then stores A→Z.
+    return [...by.values()].sort((a, b) => (a.code === null ? -1 : b.code === null ? 1 : a.name.localeCompare(b.name)));
+  }, [forms, nameOf, realForms]);
+
   if (!forms) {
     return (
       <p className="flex items-center gap-2 rounded-xl border border-border px-3.5 py-3 text-sm text-muted-foreground">
@@ -376,34 +986,65 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
       </p>
     );
   }
-  const nameOf = new Map(stores.map((s) => [s.code, s.name]));
-  const blank = forms.filter((f) => !f.storeCode).length;
+
+  const blank = realForms.filter((f) => !f.storeCode).length;
+  const pageCount = Math.max(1, Math.ceil(groups.length / STORES_PER_PAGE));
+  const safePage = Math.min(page, pageCount);
+  const shown = groups.slice((safePage - 1) * STORES_PER_PAGE, safePage * STORES_PER_PAGE);
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
       <p className="text-xs text-muted-foreground">
-        Each form is its own review. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
+        Each form is its own review, grouped by store. {blank ? `${blank} ${blank === 1 ? 'form has' : 'forms have'} no store written on page 1; pick the store when you review ${blank === 1 ? 'it' : 'them'}.` : 'Store and period were read from each page 1. Check them when you review.'}
       </p>
-      <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Forms in this scan">
-        {forms.map((f, n) => (
-          <li key={f.batchId}>
-            <Link href={`/uploads/batch/${f.batchId}`} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/50">
-              <span className="flex min-w-0 flex-col">
-                <span className="font-medium">
-                  Form {n + 1} · {f.storeCode ? (nameOf.get(f.storeCode) ?? `Store ${f.storeCode}`) : 'store not on the form'}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {pageList(f.pages)}
-                  {f.periodStart && f.periodEnd ? ` · ${fmtDay(f.periodStart)} to ${fmtDay(f.periodEnd)}` : ''}
-                  {f.consultant ? ` · BA ${f.consultant}` : ''}
-                </span>
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
-                Review <ChevronRight className="size-3.5" aria-hidden />
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {unsorted && unsorted.files > 0 && (
+        <p className="flex items-center gap-2 rounded-xl border border-dashed border-border px-3.5 py-2.5 text-xs text-muted-foreground">
+          <AlertTriangle className="size-3.5 shrink-0" style={{color: 'var(--status-warn)'}} aria-hidden />
+          {unsorted.files} {unsorted.files === 1 ? 'page' : 'pages'} could not be placed into a form (lone or unreadable pages). They stay in the batch to sort by hand.
+        </p>
+      )}
+
+      {shown.map((g) => (
+        <section key={g.key} className="flex flex-col gap-1.5" aria-label={g.name}>
+          <div className="flex items-baseline justify-between gap-3 px-0.5">
+            <h3 className="flex min-w-0 items-baseline gap-2">
+              <span className={cn('truncate text-sm font-semibold', g.code === null && 'text-[color:var(--status-crit)]')}>{g.name}</span>
+              {g.code && <span className="shrink-0 font-mono text-xs font-normal text-muted-foreground">· {g.code}</span>}
+            </h3>
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {g.forms.length} {g.forms.length === 1 ? 'form' : 'forms'}
+            </span>
+          </div>
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
+            {g.forms.map((f) => {
+              const period = f.periodStart && f.periodEnd ? `${fmtDay(f.periodStart)} to ${fmtDay(f.periodEnd)}` : null;
+              const sub = [period ? pageList(f.pages) : null, f.baLabel ? `BA ${f.baLabel}` : null].filter(Boolean).join(' · ');
+              return (
+                <li key={f.batchId}>
+                  <Link href={`/uploads/batch/${f.batchId}`} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/50">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-medium">{period ?? pageList(f.pages)}</span>
+                      {sub && <span className="truncate text-xs text-muted-foreground">{sub}</span>}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
+                      Review <ChevronRight className="size-3.5" aria-hidden />
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+
+      {pageCount > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {groups.length} stores · page {safePage} of {pageCount}
+          </span>
+          <Pagination page={safePage} pageCount={pageCount} onPage={setPage} label="Forms by store" />
+        </div>
+      )}
     </div>
   );
 }
