@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — PO form page: product lines as tiles, products in a side panel
+
+Review: the line list looked plain, and full-width rows left a wide empty gap between each line's name and its count. The overview is now a grid of compact tiles, one per product line: a ring with the share on the form (and its %), "45 of 53 on the form", and a chip for what needs a look ("8 not on it", "Not on the form", "All on the form", "3 changed" in a draft). Lines with something to decide still come first; the 47 fully on the form stay folded behind one row. A tile opens its products in a side panel (slides in from the right; Escape, the backdrop or × closes it, focus returns), products not on the form listed first. A search or filter still shows the open line list, so matches appear at once.
+
 ## 2026-11-25 · Nichido on prod: v1.25.0 and v1.25.1 (release notes)
 
 Nichido shipped to prod on Nov 24 as two releases on `main`. Production is now **coop-cedar.vercel.app** (our Vercel Pro project); `coop-brand-os` stays on v1.23.0 until the co-worker redirects it.
