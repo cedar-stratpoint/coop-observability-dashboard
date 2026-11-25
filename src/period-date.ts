@@ -78,3 +78,17 @@ export function isoPeriod(
   if (!e && s) e = end.map((c) => toIsoDate(c, yearOf(s))).find(Boolean) ?? null;
   return {start: s, end: e};
 }
+
+/** A date safe to store, from a read period. A valid YYYY-MM-DD passes; an end day past the
+ *  month's last ("Sept 16 to 31" read as 2026-09-31) means the month's end and becomes its last
+ *  day; anything else unusable is null, since the database refuses an impossible date and that
+ *  failed a whole store assignment. */
+export function storableDate(s: string | null | undefined, end = false): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s?.trim() ?? '');
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (mo < 1 || mo > 12 || d < 1) return null;
+  const last = new Date(y, mo, 0).getDate();
+  if (d <= last) return `${m[1]}-${m[2]}-${m[3]}`;
+  return end && d <= 31 ? `${m[1]}-${m[2]}-${String(last).padStart(2, '0')}` : null;
+}

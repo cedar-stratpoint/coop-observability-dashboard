@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Picking a store no longer fails on an impossible period date
+
+Picking a store on the per-store board failed with "upload_batches update failed: date/time field value out of range: 2026-09-31". Picking a store re-sorts every form in the upload and saves each one's period; a BA who wrote "Sept 16 to 31" gives an end of September 31, which the database refuses, so the whole step stopped (39 pages under review on staging carry such an end date). Batch periods are now stored safely (`storableDate`): an end day past the month's last becomes the last day (Sept 31 -> Sept 30), anything else unusable is left blank for the reviewer.
+
 ## 2026-11-25 — Ask Coop tables page 10 rows at a time
 
 Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
