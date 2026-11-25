@@ -140,7 +140,9 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
             <div className="-mr-1">
               <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
             </div>
-            {bulkForms.length > 0 && <CommitAllDialog company={companyId} forms={bulkForms} storeNames={storeNames} notListed={bulkNotListed} />}
+            {/* Always mounted (it hides its own button when nothing is left), so the success screen
+                survives the refresh that follows the last commit. */}
+            <CommitAllDialog company={companyId} forms={bulkForms} storeNames={storeNames} notListed={bulkNotListed} />
           </div>
         )}
       </header>

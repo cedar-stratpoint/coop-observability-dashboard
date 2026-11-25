@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Commit all: a success screen you can see, and committed tiles
+
+QA: after Commit all on "Nov 24 Test Run" (7 forms, 27 pages went in) it "didn't feel committed". Cause: the page refresh after the last form unmounted the button (nothing left to commit) and with it the dialog, and the refresh also reset the dialog to its confirm step. So the success step never showed.
+
+- **The dialog stays mounted** (it hides only its button when nothing is left) and reads its forms when it opens, not on every refresh. Its success step lists each committed form with its rows, with **Open Reconcile** (on the month most of them count) and **Done**. Closing leaves a toast: "Committed 7 forms · N rows. Inventory and Reconcile have them now." with Open Reconcile.
+- **Uploads tiles show it.** Once any page of a drop is committed, the tile's icon becomes a ring filling with the committed share of its pages (a solid check when every page is in) and the date line says **Partly committed** or **Committed**. The count pills stay as they were.
 ## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
 
 Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
