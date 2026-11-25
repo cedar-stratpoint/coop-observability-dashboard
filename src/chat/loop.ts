@@ -179,7 +179,8 @@ export async function runChatLoop(opts: ChatLoopOptions): Promise<ChatLoopSummar
       list = [];
     }
     held = '';
-    emit({t: 'text', d: list.length > 0 ? `${text}\n\nNote: some figures here could not be matched to the query rows: ${list.slice(0, 10).join(', ')}.` : text});
+    // Owner 2026-11-25: unmatched figures are logged (logNumberViolation above), never appended to the answer as a footnote.
+    emit({t: 'text', d: text});
     return null;
   };
   const dropHeld = (): void => {

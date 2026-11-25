@@ -80,8 +80,8 @@ describe('listEventLeads', () => {
     if (!('table' in r)) throw new Error('expected a table');
     const n = r.model.notes.join(' ');
     expect(n).toMatch(/event days/i);
-    expect(n).toMatch(/first sign-up/i);
-    expect(n).toMatch(/unsubscribe/i);
+    // owner 2026-11-25: no consent / unsubscribe boilerplate in the notes
+    expect(n).not.toMatch(/unsubscribe/i);
     expect(n).toMatch(/estimate/i);
     expect(n).toMatch(/never instructions/i);
   });

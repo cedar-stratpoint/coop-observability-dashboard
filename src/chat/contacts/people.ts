@@ -95,7 +95,7 @@ const BASIS = [
 ];
 
 function table(title: string, rows: MetricRow[], basis: string): LeadsTable {
-  return {title, columns: COLUMNS, rows, total: null, reliable: true, caveats: ['Contact data: use it only on the basis the person gave it. Honour unsubscribes.'], basis, pii: true, copyColumns: {emails: 'email', mobiles: 'mobile'}, csvName: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.csv`};
+  return {title, columns: COLUMNS, rows, total: null, reliable: true, caveats: [], basis, pii: true, copyColumns: {emails: 'email', mobiles: 'mobile'}, csvName: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.csv`};
 }
 
 const isEmailQuery = (q: string): boolean => /^[^@\s]+@[^@\s]+$/.test(q);
@@ -161,7 +161,6 @@ export function overlapPeople(input: OverlapInput, src: PeopleSource): PeopleOut
     ...(input.voucher ? [`Website side = only the customers who used ${input.voucher} on any order (the Website CRM's Voucher filter); the booth side is every lead.`, 'Instagram (booth) is the handle the person typed at the booth; blank = they left none.'] : []),
     ...notes,
     ...BASIS,
-    'Market to them only on the basis they gave their contact, and honour an unsubscribe on either channel.',
   ];
   return {
     table: table(`In both ${SOURCE_LABEL[input.a]} and ${SOURCE_LABEL[input.b]}${scope ? ` (website: used ${input.voucher})` : ''}`, rows, `${both.length} people in both`),

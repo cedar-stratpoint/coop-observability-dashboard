@@ -46,12 +46,12 @@ describe('EXP-04 single-digit counts before a count noun are enforced on Explore
     expect(retry).toContain('Figures not found in the query rows: 6.');
   });
 
-  it('still wrong after the one rewrite: shown with the note, never a second rewrite', async () => {
+  it('still wrong after the one rewrite: shown without a footnote (logged), never a second rewrite', async () => {
     const m = new FakeModel((n) => (n === 1 ? toolTurn('', RUN()) : {text: ['6 orders at Circuit Makati Weekend.'], stop_reason: 'end_turn'}));
     const t = withRows(m);
     const sum = await t.go();
     expect(sum.steps).toBe(3);
-    expect(text(t.events)).toMatch(/Note: some figures here could not be matched to the query rows: 6\./);
+    expect(text(t.events)).not.toMatch(/could not be matched/); // owner 2026-11-25: logged, never shown as a footnote
   });
 
   it('"2 spellings" and "3 notes" are not flagged: the first answer is shown as is', async () => {
@@ -80,12 +80,12 @@ describe('EXP-04 number check enforce for Explore turns', () => {
     expect(retry).toContain('₱9,999');
   });
 
-  it('EXP-04 still wrong on the second attempt: shown with a warning note, logged once', async () => {
+  it('EXP-04 still wrong on the second attempt: shown without a footnote, logged once', async () => {
     const m = new FakeModel((n) => (n === 1 ? toolTurn('', RUN()) : {text: [`Dogs made ₱${n}0,999 in sales.`], stop_reason: 'end_turn'}));
     const t = run(m);
     const sum = await t.go();
     expect(sum.steps).toBe(3);
-    expect(text(t.events)).toMatch(/Note: some figures here could not be matched to the query rows: ₱30,999\./);
+    expect(text(t.events)).not.toMatch(/could not be matched/); // owner 2026-11-25: logged, never shown as a footnote
     expect(lines(t.s.info).filter((l) => l.event === 'chat_number_violation')).toHaveLength(1);
   });
 
@@ -194,14 +194,14 @@ describe('compose reserve with the Explore number check', () => {
     expect(text(t.events)).toBe('Dogs made ₱1,200.50 from 14 orders.');
   });
 
-  it('a wrapped-up answer with a bad figure gets NO retry once past the hard deadline: it is shown with the note', async () => {
+  it('a wrapped-up answer with a bad figure gets NO retry once past the hard deadline: it is shown, the miss is logged', async () => {
     const {m, clock} = timed([35_000, 20_000], 'Dogs made ₱9,999.'); // wrap-up ends t=55 > 50
     const t = run(m, {clock});
     const sum = await t.go();
     expect(m.requests).toHaveLength(2);
     expect(sum.stopReason).toBe('wrapped_up');
     expect(text(t.events)).toContain('9,999');
-    expect(text(t.events)).toContain('could not be matched');
+    expect(text(t.events)).not.toContain('could not be matched'); // owner 2026-11-25: logged only
   });
 
   it('a bad figure inside the deadline still gets its one rewrite, and the rewrite is tool-less too', async () => {
@@ -291,12 +291,12 @@ describe('EXP-04 Explore number context holds only user and app figures, not ear
 });
 
 describe('2.8 a finished Explore answer survives the cost cap (Task 8 fix 1, finding 2)', () => {
-  it('over budget, the wrap-up answer fails the number check: it is shown with its note, not replaced by the cap text', async () => {
+  it('over budget, the wrap-up answer fails the number check: it is shown (miss logged), not replaced by the cap text', async () => {
     const m = new FakeModel((n) => (n === 1 ? toolTurn('', RUN()) : {text: ['Dogs made ₱9,999 in sales.'], stop_reason: 'end_turn'}));
     const t = run(m, {turnBudget: 5});
     const sum = await t.go();
     expect(text(t.events)).toContain('Dogs made ₱9,999 in sales.');
-    expect(text(t.events)).toMatch(/Note: some figures here could not be matched/);
+    expect(text(t.events)).not.toMatch(/could not be matched/); // owner 2026-11-25: logged only
     expect(text(t.events)).not.toMatch(/needed more work/);
     expect(sum.steps).toBe(2);
   });
