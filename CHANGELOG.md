@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop tables page 10 rows at a time
+
+Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
+
 ## 2026-11-25 — Ask Coop reads website orders again: CRM response cap 4 MB → 16 MB
 
 PROD `/api/orders` reached 4,026,463 bytes on 2026-11-25 (every order carries its raw Shopify payload), over Ask Coop's 4,000,000-byte cap per CRM response (`CRM_LIMITS.maxResponseBytes`). Every answer that reads website orders failed with "the website CRM sent more data than Ask Coop reads at once": customer lists (GRAND300 buyers), order lists, the Website row of the channel report. The Website CRM page was unaffected (its reader has no cap). Cap raised to 16 MB (about 4x headroom, the read takes about 1.2 s). **Decision:** raise now; when orders near the new cap, page `/api/orders` with `cursor` + `fields` the way the Business Health Report already does, instead of raising it again.
