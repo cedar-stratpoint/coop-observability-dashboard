@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Overview (Nichido): every card opens its detail
+
+Owner asked for the Overview's components to be clickable and lead to the right page, with hover behavior. Destinations:
+
+- **Net sales, Units sold, Gross sales** open **Stores** ranked by that figure (`/stores?sort=net|units|gross`; Stores now accepts `?sort=`). Each tile shows a muted "By store ›" cue at rest so touch users can tell it opens.
+- **Units sold, last 12 months** opens Stores ranked by units ("Units by store ›").
+- **Stores live** pill opens Stores.
+- **Top categories:** each line opens the **Inventory** board filtered to that product line (`/stock?line=`). Uncategorized and the "N SKUs aren't mapped" note ("Link SKUs") open **SKU linking**, where the fix is.
+
+Hover (`GL_CARD_LINK` / `GL_CARD_CUE` in `src/goldline-ui.ts`): kept small because it's seen many times a day. The border warms to the accent, the card tints 4% and lifts 2px with a soft shadow, and the cue turns accent with its chevron sliding 2px; press scales to 0.99. 200ms on a strong ease-out (100ms on press). Category rows tint, brighten their bar and slide their chevron. Reduced motion keeps the color changes and drops the lift, slide and scale; Tailwind v4 only applies hover on devices that can hover. Checked in dark at 1440px and 390px, and that each destination lands filtered or sorted.
 ## 2026-11-25 — Reconcile: the notebook grid, what's missing, and a notice for a month without sales
 
 Built from the mock the owner picked (`MobilePOS/Reconcile_Grid_Mock.html`). On By store and By product:
