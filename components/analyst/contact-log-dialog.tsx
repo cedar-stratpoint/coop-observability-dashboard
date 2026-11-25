@@ -10,7 +10,7 @@ import {useRouter} from 'next/navigation';
 import {MessageSquarePlus, Reply, Trash2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {fmtPh} from '@/src/crm-compute';
-import {CHANNEL_LABEL, CONTACT_CHANNELS, CONTACT_NOTE_MAX, type ContactChannel, type CustomerContact} from '@/src/customer-contacts';
+import {CHANNEL_LABEL, CONTACT_CHANNELS, CONTACT_NOTE_MAX, loggableKeys, type ContactChannel, type CustomerContact} from '@/src/customer-contacts';
 import {deleteContact, logContact} from '@/src/customer-contacts-actions';
 import {manilaDayKey} from '@/src/pos-sales-compute';
 import type {Person} from '@/src/person-identity';
@@ -51,7 +51,8 @@ export function ContactLogDialog({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<{ok: boolean; text: string} | null>(null);
-  const keys = legacy ? {email: person.email, instagram: null, mobile: null} : person;
+  // Normalised and only the keys the server accepts: a junk booth mobile never blocks a good email (legacy: email only).
+  const keys = loggableKeys(person, legacy);
   const hasKey = Boolean(keys.email || keys.instagram || keys.mobile);
   const ready = history !== null && hasKey;
   const who = [person.instagram ? `@${person.instagram.replace(/^@/, '')}` : null, person.email, person.mobile].filter(Boolean).join(' · ');
@@ -70,7 +71,7 @@ export function ContactLogDialog({
     if (!ready || !channel) return;
     setMsg(null);
     startTransition(async () => {
-      const res = await logContact({...keys, channel, note, replied, contactedAt: when});
+      const res = await logContact({...keys, channel, note, replied: !legacy && replied, contactedAt: when});
       if (res.ok) {
         setMsg({ok: true, text: `${CHANNEL_LABEL[channel]} logged${when === today ? '' : ` for ${fmtDay(when)}`}.`});
         setChannel(null);
@@ -170,7 +171,8 @@ export function ContactLogDialog({
                     className="h-8 rounded-md border bg-background px-2 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring"
                   />
                 </div>
-                <label
+                {/* "They replied" needs the replied column (supabase/customer_contacts_lead_keys.sql): hidden on the legacy log. */}
+                {!legacy && <label
                   className={cn(
                     'inline-flex h-8 cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition-[color,border-color,background-color] duration-150',
                     'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50',
@@ -179,7 +181,7 @@ export function ContactLogDialog({
                 >
                   <input type="checkbox" checked={replied} onChange={(e) => setReplied(e.target.checked)} className="size-3.5 accent-[var(--status-good)]" />
                   They replied
-                </label>
+                </label>}
               </div>
 
               <div className="mt-4">
