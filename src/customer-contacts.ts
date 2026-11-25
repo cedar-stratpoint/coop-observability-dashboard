@@ -10,6 +10,7 @@
 import {emailKey, phoneKey} from './contacts-merge';
 import {igHandle} from './customer-links';
 import {fetchAllRows, type MakePage} from './pos-fetch-paginate';
+import {manilaDayKey} from './pos-sales-compute';
 import {isMissingColumn, isMissingTable, type DbError} from './supabase-errors';
 
 /**
@@ -57,11 +58,22 @@ export type NewContactRow = {
   contact_instagram?: string;
   contact_mobile?: string;
   replied?: true;
+  /** Only for a past day ("When"); otherwise the database's now(). */
+  contacted_at?: string;
   channel: ContactChannel;
   note: string | null;
   created_by: string;
 };
-export type ContactInput = {email: string | null; instagram: string | null; mobile: string | null; channel: ContactChannel; note: string | null; replied: boolean};
+export type ContactInput = {
+  email: string | null;
+  instagram: string | null;
+  mobile: string | null;
+  channel: ContactChannel;
+  note: string | null;
+  replied: boolean;
+  /** Set only when the "When" day is before today (PH): noon PH that day. Absent = now. */
+  contactedAt?: string;
+};
 
 export interface ContactLogDeps {
   /** The signed-in user's lower-cased email, or null with no session. Never taken from the input. */
@@ -81,14 +93,31 @@ const isOldChannelCheck = (e: DbError): boolean => e.code === '23514' && /custom
 const isOldEmailNotNull = (e: DbError): boolean => e.code === '23502' && /customer_email/.test(e.message);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HANDLE = /^[a-z0-9._]{1,30}$/;
+const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (error: string): ContactResult => ({ok: false, error});
 
 /**
- * The input of "Log contact", checked in code: at least one of a real email, an Instagram handle or a mobile (each given one
- * must be valid), a closed channel, a note of at most 500 characters, and an optional boolean `replied`.
+ * "When" (owner 2026-11-25: editable last contacted): a PH day 'YYYY-MM-DD', not after today in Manila. Today = undefined (the
+ * database stamps now(), so the order of today's contacts holds); a past day = noon PH that day, which reads back as that PH day.
  */
-export function readContactInput(input: unknown): ContactInput | {error: string} {
+function readContactedAt(raw: unknown, now: Date): {at?: string} | {error: string} {
+  if (raw === undefined || raw === null || raw === '') return {};
+  const m = typeof raw === 'string' ? DAY.exec(raw.trim()) : null;
+  const day = m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+  // Round-trip through UTC to refuse days that do not exist (2026-02-30 would roll over to Mar 2).
+  const t = Date.parse(`${day}T00:00:00Z`);
+  if (!m || !Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== day) return {error: 'The date is not valid (use a day like 2026-11-20).'};
+  const today = manilaDayKey(now.toISOString());
+  if (day > today) return {error: 'The date cannot be in the future.'};
+  return day === today ? {} : {at: `${day}T12:00:00+08:00`};
+}
+
+/**
+ * The input of "Log contact", checked in code: at least one of a real email, an Instagram handle or a mobile (each given one
+ * must be valid), a closed channel, a note of at most 500 characters, an optional boolean `replied` and an optional "When" day.
+ */
+export function readContactInput(input: unknown, now: Date = new Date()): ContactInput | {error: string} {
   const o = (input !== null && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const emailRaw = str(o.email);
@@ -106,11 +135,13 @@ export function readContactInput(input: unknown): ContactInput | {error: string}
   const note = typeof o.note === 'string' ? o.note.trim() : '';
   if (note.length > CONTACT_NOTE_MAX) return {error: `Keep the note to ${CONTACT_NOTE_MAX} characters.`};
   if (o.replied !== undefined && o.replied !== null && typeof o.replied !== 'boolean') return {error: '"They replied" must be yes or no.'};
-  return {email, instagram, mobile, channel: o.channel as ContactChannel, note: note || null, replied: o.replied === true};
+  const when = readContactedAt(o.contactedAt, now);
+  if ('error' in when) return when;
+  return {email, instagram, mobile, channel: o.channel as ContactChannel, note: note || null, replied: o.replied === true, ...(when.at ? {contactedAt: when.at} : {})};
 }
 
-export async function logContactWith(deps: ContactLogDeps, input: unknown): Promise<ContactResult> {
-  const v = readContactInput(input);
+export async function logContactWith(deps: ContactLogDeps, input: unknown, now: Date = new Date()): Promise<ContactResult> {
+  const v = readContactInput(input, now);
   if ('error' in v) return fail(v.error);
   const by = await deps.actor();
   if (!by) return fail(SIGN_IN);
@@ -119,6 +150,7 @@ export async function logContactWith(deps: ContactLogDeps, input: unknown): Prom
     ...(v.instagram ? {contact_instagram: v.instagram} : {}),
     ...(v.mobile ? {contact_mobile: v.mobile} : {}),
     ...(v.replied ? {replied: true as const} : {}),
+    ...(v.contactedAt ? {contacted_at: v.contactedAt} : {}),
     channel: v.channel,
     note: v.note,
     created_by: by,

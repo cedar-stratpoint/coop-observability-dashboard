@@ -8,7 +8,7 @@ import {
   getCrmMetrics,
   getCrmOrders,
 } from '@/src/crm-data';
-import {getCustomerContacts} from '@/src/customer-contacts-data';
+import {getCustomerContactLog} from '@/src/customer-contacts-data';
 import {getCustomerLinks} from '@/src/customer-links-data';
 import {customerBoothMap} from '@/src/customer-links';
 import {getSpinLeads} from '@/src/spin-leads';
@@ -21,7 +21,7 @@ import {CrmView} from '@/components/analyst/crm-view';
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const [metrics, customers, orders, checkouts, birthdayVouchers, membershipEvents, membership, contacts, cohorts, links, leads, viewer] = await Promise.all([
+  const [metrics, customers, orders, checkouts, birthdayVouchers, membershipEvents, membership, contactLog, cohorts, links, leads, viewer] = await Promise.all([
     getCrmMetrics(),
     getCrmCustomers(),
     getCrmOrders(),
@@ -31,7 +31,8 @@ export default async function Page() {
     getCrmMembershipEvents(),
     getCrmMembershipConfig(),
     // The manual contact log (RET-05): null when the table is not applied yet, so the page shows "unavailable", never 0.
-    getCustomerContacts(),
+    // RET-17: read with how it was read (legacy = the Instagram / mobile columns are not there yet).
+    getCustomerContactLog(),
     // RET-10 saved cohorts (rules only; members are matched live on the page): null when the table is not applied = "unavailable".
     getCustomerCohorts(),
     // RET-15 Slice B: owner-approved "Same person" links (null = not set up / unread: the Instagram and Booth cells say "unknown") and the booth leads they point at.
@@ -56,7 +57,8 @@ export default async function Page() {
       birthdayVouchers={birthdayVouchers}
       membershipEvents={membershipEvents}
       membership={membership}
-      contacts={contacts}
+      contacts={contactLog?.rows ?? null}
+      contactLogLegacy={contactLog?.legacy ?? false}
       cohorts={cohorts}
       booth={Object.fromEntries(booth)}
       boothRead={{leads: leads.length > 0, links: links !== null}}

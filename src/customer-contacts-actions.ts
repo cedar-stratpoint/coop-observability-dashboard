@@ -31,12 +31,13 @@ function done(r: ContactResult): ContactResult {
   if (r.ok) {
     updateTag(CUSTOMER_CONTACTS_TAG); // read-your-own-write: the next render waits for the fresh log
     revalidatePath(PAGE);
+    revalidatePath('/customers/leads'); // RET-17: the Event leads page logs too
   }
   return r;
 }
 
-/** Logs a contact against an email, an Instagram handle or a mobile (at least one; RET-17), optionally "they replied". */
-export async function logContact(input: {email?: string | null; instagram?: string | null; mobile?: string | null; channel: string; note: string; replied?: boolean}): Promise<ContactResult> {
+/** Logs a contact against an email, an Instagram handle or a mobile (at least one; RET-17), optionally "they replied" and a past PH day ("When"). */
+export async function logContact(input: {email?: string | null; instagram?: string | null; mobile?: string | null; channel: string; note: string; replied?: boolean; contactedAt?: string}): Promise<ContactResult> {
   if (usingPosMock()) return {ok: false, error: 'The contact log is not connected in this environment.'};
   return done(await logContactWith(deps(), input));
 }
