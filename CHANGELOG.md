@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Per store board: confirming a store says it worked
+
+Confirming a store on a "Needs a store" card moved the card away with no word, so it looked like nothing happened. A confirmation now appears ("Store 473 · SM CITY-SAN PABLO 1 set for Gaisano Mall Digos (Sep 16 to 30, 2026)") with a Show button that filters the board to where the form went (its store, or One-off stores when it is that store's only form). The Uploads page's confirmation is now a shared `ToastStack` with an optional action.
+
 ## 2026-11-25 — Ask Coop: our own hedging rules removed (owner decision)
 
 Owner: Ask Coop's own caution got in the way ("exploratory, not a registered metric", "I won't retype them", "I checked only 20", "I don't match on similar names", consent reminders on every answer). These were Coop's prompt rules, not the model's. Removed:
