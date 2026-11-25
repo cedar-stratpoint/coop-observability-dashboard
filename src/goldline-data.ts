@@ -75,6 +75,7 @@ export type UploadRow = {
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
   page_kind?: string | null; // inventory | sales | blank | unknown, once classified
   orientation?: number | null; // 180 when the classifier found the page upside down (the stored file is never turned)
+  needs_store?: boolean; // to review, in a batch with no store yet (listUploads fills it)
 };
 
 /**
@@ -865,7 +866,9 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
   return unstable_cache(
     async () => {
       // Which upload each batch was split from, so a sorted upload stays one tile.
-      const drops = dropOf(await batchLinks(companyId));
+      const links = await batchLinks(companyId);
+      const drops = dropOf(links);
+      const hasStore = new Set(links.filter((b) => b.store_code?.trim()).map((b) => b.id));
       const rows = (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
@@ -875,7 +878,9 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
           .order('id', {ascending: true})
           .range(from, to),
       )) as unknown as UploadRow[];
-      return rows.map((u) => (u.batch_id ? {...u, drop_id: drops.get(u.batch_id) ?? u.batch_id} : u));
+      return rows.map((u) =>
+        u.batch_id ? {...u, drop_id: drops.get(u.batch_id) ?? u.batch_id, needs_store: u.status === 'needs_review' && !hasStore.has(u.batch_id)} : u,
+      );
     },
     ['gl-uploads', companyId],
     {tags: [glTags.uploads(companyId)], revalidate: 30},
@@ -1062,12 +1067,12 @@ export async function createBatch(
 
 /** A batch, scoped to the company (null when it isn't theirs or doesn't exist). */
 /** Every batch's split-from link for a company (small: one row per upload batch). */
-export async function batchLinks(companyId: string): Promise<BatchLink[]> {
+export async function batchLinks(companyId: string): Promise<Array<BatchLink & {store_code?: string | null}>> {
   if (!goldlineConfigured()) return [];
   const supa = db();
   return (await fetchAllRows('upload_batches', (from, to) =>
-    supa.from('upload_batches').select('id,parent_batch_id').eq('company_id', companyId).order('id').range(from, to),
-  )) as unknown as BatchLink[];
+    supa.from('upload_batches').select('id,parent_batch_id,store_code').eq('company_id', companyId).order('id').range(from, to),
+  )) as unknown as Array<BatchLink & {store_code?: string | null}>;
 }
 
 /** The batch and every batch split off the same upload. */

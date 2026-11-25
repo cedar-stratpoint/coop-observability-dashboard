@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.17 Commit all means all (prod release)
+Ships #793, cherry-picked onto `main`: pick stores inside Commit all, a whole-upload plan, unchecked rows included by default, and tiles that say how many pages need a store.
+
+## 2026-11-25 — Commit all means all: pick stores in the confirm, whole-upload plan, tiles say why
+
+QA: after Commit all, "Nov 24 Test Run" still read Partly committed. Expected: Commit all commits every form, reviewed or not. Checked on Staging: 39 of the 43 pages left had **no store** (none read, or a code not in the store list) and 4 were San Pablo Sep 16 to 30, whose page 9 was read as **2020**, so the board split it off its batch and Commit all never offered it. The 28 "issues" are sales sheets and blank backs, set aside on purpose.
+
+- **Needs a store, inside Commit all.** Every store-less form is listed with a store search. A store is pre-filled only when the name read off the form clearly points at one registry store (rare words only, ties suggest nothing; `src/store-suggest.ts`, tested on real registry names), tagged "Suggested". Left empty, the form stays for later. On commit the picked stores are saved first (same path as Confirm store), the upload is re-read, and the new store forms commit in the same pass.
+- **The plan covers the whole upload,** found by its batches (`batchFamily`), not by how the board grouped pages, so a misread year no longer drops a form. Already-committed batches are left out of the confirm.
+- **Unchecked rows are included by default** (the box starts ticked; untick to leave them for review).
+- **Tiles say why:** "Partly committed · 39 pages need a store". A page needs a store when it is still to review in a batch with no store (`needs_store` from `listUploads`, `needsStore` per tile).
+
 ## 2026-11-25 · v1.26.16 Commit all success screen, committed upload tiles (prod release)
 Ships #783, cherry-picked onto `main`: the Commit all success step survives the page refresh (with a toast receipt and Open Reconcile), and Uploads tiles show how much of a drop is committed.
 
