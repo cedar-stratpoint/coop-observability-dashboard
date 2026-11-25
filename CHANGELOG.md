@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — "Same person" links: Instagram + Booth on the Website CRM table, not a merge (RET-15 Slice B)
+
+Owner: link a website customer to a booth lead from Ask Coop's matches table, and see the booth's Instagram and event beside the customer. **Decision: extra metadata, not a total merge.** The website row keeps its own name, email, orders, spend and vouchers (the CRM stays the source), so orders, spend, cohorts and repeat rate never change, and **Unlink** removes only the extra metadata. Only the person who linked can unlink (same delete-own rule as the contact log).
+- **Matches table**: website CRM x event lead rows get a **Same person** button (saves a link, then "Linked ✓"); a row that already shares an email or mobile says "Already matched". Judged on the row's own fields, not its tier: a name plus Instagram can score "confirmed" with no shared email or mobile.
+- **Website CRM Customers tab**: new **Instagram** and **Booth** columns after Vouchers used (and on the mobile card and the CSV). Exact matches (same email, or same mobile by last 10 digits) show with no link and win over a saved link. Linked ones carry a link icon and, for their author, Unlink.
+- **Unknown is never "never"**: when the leads or the links cannot be read, the cells say "unknown", not "—". `getSpinLeads()` swallows a failed read into `[]`, so no leads at all is also treated as unread.
+- The booth leads are matched on the server, so their contact data never reaches the browser; only the matched Instagram, campaign, prize and pet do.
+- New table `customer_links` (`supabase/customer_links.sql`, RLS on, no policies); **not applied anywhere yet: the owner applies it**, staging first. Until then Same person says it is not set up. Data catalog updated.
+
 ## 2026-11-25 — Ask Coop matches table: name first, sides named by source
 
 Owner: the matches table read "A: name … B: Instagram". It now leads with **Name** (the website or Lazada name first, then the booth's typed name, then the handle), then **Match**, **Score**, **Why**, and each side is labelled by where it came from: **Website CRM: name / email / mobile** and **Event leads: name / Instagram / email / mobile / event** (Lazada: name / mobile). The internal "Signals" and "seen in" columns are gone from the table (the model still gets the signals). Tables whose sides are not fixed (one person, one event) say "Record 1 / Record 2" with a "from" column.
