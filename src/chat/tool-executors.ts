@@ -199,7 +199,8 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
         const all = await peopleSource(source);
         // RET-14: an overlap scoped to one discount code keeps only the website customers who used it on any order (same rule as the page).
-        const people = req.mode === 'overlap' && req.voucher && all.website ? {...all, website: all.website.filter((c) => voucherMatch(c, req.voucher!))} : all;
+        const voucher = req.mode === 'overlap' || req.mode === 'matches' ? req.voucher : undefined;
+        const people = voucher && all.website ? {...all, website: all.website.filter((c) => voucherMatch(c, voucher))} : all;
         out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
       } else {
         out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
