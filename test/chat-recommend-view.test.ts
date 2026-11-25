@@ -492,3 +492,23 @@ describe('EXP-07: the skill text quotes the code\'s numbers', () => {
     expect(renderSkill()).not.toContain('EXP-07');
   });
 });
+
+describe('a list of people with a date is a table, not a trend (owner 2026-11-25: "who are the latest linked …" drew a chart)', () => {
+  const people = mk(
+    [col('name', 'text', 'category'), col('instagram', 'text', 'category'), col('linked_on', 'date', 'time'), col('orders', 'count', 'measure')],
+    names(5, 'Person').map((name, i) => ({name, instagram: `handle${i}`, linked_on: `2026-11-25T0${i}:00:00Z`, orders: 5})),
+  );
+  it('one distinct name per row next to a time column -> table', () => {
+    expect(first(people).block).toBe('table');
+  });
+  it('an explicit chart ask is still honoured', () => {
+    expect(first(people, ask('line')).block).toBe('chart');
+  });
+  it('a time series split by a repeating category is still a chart', () => {
+    const weeks = mk(
+      [col('week', 'date', 'time'), col('channel', 'text', 'category'), col('revenue', 'PHP', 'measure')],
+      ['2026-11-02', '2026-11-09', '2026-11-16'].flatMap((week) => ['Shopee', 'Lazada'].map((channel, j) => ({week, channel, revenue: 100 + j}))),
+    );
+    expect(first(weeks).block).toBe('chart');
+  });
+});

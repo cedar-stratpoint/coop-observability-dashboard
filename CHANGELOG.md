@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
+
+Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured.
+
 ## 2026-11-25 — Commit all: a success screen you can see, and committed tiles
 
 QA: after Commit all on "Nov 24 Test Run" (7 forms, 27 pages went in) it "didn't feel committed". Cause: the page refresh after the last form unmounted the button (nothing left to commit) and with it the dialog, and the refresh also reset the dialog to its confirm step. So the success step never showed.
