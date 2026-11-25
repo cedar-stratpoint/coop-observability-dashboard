@@ -504,6 +504,16 @@ describe('a list of people with a date is a table, not a trend (owner 2026-11-25
   it('an explicit chart ask is still honoured', () => {
     expect(first(people, ask('line')).block).toBe('chart');
   });
+  it('a record id and a time typed as text (latest offline sales) -> table, not a bar per id', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category'), col('sold_at_manila', 'text', 'category'), col('total_php', 'PHP', 'measure')],
+      ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7', 'h8'].map((order_id, i) => ({order_id, sold_at_manila: `2026-10-2${i} 10:00`, total_php: 500 + i})),
+    );
+    expect(first(sales).block).toBe('table');
+  });
+  it('top products by revenue (one label per row, no date) is still a bar', () => {
+    expect(first(cat(5)).block).toBe('chart');
+  });
   it('a time series split by a repeating category is still a chart', () => {
     const weeks = mk(
       [col('week', 'date', 'time'), col('channel', 'text', 'category'), col('revenue', 'PHP', 'measure')],
