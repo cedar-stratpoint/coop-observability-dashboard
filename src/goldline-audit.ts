@@ -188,6 +188,39 @@ export function recoAction(c: Pick<AuditCell, 'state' | 'reco'>): string {
   return AUDIT_META[c.state].action;
 }
 
+// ── Syl's Reco A to D (Nov 25) ────────────────────────────────────────────────────────
+// Four groups of recommendations Syl reports on. They sit on top of the eight states and
+// follow the line's own recommendation, so a sold-out line ("Restock", "Flag to retire")
+// is in none of them. C is both Watsons-owned states.
+
+export type RecoLetter = 'A' | 'B' | 'C' | 'D';
+export const RECO_LETTERS: RecoLetter[] = ['A', 'B', 'C', 'D'];
+export const isRecoLetter = (s: unknown): s is RecoLetter => RECO_LETTERS.includes(s as RecoLetter);
+
+export type RecoMeta = {label: string; action: string; owner: AuditMeta['owner']; states: MatrixState[]};
+
+export const RECO_META: Record<RecoLetter, RecoMeta> = {
+  A: {label: AUDIT_META.phasing_out.label, action: AUDIT_META.phasing_out.action, owner: 'Nichido', states: ['phasing_out']},
+  B: {label: AUDIT_META.accounting.label, action: AUDIT_META.accounting.action, owner: 'Accounting', states: ['accounting']},
+  C: {
+    label: 'Watsons to audit',
+    action: 'Counted at the store but Watsons recorded no sale, on the PO form or not. Watsons audits and reports.',
+    owner: 'Watsons',
+    states: ['no_sales', 'watsons_audit'],
+  },
+  D: {label: AUDIT_META.form_missing.label, action: AUDIT_META.form_missing.action, owner: 'Nichido', states: ['form_missing']},
+};
+
+/** The line's Reco letter, or null. `reco` is the line's recommendation (the state's label when absent). */
+export function recoLetterOf(c: {state: AuditState; reco?: string}): RecoLetter | null {
+  const reco = c.reco ?? AUDIT_META[c.state].label;
+  if (c.state === 'phasing_out') return 'A';
+  if (c.state === 'accounting') return reco === AUDIT_META.accounting.label ? 'B' : null;
+  if (c.state === 'no_sales' || c.state === 'watsons_audit') return 'C';
+  if (c.state === 'form_missing') return reco === AUDIT_META.form_missing.label ? 'D' : null;
+  return null;
+}
+
 /** Build one row, or null when there is nothing to say about this product at this store. */
 export function auditCell(i: AuditInput): AuditCell | null {
   const why: WhyUnknown[] = [];
@@ -242,19 +275,22 @@ export function auditCell(i: AuditInput): AuditCell | null {
 export const WHY_ORDER: WhyUnknown[] = ['month_not_loaded', 'store_not_in_file', 'no_count', 'page_missing', 'blank', 'not_linked', 'no_po_form'];
 
 /** `why`: how many "Can't tell yet" lines miss each kind of data (a line can miss two). */
-export type AuditSummary = Record<AuditState, number> & {total: number; needsAction: number; why: Record<WhyUnknown, number>};
+export type AuditSummary = Record<AuditState, number> & {total: number; needsAction: number; why: Record<WhyUnknown, number>; letters: Record<RecoLetter, number>};
 
 /** Tally of the states and of what the unknown lines are missing, for the grid. */
-export function auditSummary(cells: Array<{state: AuditState; why?: WhyUnknown[]}>): AuditSummary {
+export function auditSummary(cells: Array<{state: AuditState; why?: WhyUnknown[]; reco?: string}>): AuditSummary {
   const s = Object.fromEntries(AUDIT_STATES.map((k) => [k, 0])) as Record<AuditState, number>;
   const why = Object.fromEntries(WHY_ORDER.map((k) => [k, 0])) as Record<WhyUnknown, number>;
+  const letters: Record<RecoLetter, number> = {A: 0, B: 0, C: 0, D: 0};
   let needsAction = 0;
   for (const c of cells) {
     s[c.state]++;
+    const l = recoLetterOf(c);
+    if (l) letters[l]++;
     if (NEEDS_ACTION.has(c.state)) needsAction++;
     if (c.state === 'unknown') for (const w of c.why ?? []) why[w]++;
   }
-  return {...s, total: cells.length, needsAction, why};
+  return {...s, total: cells.length, needsAction, why, letters};
 }
 
 const TONE_RANK: Record<AuditMeta['tone'], number> = {crit: 0, warn: 1, neutral: 2, out: 3, good: 4, unknown: 5};
@@ -273,8 +309,8 @@ export const openingState = (summary: Record<AuditState, number>): AuditState =>
 
 export type AuditSort = 'reco' | 'product' | 'store' | 'units' | 'onHand';
 export const AUDIT_SORTS: AuditSort[] = ['reco', 'product', 'store', 'units', 'onHand'];
-/** `why`: with state "Can't tell yet", only the lines missing this kind of data. */
-export type AuditQuery = {state: AuditState; why: WhyUnknown | null; q: string; sort: AuditSort; dir: 'asc' | 'desc'; page: number};
+/** `why`: with state "Can't tell yet", only the lines missing this kind of data. `reco`: a Reco letter instead of one state. */
+export type AuditQuery = {state: AuditState; why: WhyUnknown | null; reco: RecoLetter | null; q: string; sort: AuditSort; dir: 'asc' | 'desc'; page: number};
 export const isWhy = (s: unknown): s is WhyUnknown => WHY_ORDER.includes(s as WhyUnknown);
 
 /** "YYX", "yx?", "✓✓✗" → a Watsons · Inventory · PO pattern. X or N is no; ? is unknown. */
@@ -300,7 +336,7 @@ export type SearchableRow = AuditCell & {product: string | null; store: string; 
 const ORDER = new Map(AUDIT_STATES.map((s, i) => [s, i]));
 
 /** The rows a query shows, in order (every page; slice for one). Nulls always sort last. */
-export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQuery, 'state' | 'q' | 'sort' | 'dir'> & {why?: WhyUnknown | null}): T[] {
+export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQuery, 'state' | 'q' | 'sort' | 'dir'> & {why?: WhyUnknown | null; reco?: RecoLetter | null}): T[] {
   const needle = query.q.trim().toLowerCase();
   const p = needle ? parsePattern(needle) : null;
   const hit = (r: T) =>
@@ -308,7 +344,9 @@ export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQ
       ? r.watsons === p.watsons && r.inventory === p.inventory && r.po === p.po
       : needle
         ? r.item_code.toLowerCase().includes(needle) || (r.product ?? '').toLowerCase().includes(needle) || (r.storeName ?? '').toLowerCase().includes(needle) || r.store.toLowerCase() === needle
-        : r.state === query.state && (query.state !== 'unknown' || !query.why || r.why.includes(query.why));
+        : query.reco
+          ? recoLetterOf(r) === query.reco
+          : r.state === query.state && (query.state !== 'unknown' || !query.why || r.why.includes(query.why));
   const sign = query.dir === 'desc' ? -1 : 1;
   const name = (r: T) => (r.product ?? r.item_code).toLowerCase();
   const num = (a: number | null, b: number | null) => (a == null ? (b == null ? 0 : 1) : b == null ? -1 : sign * (a - b));
@@ -341,4 +379,24 @@ export function productRollup(rows: Array<{item_code: string; state: AuditState;
     if (NEEDS_ACTION.has(r.state)) p.needsAction++;
   }
   return [...by.values()].sort((a, b) => b.needsAction - a.needsAction || b.stores - a.stores || a.item_code.localeCompare(b.item_code));
+}
+
+// ── One line per product across stores (the "By SKU" CSV, e.g. Syl's Reco C report) ──
+
+export type SkuLine = {item_code: string; product: string | null; recos: string[]; stores: string[]; units: number | null; onHand: number | null};
+
+/** Lines grouped by product, in first-seen order: which stores, what they recommend, totals (null when none known). */
+export function skuLines(rows: Array<Pick<SearchableRow, 'item_code' | 'product' | 'reco' | 'store' | 'units' | 'onHand'>>): SkuLine[] {
+  const by = new Map<string, SkuLine>();
+  const add = (a: number | null, b: number | null) => (b == null ? a : (a ?? 0) + b);
+  for (const r of rows) {
+    let l = by.get(r.item_code);
+    if (!l) by.set(r.item_code, (l = {item_code: r.item_code, product: r.product, recos: [], stores: [], units: null, onHand: null}));
+    if (!l.recos.includes(r.reco)) l.recos.push(r.reco);
+    if (!l.stores.includes(r.store)) l.stores.push(r.store);
+    l.units = add(l.units, r.units);
+    l.onHand = add(l.onHand, r.onHand);
+  }
+  for (const l of by.values()) l.stores.sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  return [...by.values()];
 }
