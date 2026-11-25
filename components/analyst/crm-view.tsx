@@ -36,6 +36,7 @@
 // matchesCohort on these same rows, every render (nothing stored, nothing tagged by hand). The cohort bar says the rule as a
 // sentence, the repeat buyer rate against the 25% target and who saved it; the Cohorts column and the profile show each
 // customer's labels with the rule on hover. cohorts null (table not applied, mock mode) = saved cohorts "unavailable".
+import {instagramUrl} from '@/src/instagram';
 import {downloadCsv} from '@/src/csv';
 import dynamic from 'next/dynamic';
 import {useRouter, useSearchParams} from 'next/navigation';
@@ -340,7 +341,7 @@ function InstagramCell({found, read, linkId, onUnlink, busy}: {found: CustomerBo
   if (cell === 'none') return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <span className="flex flex-wrap items-center gap-1.5 text-xs">
-      {cell.instagram ? <span className="text-foreground">@{cell.instagram}</span> : <span className="text-muted-foreground">—</span>}
+      {cell.instagram ? (instagramUrl(cell.instagram) ? <a href={instagramUrl(cell.instagram)!} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2" title="Open their Instagram to message them (nothing is sent from Coop)">@{cell.instagram}</a> : <span className="text-foreground">@{cell.instagram}</span>) : <span className="text-muted-foreground">—</span>}
       {cell.source === 'linked' && (
         <span className="inline-flex items-center gap-1 text-muted-foreground" title="Linked by hand with Same person in Ask Coop. The customer's own record is unchanged.">
           <Link2 className="size-3" aria-hidden />

@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
+Ships only the Instagram links (#771), cherry-picked onto `main`.
+
+## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
+Ships only the Instagram links, cherry-picked onto `main`.
+
+## 2026-11-25 — Instagram handles are clickable: open the profile to message them
+
+Owner: "walang contact in IG?" Every `@handle` in Ask Coop's tables (leads, overlap, matches) and in the Website CRM Instagram column now opens `instagram.com/<handle>` in a new tab, where the team messages them. Nothing is sent from Coop. `instagramUrl` (`src/instagram.ts`) only links a real handle (letters, digits, "." and "_", up to 30), so customer-typed text can never become another link.
+
+
 ## 2026-11-25 · v1.26.11 Ask Coop: Same person button right after the Name (prod hotfix)
 The owner could not find the Same person button: it was the last of 14+ columns, off-screen to the right. It now sits right after Name. Ships only #762.
 

@@ -9,6 +9,7 @@ import {ChevronRight, FlaskConical, TriangleAlert} from 'lucide-react';
 import type {ChartBlock, ChatBlock, CohortDraftBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
 import type {MetricRow, ResultColumn} from '@/src/chat/result-types';
 import {cn} from '@/lib/utils';
+import {instagramUrl} from '../../src/instagram';
 import {samePersonOffer} from '../../src/customer-links';
 import {formatCategory, formatValue} from './chat-blocks-format';
 
@@ -143,7 +144,13 @@ export function DataTable({columns, rows: all, total, label, linkable}: {columns
               {columns.map((c, i) => (
                 <Fragment key={c.key}>
                   <td className={cn('px-2.5 py-1.5', isNumericColumn(c) ? 'whitespace-nowrap text-right tabular-nums' : 'text-left', i === 0 && 'sticky left-0 bg-card font-medium text-foreground')}>
-                    {cell(c, r)}
+                    {c.key.endsWith('instagram') && instagramUrl(String(r[c.key] ?? '')) ? (
+                      <a href={instagramUrl(String(r[c.key]))!} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2" title="Open their Instagram to message them (nothing is sent from Coop)">
+                        {cell(c, r)}
+                      </a>
+                    ) : (
+                      cell(c, r)
+                    )}
                   </td>
                   {linkable && i === LINK_AFTER && (
                     <td className="px-2.5 py-1.5 text-left">
