@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.4 Ask Coop: our own hedging rules removed (prod release)
+Ships only #737 (staging #738), cherry-picked onto `main`.
+
 ## 2026-11-25 — Ask Coop: our own hedging rules removed (owner decision)
 
 Owner: Ask Coop's own caution got in the way ("exploratory, not a registered metric", "I won't retype them", "I checked only 20", "I don't match on similar names", consent reminders on every answer). These were Coop's prompt rules, not the model's. Removed:
