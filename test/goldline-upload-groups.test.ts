@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {distinctPages, groupUploads, pagesByStatus, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
+import {distinctPages, groupUploads, pageNeed, pagesByStatus, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
 
 const u = (filename: string, created_at: string, status = 'needs_review'): GroupableUpload => ({filename, created_at, status});
 
@@ -133,16 +133,35 @@ describe('groupUploads — per-batch tiles + duplicates', () => {
   });
 });
 
-describe('pages that need a store (Nov 25)', () => {
+describe('what pages still need (Nov 25)', () => {
   const at = '2026-11-24T09:53:00Z';
-  const page = (n: number, status: string, needs_store = false) => ({filename: `Scan (page ${n} of 9).pdf`, created_at: at, status, batch_id: 'drop', needs_store});
-  it('counts pages still to review with no store, once each', () => {
-    const [g] = groupUploads([page(1, 'needs_review', true), page(2, 'needs_review', true), page(2, 'needs_review', true), page(3, 'needs_review'), page(4, 'committed')]);
-    expect(g.needsStore).toBe(2);
-    expect(g.byStatus).toMatchObject({needs_review: 3, committed: 1});
+  const page = (n: number, status: string, needs: 'store' | 'date' | null = null) => ({filename: `Scan (page ${n} of 9).pdf`, created_at: at, status, batch_id: 'drop', needs});
+  it('counts pages to review that need a store or a date, once each', () => {
+    const [g] = groupUploads([page(1, 'needs_review', 'store'), page(2, 'needs_review', 'store'), page(2, 'needs_review', 'store'), page(3, 'needs_review', 'date'), page(4, 'needs_review'), page(5, 'committed')]);
+    expect(g).toMatchObject({needsStore: 2, needsDate: 1});
+    expect(g.byStatus).toMatchObject({needs_review: 4, committed: 1});
   });
-  it('a page committed on a re-upload no longer needs a store', () => {
-    const [g] = groupUploads([page(1, 'needs_review', true), {...page(1, 'committed'), batch_id: 'drop'}]);
+  it('a page committed on a re-upload needs nothing', () => {
+    const [g] = groupUploads([page(1, 'needs_review', 'store'), page(1, 'committed')]);
     expect(g.needsStore).toBe(0);
+  });
+});
+
+describe('pageNeed', () => {
+  const known = ['473', '5300', '75', '2166'];
+  const p = (o: Partial<Parameters<typeof pageNeed>[0]>) => pageNeed({status: 'needs_review', batchHasStore: false, readStore: '473', readStart: '2026-09-16', ...o}, known);
+  it('in a store form, or not to review: nothing missing', () => {
+    expect(p({batchHasStore: true})).toBeNull();
+    expect(p({status: 'committed', readStore: null})).toBeNull();
+  });
+  it('a known store with a date can be filed, even with a misread year', () => {
+    expect(p({})).toBeNull();
+    expect(p({readStore: '75', readStart: '2016-09-01'})).toBeNull();
+    expect(p({readStore: '5360'})).toBeNull(); // one digit off a registered store: corrected, as the board does
+  });
+  it('no registry store: needs a store; a store but no date: needs a date', () => {
+    expect(p({readStore: null})).toBe('store');
+    expect(p({readStore: 'Watsons 87'})).toBe('store');
+    expect(p({readStore: '5300', readStart: null})).toBe('date');
   });
 });

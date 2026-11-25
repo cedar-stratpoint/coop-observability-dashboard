@@ -10,7 +10,7 @@ import type {FormVersion} from './goldline-extract';
 import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStoreCodes} from './goldline-store-registry';
-import {uploadSource, distinctPages, pagesByStatus} from './goldline-upload-groups';
+import {uploadSource, distinctPages, pagesByStatus, pageNeed} from './goldline-upload-groups';
 import {splitName} from './upload-batch';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
@@ -75,7 +75,7 @@ export type UploadRow = {
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
   page_kind?: string | null; // inventory | sales | blank | unknown, once classified
   orientation?: number | null; // 180 when the classifier found the page upside down (the stored file is never turned)
-  needs_store?: boolean; // to review, in a batch with no store yet (listUploads fills it)
+  needs?: 'store' | 'date' | null; // what a page to review lacks before Commit all can file it (listUploads fills it)
 };
 
 /**
@@ -866,20 +866,28 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
   return unstable_cache(
     async () => {
       // Which upload each batch was split from, so a sorted upload stays one tile.
-      const links = await batchLinks(companyId);
+      const [links, known] = await Promise.all([batchLinks(companyId), knownStoreCodes(companyId)]);
       const drops = dropOf(links);
       const hasStore = new Set(links.filter((b) => b.store_code?.trim()).map((b) => b.id));
       const rows = (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
-          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation')
+          .select(
+            'id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation,cls_store:classification->>store_code,cls_start:classification->>period_start',
+          )
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})
           .range(from, to),
-      )) as unknown as UploadRow[];
-      return rows.map((u) =>
-        u.batch_id ? {...u, drop_id: drops.get(u.batch_id) ?? u.batch_id, needs_store: u.status === 'needs_review' && !hasStore.has(u.batch_id)} : u,
+      )) as unknown as Array<UploadRow & {cls_store?: string | null; cls_start?: string | null}>;
+      return rows.map(({cls_store, cls_start, ...u}): UploadRow =>
+        u.batch_id
+          ? {
+              ...u,
+              drop_id: drops.get(u.batch_id) ?? u.batch_id,
+              needs: pageNeed({status: u.status, batchHasStore: hasStore.has(u.batch_id), readStore: cls_store, readStart: cls_start}, known),
+            }
+          : u,
       );
     },
     ['gl-uploads', companyId],
@@ -1073,6 +1081,59 @@ export async function batchLinks(companyId: string): Promise<Array<BatchLink & {
   return (await fetchAllRows('upload_batches', (from, to) =>
     supa.from('upload_batches').select('id,parent_batch_id,store_code').eq('company_id', companyId).order('id').range(from, to),
   )) as unknown as Array<BatchLink & {store_code?: string | null}>;
+}
+
+/**
+ * Commit all (Nov 25): give one form's pages a store form of their own, with this store and
+ * period, so it can commit. Sorting only peels off forms of two or more pages, so a lone page
+ * (or one whose store was just picked) otherwise stays in the upload's leftover pile and never
+ * commits. Every page must still be to review and sit in the same open batch; a batch holding
+ * exactly these pages is reused, otherwise they move to a new batch of the same upload.
+ */
+export async function fileFormPages(
+  companyId: string,
+  uploadIds: string[],
+  info: {storeCode: string; storeName: string | null; periodStart: string; periodEnd: string; picked: boolean},
+  createdBy: string | null,
+): Promise<string> {
+  const ids = [...new Set(uploadIds)].slice(0, 50);
+  const supa = db();
+  // pagination-ok: at most 50 rows by id.
+  const res = await supa.from('uploads').select('id,batch_id,status,kind').eq('company_id', companyId).in('id', ids);
+  if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
+  const rows = (res.data ?? []) as Array<{id: string; batch_id: string | null; status: string; kind: string}>;
+  if (rows.length !== ids.length) throw new Error('page_not_found');
+  if (rows.some((r) => r.status !== 'needs_review' || r.kind !== 'inventory_pdf')) throw new Error('page_not_to_review');
+  const batchIds = new Set(rows.map((r) => r.batch_id));
+  if (batchIds.size !== 1 || !rows[0].batch_id) throw new Error('pages_in_several_batches');
+  const batch = await getBatch(companyId, rows[0].batch_id);
+  if (!batch || batch.status !== 'open') throw new Error('batch_not_open');
+  const others = await supa.from('uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('batch_id', batch.id).not('id', 'in', `(${ids.join(',')})`);
+  if (others.error) throw new Error(`uploads count failed: ${others.error.message}`);
+  let target = batch.id;
+  if ((others.count ?? 0) > 0 || batch.kind !== 'form') {
+    target = await createBatch(companyId, createdBy, {parentBatchId: batch.parent_batch_id ?? batch.id});
+    const moved = await supa.from('uploads').update({batch_id: target}).eq('company_id', companyId).eq('batch_id', batch.id).in('id', ids);
+    if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
+  }
+  if (info.picked) await setUploadsStore(companyId, ids, info.storeCode, info.storeName);
+  await updateBatchInfo(companyId, target, {storeCode: info.storeCode, periodStart: info.periodStart, periodEnd: info.periodEnd});
+  return target;
+}
+
+/** Set pages aside (no store to file them under, e.g. a nearly blank sheet): they leave the
+ *  review queue and count with the upload's other set-aside pages. Only pages still to review. */
+export async function setAsidePages(companyId: string, uploadIds: string[], reason: string): Promise<number> {
+  const ids = [...new Set(uploadIds)].slice(0, 50);
+  const res = await db()
+    .from('uploads')
+    .update({status: 'rejected', reject_reason: reason})
+    .eq('company_id', companyId)
+    .eq('status', 'needs_review')
+    .in('id', ids)
+    .select('id');
+  if (res.error) throw new Error(`set aside failed: ${res.error.message}`);
+  return (res.data ?? []).length;
 }
 
 /** The batch and every batch split off the same upload. */
