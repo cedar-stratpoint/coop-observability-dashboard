@@ -1,6 +1,6 @@
 // Train 4, spec 4.5: the GET-only CRM client against hostile inputs. Fake fetch only; every case asserts what was (not) sent.
 import {describe, expect, it} from 'vitest';
-import {CRM_ENDPOINTS, CrmError, createCrmClient, type CrmEndpointId} from '../src/chat/crm/client';
+import {CRM_ENDPOINTS, CRM_LIMITS, CrmError, createCrmClient, type CrmEndpointId} from '../src/chat/crm/client';
 import {resolveCrmAccess} from '../src/chat/crm/config';
 import {loadDirs, strip} from './support/chat-arch-scan';
 
@@ -108,7 +108,7 @@ describe('the token never leaks', () => {
 
 describe('size and time caps (Review Focus 4)', () => {
   it('a body that lies about its length is still cut at the cap', async () => {
-    const {c} = harness(() => new Response(new ReadableStream({start(ctl) { for (let i = 0; i < 5; i += 1) ctl.enqueue(new Uint8Array(1_000_000)); ctl.close(); }}), {headers: {'content-length': '10'}}));
+    const {c} = harness(() => new Response(new ReadableStream({start(ctl) { for (let i = 0; i <= CRM_LIMITS.maxResponseBytes / 1_000_000; i += 1) ctl.enqueue(new Uint8Array(1_000_000)); ctl.close(); }}), {headers: {'content-length': '10'}}));
     await expect(c.get('orders')).rejects.toMatchObject({code: 'too_large'});
   });
   it('a stalled body read ends as a timeout', async () => {
