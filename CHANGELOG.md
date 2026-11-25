@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
+
+Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
+- **Instagram filter** (All / Has Instagram · N / No Instagram). A customer whose booth leads or links haven't loaded yet is "unknown" and stays out of both lists, so a failed read never shows as "No Instagram" (`instagramState` in `src/customer-links.ts`, tested).
+- **Log contact** is now the column right after Name, as a labelled button, not an icon at the far right.
+- **Profile drawer** shows the clickable `@handle`, the booth sign-up (event · prize · pet) and whether it came from a Same person link or the same email or mobile.
+
 ## 2026-11-25 — Commit all moves to the upload's header
 
 Feedback: Commit all should sit in the header, beside Delete scan, whatever the view. It was only on the Per store view. It now shows on Per file, Per store and Per BA, and always covers the whole upload: it reads the unfiltered board, so a BA or form-version filter never changes what it commits. The board's own summary is back to just the counts.
