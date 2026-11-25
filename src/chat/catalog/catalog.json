@@ -352,8 +352,8 @@
   "customer_contacts": {
    "name": "customer_contacts",
    "domain": "booth-leads",
-   "about": "The manual contact log (RET-05, 2026-11-10): an Instagram, Facebook or Viber message, a DM on another app, an SMS, call, hand-sent email or other contact a team member logged against a website customer, so \"times contacted\" counts more than the automated CRM emails. It records a contact; nothing sends one.",
-   "columns": "id, customer_email (the website customer's email, lower-cased), channel, note (free text, nullable), contacted_at (default now), created_by (the signed-in Coop email that logged it), created_at.",
+   "about": "The manual contact log (RET-05, 2026-11-10): an Instagram, Facebook or Viber message, a DM on another app, an SMS, call, hand-sent email or other contact a team member logged against a website customer, so \"times contacted\" counts more than the automated CRM emails. Since RET-17 (2026-11-25) a contact can also be logged against an event lead by Instagram handle or mobile (no email needed) and marked \"they replied\". It records a contact; nothing sends one.",
+   "columns": "id, customer_email (the customer's or lead's email, lower-cased; nullable since RET-17), contact_instagram (RET-17: the Instagram handle as igHandle, no \"@\", lower-cased; nullable), contact_mobile (RET-17: the mobile as phoneKey, last 10 digits; nullable), replied (RET-17: boolean, default false; the person answered this contact), channel, note (free text, nullable), contacted_at (default now), created_by (the signed-in Coop email that logged it), created_at.",
    "prefer": null,
    "testOrders": null
   },
