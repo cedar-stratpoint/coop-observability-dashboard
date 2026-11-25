@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {matchesLeadSearch, type SpinLead} from '../src/spin-leads-types';
+import {inDayRange, matchesLeadSearch, type SpinLead} from '../src/spin-leads-types';
 
 const lead: SpinLead = {
   email: 'Ana.Cruz@gmail.com', instagram: 'mimi_cat', name: 'Ana Cruz', pet: 'Mimi / Puspin', picky: null,
@@ -24,5 +24,15 @@ describe('matchesLeadSearch', () => {
   it('no match', () => {
     expect(matchesLeadSearch(lead, 'pedro')).toBe(false);
     expect(matchesLeadSearch({...lead, mobile: null}, '0917')).toBe(false);
+  });
+});
+
+describe('inDayRange (Collected from–to)', () => {
+  it('is inclusive and open on an "all" side', () => {
+    expect(inDayRange('2026-09-20', 'all', 'all')).toBe(true);
+    expect(inDayRange('2026-09-20', '2026-09-20', '2026-09-20')).toBe(true);
+    expect(inDayRange('2026-09-19', '2026-09-20', 'all')).toBe(false);
+    expect(inDayRange('2026-09-21', 'all', '2026-09-20')).toBe(false);
+    expect(inDayRange('2026-09-21', '2026-09-20', '2026-09-22')).toBe(true);
   });
 });
