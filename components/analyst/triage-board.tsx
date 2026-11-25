@@ -15,6 +15,7 @@ import type {StoreOption} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {fmtTriagePeriod, FLAG_LABEL, flagTone, VERSION_LABEL} from '@/src/goldline-triage-format';
 import {assignFormStoreAction} from '@/app/uploads/actions';
+import {CommitAllDialog} from '@/components/analyst/commit-all-dialog';
 import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 
 /** Told when a form's store is confirmed, so the board can say so (the card itself moves away). */
@@ -515,6 +516,9 @@ export function TriageBoard({
   );
 
   const t = data.totals;
+  // Forms "Commit all" can take: one store's form batch with pages still to commit.
+  const bulkForms = useMemo(() => data.forms.filter((f) => f.batchKind === 'form' && f.batchId && f.needsReview > 0), [data.forms]);
+  const bulkNotListed = data.forms.filter((f) => f.needsReview > 0).length - bulkForms.length;
 
   const summaryLine =
     n > 0 ? (
@@ -544,9 +548,13 @@ export function TriageBoard({
     <OpenPicker.Provider value={openPicker}>
     <div className={embedded ? 'flex flex-col gap-6' : GL_PAGE}>
       {embedded ? (
-        <div className="flex flex-col gap-2.5">
-          {summaryLine}
-          {pills}
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-2.5">
+            {summaryLine}
+            {pills}
+          </div>
+          {/* A grouped upload: commit every ready form at once (confirms first). */}
+          {scan && canEdit && company && bulkForms.length > 0 && <CommitAllDialog company={company} forms={bulkForms} storeNames={storeByCode} notListed={bulkNotListed} />}
         </div>
       ) : (
         <header className="flex flex-col gap-4">

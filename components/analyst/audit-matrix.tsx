@@ -6,7 +6,7 @@ import Link from 'next/link';
 import {ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Download, Search, X} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
-import {NativeSelect} from '@/components/ui/native-select';
+import {MonthPicker, StorePicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
@@ -22,9 +22,6 @@ import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager,
 const FIELD =
   'h-9 rounded-lg border border-border bg-card px-2.5 text-sm outline-none transition-colors duration-150 [@media(hover:hover)]:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
 
-// The store / month pickers: NativeSelect draws an inset chevron (the browser's own arrow sits
-// flush against the right edge), sized to match FIELD.
-const SELECT = 'h-9 rounded-lg bg-card pr-9 pl-3 duration-150';
 
 const STORE_PAGE = 12;
 
@@ -127,28 +124,14 @@ export function AuditMatrix({data}: {data: AuditResult}) {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
               Store
-              <NativeSelect wrapperClassName="w-[min(20rem,calc(100vw-2rem))]" className={SELECT} value={sel.code} onChange={(e) => setParam('store', e.target.value)}>
-                <option value={ALL_STORES}>All stores ({data.stores.length})</option>
-                {data.stores.map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.name ? `${s.code} · ${titleName(s.name)}` : s.code}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+              <StorePicker stores={data.stores} value={sel.code} onChange={(code) => setParam('store', code)} />
+            </div>
+            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
               Month
-              <NativeSelect className={SELECT} value={sel.month} onChange={(e) => setParam('month', e.target.value)}>
-                {data.months.map((mo) => (
-                  <option key={mo.month} value={mo.month}>
-                    {monthLabel(mo.month)}
-                    {!mo.loaded ? ' (no sales yet)' : !mo.counted ? ' (no forms)' : ''}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
+              <MonthPicker months={data.months} value={sel.month} onChange={(month) => setParam('month', month)} />
+            </div>
             <div className="ml-auto text-right">
               <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.summary.needsAction.toLocaleString('en-US')}</p>
               <p className="mt-1 text-xs text-muted-foreground">

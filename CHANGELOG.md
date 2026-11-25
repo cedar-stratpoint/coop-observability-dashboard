@@ -10,6 +10,33 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.13 Reconcile pickers, Commit all, scan toolbar (prod release)
+Ships #756 (Reconcile Store/Month pickers, All stores by default), #770 (scan zoom controls moved off the page) and #769 (Commit all on grouped uploads), cherry-picked onto `main`. No schema change.
+
+## 2026-11-25 — Grouped uploads: Commit all, with a confirmation
+
+Request: a way to commit every form of a grouped upload at once, behind a confirm. There was none (each store form committed from its own review page).
+
+- **Commit all** on a grouped upload's Per store view. The confirm lists every form it can take, by store (registry name), period, pages and rows, before anything is written:
+  - **Ready**: committed as read, with the store and period the form's own review page would open with.
+  - **Rows nobody has checked**: forms with low-confidence rows. The single-form commit makes you resolve those first, so they are left out unless you tick "Also commit these forms without checking their N low-confidence rows" (off by default).
+  - **Skipped**, with the reason: anything a single commit refuses (no store or a store not in the registry, still reading, a page uploaded twice, pages that read different stores, nothing left to commit), plus a form with edits saved in this browser, so a bulk commit never discards someone's fixes.
+  - A note counts the forms it can't take (no store yet, or pages mixed with another form): open those from the board.
+- Forms commit **one at a time** through the same `commitBatchAction` as a single form (same access, store scope, validation, BA learning and checks), so the progress bar is real and one failure doesn't stop or undo the others. The plan is re-read on the server for every form, never trusted from the browser.
+- `bulkVerdict` (src/upload-batch.ts) is the rule, unit-tested; `planCommitAllAction` / `commitAllAction` in app/uploads/actions.ts.
+## 2026-11-25 — Scan viewer: zoom controls moved off the page
+
+Feedback: the floating zoom bar (enlarge, rotate, zoom out, %, zoom in) sat on the bottom-right of the scan and covered handwriting there (totals, the page number). It is now a slim strip above the page, inside the viewer's frame, so nothing on the paper is ever covered. Same controls, same pinch/drag/click behaviour; applies to the review side pane and the enlarged view (`components/analyst/scan-page-viewer.tsx`).
+
+## 2026-11-25 — Reconcile: new Store and Month pickers, All stores by default
+
+Feedback: the two native dropdowns looked plain, and the month list was a long run of "(no forms)". Hick's law: fewer, clearer choices first.
+
+- **Store** is a searchable picker. All stores sits pinned on top and is now the **default** (user request; was the first store with a form). Next come the stores with a form this month, the ones that can be fully checked. Stores with sales only are folded behind "Show N stores with sales only" until you search, and search covers every store by name or code. A store-limited role still only sees its own stores; an unknown or out-of-scope code in the URL opens All stores.
+- **Month** is a year-at-a-glance grid with one dot per month: sales and forms, forms with no sales yet, or sales with no forms. Months with no data are shown but can't be picked. When no month has both, the picker says so. Arrow keys move across months.
+- Both views use the same month picker. `AuditResult.stores` now carries `counted`.
+
+On Staging today, no month has both: October has forms for 2 stores but no POS sales, and November 2025 to September 2026 have sales but no committed forms (about 1,377 scanned pages wait in Needs review).
 ## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
 Ships only the Instagram links (#771), cherry-picked onto `main`.
 

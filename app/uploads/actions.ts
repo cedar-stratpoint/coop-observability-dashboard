@@ -12,6 +12,10 @@ import {uploadSource} from '@/src/goldline-upload-groups';
 import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
 import {auth} from '@/auth';
+import {bulkVerdict, type BulkVerdict} from '@/src/upload-batch';
+import {LOW_BELOW, rowConfidence} from '@/src/review-confidence';
+import {isoPeriod} from '@/src/period-date';
+import {knownStoreCodes} from '@/src/goldline-store-registry';
 import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
   BatchConflictError,
@@ -372,6 +376,133 @@ export async function commitBatchAction(input: {
     console.error('commitBatchAction', e);
     return {ok: false, error: 'Could not commit these pages. Please try again; committing again is safe.'};
   }
+}
+
+// ── Commit all forms of a grouped upload (Nov 25) ─────────────────────────────────────
+
+/** One form as the "Commit all" confirm shows it. Store and period are the ones the form's
+ *  own review page would open with (the batch's, else the first page's reading). */
+export type BulkCommitForm = {
+  batchId: string;
+  storeCode: string;
+  periodStart: string;
+  periodEnd: string;
+  pages: number;
+  rows: number;
+  verdict: BulkVerdict;
+};
+type BulkPlan = BulkCommitForm & {consultant: string | null; send: Array<{uploadId: string; rows: unknown[]}>};
+
+async function planBulk(companyId: string, batchIds: string[]): Promise<BulkPlan[]> {
+  const ids = [...new Set(batchIds.filter((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 100);
+  const out: BulkPlan[] = [];
+  const known = new Set(await knownStoreCodes(companyId));
+  for (const batchId of ids) {
+    const batch = await getBatch(companyId, batchId);
+    if (!batch) continue; // not this company's
+    const base = {batchId, storeCode: batch.store_code ?? '', periodStart: '', periodEnd: '', pages: 0, rows: 0, consultant: null, send: []};
+    if (batch.status !== 'open') {
+      out.push({...base, verdict: {state: 'blocked', reason: 'Already committed.'}});
+      continue;
+    }
+    if (batch.kind !== 'form') {
+      out.push({...base, verdict: {state: 'blocked', reason: 'Part of a server scan. Commit its pages one by one.'}});
+      continue;
+    }
+    const pdf = (await getBatchPages(companyId, batchId)).filter((p) => p.upload.kind === 'inventory_pdf');
+    const header = pdf.find((p) => p.extraction?.page === 1)?.extraction?.data;
+    const period = isoPeriod([batch.period_start, header?.period_start], [batch.period_end, header?.period_end]);
+    const storeCode = (batch.store_code ?? header?.store_code ?? '').trim();
+    const info = pdf.map((p) => ({
+      uploadId: p.upload.id,
+      page: p.extraction?.page ?? null,
+      flagged: (p.extraction?.data?.rows ?? []).filter((r) => rowConfidence(r.confidence) < LOW_BELOW).length,
+      resolved: 0,
+      status: p.upload.status,
+      detectedStore: p.detectedStore,
+    }));
+    const reviewable = pdf.filter((p) => p.upload.status === 'needs_review');
+    // The rows exactly as read: what the form's own review page starts from.
+    const send = reviewable.map((p) => ({
+      uploadId: p.upload.id,
+      rows: (p.extraction?.data?.rows ?? []).map((r) => ({
+        item_code: r.item_code,
+        stockroom: r.stockroom,
+        drawer: r.drawer,
+        selling_area: r.selling_area,
+        delivery: r.delivery,
+        ending_on_hand: r.ending_on_hand,
+      })),
+    }));
+    out.push({
+      batchId,
+      storeCode,
+      periodStart: period.start ?? '',
+      periodEnd: period.end ?? '',
+      pages: reviewable.length,
+      rows: send.reduce((n, p) => n + p.rows.length, 0),
+      consultant: header?.consultant ?? null,
+      send,
+      // A code the registry doesn't know is a misread: the board shows it as "Needs a store".
+      verdict:
+        storeCode && !known.has(storeCode)
+          ? {state: 'blocked', reason: `Store ${storeCode} isn't in the store list. Confirm the store first.`}
+          : bulkVerdict({storeCode, periodStart: period.start ?? '', periodEnd: period.end ?? '', pages: info}),
+    });
+  }
+  return out;
+}
+
+/** What "Commit all" would do, for its confirm. Read-only. */
+export async function planCommitAllAction(input: {company: string | null; batchIds: string[]}): Promise<{ok: true; forms: BulkCommitForm[]} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot commit reviews.'};
+  try {
+    const plan = await planBulk(ctx.companyId, input.batchIds);
+    return {ok: true, forms: plan.map(({consultant: _c, send: _s, ...f}) => f)};
+  } catch (e) {
+    console.error('planCommitAllAction', e);
+    return {ok: false, error: 'Could not read these forms. Please try again.'};
+  }
+}
+
+/**
+ * Commit every ready form of a grouped upload, one form at a time, each through the same
+ * commitBatchAction a single form uses (same access, scope and validation; one form
+ * failing doesn't undo the others). The plan is re-read here, never trusted from the browser.
+ */
+export async function commitAllAction(input: {
+  company: string | null;
+  batchIds: string[];
+  includeFlagged: boolean;
+}): Promise<{ok: true; results: Array<{batchId: string; ok: boolean; committed: number; error?: string}>} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot commit reviews.'};
+  let plan: BulkPlan[];
+  try {
+    plan = await planBulk(ctx.companyId, input.batchIds);
+  } catch (e) {
+    console.error('commitAllAction plan', e);
+    return {ok: false, error: 'Could not read these forms. Please try again.'};
+  }
+  const go = plan.filter((f) => f.verdict.state === 'ready' || (f.verdict.state === 'flagged' && input.includeFlagged));
+  if (!go.length) return {ok: false, error: 'No form is ready to commit.'};
+  const results: Array<{batchId: string; ok: boolean; committed: number; error?: string}> = [];
+  for (const f of go) {
+    const res = await commitBatchAction({
+      company: input.company,
+      batchId: f.batchId,
+      storeCode: f.storeCode,
+      periodStart: f.periodStart,
+      periodEnd: f.periodEnd,
+      consultant: f.consultant,
+      pages: f.send,
+    });
+    results.push(res.ok ? {batchId: f.batchId, ok: true, committed: res.committed} : {batchId: f.batchId, ok: false, committed: 0, error: res.error});
+  }
+  return {ok: true, results};
 }
 
 /**

@@ -89,6 +89,15 @@ describe('marks from the three sources', () => {
   });
 });
 
+describe('the store picker', () => {
+  it('opens on every store, and flags the stores with a form', async () => {
+    const d = await auditData('goldline', {});
+    expect(d.selected?.code).toBe('all');
+    expect(d.stores.map((s) => `${s.code}:${s.counted}`)).toEqual(['1:true', '2:true', '3:false']);
+    expect((await auditData('goldline', {store: 'nope'})).selected?.code).toBe('all');
+  });
+});
+
 describe('a role limited to some stores', () => {
   it('sees only its stores, whatever it asks for', async () => {
     const d = await auditData('goldline', {store: 'all'}, ['2']);
@@ -96,7 +105,8 @@ describe('a role limited to some stores', () => {
     expect(d.rows.every((r) => r.store === '2')).toBe(true);
     expect(d.coverage).toEqual({loaded: true, storesSold: 1, storesCounted: 1, unlinkedUnits: 0});
     const asked = await auditData('goldline', {store: '1'}, ['2']); // another store's code in the URL
-    expect(asked.selected?.code).toBe('2');
+    expect(asked.selected?.code).toBe('all');
+    expect(asked.rows.every((r) => r.store === '2')).toBe(true);
     expect(h.askedStores.flat()).not.toContain('1'); // never even read
   });
   it('in the CSV and By product too', async () => {
