@@ -19,6 +19,8 @@ import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 
 /** Told when a form's store is confirmed, so the board can say so (the card itself moves away). */
 const StoreAssigned = createContext<((a: {code: string; name: string; form: TriageForm}) => void) | null>(null);
+/** Which card's store picker is open: one at a time, so opening another closes the first. */
+const OpenPicker = createContext<{key: string | null; set: (key: string | null) => void} | null>(null);
 import {VersionPill} from '@/components/analyst/version-pill';
 
 const INVENTORY_PAGES = [1, 2, 3, 4, 5];
@@ -122,7 +124,10 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
  *  the chosen store is stamped onto the form's pages so it leaves "needs a store". */
 function StorePicker({company, form, stores}: {company: string; form: TriageForm; stores: StoreOption[]}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const shared = useContext(OpenPicker);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = shared ? shared.key === form.key : localOpen;
+  const setOpen = (v: boolean) => (shared ? shared.set(v ? form.key : null) : setLocalOpen(v));
   const [q, setQ] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -492,6 +497,8 @@ export function TriageBoard({
   // Confirming a store moves the card out of "Needs a store", so say it worked and offer to
   // follow it to its store (or to One-off stores when it is that store's only form).
   const {toasts, push, dismiss} = useToasts();
+  const [pickerKey, setPickerKey] = useState<string | null>(null);
+  const openPicker = useMemo(() => ({key: pickerKey, set: setPickerKey}), [pickerKey]);
   // The sections as they are when Show is clicked (after the board refreshed with the move).
   const sectionsNow = useRef(sections);
   sectionsNow.current = sections;
@@ -534,6 +541,7 @@ export function TriageBoard({
 
   return (
     <StoreAssigned.Provider value={onAssigned}>
+    <OpenPicker.Provider value={openPicker}>
     <div className={embedded ? 'flex flex-col gap-6' : GL_PAGE}>
       {embedded ? (
         <div className="flex flex-col gap-2.5">
@@ -638,6 +646,7 @@ export function TriageBoard({
       {editGroup && <GroupStoreDialog company={company} group={editGroup} stores={stores} onClose={() => setEditGroup(null)} />}
       <ToastStack toasts={toasts} dismiss={dismiss} />
     </div>
+    </OpenPicker.Provider>
     </StoreAssigned.Provider>
   );
 }

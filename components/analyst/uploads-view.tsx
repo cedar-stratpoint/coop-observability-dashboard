@@ -16,6 +16,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {Pagination} from '@/components/analyst/pagination';
 import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {cn} from '@/lib/utils';
+import {ToastStack} from '@/components/analyst/toast-stack';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upload-groups';
 
@@ -657,34 +658,10 @@ export function UploadsView({
         }}
       />
 
-      {/* Toast stack — bottom-right on desktop, bottom-center above the mobile tab bar. */}
-      <div
-        aria-live="polite"
-        className="pointer-events-none fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-50 flex flex-col items-center gap-2 md:inset-x-auto md:right-6 md:bottom-6 md:items-end"
-      >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className="pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-xl border border-border bg-popover px-3.5 py-3 text-sm text-popover-foreground shadow-lg transition-[opacity,transform] duration-200 ease-out starting:translate-y-2 starting:opacity-0"
-          >
-            {t.kind === 'ok' ? (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0" style={{color: 'var(--status-good)'}} aria-hidden />
-            ) : (
-              <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
-            )}
-            <span className="min-w-0 flex-1">{t.text}</span>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))}
-              className="-mr-1 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-        ))}
-      </div>
+      <ToastStack
+        toasts={toasts.map((t) => ({...t, kind: t.kind === 'err' ? 'error' : 'ok'}))}
+        dismiss={(id) => setToasts((all) => all.filter((x) => x.id !== id))}
+      />
     </div>
   );
 }
