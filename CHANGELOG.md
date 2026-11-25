@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop: which code users are also booth leads, with their Instagram (RET-14)
+
+Owner asked "are the GRAND300 customers also in the event leads, and can we merge their IG?". Ask Coop answered with the overlap of ALL website customers and booth leads (10 people) and could not show any Instagram: the `contacts` overlap had no code filter and its table had no Instagram column. Now `contacts` mode overlap takes `voucher` (website side = customers who used that code on any order, the same `voucherMatch` as the Website CRM page), and the people table carries **Instagram (booth)**, the handle the lead typed (`UnifiedContact.instagram`, booth only). "Merge" stays read-only: the handle shows next to the website record; nothing is written. Also confirmed: GRAND300 orders total ₱0.00 (the ₱300 covers the whole order), so "Spent ₱0" on those buyers is right, not a gap. Tests `test/chat-contacts-voucher-overlap.test.ts`.
+
+
 ## 2026-11-25 — Picking a store no longer fails on an impossible period date
 
 Picking a store on the per-store board failed with "upload_batches update failed: date/time field value out of range: 2026-09-31". Picking a store re-sorts every form in the upload and saves each one's period; a BA who wrote "Sept 16 to 31" gives an end of September 31, which the database refuses, so the whole step stopped (39 pages under review on staging carry such an end date). Batch periods are now stored safely (`storableDate`): an end day past the month's last becomes the last day (Sept 31 -> Sept 30), anything else unusable is left blank for the reviewer.

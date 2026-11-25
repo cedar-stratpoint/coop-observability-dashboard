@@ -39,6 +39,8 @@ export type UnifiedContact = {
   tier: string | null;
   /** The booth prize they won, when they came through the wheel. */
   prize: string | null;
+  /** Their Instagram handle (no @), as typed on a booth lead; the website and Lazada do not hold one. */
+  instagram: string | null;
   /** Which booth event they were met at. */
   campaign: string | null;
   /** Most recent evidence of them anywhere: an order, or a booth signup. */
@@ -86,6 +88,7 @@ type Incoming = {
   spend?: number;
   tier?: string | null;
   prize?: string | null;
+  instagram?: string | null;
   campaign?: string | null;
   pet?: string | null;
   lastSeen?: string | null;
@@ -138,6 +141,7 @@ export function mergeContacts(
       email: l.email,
       mobile: l.mobile,
       prize: l.prize,
+      instagram: l.instagram?.trim().replace(/^@/, '') || null,
       campaign: l.campaign,
       pet: l.pet,
       lastSeen: l.collectedAt,
@@ -224,6 +228,7 @@ export function mergeContacts(
       spend: Math.round(records.reduce((n, r) => n + (r.spend ?? 0), 0) * 100) / 100,
       tier: (pick('tier', ['website']) as string | null) ?? null,
       prize: (pick('prize', ['booth']) as string | null) ?? null,
+      instagram: (pick('instagram', ['booth']) as string | null) ?? null,
       campaign: (pick('campaign', ['booth']) as string | null) ?? null,
       lastSeen: records.reduce<string | null>((acc, r) => later(acc, r.lastSeen), null),
       pets: distinct(records.map((r) => r.pet)),
