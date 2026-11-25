@@ -11,6 +11,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 Dates are local working dates (GMT+8). Newest first.
 
 ## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
+Ships only the Instagram links (#771), cherry-picked onto `main`.
+
+## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
 Ships only the Instagram links, cherry-picked onto `main`.
 
 ## 2026-11-25 — Instagram handles are clickable: open the profile to message them
