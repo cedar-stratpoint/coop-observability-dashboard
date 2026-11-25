@@ -6,11 +6,11 @@
 // page (upload) and the row (item code); null item = the whole page. Syl: flag that a note
 // exists, never capture what it says.
 
-export type MarkKind = 'illegible' | 'note' | 'damage' | 'column_changed' | 'added_row' | 'other';
+export type MarkKind = 'illegible' | 'note' | 'damage' | 'column_changed' | 'added_row' | 'other' | 'price';
 export type MarkSource = 'reviewer' | 'reader';
 export type MarkStatus = 'open' | 'cleared';
 
-export const MARK_KINDS: MarkKind[] = ['illegible', 'note', 'damage', 'column_changed', 'added_row', 'other'];
+export const MARK_KINDS: MarkKind[] = ['illegible', 'note', 'damage', 'column_changed', 'added_row', 'other', 'price'];
 
 /** What a reviewer can pick on a row, in menu order. */
 export const ROW_KINDS: MarkKind[] = ['illegible', 'note', 'damage', 'other'];
@@ -24,6 +24,7 @@ export const MARK_LABEL: Record<MarkKind, string> = {
   column_changed: 'Columns changed',
   added_row: 'Product written in',
   other: 'Other',
+  price: 'Price written',
 };
 
 /** One line under each choice, so the reviewer picks the right one. */
@@ -34,6 +35,7 @@ export const MARK_HINT: Record<MarkKind, string> = {
   column_changed: 'The BA wrote over the printed headers',
   added_row: 'A product hand-written between printed rows',
   other: 'Anything else worth a second look',
+  price: 'The paper prices a band differently from the printed price',
 };
 
 export const REASON_MAX = 200;

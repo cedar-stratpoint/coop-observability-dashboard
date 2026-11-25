@@ -16,6 +16,7 @@ import {humanizeExtractError, MANIFESTS} from './goldline-extract';
 import {uploadSource} from './goldline-upload-groups';
 import {logReadEvent, type ReadLogInput} from './goldline-read-log';
 import {syncReaderMarks} from './goldline-review-marks-data';
+import {flaggedRowIndexes} from './band-prices';
 
 // The per-page inventory read, shared by the upload route (a fresh scan) and the
 // re-read action (a stored page read again). ONE pipeline so the two can never drift:
@@ -100,7 +101,7 @@ export async function runInventoryRead(args: {
       const page = copied?.rows as ExtractedPage | undefined;
       if (copied && page && !outOfScopeStores(storeScope, [page.store_code]).length) {
         await setUploadStatus(uploadId, 'needs_review', {pageCount: copied.page});
-        const flagged = page.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length;
+        const flagged = flaggedRowIndexes(page, 0.6).length;
         await logReadEvent({...rec, page: copied.page, formVersion: copied.formVersion ?? undefined, status: 'needs_review', stage: 'reused', rowCount: page.rows.length, docConfidence: copied.docConfidence ?? undefined, flagged, detail: {reusedFrom: copied.fromId, readerSig}, usage: readUsageSnapshot()});
         return {
           http: 200,
@@ -348,7 +349,7 @@ export async function runInventoryRead(args: {
       stage: 'read',
       rowCount: extracted.rows.length,
       docConfidence: avgConfidence(extracted),
-      flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
+      flagged: flaggedRowIndexes(extracted, 0.6).length,
       offManifest: extracted.rows.filter((r) => r.off_manifest).length,
       usage: readUsageSnapshot(),
     });
@@ -360,7 +361,7 @@ export async function runInventoryRead(args: {
         page,
         rows: extracted.rows.length,
         docConfidence: avgConfidence(extracted),
-        flagged: extracted.rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length,
+        flagged: flaggedRowIndexes(extracted, 0.6).length,
         // Phase 0 classification: the form version detected, whether the page was rotated
         // upright, the store-code snap, and any duplicate / re-upload of this same page.
         formVersion: cls.version,

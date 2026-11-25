@@ -3,6 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import type {FlagInput, MarkKind, MarkSource, MarkStatus, ReviewMark} from './goldline-review-marks';
 import {readerMarksFor, type ReaderMark} from './goldline-reader-marks';
 import {readMarksEnabled} from './goldline-anchored-flag';
+import {bandNote, cleanBands, type PaperBand} from './band-prices';
 
 // Reads and writes for review marks (NICH-42). Nichido project, service role, scoped by
 // company on every call. The actions (app/uploads/review-marks-actions.ts) check the role
@@ -102,7 +103,8 @@ export async function markUpload(companyId: string, id: string): Promise<string 
  */
 export async function replaceReaderMarks(companyId: string, uploadId: string, marks: ReaderMark[]): Promise<number> {
   if (!nichidoConfigured()) return 0;
-  const del = await nichidoDb().from('review_marks').delete().eq('company_id', companyId).eq('upload_id', uploadId).eq('source', 'reader');
+  // Band price marks have their own sync (always on), so a reader-flags pass leaves them be.
+  const del = await nichidoDb().from('review_marks').delete().eq('company_id', companyId).eq('upload_id', uploadId).eq('source', 'reader').neq('kind', 'price');
   if (del.error) throw new Error(`review_marks reader clear failed: ${del.error.message}`);
   if (!marks.length) return 0;
   const ins = await nichidoDb()
@@ -112,8 +114,58 @@ export async function replaceReaderMarks(companyId: string, uploadId: string, ma
   return marks.length;
 }
 
-/** Write a read page's reader flags when GOLDLINE_READ_MARKS is on. Never fails the read. */
-export async function syncReaderMarks(companyId: string, uploadId: string, page: Parameters<typeof readerMarksFor>[0] | null | undefined): Promise<void> {
+/** The "Price written" marks a read page carries: one per band whose paper points at another
+ *  price than the printed one, on the band's first row, with the prices as the reason. */
+export function bandMarksFor(page: {rows: Array<{item_code: string}>; bands?: unknown}): Array<{itemCode: string; rowIndex: number; reason: string; open: boolean}> {
+  const out: Array<{itemCode: string; rowIndex: number; reason: string; open: boolean}> = [];
+  const seen = new Set<string>();
+  for (const b of cleanBands(page.bands)) {
+    if (b.kind == null) continue;
+    const code = page.rows[b.first_index ?? -1]?.item_code?.trim();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push({itemCode: code, rowIndex: b.first_index as number, reason: bandNote(b), open: b.use_price == null});
+  }
+  return out;
+}
+
+/** Replace a page's band price marks with what its latest read saw. Always on (it is Coop's own
+ *  check of the paper, not a reader option). Never fails the read. */
+export async function syncBandMarks(companyId: string, uploadId: string, page: {rows: Array<{item_code: string}>; bands?: PaperBand[] | null} | null | undefined): Promise<void> {
+  if (!nichidoConfigured() || !page || !Array.isArray(page.rows)) return;
+  try {
+    const del = await nichidoDb().from('review_marks').delete().eq('company_id', companyId).eq('upload_id', uploadId).eq('source', 'reader').eq('kind', 'price');
+    if (del.error) throw new Error(del.error.message);
+    const marks = bandMarksFor(page);
+    if (!marks.length) return;
+    const ins = await nichidoDb()
+      .from('review_marks')
+      .insert(marks.map((m) => ({company_id: companyId, upload_id: uploadId, item_code: m.itemCode, row_index: m.rowIndex, kind: 'price', source: 'reader', reason: m.reason, status: m.open ? 'open' : 'cleared', created_by: 'reader'})));
+    if (ins.error) throw new Error(ins.error.message);
+  } catch (e) {
+    console.error('band price flags skipped', uploadId, e instanceof Error ? e.message : e);
+  }
+}
+
+/** Open or clear a band's price mark when the reviewer picks (or takes back) its price. */
+export async function setBandMarkStatus(companyId: string, uploadId: string, itemCode: string, open: boolean, by: string | null): Promise<void> {
+  if (!nichidoConfigured()) return;
+  const now = new Date().toISOString();
+  const res = await nichidoDb()
+    .from('review_marks') // pagination-ok: an update of one page's one mark, no rows returned
+    .update(open ? {status: 'open', cleared_by: null, cleared_at: null, updated_at: now} : {status: 'cleared', cleared_by: by, cleared_at: now, updated_at: now})
+    .eq('company_id', companyId)
+    .eq('upload_id', uploadId)
+    .eq('kind', 'price')
+    .eq('source', 'reader')
+    .eq('item_code', itemCode);
+  if (res.error) throw new Error(`review_marks price update failed: ${res.error.message}`);
+}
+
+/** Write a read page's reader flags when GOLDLINE_READ_MARKS is on, and its band price flags
+ *  always. Never fails the read. */
+export async function syncReaderMarks(companyId: string, uploadId: string, page: (Parameters<typeof readerMarksFor>[0] & {bands?: PaperBand[] | null}) | null | undefined): Promise<void> {
+  await syncBandMarks(companyId, uploadId, page);
   if (!readMarksEnabled() || !page || !Array.isArray(page.rows)) return;
   try {
     await replaceReaderMarks(companyId, uploadId, readerMarksFor(page));
