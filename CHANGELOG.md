@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Website CRM: Voucher filter and voucher search on the Customers tab (RET-14)
+
+Owner asked to find customers by voucher right on the table. The Customers tab gets a **Voucher** filter next to Tier and Bought: **All**, **Used a voucher**, **Bought, no voucher**, then every code with buyers and its buyer count (`GRAND300 · 63`), most buyers first. A code matches on **any** order, not just the first (the RET-12 `codesUsed` keys), so a customer who used GRAND300 on a second order shows up. The search box now also matches voucher codes ("Search name, email or code"). Rules kept: a customer whose orders were not read, or who never ordered, is never "no voucher" (unknown is never "never"); birthday codes stay folded into "birthday voucher" and never reach the browser. The CSV header names the Voucher filter. Pure logic in `src/crm-compute.ts` (`voucherMatch`, `voucherOptions`; `codesUsedList` now reuses `voucherOptions`), tests `test/crm-voucher-filter.test.ts`. Verified locally against a fake CRM.
+
 ## 2026-11-25 — Uploads: search in the header, by upload name too
 
 Search was hidden inside the Filters panel and only matched the file name, while a tile shows the name given at upload ("SM SAN PABLO [QA TEST] RERUN NOV24"), so typing what you saw could miss it. The search box now sits in the Files header next to the count, always visible, and matches the upload name or the file name. The count reads "17 of 100 uploads" while narrowed; × or Escape clears it, and an empty result says what was searched with a Clear search link. Filters keeps the dates, status and type. Works in Grouped, All files and inside a group.

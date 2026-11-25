@@ -90,6 +90,7 @@ import {
   filterActive,
   filterCarts,
   filterCustomers,
+  voucherOptions,
   filterOrders,
   fmtPh,
   fmtPhDate,
@@ -603,6 +604,8 @@ export function CrmView({
   // RET-10 9B: first-order codes with buyers no saved cohort covers yet (RET-06's codeCohorts), as one-click drafts. Code counts the preview.
   const suggestions = useMemo(() => (cohorts === null ? [] : cohortSuggestions(all, savedCohorts).slice(0, 4)), [cohorts, all, savedCohorts]);
   const pagePreview = useMemo(() => (pageDraft ? cohortPreview(all, pageDraft.rule) : null), [pageDraft, all]);
+  // Voucher filter: every code with buyers (any order), most buyers first, with its buyer count.
+  const voucherChoices = useMemo(() => voucherOptions(all), [all]);
   // Pets need only the customer list (one pet per customer, as the CRM projects it).
   const pets = useMemo(() => petRows(customers ?? [], birthdayVouchers, nowDate), [customers, birthdayVouchers, nowDate]);
 
@@ -678,7 +681,7 @@ export function CrmView({
       downloadCsv(`crm-orders (${orderRows.length}).csv`, orderCsv(orderRows, asOf, note));
     } else if (tab === 'customers') {
       const name = savedCohort ? 'crm-customers-cohort' : ruleBuiltin ? `crm-customers-${ruleBuiltin.key.replace('_', '-')}` : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
-      const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers]], q);
+      const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers], ['Voucher', customerFilter.voucher ?? 'all']], q);
       downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name, ruleBuiltin !== null));
     } else {
       const note = filterNote([['Voucher', petFilter]], q);
@@ -871,7 +874,7 @@ export function CrmView({
                 setQ(e.target.value);
                 setPage(1);
               }}
-              placeholder={tab === 'pets' ? 'Search email or pet' : 'Search email, order # or name'}
+              placeholder={tab === 'pets' ? 'Search email or pet' : tab === 'customers' ? 'Search name, email or code' : 'Search email, order # or name'}
               aria-label="Search the table"
               className="h-9 w-56 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-primary max-sm:w-auto max-sm:flex-1"
             />
@@ -1053,6 +1056,17 @@ export function CrmView({
                   ['all', 'All'],
                   ['buyers', 'Has ordered'],
                   ['none', 'Never ordered'],
+                ]}
+              />
+              <FilterSelect
+                label="Voucher"
+                value={customerFilter.voucher ?? 'all'}
+                onChange={(voucher) => onFilter(setCustomerFilter, {...customerFilter, voucher})}
+                options={[
+                  ['all', 'All'],
+                  ['any', 'Used a voucher'],
+                  ['none', 'Bought, no voucher'],
+                  ...voucherChoices.map(({code, buyers}): [string, string] => [code, `${code} · ${buyers}`]),
                 ]}
               />
               <FilterSelect
