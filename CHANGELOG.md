@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Ask Coop tables page 10 rows at a time
+
+Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
+
+
 ## 2026-11-25 · v1.26.2 Ask Coop: website orders readable again (prod hotfix)
 Ships only #719 (CRM response cap 4 MB → 16 MB), cherry-picked onto `main`.
 

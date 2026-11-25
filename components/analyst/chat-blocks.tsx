@@ -104,9 +104,18 @@ function cell(c: ResultColumn, row: MetricRow): string {
   return formatValue(v, c.unit);
 }
 
-/** Compact table: numbers right-aligned in tabular numerals, sticky first column, scrolls sideways inside its own box. */
-export function DataTable({columns, rows, total, label}: {columns: ResultColumn[]; rows: MetricRow[]; total: MetricRow | null; label: string}) {
+/** Rows per page in a chat table. Copy and Download CSV still take every row; only the screen pages. */
+export const TABLE_PAGE_ROWS = 10;
+
+/** Compact table: numbers right-aligned in tabular numerals, sticky first column, scrolls sideways inside its own box. Over
+ * TABLE_PAGE_ROWS rows it pages (Prev / Next, "11–20 of 67"); the total row stays on every page because it sums all rows. */
+export function DataTable({columns, rows: all, total, label}: {columns: ResultColumn[]; rows: MetricRow[]; total: MetricRow | null; label: string}) {
+  const [page, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(all.length / TABLE_PAGE_ROWS));
+  const at = Math.min(page, pages - 1);
+  const rows = pages > 1 ? all.slice(at * TABLE_PAGE_ROWS, (at + 1) * TABLE_PAGE_ROWS) : all;
   return (
+    <div className="flex flex-col gap-1.5">
     <div tabIndex={0} role="region" aria-label={`${label}, table`} className={cn('max-w-full overflow-x-auto rounded-lg border border-border', FOCUS)}>
       <table className="w-full border-collapse text-[12px]">
         <thead>
@@ -139,6 +148,22 @@ export function DataTable({columns, rows, total, label}: {columns: ResultColumn[
           )}
         </tbody>
       </table>
+    </div>
+    {pages > 1 && (
+      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <span className="tabular-nums" aria-live="polite">
+          {at * TABLE_PAGE_ROWS + 1}–{Math.min((at + 1) * TABLE_PAGE_ROWS, all.length)} of {all.length}
+        </span>
+        <span className="flex gap-1">
+          <button type="button" onClick={() => setPage(at - 1)} disabled={at === 0} className={cn(ACTION_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
+            Prev
+          </button>
+          <button type="button" onClick={() => setPage(at + 1)} disabled={at >= pages - 1} className={cn(ACTION_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
+            Next
+          </button>
+        </span>
+      </div>
+    )}
     </div>
   );
 }
