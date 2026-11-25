@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Commit all moves to the upload's header
+
+Feedback: Commit all should sit in the header, beside Delete scan, whatever the view. It was only on the Per store view. It now shows on Per file, Per store and Per BA, and always covers the whole upload: it reads the unfiltered board, so a BA or form-version filter never changes what it commits. The board's own summary is back to just the counts.
+
 ## 2026-11-25 — Instagram handles are clickable: open the profile to message them
 
 Owner: "walang contact in IG?" Every `@handle` in Ask Coop's tables (leads, overlap, matches) and in the Website CRM Instagram column now opens `instagram.com/<handle>` in a new tab, where the team messages them. Nothing is sent from Coop. `instagramUrl` (`src/instagram.ts`) only links a real handle (letters, digits, "." and "_", up to 30), so customer-typed text can never become another link.

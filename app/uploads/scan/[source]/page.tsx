@@ -16,6 +16,7 @@ import {GL_PAGE} from '@/src/goldline-ui';
 import {TriageBoard} from '@/components/analyst/triage-board';
 import {BaCards, ScanFileList} from '@/components/analyst/scan-views';
 import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
+import {CommitAllDialog} from '@/components/analyst/commit-all-dialog';
 import {ScanReadingCard} from '@/components/analyst/scan-reading';
 import {ScanViewTabs, type ScanView} from '@/components/analyst/scan-view-tabs';
 
@@ -74,7 +75,8 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   const needBas = view !== 'file';
   const [rawBoard, stores, uploads, baReg] = await Promise.all([
     triageBoard(companyId, {source, batchId: batchId ?? undefined}),
-    view === 'file' ? Promise.resolve([]) : listStores(companyId),
+    // Every view: the header's Commit all names forms by their registry store name.
+    listStores(companyId),
     // Always listed (cached, shared with the Uploads page) so every view can read the
     // optional upload name the user gave this scan; `files` below still only uses it on the file view.
     listUploads(companyId),
@@ -109,6 +111,12 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   const href = (v: View) => scanHref(source, {view: v, version, batch: batchId});
 
+  // Commit all (Nov 25): in the header on every view, over the whole upload. It reads the
+  // unfiltered board, so a BA or version filter never changes what it commits.
+  const bulkForms = rawBoard.forms.filter((f) => f.batchKind === 'form' && f.batchId && f.needsReview > 0);
+  const bulkNotListed = rawBoard.forms.filter((f) => f.needsReview > 0).length - bulkForms.length;
+  const storeNames = Object.fromEntries(stores.map((s) => [s.code, s.name]));
+
   return (
     <div className={GL_PAGE}>
       {/* Header: back to Uploads, the scan's name as the title (file name beneath when the user
@@ -128,8 +136,11 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
           )}
         </div>
         {canEdit && (
-          <div className="-mr-2 sm:shrink-0">
-            <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
+          <div className="flex items-center gap-2 sm:shrink-0">
+            <div className="-mr-1">
+              <DeleteScanDialog company={companyId} source={source} batchId={batchId} />
+            </div>
+            {bulkForms.length > 0 && <CommitAllDialog company={companyId} forms={bulkForms} storeNames={storeNames} notListed={bulkNotListed} />}
           </div>
         )}
       </header>
