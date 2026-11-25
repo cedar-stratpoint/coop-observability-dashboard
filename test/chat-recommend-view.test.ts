@@ -522,3 +522,16 @@ describe('a list of people with a date is a table, not a trend (owner 2026-11-25
     expect(first(weeks).block).toBe('chart');
   });
 });
+
+describe('an Explore table is titled by its columns, not "explore"', () => {
+  it('names the columns', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category', 'Order id'), col('sold_at', 'text', 'category', 'Sold at'), col('total_php', 'PHP', 'measure', 'Total')],
+      [{order_id: 'a1', sold_at: '2026-10-20 10:00', total_php: 500}, {order_id: 'b2', sold_at: '2026-10-21 10:00', total_php: 600}],
+      {exploratory: {label: 'Exploratory', sql: 'select 1', coverage_note: '', warnings: []}},
+    );
+    const out = bindBlock('render_chart', {source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: ''}, new Map([['r1', {...sales, metric: 'explore'}]]), () => 'b1');
+    if ('error' in out) throw new Error(out.error);
+    expect(out.blocks[0]).toMatchObject({kind: 'table', title: 'Order id, Sold at and Total'});
+  });
+});
