@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Release v1.27.1: log a contact for any event lead, Has Instagram filter, Ask Coop lists as tables, "Leave a review email"
+
+PROD release of our own changes only (cherry-picked onto main after v1.27.0): RET-17 (SQL `customer_contacts_lead_keys.sql` applied on PROD by the owner 2026-11-25), the Website CRM Instagram filter / Log contact next to Name / Instagram on the profile, Ask Coop showing one-row-per-record answers as tables, and the "Leave a review email" label. Checked on coop-cedar-staging first.
+
 ## 2026-11-25 — Event leads: log a contact for any lead, status first (RET-17)
 
 Syl's list: see who we have / haven't contacted or who replied, log a contact by hand, edit "when I last talked to them". 604 of 744 booth leads gave only an Instagram handle, so the email-only contact log couldn't record them.
