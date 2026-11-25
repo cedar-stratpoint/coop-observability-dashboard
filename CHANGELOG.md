@@ -10,6 +10,20 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.0 Customers: last contacted, profile, CRM parity, cohorts, vouchers used (prod release)
+Ships, on top of `main` (v1.25.2), only our own customer work from staging, cherry-picked (no merge of staging). Supersedes the unreleased v1.24.0 entry (PR #657, never merged; renumbered after main moved to v1.25.2):
+- last contacted per customer (RET-07 7A), Instagram / Facebook / Viber channels (7B), membership emails as contacts (7C);
+- the customer profile drawer and timeline (RET-08 8B + 8C);
+- Website CRM parity with the storefront admin CRM (RET-09 8A);
+- rule-based cohorts and Ask Coop cohort drafts (RET-10 9A + 9B);
+- Vouchers used column + profile tile; Tier / To Platinum / Spend (year) hidden from the table (RET-11 8D);
+- cohort field "Used code (any order)", built-in "Birthday voucher not used", spin voucher winners with no website order (RET-12, RET-13);
+- Ask Coop with an org-scoped Anthropic key (`ANTHROPIC_WORKSPACE_ID`).
+
+Nothing else from staging rides along: no uploads, Goldline or CI changes. **Decision (owner, 2026-11-23):** a PROD release carries only our own changes, cherry-picked.
+
+**Done on PROD before this release (owner, 2026-11-25):** `supabase/customer_contacts.sql` (includes the 7B channels) and `supabase/customer_cohorts.sql` applied; `ANTHROPIC_WORKSPACE_ID` set in Vercel Production. The CRM's `GET /api/membership-events` 404 is still handled (membership emails left out with a note).
+
 ## 2026-11-25 · v1.25.2 Nichido: PO form tiles, uploads search, name-then-file fix
 
 Release on `main` cut from v1.25.1 with four staging PRs, picked as is (the three files they touch were identical on prod and staging beforehand, so nothing else rides along). **No SQL:** Nichido prod already has `po_forms` and the `audit_counts` with shelf counts from the Nov 24 cutover (checked read-only: 3 functions, one active PO form with 243 products).
@@ -103,18 +117,6 @@ The contact list on `/customers/leads` (and each event page's lead block, same c
 
 
 
-
-## v1.24.0 (2026-11-23): Customers — last contacted, profile drawer, CRM parity and cohorts (prod release)
-Ships, on top of `main`, only our own customer work from staging, cherry-picked (no merge of staging):
-- last contacted per customer (RET-07 7A), Instagram / Facebook / Viber channels (7B), membership emails as contacts (7C);
-- the customer profile drawer and timeline (RET-08 8B + 8C);
-- Website CRM parity with the storefront admin CRM (RET-09 8A);
-- rule-based cohorts and Ask Coop cohort drafts (RET-10 9A + 9B);
-- Ask Coop with an org-scoped Anthropic key (`ANTHROPIC_WORKSPACE_ID`).
-
-Nothing else from staging rides along: no uploads, Goldline or CI changes. **Decision (owner, 2026-11-23):** a PROD release carries only our own changes, cherry-picked.
-
-**Before deploying, on PROD:** run `supabase/customer_contacts_channels_7b.sql` and `supabase/customer_cohorts.sql` (`customer_contacts` itself shipped in v1.23.0); set `ANTHROPIC_WORKSPACE_ID` in Vercel Production if the key is org-scoped; confirm the CRM's `GET /api/membership-events` is live (a 404 is handled: membership emails are left out with a note).
 
 ## 2026-11-20 — Ask Coop drafts, suggests and reads customer cohorts (RET-10, Stage 9B)
 
