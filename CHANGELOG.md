@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Website CRM: Voucher filter and voucher search on the Customers tab (RET-14)
+
+Owner asked to find customers by voucher right on the table. The Customers tab gets a **Voucher** filter next to Tier and Bought: **All**, **Used a voucher**, **Bought, no voucher**, then every code with buyers and its buyer count (`GRAND300 · 63`), most buyers first. A code matches on **any** order, not just the first (the RET-12 `codesUsed` keys), so a customer who used GRAND300 on a second order shows up. The search box now also matches voucher codes ("Search name, email or code"). Rules kept: a customer whose orders were not read, or who never ordered, is never "no voucher" (unknown is never "never"); birthday codes stay folded into "birthday voucher" and never reach the browser. The CSV header names the Voucher filter. Pure logic in `src/crm-compute.ts` (`voucherMatch`, `voucherOptions`; `codesUsedList` now reuses `voucherOptions`), tests `test/crm-voucher-filter.test.ts`. Verified locally against a fake CRM.
+
 ## 2026-11-25 · Nichido on prod: v1.25.0 and v1.25.1 (release notes)
 
 Nichido shipped to prod on Nov 24 as two releases on `main`. Production is now **coop-cedar.vercel.app** (our Vercel Pro project); `coop-brand-os` stays on v1.23.0 until the co-worker redirects it.
