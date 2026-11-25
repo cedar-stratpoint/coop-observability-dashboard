@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Voucher families: "*300" covers every ₱300-off code; Ask Coop runs matches without asking
+
+Owner asked for "the other 300 off vouchers, not just GRAND300" against booth leads and their IG. `voucher` took one exact code, so Ask Coop fell back to a general overlap and only offered name/IG matching. `voucherMatch` (one rule for the Website CRM page and Ask Coop) now takes a family with `*` ("*300" = every code ending in 300: GRAND300, ZOOMY300, WEB300, EAST300, ZMY300, STRAT300 and the one-off ones) or a comma list; regex characters stay literal. The contacts topic tells Ask Coop to run overlap AND matches in the same turn for IG questions, never ask first. Measured on PROD: 10 codes end in 300, 121 customers used one; 604 of 744 booth leads gave only an Instagram handle, so name/IG matching is the main way to link them. Tests in `test/crm-voucher-filter.test.ts`.
+
+
 ## 2026-11-25 — v1.26.5 Nichido: #711, #713, #714, #726, #728, #736 from staging
 
 Nichido-only release cut from `main` (v1.26.4) by cherry-picking the six Nichido PRs merged to staging since v1.25.2; every touched file is identical to staging. Left out on purpose: the Ask Coop / CRM commits (not Nichido) and `supabase/product_channel_alias.sql` (Coop archive, not Nichido). Database: `supabase/nichido/batch_parent.sql` (adds `upload_batches.parent_batch_id` + partial index, additive) applied to Nichido PROD before this deploy; prod had no store-split batches yet, so no backfill was needed. All other Nichido functions and columns already match staging (the only drift is s2's pending plain `sales` columns on prod).
