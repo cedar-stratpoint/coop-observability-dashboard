@@ -10,6 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Ask Coop: which code users are also booth leads, with their Instagram (RET-14)
+
+Owner asked "are the GRAND300 customers also in the event leads, and can we merge their IG?". Ask Coop answered with the overlap of ALL website customers and booth leads (10 people) and could not show any Instagram: the `contacts` overlap had no code filter and its table had no Instagram column. Now `contacts` mode overlap takes `voucher` (website side = customers who used that code on any order, the same `voucherMatch` as the Website CRM page), and the people table carries **Instagram (booth)**, the handle the lead typed (`UnifiedContact.instagram`, booth only). "Merge" stays read-only: the handle shows next to the website record; nothing is written. Also confirmed: GRAND300 orders total ₱0.00 (the ₱300 covers the whole order), so "Spent ₱0" on those buyers is right, not a gap. Tests `test/chat-contacts-voucher-overlap.test.ts`.
+
+
 ## 2026-11-25 — Ask Coop tables page 10 rows at a time
 
 Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
