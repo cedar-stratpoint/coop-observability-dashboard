@@ -71,6 +71,7 @@ import {cn} from '@/lib/utils';
 import {Metric} from './metric';
 import {RefreshControl} from './refresh-control';
 import {ContactLogDialog} from './contact-log-dialog';
+import {FilterSelect} from './filter-select';
 import {CohortBuilderDialog, blankDraft, draftFromProposal, draftOf, type CohortDraft} from './cohort-builder-dialog';
 import {CohortDraftCard, type CohortDraftValue} from './cohort-draft-card';
 import {useCoopChat} from './coop-chat';
@@ -225,40 +226,6 @@ const TABS: Array<{key: Tab; label: string; icon: React.ComponentType<{className
   {key: 'pets', label: 'Pet birthdays', icon: PawPrint},
 ];
 
-/** One labelled dropdown. Native select on purpose: it is the control every
- * admin already knows, and it works on a phone without a popover library. */
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: Array<[string, string]>;
-}) {
-  return (
-    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(
-          'h-8 rounded-lg border bg-background px-2 text-xs text-foreground outline-none',
-          'focus-visible:border-primary',
-          value === 'all' ? 'border-border' : 'border-primary text-primary',
-        )}
-      >
-        {options.map(([v, l]) => (
-          <option value={v} key={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
 
 const th = 'px-4 py-2.5 font-medium';
 
@@ -432,6 +399,7 @@ export function CrmView({
   booth,
   boothRead,
   viewer,
+  contactLogLegacy = false,
   configured,
   now,
   fetchedAt,
@@ -454,6 +422,8 @@ export function CrmView({
   boothRead: {leads: boolean; links: boolean};
   /** The signed-in email: the log shows Delete only on this person's own contacts. */
   viewer: string | null;
+  /** RET-17: the log was read without the Instagram / mobile / replied columns (SQL not applied): the Log dialog logs by email only. */
+  contactLogLegacy?: boolean;
   configured: boolean;
   /** The server's clock for this render (days since last order, the membership year). */
   now: string;
@@ -1829,7 +1799,16 @@ export function CrmView({
           }}
         />
       )}
-      {logFor && <ContactLogDialog name={nameOf(logFor)} email={logFor.email} history={historyOf(logFor)} viewer={viewer} onClose={() => setLogFor(null)} />}
+      {logFor && (
+        <ContactLogDialog
+          name={nameOf(logFor)}
+          person={{email: logFor.email, instagram: null, mobile: logFor.phone}}
+          history={historyOf(logFor)}
+          viewer={viewer}
+          legacy={contactLogLegacy}
+          onClose={() => setLogFor(null)}
+        />
+      )}
     </div>
   );
 }
