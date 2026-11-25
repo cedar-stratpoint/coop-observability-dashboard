@@ -3,9 +3,7 @@
 import {useState} from 'react';
 import {Button} from '@/components/ui/button';
 import {toneText} from '@/src/review-confidence';
-import {bandNote, type PaperBand} from '@/src/band-prices';
-
-const peso = (n: number) => `₱${n.toLocaleString('en-US')}`;
+import {bandNote, peso, type PaperBand} from '@/src/band-prices';
 
 /**
  * A flagged band's price pick (QA San Pablo, Nov 25), shown on the band's first row: what the
@@ -79,5 +77,48 @@ export function BandPrice({band, pieces, editable, onPick}: {
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * "Use the paper's price on every band" (audit Nov 25): stores 473 and 5300 write their own
+ * (about 20% off) price on most bands, and each band would otherwise take its own click. Shown
+ * above the rows when two or more bands on the page are still open; one click picks the paper's
+ * price for all of them, for this form only. Each band can still be changed on its own after.
+ */
+export function BandPricesBar({bands, editable, onPickAll}: {
+  bands: PaperBand[];
+  editable: boolean;
+  onPickAll?: (picks: Array<{group: string; price: number}>) => Promise<string | null>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const open = bands.filter((b) => b.kind != null && b.offer_price != null && b.use_price == null);
+  if (open.length < 2 || !editable || !onPickAll) return null;
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    const err = await onPickAll(open.map((b) => ({group: b.group, price: b.offer_price as number})));
+    setBusy(false);
+    if (err) setError(err);
+  };
+  return (
+    <div
+      className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 text-xs"
+      style={{borderColor: 'color-mix(in oklab, var(--status-warn) 35%, transparent)', background: 'color-mix(in oklab, var(--status-warn) 7%, transparent)'}}
+    >
+      <span className="min-w-0 flex-1" style={{color: toneText('var(--status-warn)')}}>
+        {open.length} bands on this page are priced differently on the paper ({open.map((b) => `${peso(b.offer_price as number)} for ${peso(b.printed_price as number)}`).slice(0, 3).join(', ')}
+        {open.length > 3 ? ', …' : ''}).
+      </span>
+      <Button variant="outline" size="xs" disabled={busy} onClick={go} className="active:scale-[0.97]">
+        {busy ? 'Saving…' : `Use the paper prices on all ${open.length}`}
+      </Button>
+      {error && (
+        <span role="alert" className="w-full" style={{color: toneText('var(--status-crit)')}}>
+          {error}
+        </span>
+      )}
+    </div>
   );
 }

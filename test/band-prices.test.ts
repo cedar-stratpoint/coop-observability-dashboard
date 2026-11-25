@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
+  peso,
   allowedPrices,
   bandFlagRows,
   bandNote,
@@ -52,9 +53,28 @@ describe('checkBands', () => {
     expect(checkBands(items, rows, [{family: G, amount: null, written_price: null}])).toEqual([]);
   });
 
+  it('a total that is whole pieces at the printed price says a count is off, not the price (Elise Lashes)', () => {
+    const lashes = [{code: 'EL1', group: 'ELISE LASHES', price: 238}, {code: 'EL2', group: 'ELISE LASHES', price: 238}];
+    const b = checkBands(lashes, [{item_code: 'EL1', ending_on_hand: 10}, {item_code: 'EL2', ending_on_hand: 7}], [{family: 'ELISE LASHES', amount: 4522}]);
+    expect(b[0]).toMatchObject({kind: null, offer_price: null, pieces: 17}); // 4,522 = 19 x 238
+  });
+
+  it('a band with nothing on hand has nothing to value, so it is never flagged', () => {
+    const none = rows.map((r) => (r.item_code.startsWith('USMLLC') ? {...r, ending_on_hand: null} : r));
+    expect(band(checkBands(items, none, [{family: G, amount: null, written_price: 180}]))).toMatchObject({kind: null, pieces: 0});
+  });
+
   it('skips bands whose items print different prices', () => {
     const mixed = [{code: 'BESP', group: 'MAKE-UP COLLECTION', price: 320}, {code: 'CPC001', group: 'MAKE-UP COLLECTION', price: 350}];
     expect(checkBands(mixed, mixed.map((m) => ({item_code: m.code, ending_on_hand: 2})), [{family: 'MAKE-UP COLLECTION', amount: 999, written_price: 300}])).toEqual([]);
+  });
+});
+
+describe('peso', () => {
+  it('prints centavos with two places, whole pesos plain', () => {
+    expect(peso(158.4)).toBe('₱158.40');
+    expect(peso(213.75)).toBe('₱213.75');
+    expect(peso(6480)).toBe('₱6,480');
   });
 });
 

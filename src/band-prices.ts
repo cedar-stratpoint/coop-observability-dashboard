@@ -44,7 +44,9 @@ type Item = {code: string; group: string | null; price: number | null};
 type Row = {item_code: string; ending_on_hand?: number | null};
 
 const keyOf = (s: string) => s.toUpperCase().replace(/[^A-Z0-9#&]+/g, '');
-const peso = (n: number) => `₱${n.toLocaleString('en-US')}`;
+/** Pesos as printed on the forms: whole amounts plain, centavos always two places (₱158.40). */
+export const peso = (n: number) =>
+  `₱${n.toLocaleString('en-US', Number.isInteger(n) ? {maximumFractionDigits: 0} : {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /** Printed items grouped into consecutive heading bands, each with one price when all agree. */
@@ -98,12 +100,19 @@ export function checkBands(items: Item[], rows: Row[], paper: PaperTotal[]): Pap
     const pieces = idx.reduce((a, i) => a + (num(rows[i].ending_on_hand) ?? 0), 0);
     let kind: PaperBand['kind'] = null;
     let offer: number | null = null;
-    if (written != null && written !== printed) {
+    // Nothing on hand in the band: there is nothing to value, so no price to pick (audit Nov 25:
+    // three 5300 bands had a written price and no counts).
+    const wholeAtPrinted = amount != null && Math.abs(amount / printed - Math.round(amount / printed)) < 1e-6;
+    if (pieces <= 0) {
+      // saved below with kind null
+    } else if (written != null && written !== printed) {
       kind = 'written';
       offer = written;
-    } else if (written == null && amount != null && pieces > 0 && Math.abs(amount - pieces * printed) > 1) {
+    } else if (written == null && amount != null && !wholeAtPrinted && Math.abs(amount - pieces * printed) > 1) {
       // Only a whole peso price in a believable range: a misread count makes nonsense prices,
-      // and those stay with the ordinary "total doesn't match" note.
+      // and those stay with the ordinary "total doesn't match" note. A total that is a whole
+      // number of pieces at the printed price says a COUNT is off, not the price (audit Nov 25:
+      // Elise Lashes ₱4,522 = 19 x ₱238, read as 17 pcs, offered "₱266").
       const implied = amount / pieces;
       const whole = Math.round(implied);
       if (Math.abs(implied - whole) < 1e-6 && whole !== printed && whole >= printed * 0.25 && whole <= printed * 2) {
