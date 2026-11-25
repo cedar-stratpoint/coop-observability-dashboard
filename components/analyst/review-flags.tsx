@@ -102,7 +102,12 @@ export function FlagChips({marks, className}: {marks: ReviewMark[]; className?: 
   );
 }
 
-/** The Flag button on a row or the page. Tinted once there is an open flag. */
+/**
+ * The Flag button on a row or the page. Tinted once there is an open flag. On a row with no flag
+ * it only shows when it can be wanted (Hick's law, Nov 25): on hover, keyboard focus anywhere in
+ * the row, the row pointed at on the scan, or a phone row whose count is being edited. It keeps
+ * its space when hidden, so the count columns never shift.
+ */
 export function FlagButton({target, count, size = 'row'}: {target: FlagTarget; count: number; size?: 'row' | 'page'}) {
   const ctx = useReviewFlags();
   if (!ctx?.canFlag) return null;
@@ -116,7 +121,8 @@ export function FlagButton({target, count, size = 'row'}: {target: FlagTarget; c
       title={on ? 'Flagged. Open to add or clear' : label}
       className={cn(
         'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border text-xs font-medium outline-none',
-        'transition-[transform,border-color,background-color] duration-150 ease-out active:scale-[0.97] focus-visible:ring-3 focus-visible:ring-ring/40',
+        'transition-[transform,border-color,background-color,opacity] duration-150 ease-out active:scale-[0.97] focus-visible:ring-3 focus-visible:ring-ring/40',
+        size === 'row' && !on && 'opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[pointed]/row:opacity-100 focus-visible:opacity-100',
         size === 'row' ? 'size-7' : 'h-8 px-2.5',
         on ? 'border-transparent' : 'border-border bg-background text-muted-foreground [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:text-foreground',
       )}
