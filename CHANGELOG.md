@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
+
+Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
+- **Instagram filter** (All / Has Instagram · N / No Instagram). A customer whose booth leads or links haven't loaded yet is "unknown" and stays out of both lists, so a failed read never shows as "No Instagram" (`instagramState` in `src/customer-links.ts`, tested).
+- **Log contact** is now the column right after Name, as a labelled button, not an icon at the far right.
+- **Profile drawer** shows the clickable `@handle`, the booth sign-up (event · prize · pet) and whether it came from a Same person link or the same email or mobile.
+
 ## 2026-11-25 — Instagram handles are clickable: open the profile to message them
 
 Owner: "walang contact in IG?" Every `@handle` in Ask Coop's tables (leads, overlap, matches) and in the Website CRM Instagram column now opens `instagram.com/<handle>` in a new tab, where the team messages them. Nothing is sent from Coop. `instagramUrl` (`src/instagram.ts`) only links a real handle (letters, digits, "." and "_", up to 30), so customer-typed text can never become another link.
