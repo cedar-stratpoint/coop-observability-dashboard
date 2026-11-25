@@ -1,0 +1,108 @@
+# Deploys this app to Vercel (project coop-observability-dashboard) from GitLab.
+#
+# GitHub stays the source of truth: .github/workflows/mirror-gitlab.yml pushes every branch here,
+# and that push starts this pipeline. Only two branches deploy:
+#   staging -> Preview build, aliased to https://coop-cedar-staging.vercel.app
+#   main    -> Production build, served at https://coop-cedar.vercel.app
+# Vercel's own GitHub auto-deploys are off (vercel.json "git.deploymentEnabled": false).
+#
+# Setup (GitLab project, Settings > CI/CD > Variables): COOP_VERCEL_TOKEN (masked, protected),
+# VERCEL_ORG_ID, VERCEL_PROJECT_ID, GCHAT_WEBHOOK_URL (masked, optional). Protect the staging and main
+# branches so the protected token reaches them. Re-run a missed deploy with Build > Pipelines > Run pipeline.
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(staging|main)$/ && $CI_PIPELINE_SOURCE =~ /^(push|web)$/'
+
+stages:
+  - deploy
+
+.vercel_deploy:
+  stage: deploy
+  image: node:24
+  resource_group: vercel-$CI_COMMIT_BRANCH # one deploy per branch at a time; newer pushes wait
+  timeout: 30 minutes
+  variables:
+    GIT_DEPTH: '20'
+    VERCEL_CLI_VERSION: '65.12.1'
+  before_script:
+    - |
+      if [ -z "$COOP_VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+        echo "COOP_VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not set (or the branch is not protected)"; exit 1
+      fi
+    - npm install -g --no-fund --no-audit "vercel@${VERCEL_CLI_VERSION}"
+    # The runner checks out a detached HEAD. Vercel reads the branch from git, and many Preview env vars
+    # are scoped to the staging branch, so the deploy must see a real branch name.
+    - git checkout -B "$CI_COMMIT_BRANCH"
+    # Drop the runner's credential-bearing remote so it never lands in the deployment's git metadata.
+    - git remote set-url origin "${CI_PROJECT_URL}.git"
+  script:
+    - |
+      set -eu
+      if [ "$DEPLOY_TARGET" = "production" ]; then
+        URL=$(vercel deploy --prod --yes --token "$COOP_VERCEL_TOKEN")
+      else
+        URL=$(vercel deploy --yes --token "$COOP_VERCEL_TOKEN")
+        vercel alias set "$URL" "${SITE_URL#https://}" --token "$COOP_VERCEL_TOKEN"
+      fi
+      echo "Deployment: $URL"
+      echo "DEPLOY_URL=$URL" >> deploy.env
+    # Smoke check: the public domain answers, is on this branch, and its database is reachable.
+    - |
+      set -eu
+      for i in 1 2 3 4 5 6; do
+        if curl -fsS "$SITE_URL/api/health" -o health.json; then
+          if node -e '
+            const h = require("./health.json");
+            console.log(JSON.stringify(h));
+            const e = process.env;
+            // env comes from the database the site is connected to (src/coop-env.ts), so it proves the right keys.
+            // branch/commit come from Vercel git metadata; check them only when Vercel filled them in.
+            const ok = h.ok && h.dbOk && h.env === e.EXPECT_ENV
+              && (h.branch == null || h.branch === e.CI_COMMIT_BRANCH)
+              && (h.commit == null || e.CI_COMMIT_SHA.startsWith(h.commit));
+            if (h.branch == null || h.commit == null) console.log("note: branch/commit not reported by Vercel");
+            process.exit(ok ? 0 : 1);
+          '; then exit 0; fi
+        fi
+        echo "Health check not passing yet ($i/6), retrying in 10s"; sleep 10
+      done
+      echo "Health check failed for $SITE_URL"; exit 1
+  after_script:
+    # Google Chat notice on success or failure. Skipped when GCHAT_WEBHOOK_URL is not set.
+    - |
+      if [ -z "${GCHAT_WEBHOOK_URL:-}" ]; then echo "GCHAT_WEBHOOK_URL not set; skipping"; exit 0; fi
+      export SUBJECT="$(git log -1 --format=%s "$CI_COMMIT_SHA" 2>/dev/null || echo "$CI_COMMIT_TITLE")"
+      node -e '
+        const e = process.env, sha = e.CI_COMMIT_SHA.slice(0, 7);
+        const text = e.CI_JOB_STATUS === "success"
+          ? `🚀 *Deployed to ${e.ENV_LABEL}* ${e.CI_PROJECT_PATH}\n${e.SUBJECT} (\`${sha}\`)\n<${e.SITE_URL}|Open the site> · <${e.CI_PIPELINE_URL}|Pipeline>`
+          : `⚠️ *Deploy to ${e.ENV_LABEL} failed* ${e.CI_PROJECT_PATH}\n${e.SUBJECT} (\`${sha}\`)\n<${e.CI_JOB_URL}|Job log>`;
+        process.stdout.write(JSON.stringify({ text }));
+      ' | curl -sS --fail-with-body -X POST -H "Content-Type: application/json; charset=UTF-8" -d @- "$GCHAT_WEBHOOK_URL" || true
+
+deploy:staging:
+  extends: .vercel_deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+  variables:
+    DEPLOY_TARGET: preview
+    ENV_LABEL: Staging
+    EXPECT_ENV: staging
+    SITE_URL: https://coop-cedar-staging.vercel.app
+  environment:
+    name: staging
+    url: https://coop-cedar-staging.vercel.app
+
+deploy:production:
+  extends: .vercel_deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  variables:
+    DEPLOY_TARGET: production
+    ENV_LABEL: Production
+    EXPECT_ENV: production
+    SITE_URL: https://coop-cedar.vercel.app
+  environment:
+    name: production
+    url: https://coop-cedar.vercel.app
