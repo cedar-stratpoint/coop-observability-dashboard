@@ -18,7 +18,8 @@ describe('parseFlagInput', () => {
   it('keeps row kinds on rows and page kinds on pages', () => {
     expect(parseFlagInput({uploadId: UP, itemCode: 'A1', kind: 'column_changed'})).toMatchObject({ok: false});
     expect(parseFlagInput({uploadId: UP, itemCode: null, kind: 'illegible'})).toMatchObject({ok: false});
-    expect(parseFlagInput({uploadId: UP, itemCode: 'A1', kind: 'added_row'})).toMatchObject({ok: false});
+    expect(parseFlagInput({uploadId: UP, itemCode: null, kind: 'added_row'})).toMatchObject({ok: false});
+    expect(parseFlagInput({uploadId: UP, itemCode: 'A1', kind: 'added_row'})).toMatchObject({ok: true});
   });
   it('Other needs a note; notes have a limit', () => {
     expect(parseFlagInput({uploadId: UP, itemCode: 'A1', kind: 'other', reason: ' '})).toEqual({ok: false, error: 'Say what to look at.'});

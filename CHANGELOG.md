@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Add product row on the inventory review (NICH-42)
+
+Syl (Nov 25): BAs hand-write products onto the form between the printed rows (e.g. "P.Glow" under Creamy Glow), and the review had no way to count them. Decided with the user: build Add product row now.
+
+- **"Add product"** beside the row search on both review screens (one page and the batch stepper), while the page can still be committed. A picker lists the catalog (visible, not retired), opening on the product lines already on the page; search by code or name. The new row joins the page with blank counts under its printed heading, the view switches to All and focuses its first cell.
+- **Guards:** a product already on the page can't be added twice. One printed on another page of the same form version shows "Printed on page N" and a warning, because inventory is one count per store, product and period, so committing both replaces one.
+- Each added row is flagged **"Product written in"** (a review flag, `added_row`), so the reports list it with its page and row. Removing an added row clears that flag. Added rows commit with the page like printed rows; Commit all from the scan board commits what the reader read, so an added row needs the page's own Commit.
+- The batch review's saved draft now keeps added rows (`added` on a draft page); older drafts restore as before.
+
 ## 2026-11-25 — Review flags: flag a row or a page on the inventory review (NICH-42)
 
 Syl (Nov 25): BAs write notes and revisions on the form, write "Damage" in Ending, relabel the printed columns, and some numbers can't be read. "Flag" them with the file, page and row, never capture the note text, and for an unreadable number flag instead of guessing. Decided with the user: these are **review flags, separate from the BA scorecard** (public.flags); they never add BA points.

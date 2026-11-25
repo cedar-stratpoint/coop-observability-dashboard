@@ -23,6 +23,10 @@ type Ctx = {
   marks: ReviewMark[];
   canFlag: boolean;
   open: (t: FlagTarget) => void;
+  /** Save a flag without the dialog (Add product row). Returns an error, or null. */
+  save: (flag: {uploadId: string; itemCode: string | null; rowIndex: number | null; kind: MarkKind; reason?: string | null}) => Promise<string | null>;
+  /** Clear a flag by id without the dialog. Returns an error, or null. */
+  clear: (id: string) => Promise<string | null>;
 };
 
 const MarksContext = createContext<Ctx | null>(null);
@@ -36,8 +40,26 @@ export function ReviewFlagsProvider({company, initial, canFlag, children}: {comp
   const [marks, setMarks] = useState<ReviewMark[]>(initial);
   const [target, setTarget] = useState<FlagTarget | null>(null);
   const open = useCallback((t: FlagTarget) => setTarget(t), []);
-  const value = useMemo(() => ({marks, canFlag, open}), [marks, canFlag, open]);
   const onSaved = useCallback((m: ReviewMark) => setMarks((all) => upsertLocal(all, m)), []);
+  const save = useCallback<Ctx['save']>(
+    async (flag) => {
+      const res = await flagAction({company, flag: {...flag, reason: flag.reason ?? ''}});
+      if (!res.ok) return res.error;
+      onSaved(res.mark);
+      return null;
+    },
+    [company, onSaved],
+  );
+  const clear = useCallback<Ctx['clear']>(
+    async (id) => {
+      const res = await clearMarkAction({company, id});
+      if (!res.ok) return res.error;
+      onSaved(res.mark);
+      return null;
+    },
+    [company, onSaved],
+  );
+  const value = useMemo(() => ({marks, canFlag, open, save, clear}), [marks, canFlag, open, save, clear]);
   return (
     <MarksContext.Provider value={value}>
       {children}

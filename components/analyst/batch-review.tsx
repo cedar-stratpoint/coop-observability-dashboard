@@ -23,6 +23,7 @@ import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
 import type {ReviewMark} from '@/src/goldline-review-marks';
+import type {AddableItem} from '@/src/review-add-row';
 import {useUploadQueue} from '@/components/analyst/upload-queue';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
@@ -98,7 +99,10 @@ export function BatchReview({
   otherFiles,
   initialPageId = null,
   marks = [],
+  addable = [],
 }: {
+  /** Catalog products the reviewer can add as rows (NICH-42 Add product row). */
+  addable?: AddableItem[];
   /** Every page's review flags (NICH-42). */
   marks?: ReviewMark[];
   company: string;
@@ -660,6 +664,10 @@ export function BatchReview({
                 </Card>
                 <ReviewRows
                   uploadId={cur.upload.id}
+                  addable={addable}
+                  page={cur.page}
+                  onAddRow={(row) => setCur((s) => ({rows: [...s.rows, row]}))}
+                  onRemoveRow={(i) => setCur((s) => ({rows: s.rows[i]?.added ? s.rows.filter((_, k) => k !== i) : s.rows}))}
                   onPoint={cur.scanUrl ? setPointRow : undefined}
                   pointed={pointRow}
                   rows={curState.rows}
