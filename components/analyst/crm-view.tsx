@@ -145,7 +145,7 @@ import {
 } from '@/src/crm-table';
 import type {CrmBirthdayVoucherSafe, MembershipEventsRead} from '@/src/crm-project';
 import {phDay} from '@/src/custom-range';
-import type {CustomerContact} from '@/src/customer-contacts';
+import {loggableKeys, type CustomerContact} from '@/src/customer-contacts';
 import {cohortLabel, cohortPreview, cohortSuggestions, cohortsOf, compareCohorts, type CustomerCohort} from '@/src/customer-cohorts';
 import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
@@ -603,6 +603,9 @@ export function CrmView({
   const historyOf = (c: CustomerRow): CustomerContact[] | null =>
     contacts === null ? null : (contactsByEmail.get((c.email ?? '').trim().toLowerCase()) ?? []);
   const nameOf = (c: CustomerRow): string => [c.firstName, c.lastName].filter(Boolean).join(' ');
+  // RET-17 review: the Website CRM logs by email (history and counts here match by email); the phone rides along only with an email.
+  const crmPerson = (c: CustomerRow) => ({email: c.email, instagram: null, mobile: c.email ? c.phone : null});
+  const canLog = (c: CustomerRow): boolean => loggableKeys({email: c.email, instagram: null, mobile: null}).email !== null;
   const tiers = useMemo(() => tierCounts(customers ?? []), [customers]);
   const repeat = useMemo(() => repeatRate(all.map((c) => c.orderCount)), [all]);
   // Named so the Orders tile (the CRM's own total, test orders in) and "No buyers yet" never read as a contradiction (staging is all test orders).
@@ -1482,7 +1485,9 @@ export function CrmView({
                             <ProfileLink onOpen={open} owner={c} className="font-medium">{nameOf(c) || '—'}</ProfileLink>
                           </td>
                           <td className="px-2 py-1.5">
-                            {/* Owner 2026-11-25: Log contact sits next to the name, not at the far right, and reads as a button. */}
+                            {/* Owner 2026-11-25: Log contact sits next to the name, not at the far right, and reads as a button.
+                                RET-17 review: the Website CRM logs by email (its history and counts match by email), so no email = no Log. */}
+                            {canLog(c) ? (
                             <button
                               type="button"
                               onClick={() => setLogFor(c)}
@@ -1492,6 +1497,9 @@ export function CrmView({
                               <MessageSquarePlus className="size-3.5" aria-hidden />
                               Log contact
                             </button>
+                            ) : (
+                              <span className="px-2.5 text-xs text-muted-foreground" title="No email address: a contact cannot be logged for this customer here">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5">
                             <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
@@ -1524,6 +1532,7 @@ export function CrmView({
                           </td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">
                             {/* RET-17 (owner 2026-11-25): click Last contacted to log a contact on a chosen day. Automated emails stay read-only. */}
+                            {canLog(c) ? (
                             <button
                               type="button"
                               onClick={() => setLogFor(c)}
@@ -1534,6 +1543,12 @@ export function CrmView({
                               {lastContactLabel(c)}
                               {c.lastContactKind && <span className="block no-underline">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
                             </button>
+                            ) : (
+                              <span className="block px-2 py-1" title={c.lastContactKnown ? undefined : 'Unknown: a CRM source or the contact log did not answer'}>
+                                {lastContactLabel(c)}
+                                {c.lastContactKind && <span className="block">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.consent.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.petName ?? '—'}</td>
@@ -1719,13 +1734,13 @@ export function CrmView({
                           </dd>
                         </div>
                       </dl>
-                      <button
+                      {canLog(c) && <button
                         type="button"
                         onClick={() => setLogFor(c)}
                         className="mt-2.5 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium text-muted-foreground transition-[color,border-color,transform] duration-150 hover:border-primary hover:text-foreground active:scale-[0.97]"
                       >
                         <MessageSquarePlus className="size-3.5" /> Log contact
-                      </button>
+                      </button>}
                     </li>
                   ))}
                 {tab === 'pets' &&
@@ -1811,7 +1826,7 @@ export function CrmView({
       {logFor && (
         <ContactLogDialog
           name={nameOf(logFor)}
-          person={{email: logFor.email, instagram: null, mobile: logFor.phone}}
+          person={crmPerson(logFor)}
           history={historyOf(logFor)}
           viewer={viewer}
           legacy={contactLogLegacy}

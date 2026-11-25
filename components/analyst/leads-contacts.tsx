@@ -21,6 +21,7 @@ import {
 import {leadKey, type LeadMatch} from '@/src/lead-order-match';
 import {fmtPhDate} from '@/src/crm-compute';
 import {downloadCsv} from '@/src/csv';
+import {hasLoggableKey} from '@/src/customer-contacts';
 import {instagramUrl} from '@/src/instagram';
 import {isVoucherPrize} from '@/src/spin-leads-sync';
 import {spinVoucherCsv, type SpinVoucherInfo} from '@/src/spin-voucher';
@@ -39,7 +40,8 @@ export type LeadsContactsData = {
 };
 
 const UNKNOWN: ContactStatus = {state: 'unknown', lastAt: null, lastChannel: null};
-export const hasContactKey = (l: SpinLead): boolean => Boolean(l.email || l.instagram || l.mobile);
+/** A lead the team can log a contact for: at least one key the log accepts (a junk mobile or handle does not count). */
+export const hasContactKey = (l: SpinLead): boolean => hasLoggableKey(l);
 
 const STATE_TONE: Record<ContactState, string> = {
   not_contacted: 'border-[var(--amber-fg)]/30 bg-[var(--amber-bg)] text-[var(--bhr-warn)] dark:text-[var(--amber-fg)]',

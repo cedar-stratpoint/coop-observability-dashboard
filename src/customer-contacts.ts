@@ -97,6 +97,31 @@ const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (error: string): ContactResult => ({ok: false, error});
 
+/** The keys of a person a contact can be logged against. */
+export type ContactKeys = {email: string | null; instagram: string | null; mobile: string | null};
+
+/**
+ * The keys as readContactInput stores them (emailKey / igHandle / phoneKey), with every key it would refuse dropped (null): a
+ * booth mobile "N/A" or an Instagram "@karla sy" must not block logging by a good email. `legacy` (supabase/
+ * customer_contacts_lead_keys.sql not applied) keeps the email only, the one key the old table takes. What comes back always
+ * passes readContactInput; the server still checks.
+ */
+export function loggableKeys(p: ContactKeys, legacy = false): ContactKeys {
+  const email = emailKey(p.email);
+  const instagram = igHandle(p.instagram);
+  return {
+    email: email && EMAIL.test(email) && email.length <= 254 ? email : null,
+    instagram: !legacy && instagram && HANDLE.test(instagram) ? instagram : null,
+    mobile: legacy ? null : phoneKey(p.mobile),
+  };
+}
+
+/** At least one key a contact can be logged against (no key = no Log button, status Unknown). */
+export function hasLoggableKey(p: ContactKeys, legacy = false): boolean {
+  const k = loggableKeys(p, legacy);
+  return Boolean(k.email || k.instagram || k.mobile);
+}
+
 /**
  * "When" (owner 2026-11-25: editable last contacted): a PH day 'YYYY-MM-DD', not after today in Manila. Today = undefined (the
  * database stamps now(), so the order of today's contacts holds); a past day = noon PH that day, which reads back as that PH day.
