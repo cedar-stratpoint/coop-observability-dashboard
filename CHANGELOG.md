@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · GitLab staging deploys use a Vercel "staging" environment
+
+The first GitLab deploy of `staging` built fine but failed at `vercel alias set` ("User not found": `COOP_VERCEL_TOKEN` is a team token and the alias command looks up a personal user). Testing that build showed a bigger problem: sign-in failed with `MissingSecret`. Vercel doesn't apply branch-scoped Preview vars to CLI deploys, even when the deploy records `gitCommitRef: staging`, so `AUTH_SECRET` and the other 20 `staging`-scoped vars were missing. The alias failure kept that build off the staging domain.
+
+- **Decided: a Vercel custom environment named `staging`** (`env_ADpm…`), not branch-scoped Preview vars. It holds the 37 Preview vars, with the `staging` branch value where both existed. `coop-cedar-staging.vercel.app` is attached to it, so `vercel deploy --environment=staging` moves the domain by itself and the alias step is gone. Applied by hand on 2026-11-25 and checked with a test deploy (sign-in config OK); live staging now serves that build.
+- **Still to add by hand:** `SHOPEE_SYNC_WAKE_TOKEN` and `SHOPEE_SYNC_WORKER_TOKEN` in the `staging` environment. Vercel marks them sensitive and never returns their values, so they couldn't be copied. Until then the Shopee sync routes on staging answer 503 (fail closed).
+- **Commit on CLI deploys.** Vercel fills `VERCEL_GIT_*` only for Git-integration builds. The job now passes `DEPLOY_COMMIT_SHA` / `DEPLOY_COMMIT_REF` with `--env`, and `/api/health` falls back to them. The smoke check requires the commit and branch to match the job, which also proves the domain moved to the new build.
+- The old branch-scoped Preview vars stay in place for now; remove them once GitLab deploys are settled.
+
 ## 2026-11-25 · Vercel deploys move from GitHub to GitLab CI
 
 Staging and production now deploy from a GitLab pipeline (`.gitlab-ci.yml`) instead of Vercel's GitHub integration. Same Vercel project (`coop-observability-dashboard`), same domains: `main` → **coop-cedar.vercel.app** (Production), `staging` → **coop-cedar-staging.vercel.app** (a Preview build, aliased on every deploy).

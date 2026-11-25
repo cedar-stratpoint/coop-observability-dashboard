@@ -39,8 +39,9 @@ export async function GET(req: Request) {
     {
       ok: dbOk,
       env: resolveEnv(url, req.headers.get('x-forwarded-host') ?? req.headers.get('host')).key,
-      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
-      branch: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+      // Vercel fills VERCEL_GIT_* only for Git-integration builds; GitLab CLI deploys pass DEPLOY_COMMIT_* instead.
+      commit: (process.env.VERCEL_GIT_COMMIT_SHA || process.env.DEPLOY_COMMIT_SHA)?.slice(0, 7) || null,
+      branch: process.env.VERCEL_GIT_COMMIT_REF || process.env.DEPLOY_COMMIT_REF || null,
       db: ref ? mask(ref) : null,
       dbOk,
       checkedAt: new Date().toISOString(),
