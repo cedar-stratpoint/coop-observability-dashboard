@@ -3,7 +3,7 @@
 // applied, reads fall back to the old columns and logging by Instagram / mobile says "not set up" (email logging keeps working).
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {loadContactLog, loadContactRows, logContactWith, readContactInput, withColumnFallback, type ContactLogDeps, type NewContactRow} from '../src/customer-contacts';
+import {hasLoggableKey, loadContactLog, loadContactRows, loggableKeys, logContactWith, readContactInput, withColumnFallback, type ContactLogDeps, type NewContactRow} from '../src/customer-contacts';
 
 const ME = 'ana@zoomy.ph';
 const ID = '0b6f6a52-2f6e-4f5e-9d33-6f1b8a3c9e01';
@@ -170,5 +170,25 @@ describe('contactedAt: the "When" of a logged contact', () => {
     expect(await logContactWith(deps, {email: 'mia@example.com', channel: 'dm', note: ''}, NOW)).toEqual({ok: true});
     expect(inserted[0]).toMatchObject({contact_instagram: 'karla.sy', contacted_at: '2026-11-20T12:00:00+08:00'});
     expect(inserted[1]).not.toHaveProperty('contacted_at');
+  });
+});
+
+// Review fix: the Log dialog sends only keys the server accepts, normalised; a bad booth mobile no longer blocks a good email.
+describe('loggableKeys', () => {
+  it('normalises and drops invalid keys', () => {
+    expect(loggableKeys({email: ' Mia@Example.com ', instagram: '@Karla.Sy', mobile: '+63 917 148 8749'})).toEqual({email: 'mia@example.com', instagram: 'karla.sy', mobile: '9171488749'});
+    expect(loggableKeys({email: 'mia@example.com', instagram: '@karla sy', mobile: 'N/A'})).toEqual({email: 'mia@example.com', instagram: null, mobile: null});
+    expect(loggableKeys({email: 'not-an-email', instagram: null, mobile: '917148874'})).toEqual({email: null, instagram: null, mobile: null});
+  });
+  it('legacy (SQL not applied) keeps the email only', () => {
+    expect(loggableKeys({email: 'mia@example.com', instagram: 'karla.sy', mobile: '09171488749'}, true)).toEqual({email: 'mia@example.com', instagram: null, mobile: null});
+  });
+  it('what it returns always passes readContactInput', () => {
+    const k = loggableKeys({email: 'mia@example.com', instagram: '@karla sy', mobile: '12'});
+    expect('error' in readContactInput({...k, channel: 'dm', note: ''})).toBe(false);
+  });
+  it('hasLoggableKey is false when nothing valid is left', () => {
+    expect(hasLoggableKey({email: 'N/A', instagram: '@ bad handle', mobile: '123'})).toBe(false);
+    expect(hasLoggableKey({email: null, instagram: null, mobile: '0917 148 8749'})).toBe(true);
   });
 });

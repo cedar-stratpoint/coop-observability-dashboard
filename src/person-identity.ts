@@ -6,27 +6,33 @@
  * or a mobile; a mobile only when the two records do not carry DIFFERENT emails (one household phone, two people). Keys are
  * compared the way they are stored: emailKey, igHandle (no "@", lower case), phoneKey (last 10 digits).
  */
-import {emailKey, phoneKey} from './contacts-merge';
-import type {ContactChannel, CustomerContact} from './customer-contacts';
-import {igHandle, type CustomerLink} from './customer-links';
+import {emailKey} from './contacts-merge';
+import {loggableKeys, type ContactChannel, type CustomerContact} from './customer-contacts';
+import type {CustomerLink} from './customer-links';
 
 export type Person = {email: string | null; instagram: string | null; mobile: string | null};
 
 type Keys = {email: string | null; instagram: string | null; mobile: string | null};
-const keysOf = (p: Person): Keys => ({email: emailKey(p.email), instagram: igHandle(p.instagram), mobile: phoneKey(p.mobile)});
+/** A key a contact could not be logged against (an invalid email or handle, a short mobile) is not a key here either. */
+const keysOf = (p: Person): Keys => loggableKeys(p);
 
 /** Direct match on the records' own keys. */
 function sameKeys(a: Keys, b: Keys): boolean {
   if (a.email && a.email === b.email) return true;
   if (a.instagram && a.instagram === b.instagram) return true;
-  // One mobile, two different emails = two people sharing a phone (Review Focus 2): not joined.
-  return a.mobile !== null && a.mobile === b.mobile && !(a.email && b.email && a.email !== b.email);
+  // One mobile, two different emails or two different Instagram handles = two people sharing a phone (Review Focus 2): not joined.
+  return (
+    a.mobile !== null &&
+    a.mobile === b.mobile &&
+    !(a.email && b.email && a.email !== b.email) &&
+    !(a.instagram && b.instagram && a.instagram !== b.instagram)
+  );
 }
 
 /** `customer` is the link's customer, and `lead` carries one of the link's lead keys. */
 function linkedBy(link: CustomerLink, customer: Keys, lead: Keys): boolean {
   if (!customer.email || customer.email !== emailKey(link.customerEmail)) return false;
-  return sameKeys(lead, {email: emailKey(link.leadEmail), instagram: igHandle(link.leadInstagram), mobile: phoneKey(link.leadMobile)});
+  return sameKeys(lead, keysOf({email: link.leadEmail, instagram: link.leadInstagram, mobile: link.leadMobile}));
 }
 
 export function samePerson(a: Person, b: Person, links: readonly CustomerLink[]): boolean {

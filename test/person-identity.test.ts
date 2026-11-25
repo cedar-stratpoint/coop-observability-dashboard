@@ -128,3 +128,23 @@ describe('review fixes', () => {
     expect(contactStatus(P({email: 'mia@example.com'}), [C({email: 'mia@example.com', contactedAt: 'x'})], [])).toEqual({state: 'contacted', lastAt: null, lastChannel: null});
   });
 });
+
+// Review fix (whole-branch review, RET-17): one household phone, two different Instagram handles = two people, like two emails.
+describe('samePerson: household mobile with different Instagram handles', () => {
+  it('two leads with different IG handles and the same mobile are NOT the same person', () => {
+    expect(samePerson(P({instagram: 'karla.sy', mobile: '09171488749'}), P({instagram: 'bea.cat', mobile: '0917 148 8749'}), [])).toBe(false);
+  });
+  it('same mobile, one side without IG, still joins', () => {
+    expect(samePerson(P({instagram: 'karla.sy', mobile: '09171488749'}), P({mobile: '09171488749'}), [])).toBe(true);
+  });
+  it('a contact logged by IG + mobile does not land on another IG handle sharing that mobile', () => {
+    const log = [C({instagram: 'bea.cat', mobile: '9171488749'})];
+    expect(contactStatus(P({instagram: 'karla.sy', mobile: '09171488749'}), log, []).state).toBe('not_contacted');
+  });
+});
+
+describe('keys that cannot be logged are not keys (status Unknown, no Log)', () => {
+  it('a lead with only an invalid IG handle and a junk mobile is unknown', () => {
+    expect(contactStatus(P({instagram: '@karla sy', mobile: 'N/A'}), [], []).state).toBe('unknown');
+  });
+});
