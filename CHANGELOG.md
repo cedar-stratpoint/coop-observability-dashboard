@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Every flag with its page and row, and a per-store flag CSV (NICH-43 §3, §4)
+
+Syl (Nov 25): "if there's a flag, can I see the page and row where it was flagged and why, which store, which BA", and "export all SKUs that need flagging per store". Built as one list for both kinds of flag: the BA scorecard's checks and the review flags (reader and reviewer, #799/#801).
+
+- **`/flags/review` "Every flag, page and row"**, linked from the Flags header. One line per flag: the scan page ("Page 11 of 98" and the scan's name), the row (product and item code, or Whole page), why, who raised it (Coop check, Reader, Reviewer) with the reviewer's note, store, BA and month, and a link to open the page. Filters: store, month, source, open or closed, and search; kept in the URL.
+- **CSV** with the same filters (`/api/goldline/flag-lines-export`): pick a store for that store's file, or every store sorted by store.
+- Store, period and BA are joined live from the page's form and read header (a page's store is often set after it was flagged). A store-limited role sees only its stores, and never a review flag whose store isn't known yet.
+- Staging: 166 flags listed (the existing checks), CSV matches.
+
 ## 2026-11-25 — Reader sets review flags: notes, Damage, relabelled columns, written-in rows (NICH-36, flagged off)
 
 Syl (Nov 25): flag BA notes and revisions, "Damage" written in a count, and relabelled columns with the file, page and row, without capturing the note's text. Decided with the user: the reader detects them and reviewers can add or clear flags by hand (#799). Behind `GOLDLINE_READ_MARKS=1`; **off by default, byte-identical read when off**.
