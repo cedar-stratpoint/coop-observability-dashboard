@@ -20,13 +20,19 @@ Owner: link a website customer to a booth lead from Ask Coop's matches table, an
 - New table `customer_links` (`supabase/customer_links.sql`, RLS on, no policies); **not applied anywhere yet: the owner applies it**, staging first. Until then Same person says it is not set up. Data catalog updated.
 
 
-## 2026-11-25 · v1.26.9 Ask Coop matches table by source (prod release)
+## 2026-11-25 · v1.26.10 Ask Coop matches by source + Same person links (prod release)
 Ships only the matches table layout (name first; Website CRM / Event leads columns), cherry-picked onto `main`.
 
 ## 2026-11-25 — Ask Coop matches table: name first, sides named by source
 
 Owner: the matches table read "A: name … B: Instagram". It now leads with **Name** (the website or Lazada name first, then the booth's typed name, then the handle), then **Match**, **Score**, **Why**, and each side is labelled by where it came from: **Website CRM: name / email / mobile** and **Event leads: name / Instagram / email / mobile / event** (Lazada: name / mobile). The internal "Signals" and "seen in" columns are gone from the table (the model still gets the signals). Tables whose sides are not fixed (one person, one event) say "Record 1 / Record 2" with a "from" column.
 
+## 2026-11-25 · v1.26.9 Per store board: one store picker at a time; confirmations stay on screen (prod release)
+Ships only #749 (staging), cherry-picked onto `main`.
+
+## 2026-11-25 — Per store board: one store picker at a time; confirmations stay on screen
+
+QA (Nov 25): opening "Confirm store" on a second card left the first card's picker open too, so two search boxes showed at once. The board now keeps one open picker; opening another closes the first. Also, the store-confirm confirmation landed at the very bottom of a long scan board instead of on screen: an animated (transformed) page wrapper turns `position: fixed` into "bottom of the page". `ToastStack` now renders into `<body>` through a portal, so it stays at the bottom right of the visible screen however far down the reviewer is. The Uploads page had its own copy of the same stack and now uses the shared one, so its confirmations get the same fix.
 
 ## 2026-11-25 · v1.26.8 Event lead contacts: Collected from–to range (prod release)
 Ships only #746 (staging #747), cherry-picked onto `main`.
