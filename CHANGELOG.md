@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop matches: Instagram columns, and one piece of evidence scores once
+
+The matches table now shows **A: Instagram** and **B: Instagram** next to email and mobile. A name inside a handle is no longer added on top of the same handle match (Karla Sy / karlasy60@ / @karla.sy scored 40 + 30 for one fact; now 40, plus any other clue such as the same pet).
+
 ## 2026-11-25 — Ask Coop matches people by name, email and IG patterns (RET-14)
 
 Owner: "match by name and IG words or letters, or in the email". `contacts` mode matches gains two pattern clues: **same letters in an email or IG handle** (40: `karlasy60@gmail.com` and `@karla.sy` both read `karlasy`) and **a name written inside the other's email or handle** (30: "Karla Sy" in `karlasy60@`). Booth leads now bring their typed **name** into matching (it was ignored). Rules kept: only same email or mobile is "confirmed"; a clue never counts twice with an exact email or IG; handles under 5 letters and one-word or 2-letter names never match; new blocks are capped like the others. `voucher` now also scopes matches (website side = that code's users). Weights are starting points (`WEIGHTS` in `src/chat/contacts/match.ts`) for the owner to tune on labelled pairs. Tests `test/chat-contacts-match-handles.test.ts`.

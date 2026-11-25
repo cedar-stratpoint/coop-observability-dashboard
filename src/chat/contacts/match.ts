@@ -98,8 +98,9 @@ function signalsFor(x: Rec, y: Rec, phoneNames: Map<string, Set<string>>): Signa
   // Pattern clues across fields (owner 2026-11-25): the same letters in an email or IG handle, or a name written inside one.
   const shared = exact(x, y) ? null : cores(x).find((c) => cores(y).includes(c));
   if (shared) out.push({key: 'handle', points: WEIGHTS.handleSame, why: `same name in email or Instagram (${shared})`});
-  const inY = nameIn(x.name, cores(y));
-  const inX = inY ? null : nameIn(y.name, cores(x));
+  // One piece of evidence scores once: a name inside a handle is only added when the handles themselves did not already match.
+  const inY = shared ? null : nameIn(x.name, cores(y));
+  const inX = shared || inY ? null : nameIn(y.name, cores(x));
   if (inY || inX) out.push({key: 'name_in_handle', points: WEIGHTS.nameInHandle, why: `name is written in the other's email or Instagram (${inY ?? inX})`});
   const kx = petKey(x.pet);
   if (kx && kx === petKey(y.pet)) out.push({key: 'pet', points: WEIGHTS.pet, why: `same pet name (${kx})`});
@@ -177,14 +178,16 @@ const COLUMNS: ResultColumn[] = [
   {key: 'a_name', label: 'A: name', unit: 'text', role: 'category'},
   {key: 'a_email', label: 'A: email', unit: 'text', role: 'category'},
   {key: 'a_mobile', label: 'A: mobile', unit: 'text', role: 'category'},
+  {key: 'a_instagram', label: 'A: Instagram', unit: 'text', role: 'category'},
   {key: 'b_source', label: 'B: seen in', unit: 'text', role: 'category'},
   {key: 'b_name', label: 'B: name', unit: 'text', role: 'category'},
   {key: 'b_email', label: 'B: email', unit: 'text', role: 'category'},
   {key: 'b_mobile', label: 'B: mobile', unit: 'text', role: 'category'},
+  {key: 'b_instagram', label: 'B: Instagram', unit: 'text', role: 'category'},
 ];
 
 const label = (r: Rec): string | null => clean(r.name, 80) ?? (r.ig ? clean(`@${igKey(r.ig)}`, 40) : null);
-const side = (p: 'a' | 'b', r: Rec): MetricRow => ({[`${p}_source`]: r.source, [`${p}_name`]: label(r), [`${p}_email`]: clean(r.email, 80), [`${p}_mobile`]: clean(r.mobile, 30)});
+const side = (p: 'a' | 'b', r: Rec): MetricRow => ({[`${p}_source`]: r.source, [`${p}_name`]: label(r), [`${p}_email`]: clean(r.email, 80), [`${p}_mobile`]: clean(r.mobile, 30), [`${p}_instagram`]: igKey(r.ig) ? clean(`@${igKey(r.ig)}`, 60) : null});
 const toRow = (l: Link, n: number, ordered: [Rec, Rec]): MetricRow => ({
   n,
   tier: l.tier,
