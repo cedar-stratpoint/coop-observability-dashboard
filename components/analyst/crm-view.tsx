@@ -149,7 +149,7 @@ import {cohortLabel, cohortPreview, cohortSuggestions, cohortsOf, compareCohorts
 import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
 import {unlinkPeople} from '@/src/customer-links-actions';
-import {boothCell, boothText, type CustomerBooth} from '@/src/customer-links';
+import {boothCell, boothText, instagramState, matchesInstagramFilter, type CustomerBooth, type InstagramFilter} from '@/src/customer-links';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -482,6 +482,8 @@ export function CrmView({
   const [deleting, startDelete] = useTransition();
   const [unlinking, startUnlink] = useTransition();
   const boothOf = (c: CustomerRow): CustomerBooth | undefined => booth[(c.email ?? '').trim().toLowerCase()];
+  // Owner 2026-11-25: "filter na has Instagram". Kept apart from CustomerFilter: the handle comes from the page's booth map, not the CRM row.
+  const [igFilter, setIgFilter] = useState<InstagramFilter>('all');
   // The viewer can only unlink a link they made (the action checks again).
   const myLinkId = (c: CustomerRow): string | null => (viewer === null ? null : (boothOf(c)?.links.find((l) => l.createdBy === viewer)?.id ?? null));
   const unlink = (id: string) =>
@@ -567,7 +569,7 @@ export function CrmView({
       : tab === 'orders'
         ? filterActive(orderFilter)
         : tab === 'customers'
-          ? filterActive(customerFilter) || cohortOn
+          ? filterActive(customerFilter) || cohortOn || igFilter !== 'all'
           : petFilter !== 'all';
   const clearFilters = () => {
     if (tab === 'carts') setCartFilter(EMPTY_CART_FILTER);
@@ -575,6 +577,7 @@ export function CrmView({
     else if (tab === 'customers') {
       setCustomerFilter(EMPTY_CUSTOMER_FILTER);
       setCohortSel('all');
+      setIgFilter('all');
     } else setPetFilter('all');
     setPage(1);
   };
@@ -672,9 +675,11 @@ export function CrmView({
   const customerList = useMemo(() => {
     const audience = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
     const rule = savedCohort?.rule ?? ruleBuiltin?.rule ?? null;
-    const listed = rule ? audience.filter((r) => matchesCohort(r, rule)) : audience;
+    const ruled = rule ? audience.filter((r) => matchesCohort(r, rule)) : audience;
+    const listed = igFilter === 'all' ? ruled : ruled.filter((r) => matchesInstagramFilter(igFilter, instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead)));
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
-  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort]);
+  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead]);
+  const igCount = useMemo(() => all.filter((r) => instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead) === 'has').length, [all, booth, boothRead]);
   // The cohort bar: everyone in the selected cohort (search and the other filters aside), their repeat buyer rate and the rule.
   const cohortBar = useMemo(() => {
     if (!cohortOn) return null;
@@ -739,7 +744,7 @@ export function CrmView({
       downloadCsv(`crm-orders (${orderRows.length}).csv`, orderCsv(orderRows, asOf, note));
     } else if (tab === 'customers') {
       const name = savedCohort ? 'crm-customers-cohort' : ruleBuiltin ? `crm-customers-${ruleBuiltin.key.replace('_', '-')}` : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
-      const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers], ['Voucher', customerFilter.voucher ?? 'all']], q);
+      const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers], ['Voucher', customerFilter.voucher ?? 'all'], ['Instagram', igFilter]], q);
       downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name, ruleBuiltin !== null, {map: new Map(Object.entries(booth)), read: boothRead}));
     } else {
       const note = filterNote([['Voucher', petFilter]], q);
@@ -1128,6 +1133,19 @@ export function CrmView({
                 ]}
               />
               <FilterSelect
+                label="Instagram"
+                value={igFilter}
+                onChange={(v) => {
+                  setIgFilter(v as InstagramFilter);
+                  setPage(1);
+                }}
+                options={[
+                  ['all', 'All'],
+                  ['has', `Has Instagram · ${igCount}`],
+                  ['none', 'No Instagram'],
+                ]}
+              />
+              <FilterSelect
                 label="Sort"
                 value={sortChoiceOf(customerSort)}
                 onChange={(v) => v !== 'column' && onFilter(setCustomerSort, SORT_CHOICES[v as Exclude<SortChoice, 'column'>])}
@@ -1379,6 +1397,7 @@ export function CrmView({
                     {tab === 'customers' && (
                       <tr>
                         <SortTh label="Name" k="name" sort={customerSort} onSort={sortCustomers} />
+                        <th className={th}>Contact</th>
                         <SortTh label="Email" k="email" sort={customerSort} onSort={sortCustomers} />
                         <th className={th} title="Saved cohorts this customer matches right now. Hover a label for its rule">Cohorts</th>
                         <SortTh label="Member since" k="memberSince" sort={customerSort} onSort={sortCustomers} title="When the customer record was created (PH date)" />
@@ -1401,7 +1420,6 @@ export function CrmView({
                         <SortTh label="Last contacted" k="lastContacted" sort={customerSort} onSort={sortCustomers} title="The newest contact of any kind, Philippine date. Unknown when a source could not be read" />
                         <SortTh label="Consent" k="consent" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Pet" k="pet" sort={customerSort} onSort={sortCustomers} />
-                        <th className="px-2 py-2.5"><span className="sr-only">Log a contact</span></th>
                       </tr>
                     )}
                     {tab === 'pets' && (
@@ -1493,6 +1511,18 @@ export function CrmView({
                           <td className="px-4 py-2.5">
                             <ProfileLink onOpen={open} owner={c} className="font-medium">{nameOf(c) || '—'}</ProfileLink>
                           </td>
+                          <td className="px-2 py-1.5">
+                            {/* Owner 2026-11-25: Log contact sits next to the name, not at the far right, and reads as a button. */}
+                            <button
+                              type="button"
+                              onClick={() => setLogFor(c)}
+                              aria-label={`Log a contact with ${nameOf(c) || c.email || 'this customer'}`}
+                              className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-primary/40 bg-primary/5 px-2.5 py-1 text-[11px] font-semibold text-primary transition-[background-color,transform] duration-150 hover:bg-primary/10 active:scale-[0.97] motion-reduce:transition-none"
+                            >
+                              <MessageSquarePlus className="size-3.5" aria-hidden />
+                              Log contact
+                            </button>
+                          </td>
                           <td className="px-4 py-2.5">
                             <ProfileLink onOpen={open} owner={c}>{c.email ?? '—'}</ProfileLink>
                           </td>
@@ -1528,17 +1558,6 @@ export function CrmView({
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.consent.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.petName ?? '—'}</td>
-                          <td className="px-2 py-1.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setLogFor(c)}
-                              aria-label={`Log a contact with ${nameOf(c) || c.email || 'this customer'}`}
-                              title="Log a contact"
-                              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-[0.97]"
-                            >
-                              <MessageSquarePlus className="size-4" />
-                            </button>
-                          </td>
                         </tr>
                       ))}
                     {tab === 'pets' &&
@@ -1779,6 +1798,7 @@ export function CrmView({
       {profileId !== null && (
         <CustomerProfile
           row={profileRow}
+          boothInfo={profileRow ? boothOf(profileRow) : undefined}
           orders={orders}
           checkouts={checkouts}
           birthdayVouchers={birthdayVouchers}
