@@ -1,5 +1,6 @@
 // F5 + F7 + F8 + F10: executors for describe_data, query_metric, get_digest, lookup_product, the three render tools and the three report-edit tools, and the progress line for the stream.
 // Pure; data loads lazily. query_metric keeps the FULL result in a per-request store that the render tools bind from.
+import {voucherMatch} from '../crm-compute';
 import {draftLeads} from './contacts/draft';
 import {matchPeople} from './contacts/match';
 import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
@@ -196,7 +197,9 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       const source = await ctx.leads!();
       let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
       if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
-        const people = await peopleSource(source);
+        const all = await peopleSource(source);
+        // RET-14: an overlap scoped to one discount code keeps only the website customers who used it on any order (same rule as the page).
+        const people = req.mode === 'overlap' && req.voucher && all.website ? {...all, website: all.website.filter((c) => voucherMatch(c, req.voucher!))} : all;
         out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
       } else {
         out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
