@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Reconcile: new Store and Month pickers, All stores by default
+
+Feedback: the two native dropdowns looked plain, and the month list was a long run of "(no forms)". Hick's law: fewer, clearer choices first.
+
+- **Store** is a searchable picker. All stores sits pinned on top and is now the **default** (user request; was the first store with a form). Next come the stores with a form this month, the ones that can be fully checked. Stores with sales only are folded behind "Show N stores with sales only" until you search, and search covers every store by name or code. A store-limited role still only sees its own stores; an unknown or out-of-scope code in the URL opens All stores.
+- **Month** is a year-at-a-glance grid with one dot per month: sales and forms, forms with no sales yet, or sales with no forms. Months with no data are shown but can't be picked. When no month has both, the picker says so. Arrow keys move across months.
+- Both views use the same month picker. `AuditResult.stores` now carries `counted`.
+
+On Staging today, no month has both: October has forms for 2 stores but no POS sales, and November 2025 to September 2026 have sales but no committed forms (about 1,377 scanned pages wait in Needs review).
 ## 2026-11-25 — "Same person" links: Instagram + Booth on the Website CRM table, not a merge (RET-15 Slice B)
 
 Owner: link a website customer to a booth lead from Ask Coop's matches table, and see the booth's Instagram and event beside the customer. **Decision: extra metadata, not a total merge.** The website row keeps its own name, email, orders, spend and vouchers (the CRM stays the source), so orders, spend, cohorts and repeat rate never change, and **Unlink** removes only the extra metadata. Only the person who linked can unlink (same delete-own rule as the contact log).

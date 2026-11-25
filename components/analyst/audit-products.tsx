@@ -6,7 +6,7 @@ import {useRouter} from 'next/navigation';
 import {ChevronRight, Search, X} from 'lucide-react';
 import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
-import {NativeSelect} from '@/components/ui/native-select';
+import {MonthPicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {ALL_STORES, AUDIT_META, AUDIT_STATES, NEEDS_ACTION, openingState, patternState, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
@@ -19,9 +19,6 @@ import {CoverageNote, ink, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSou
 const FIELD =
   'h-9 rounded-lg border border-border bg-card px-2.5 text-sm outline-none transition-colors duration-150 [@media(hover:hover)]:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
 
-// The store / month pickers: NativeSelect draws an inset chevron (the browser's own arrow sits
-// flush against the right edge), sized to match FIELD.
-const SELECT = 'h-9 rounded-lg bg-card pr-9 pl-3 duration-150';
 
 const PAGE = 25;
 
@@ -80,18 +77,11 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
               Month
               {/* A month is a filter, not a step: replace, so Back leaves the page. */}
-              <NativeSelect className={SELECT} value={data.month} onChange={(e) => router.replace(`/stock/audit/products?month=${e.target.value}`, {scroll: false})}>
-                {data.months.map((m) => (
-                  <option key={m.month} value={m.month}>
-                    {monthLabel(m.month)}
-                    {!m.loaded ? ' (no sales yet)' : !m.counted ? ' (no forms)' : ''}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
+              <MonthPicker months={data.months} value={data.month} onChange={(month) => router.replace(`/stock/audit/products?month=${month}`, {scroll: false})} />
+            </div>
             <div className="ml-auto flex gap-6 text-right">
               <div>
                 <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.storeCount}</p>
