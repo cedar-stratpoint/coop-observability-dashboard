@@ -143,3 +143,32 @@ describe('supabase/customer_contacts_lead_keys.sql', () => {
     expect(sql).not.toMatch(/create policy|grant /i);
   });
 });
+
+// Priority update (owner 2026-11-25): "When" = an editable last-contacted day. A PH day, never in the future; today (or none)
+// leaves contacted_at to the database's now(), a past day is stored as noon PH that day so it reads back as that day.
+describe('contactedAt: the "When" of a logged contact', () => {
+  const NOW = new Date('2026-11-25T03:00:00Z'); // 11:00 PH, Nov 25
+  it('a past PH day is stored as noon PH that day', () => {
+    const r = readContactInput({email: 'mia@example.com', channel: 'dm', note: '', contactedAt: '2026-11-20'}, NOW);
+    expect(r).toMatchObject({contactedAt: '2026-11-20T12:00:00+08:00'});
+  });
+  it('today, or no day, leaves the time to the database (now)', () => {
+    expect('contactedAt' in (readContactInput({email: 'mia@example.com', channel: 'dm', note: '', contactedAt: '2026-11-25'}, NOW) as object)).toBe(false);
+    expect('contactedAt' in (readContactInput({email: 'mia@example.com', channel: 'dm', note: ''}, NOW) as object)).toBe(false);
+  });
+  it('today is the PH day, not the UTC one (Nov 25 16:30 UTC is already Nov 26 in Manila)', () => {
+    const late = new Date('2026-11-25T16:30:00Z');
+    expect('error' in (readContactInput({email: 'mia@example.com', channel: 'dm', note: '', contactedAt: '2026-11-26'}, late) as object)).toBe(false);
+  });
+  it.each([['2026-11-26', /future/], ['2026-13-01', /date/i], ['2026-02-30', /date/i], ['11/20/2026', /date/i], [20261120, /date/i]])('refuses %j', (day, msg) => {
+    const r = readContactInput({email: 'mia@example.com', channel: 'dm', note: '', contactedAt: day}, NOW);
+    expect('error' in r && r.error).toMatch(msg);
+  });
+  it('logContactWith writes contacted_at only for a past day', async () => {
+    const {deps, inserted} = fakeDeps();
+    expect(await logContactWith(deps, {instagram: 'karla.sy', channel: 'instagram', note: '', contactedAt: '2026-11-20'}, NOW)).toEqual({ok: true});
+    expect(await logContactWith(deps, {email: 'mia@example.com', channel: 'dm', note: ''}, NOW)).toEqual({ok: true});
+    expect(inserted[0]).toMatchObject({contact_instagram: 'karla.sy', contacted_at: '2026-11-20T12:00:00+08:00'});
+    expect(inserted[1]).not.toHaveProperty('contacted_at');
+  });
+});
