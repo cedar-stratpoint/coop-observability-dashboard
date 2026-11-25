@@ -9,7 +9,9 @@ import {scanPosition} from './upload-batch';
 
 export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null;
   /** The upload this page's batch was split from (see src/upload-drops.ts); its own batch when never split. */
-  drop_id?: string | null};
+  drop_id?: string | null;
+  /** Waiting for review in a batch with no store yet: nobody can commit it until a store is picked. */
+  needs_store?: boolean};
 
 export type UploadGroup = {
   key: string;
@@ -34,6 +36,8 @@ export type UploadGroup = {
    *  per page at its furthest-along outcome, so this sums to `pages`. A page re-fed after a
    *  failed read and then committed counts as committed, not as both an issue and a commit. */
   byStatus: Record<string, number>;
+  /** Pages still to review that have no store yet (of `byStatus.needs_review`). */
+  needsStore: number;
   /** True when this group is a split multi-page scan (not a lone file). */
   isSplit: boolean;
   /** The upload batch this tile is one drop of, when the drop was batched (a multi-file
@@ -114,7 +118,7 @@ export function pagesByStatus(items: Array<Pick<GroupableUpload, 'filename' | 's
  * `pages` and a page that failed then read on a retry counts once, under its good status.
  */
 export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGroup[] {
-  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus'> & {_files: number; _pageStatus: Map<string, string>};
+  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus' | 'needsStore'> & {_files: number; _pageStatus: Map<string, string>; _noStore: Set<string>};
   const map = new Map<string, Acc>();
   for (const u of uploads) {
     const key = uploadGroupKey(u);
@@ -133,6 +137,7 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
         duplicateOf: null,
         _files: 0,
         _pageStatus: new Map<string, string>(),
+        _noStore: new Set<string>(),
       };
       map.set(key, g);
     }
@@ -141,14 +146,17 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
     const id = pageIdentity(u.filename);
     const prev = g._pageStatus.get(id);
     g._pageStatus.set(id, prev === undefined ? u.status : betterStatus(prev, u.status));
+    if (u.status === 'needs_review' && u.needs_store) g._noStore.add(id);
     if (at && at < g.firstAt) g.firstAt = at;
     if (at && at > g.lastAt) g.lastAt = at;
     if (scanPosition(u.filename)) g.isSplit = true;
   }
-  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, ...g}) => {
+  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, _noStore, ...g}) => {
     const byStatus: Record<string, number> = {};
     for (const s of _pageStatus.values()) byStatus[s] = (byStatus[s] ?? 0) + 1;
-    return {...g, files: _files, pages: _pageStatus.size, byStatus};
+    // Only pages that are still to review at their best status (a re-upload committed elsewhere doesn't count).
+    const needsStore = [..._noStore].filter((id) => _pageStatus.get(id) === 'needs_review').length;
+    return {...g, files: _files, pages: _pageStatus.size, byStatus, needsStore};
   });
   // Mark re-uploads: among groups that share a source (the same scan uploaded more than once),
   // the earliest drop by firstAt is canonical; the rest point at it as duplicates, so a

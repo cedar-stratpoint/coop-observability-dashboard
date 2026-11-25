@@ -18,6 +18,7 @@ import {isoPeriod} from '@/src/period-date';
 import {knownStoreCodes} from '@/src/goldline-store-registry';
 import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
+  batchFamily,
   BatchConflictError,
   BatchStateError,
   commitBatch,
@@ -393,18 +394,28 @@ export type BulkCommitForm = {
 };
 type BulkPlan = BulkCommitForm & {consultant: string | null; send: Array<{uploadId: string; rows: unknown[]}>};
 
-async function planBulk(companyId: string, batchIds: string[]): Promise<BulkPlan[]> {
-  const ids = [...new Set(batchIds.filter((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 100);
+const UUID = /^[0-9a-f-]{36}$/i;
+
+/**
+ * With `dropId`, every batch of that upload counts too (Nov 25), found by the batches
+ * themselves, not by how the board grouped pages: one page read with the wrong year split
+ * San Pablo's Sep 16 to 30 off its batch on the board, so Commit all never offered it.
+ * Those extra batches are only planned when they are open store forms with pages to commit.
+ */
+async function planBulk(companyId: string, batchIds: string[], dropId?: string | null): Promise<BulkPlan[]> {
+  const asked = new Set(batchIds.filter((id) => typeof id === 'string' && UUID.test(id)));
+  const family = dropId && UUID.test(dropId) ? await batchFamily(companyId, dropId) : [];
+  const ids = [...new Set([...asked, ...family])].slice(0, 200);
   const out: BulkPlan[] = [];
   const known = new Set(await knownStoreCodes(companyId));
   for (const batchId of ids) {
     const batch = await getBatch(companyId, batchId);
     if (!batch) continue; // not this company's
+    // Already committed: nothing to do, and not worth a line in the confirm.
+    if (batch.status !== 'open') continue;
+    // A batch found through the upload (not asked for): only a store form counts.
+    if (!asked.has(batchId) && batch.kind !== 'form') continue;
     const base = {batchId, storeCode: batch.store_code ?? '', periodStart: '', periodEnd: '', pages: 0, rows: 0, consultant: null, send: []};
-    if (batch.status !== 'open') {
-      out.push({...base, verdict: {state: 'blocked', reason: 'Already committed.'}});
-      continue;
-    }
     if (batch.kind !== 'form') {
       out.push({...base, verdict: {state: 'blocked', reason: 'Part of a server scan. Commit its pages one by one.'}});
       continue;
@@ -422,6 +433,7 @@ async function planBulk(companyId: string, batchIds: string[]): Promise<BulkPlan
       detectedStore: p.detectedStore,
     }));
     const reviewable = pdf.filter((p) => p.upload.status === 'needs_review');
+    if (!asked.has(batchId) && !reviewable.length) continue;
     // The rows exactly as read: what the form's own review page starts from.
     const send = reviewable.map((p) => ({
       uploadId: p.upload.id,
@@ -454,12 +466,12 @@ async function planBulk(companyId: string, batchIds: string[]): Promise<BulkPlan
 }
 
 /** What "Commit all" would do, for its confirm. Read-only. */
-export async function planCommitAllAction(input: {company: string | null; batchIds: string[]}): Promise<{ok: true; forms: BulkCommitForm[]} | {ok: false; error: string}> {
+export async function planCommitAllAction(input: {company: string | null; batchIds: string[]; dropId?: string | null}): Promise<{ok: true; forms: BulkCommitForm[]} | {ok: false; error: string}> {
   const ctx = await getDataContext(input.company);
   if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
   if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot commit reviews.'};
   try {
-    const plan = await planBulk(ctx.companyId, input.batchIds);
+    const plan = await planBulk(ctx.companyId, input.batchIds, input.dropId);
     return {ok: true, forms: plan.map(({consultant: _c, send: _s, ...f}) => f)};
   } catch (e) {
     console.error('planCommitAllAction', e);

@@ -113,8 +113,11 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   // Commit all (Nov 25): in the header on every view, over the whole upload. It reads the
   // unfiltered board, so a BA or version filter never changes what it commits.
-  const bulkForms = rawBoard.forms.filter((f) => f.batchKind === 'form' && f.batchId && f.needsReview > 0);
-  const bulkNotListed = rawBoard.forms.filter((f) => f.needsReview > 0).length - bulkForms.length;
+  // Forms with no store (none read, or a code not in the store list) get a picker in it.
+  const known = new Set(stores.map((s) => s.code));
+  const needsStore = rawBoard.forms.filter((f) => f.needsReview > 0 && (!f.storeCode || !known.has(f.storeCode) || f.flags.includes('store-unmatched')));
+  const bulkForms = rawBoard.forms.filter((f) => f.batchKind === 'form' && f.batchId && f.needsReview > 0 && !needsStore.includes(f));
+  const bulkNotListed = rawBoard.forms.filter((f) => f.needsReview > 0).length - bulkForms.length - needsStore.length;
   const storeNames = Object.fromEntries(stores.map((s) => [s.code, s.name]));
 
   return (
@@ -142,7 +145,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
             </div>
             {/* Always mounted (it hides its own button when nothing is left), so the success screen
                 survives the refresh that follows the last commit. */}
-            <CommitAllDialog company={companyId} forms={bulkForms} storeNames={storeNames} notListed={bulkNotListed} />
+            <CommitAllDialog company={companyId} dropId={drop} forms={bulkForms} needsStore={needsStore} stores={stores} storeNames={storeNames} notListed={bulkNotListed} />
           </div>
         )}
       </header>
