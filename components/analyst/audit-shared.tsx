@@ -9,7 +9,7 @@ import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, HelpCircle, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {AUDIT_META, MATRIX_STATES, NEEDS_ACTION, WHY_LABEL, WHY_ORDER, type AuditState, type AuditSummary, type Leg, type WhyUnknown} from '@/src/goldline-audit';
+import {AUDIT_META, MATRIX_STATES, NEEDS_ACTION, RECO_LETTERS, RECO_META, WHY_LABEL, WHY_ORDER, type AuditState, type AuditSummary, type Leg, type RecoLetter, type WhyUnknown} from '@/src/goldline-audit';
 import type {AuditCoverage, PoLeg} from '@/src/goldline-audit-data';
 
 export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> = {
@@ -111,7 +111,8 @@ export function NotebookGrid({
   unit,
 }: {
   summary: AuditSummary;
-  active: AuditState | null;
+  /** One state, or every box a Reco letter covers. */
+  active: AuditState | AuditState[] | null;
   onPick: (s: AuditState) => void;
   unit: string;
 }) {
@@ -144,7 +145,7 @@ export function NotebookGrid({
   );
 }
 
-function GridRow({row, summary, active, onPick, unit}: {row: (typeof GRID_ROWS)[number]; summary: AuditSummary; active: AuditState | null; onPick: (s: AuditState) => void; unit: string}) {
+function GridRow({row, summary, active, onPick, unit}: {row: (typeof GRID_ROWS)[number]; summary: AuditSummary; active: AuditState | AuditState[] | null; onPick: (s: AuditState) => void; unit: string}) {
   return (
     <>
       <span className="col-span-2 flex items-baseline gap-2 px-1 pt-2 sm:col-span-1 sm:flex-col sm:justify-center sm:gap-0.5 sm:pt-0">
@@ -153,7 +154,7 @@ function GridRow({row, summary, active, onPick, unit}: {row: (typeof GRID_ROWS)[
       </span>
       {GRID_COLS.map((c) => {
         const s = stateAt(c.w, c.i, row.po);
-        return <GridCell key={s} state={s} n={summary[s]} on={active === s} onClick={() => onPick(s)} unit={unit} col={c.label} />;
+        return <GridCell key={s} state={s} n={summary[s]} on={Array.isArray(active) ? active.includes(s) : active === s} onClick={() => onPick(s)} unit={unit} col={c.label} />;
       })}
     </>
   );
@@ -196,6 +197,52 @@ function GridCell({state, n, on, onClick, unit, col}: {state: AuditState; n: num
       </button>
       <StateTip id={tip} state={state} fit />
     </div>
+  );
+}
+
+/**
+ * Syl's Reco A to D (Nov 25): the four groups she reports on, as one row above the grid.
+ * A letter is a filter like a box; C covers both Watsons boxes. Same press and active
+ * treatment as the grid's boxes, no motion beyond the press.
+ */
+export function RecoStrip({summary, active, onPick, unit}: {summary: AuditSummary; active: RecoLetter | null; onPick: (l: RecoLetter) => void; unit: string}) {
+  return (
+    <section aria-label="Reco A to D" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {RECO_LETTERS.map((l) => {
+        const m = RECO_META[l];
+        const c = toneOf(m.states[0]);
+        const n = summary.letters[l];
+        const on = active === l;
+        return (
+          <button
+            key={l}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onPick(l)}
+            className={cn(
+              'flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left',
+              'transition-[transform,border-color,background-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.98]',
+              'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
+              !on && 'border-border bg-card [@media(hover:hover)]:hover:border-foreground/25',
+              n === 0 && !on && 'opacity-55',
+            )}
+            style={on ? {borderColor: `color-mix(in oklab, ${c} 60%, transparent)`, background: tint(c, 11), boxShadow: `0 0 0 3px ${tint(c, 16)}`} : undefined}
+          >
+            <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg font-mono text-sm font-semibold" style={{color: ink(c), background: tint(c, 16)}}>
+              {l}
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="font-heading text-xl leading-none font-semibold tabular-nums">{n.toLocaleString('en-US')}</span>
+              <span className="mt-1 truncate text-xs font-medium">{m.label}</span>
+              <span className="truncate text-[11px] text-muted-foreground">{m.owner}</span>
+            </span>
+            <span className="sr-only">
+              Reco {l}, {n} {unit}
+            </span>
+          </button>
+        );
+      })}
+    </section>
   );
 }
 

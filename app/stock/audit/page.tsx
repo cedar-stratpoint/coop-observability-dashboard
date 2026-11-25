@@ -19,7 +19,7 @@ export default async function Page(props: {searchParams: Promise<Record<string, 
   }
   const sp = await props.searchParams;
   const one = (k: string) => (typeof sp[k] === 'string' ? (sp[k] as string) : null);
-  const params: AuditParams = {store: one('store'), month: one('month'), state: one('state'), why: one('why'), q: one('q'), sort: one('sort'), dir: one('dir'), page: one('page')};
+  const params: AuditParams = {store: one('store'), month: one('month'), state: one('state'), why: one('why'), reco: one('reco'), q: one('q'), sort: one('sort'), dir: one('dir'), page: one('page')};
   const data = await auditData(ctx.companyId, params, ctx.storeScope ?? null);
   // Keyed by store and month: a new selection starts from its own query.
   return <AuditMatrix key={`${data.selected?.code ?? ''}|${data.selected?.month ?? ''}`} data={data} />;
