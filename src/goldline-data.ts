@@ -1126,6 +1126,7 @@ export async function fileFormPages(
  *  review queue and count with the upload's other set-aside pages. Only pages still to review. */
 export async function setAsidePages(companyId: string, uploadIds: string[], reason: string): Promise<number> {
   const ids = [...new Set(uploadIds)].slice(0, 50);
+  // pagination-ok: an update of at most 50 rows by id.
   const res = await db()
     .from('uploads')
     .update({status: 'rejected', reject_reason: reason})
