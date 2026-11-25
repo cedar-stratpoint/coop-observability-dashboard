@@ -41,3 +41,21 @@ describe('voucher filter (Customers tab)', () => {
     expect(filterCustomers(rows, {tier: 'all', buyers: 'buyers'}, '')).toHaveLength(6);
   });
 });
+
+describe('voucher families and lists (owner 2026-11-25: "other 300 off vouchers, not just GRAND300")', () => {
+  const r = (codes: string[]) => ({orderCount: 1, codesUsed: codes});
+  it('"*300" matches every code ending in 300, case-insensitive', () => {
+    expect(voucherMatch(r(['ZOOMY300']), '*300')).toBe(true);
+    expect(voucherMatch(r(['grand300']), '*300')).toBe(true);
+    expect(voucherMatch(r(['FAM40']), '*300')).toBe(false);
+    expect(voucherMatch(r(['300X']), '*300')).toBe(false);
+    expect(voucherMatch(r(['300X']), '*300*')).toBe(true);
+  });
+  it('a list matches any of its codes; regex characters are literal', () => {
+    expect(voucherMatch(r(['WEB300']), 'GRAND300, WEB300')).toBe(true);
+    expect(voucherMatch(r(['GRAND3000']), 'GRAND300')).toBe(false);
+    expect(voucherMatch(r(['A.B']), 'A.B')).toBe(true);
+    expect(voucherMatch(r(['AXB']), 'A.B')).toBe(false);
+    expect(voucherMatch(r(['AXB']), 'A.*')).toBe(false);
+  });
+});
