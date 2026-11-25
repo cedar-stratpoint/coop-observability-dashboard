@@ -14,6 +14,8 @@ import {
   productRollup,
   rankedSteps,
   recoAction,
+  recoLetterOf,
+  skuLines,
   type AuditCell,
   type AuditInput,
   type SearchableRow,
@@ -189,5 +191,50 @@ describe('what the unknown lines are missing (Nov 25)', () => {
   });
   it('the reason is ignored for any other state', () => {
     expect(auditRows(rows, {state: 'ok', why: 'blank', q: '', sort: 'product', dir: 'asc'}).map((r) => r.item_code)).toEqual(['D']);
+  });
+});
+
+describe('Reco A to D (Syl, Nov 25)', () => {
+  const at = (p: Partial<AuditInput>) => auditCell(inp(p))!;
+  it('maps each state to its letter and C covers both Watsons states', () => {
+    expect(recoLetterOf(at({po: false, watsons: 3, inventory: 5}))).toBe('A');
+    expect(recoLetterOf(at({po: false, watsons: 3, inventory: 'absent'}))).toBe('B');
+    expect(recoLetterOf(at({po: true, watsons: 0, inventory: 5}))).toBe('C');
+    expect(recoLetterOf(at({po: false, watsons: 0, inventory: 5}))).toBe('C');
+    expect(recoLetterOf(at({po: true, watsons: 3, inventory: 'absent'}))).toBe('D');
+    expect(recoLetterOf(at({po: true, watsons: 3, inventory: 5}))).toBeNull();
+    expect(recoLetterOf(at({po: true, watsons: 0, inventory: 0}))).toBeNull();
+  });
+  it('a sold-out line is in no letter (Restock, Flag to retire)', () => {
+    expect(at({po: true, watsons: 3, inventory: 0}).reco).toBe('Restock');
+    expect(recoLetterOf(at({po: true, watsons: 3, inventory: 0}))).toBeNull();
+    expect(recoLetterOf(at({po: false, watsons: 3, inventory: 0}))).toBeNull();
+  });
+  it('the summary counts letters', () => {
+    const s = auditSummary([at({po: false, watsons: 0, inventory: 5}), at({po: true, watsons: 0, inventory: 2}), at({po: false, watsons: 3, inventory: 5})]);
+    expect(s.letters).toEqual({A: 1, B: 0, C: 2, D: 0});
+  });
+  it('a letter filters the rows; a search overrides it', () => {
+    const row = (store: string, product: string, p: Partial<AuditInput>): SearchableRow => ({...at({item_code: product.toUpperCase(), ...p}), store, storeName: null, product});
+    const rows = [row('1', 'Alpha', {po: true, watsons: 0, inventory: 5}), row('2', 'Beta', {po: false, watsons: 0, inventory: 1}), row('3', 'Gamma', {po: false, watsons: 3, inventory: 5})];
+    const run = (reco: 'A' | 'C', q = '') => auditRows(rows, {state: 'ok', reco, q, sort: 'product', dir: 'asc'}).map((r) => r.product);
+    expect(run('C')).toEqual(['Alpha', 'Beta']);
+    expect(run('A')).toEqual(['Gamma']);
+    expect(run('A', 'beta')).toEqual(['Beta']);
+  });
+});
+
+describe('skuLines', () => {
+  it('groups lines per product with its stores, recommendations and totals', () => {
+    const base = {product: 'Gold Frost', reco: 'Watsons to audit', units: 0};
+    const out = skuLines([
+      {item_code: 'T1', store: '473', onHand: 2, ...base},
+      {item_code: 'T2', store: '10', onHand: null, product: 'Pink', reco: 'Report to Watsons', units: null},
+      {item_code: 'T1', store: '5300', onHand: 3, ...base, reco: 'Report to Watsons'},
+    ]);
+    expect(out).toEqual([
+      {item_code: 'T1', product: 'Gold Frost', recos: ['Watsons to audit', 'Report to Watsons'], stores: ['473', '5300'], units: 0, onHand: 5},
+      {item_code: 'T2', product: 'Pink', recos: ['Report to Watsons'], stores: ['10'], units: null, onHand: null},
+    ]);
   });
 });

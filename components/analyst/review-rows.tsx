@@ -1,7 +1,7 @@
 'use client';
 
-import {useMemo} from 'react';
-import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
+import {useMemo, useState} from 'react';
+import {Check, ChevronLeft, ChevronRight, Plus, Search, Trash2} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
 import {groupByFamily, pageTotal, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
@@ -11,6 +11,10 @@ import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
 import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols';
 import {noteLayout, readerNote} from './reader-note';
+import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
+import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
+import {AddRowDialog} from './add-row-dialog';
+import {addedRow, type AddableItem} from '@/src/review-add-row';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -88,6 +92,15 @@ type Props = {
   onPoint?: (index: number) => void;
   /** The row currently pointed at: tinted to match the box drawn on the scan. */
   pointed?: number | null;
+  /** The page these rows are on, so a row (or the page) can be flagged (NICH-42). Needs a
+   *  ReviewFlagsProvider above; without either, no Flag buttons show. */
+  uploadId?: string;
+  /** Add product row (NICH-42): the catalog to pick from, this page's printed number (for the
+   *  "printed on another page" warning), and the parent's add/remove. Absent = no Add product. */
+  addable?: AddableItem[];
+  page?: number | null;
+  onAddRow?: (row: ExtractedRow) => void;
+  onRemoveRow?: (index: number) => void;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -116,7 +129,7 @@ export function ReviewRows({
   rows,
   productNames,
   rowNames,
-  catalog,
+  catalog: catalogIn,
   flagged,
   rowNotes,
   resolved,
@@ -132,7 +145,63 @@ export function ReviewRows({
   onStep,
   onPoint,
   pointed,
+  uploadId,
+  addable,
+  page,
+  onAddRow,
+  onRemoveRow,
 }: Props) {
+  const [adding, setAdding] = useState(false);
+  // Added rows aren't in the page's catalog slice: borrow their line and price from the
+  // picker list so they sit under their heading and count in its total.
+  const catalog = useMemo(() => {
+    const extra = rows.filter((r) => r.added && !catalogIn[r.item_code]);
+    if (!extra.length || !addable) return catalogIn;
+    const by = new Map(addable.map((a) => [a.code, a]));
+    return {...catalogIn, ...Object.fromEntries(extra.map((r) => [r.item_code, {productLine: by.get(r.item_code)?.line ?? null, unitPrice: by.get(r.item_code)?.price ?? null}]))};
+  }, [rows, catalogIn, addable]);
+  const flagCtx = useReviewFlags();
+  const onPage = useMemo(() => (flagCtx && uploadId ? flagCtx.marks.filter((m) => m.uploadId === uploadId) : []), [flagCtx, uploadId]);
+  const flagsOf = (code: string) => rowMarks(onPage, code);
+  const pageFlags = pageMarks(onPage);
+  const canAdd = Boolean(editable && onAddRow && addable?.length);
+  const pageCodes = useMemo(() => new Set(rows.map((r) => r.item_code)), [rows]);
+  const pageLines = useMemo(() => new Set(rows.map((r) => catalog[r.item_code]?.productLine).filter((l): l is string => Boolean(l))), [rows, catalog]);
+  const addProduct = async (it: AddableItem): Promise<string | null> => {
+    const index = rows.length;
+    onAddRow?.(addedRow(it));
+    onView('all');
+    requestAnimationFrame(() => {
+      const el = reviewRowEl(index);
+      el?.scrollIntoView({behavior: 'smooth', block: 'center'});
+      el?.querySelector<HTMLInputElement>('input')?.focus({preventScroll: true});
+    });
+    // Flag it as written in, so the reports list it with its page and row.
+    if (flagCtx?.canFlag && uploadId) {
+      const err = await flagCtx.save({uploadId, itemCode: it.code, rowIndex: index, kind: 'added_row'});
+      if (err) console.error('added_row flag', err);
+    }
+    return null;
+  };
+  const removeAdded = (r: {item_code: string; i: number}) => {
+    onRemoveRow?.(r.i);
+    const m = onPage.find((x) => x.status === 'open' && x.itemCode === r.item_code && x.kind === 'added_row' && x.source === 'reviewer');
+    if (m && flagCtx) void flagCtx.clear(m.id);
+  };
+  const removeButton = (r: (typeof indexed)[number]) =>
+    r.added && editable && onRemoveRow ? (
+      <button
+        type="button"
+        onClick={() => removeAdded(r)}
+        aria-label={`Remove ${r.item_code}`}
+        title="Remove this added row"
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground outline-none transition-[transform,border-color,color] duration-150 ease-out active:scale-[0.97] focus-visible:ring-3 focus-visible:ring-ring/40 [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:text-foreground"
+      >
+        <Trash2 aria-hidden className="size-3.5" />
+      </button>
+    ) : null;
+  const flagTarget = (r: {item_code: string; i: number}) =>
+    uploadId ? {uploadId, itemCode: r.item_code, rowIndex: r.i, label: `${r.item_code}${nameOf(r as (typeof indexed)[number]) ? ` · ${nameOf(r as (typeof indexed)[number])}` : ''}`} : null;
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
   const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
@@ -196,8 +265,9 @@ export function ReviewRows({
         data-review-row={r.i}
         onPointerEnter={onPoint ? () => onPoint(r.i) : undefined}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
+        data-pointed={pointed === r.i || active === r.i || undefined}
         className={cn(
-          'scroll-mt-24 border-b border-border/60 transition-colors',
+          'group/row scroll-mt-24 border-b border-border/60 transition-colors',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
@@ -229,7 +299,10 @@ export function ReviewRows({
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
               )}
+              <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
             </div>
+            {removeButton(r)}
+            {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           </div>
         </td>
         {cols.map((col) => (
@@ -284,8 +357,9 @@ export function ReviewRows({
         key={`${r.item_code}-${r.i}`}
         data-review-row={r.i}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
+        data-pointed={pointed === r.i || active === r.i || undefined}
         className={cn(
-          'flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
+          'group/row flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
@@ -303,12 +377,17 @@ export function ReviewRows({
             )}
             {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
+            <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
           </div>
+          <span className="flex shrink-0 items-center gap-1.5">
+          {removeButton(r)}
+          {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
             style={{color: toneText(tone), background: `color-mix(in oklab, ${tone} 14%, transparent)`}}
           >
             {Math.round(c * 100)}%
+          </span>
           </span>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
@@ -350,9 +429,12 @@ export function ReviewRows({
     <Card className="scroll-mt-4">
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>
-            Rows <span className="text-sm font-normal text-muted-foreground tabular-nums">({rows.length})</span>
-          </CardTitle>
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <CardTitle>
+              Rows <span className="text-sm font-normal text-muted-foreground tabular-nums">({rows.length})</span>
+            </CardTitle>
+            {uploadId && <FlagButton size="page" target={{uploadId, itemCode: null, rowIndex: null, label: 'Whole page'}} count={pageFlags.length} />}
+          </div>
           {flagged.length > 0 && (
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
@@ -372,6 +454,7 @@ export function ReviewRows({
             </div>
           )}
         </div>
+        {pageFlags.length > 0 && <FlagChips marks={pageFlags} />}
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedControl<ReviewView>
             ariaLabel="Which rows"
@@ -382,7 +465,12 @@ export function ReviewRows({
               {value: 'all', label: `All ${rows.length} · form grid`},
             ]}
           />
-          <div className="relative ml-auto min-w-[12rem]">
+          {canAdd && (
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)} className="ml-auto">
+              <Plus aria-hidden className="size-4" /> Add product
+            </Button>
+          )}
+          <div className={cn('relative min-w-[12rem]', !canAdd && 'ml-auto')}>
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}
@@ -437,6 +525,9 @@ export function ReviewRows({
           </>
         )}
       </CardContent>
+      {adding && addable && (
+        <AddRowDialog items={addable} pageCodes={pageCodes} pageLines={pageLines} page={page ?? null} onAdd={addProduct} onClose={() => setAdding(false)} />
+      )}
     </Card>
   );
 }

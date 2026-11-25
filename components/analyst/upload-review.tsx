@@ -19,6 +19,9 @@ import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation'
 import {estimateRowBoxes} from '@/src/row-box-fill';
 import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
+import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
+import type {ReviewMark} from '@/src/goldline-review-marks';
+import type {AddableItem} from '@/src/review-add-row';
 import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
@@ -97,11 +100,17 @@ export function UploadReview({
   periodDefault = null,
   rowNotes = {},
   bas,
+  marks = [],
+  addable = [],
 }: {
+  /** Catalog products the reviewer can add as rows (NICH-42 Add product row). */
+  addable?: AddableItem[];
   company: string;
   canEdit: boolean;
   upload: UploadRow;
   extraction: ExtractionRecord | null;
+  /** This page's review flags (NICH-42). */
+  marks?: ReviewMark[];
   /** Same-origin proxy path to the stored scan (streams the private file), or null. */
   scanUrl?: string | null;
   /** item_code → printed product name (from the page manifest), for the rows table. */
@@ -708,7 +717,13 @@ export function UploadReview({
             </CardContent>
           </Card>
 
+          <ReviewFlagsProvider company={company} initial={marks} canFlag={canEdit && upload.kind === 'inventory_pdf'}>
           <ReviewRows
+            uploadId={upload.id}
+            addable={upload.kind === 'inventory_pdf' ? addable : undefined}
+            page={extraction?.page ?? null}
+            onAddRow={(row) => setRows((rs) => [...rs, row])}
+            onRemoveRow={(i) => setRows((rs) => (rs[i]?.added ? rs.filter((_, k) => k !== i) : rs))}
             rows={rows}
             onPoint={scanUrl ? setPointRow : undefined}
             pointed={pointRow}
@@ -736,6 +751,7 @@ export function UploadReview({
               goToFlag(stepFlag(open.length ? open : flagged, active, dir));
             }}
           />
+          </ReviewFlagsProvider>
 
           {/* Commit bar */}
           {!committed && canEdit && (

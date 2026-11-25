@@ -19,6 +19,8 @@ import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {assignFormBaAction} from '@/app/uploads/actions';
 import {sendReread} from '@/src/upload-transport';
 import {Button} from '@/components/ui/button';
+import {NativeSelect} from '@/components/ui/native-select';
+import {StickyBar, TopButton, useStuckSentinel} from '@/components/analyst/sticky-bar';
 import {Pagination} from '@/components/analyst/pagination';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {DeleteUploadDialog} from '@/components/analyst/delete-upload-dialog';
@@ -56,11 +58,14 @@ const STATUS_DOT: Record<UploadStatus, string> = {
 /** The scan's pages as a plain list — "Page 10 of 98", in page order, each opening its
  *  review. One row per page: the current (best) attempt, with the older tries folded
  *  behind an "N earlier attempts" toggle so repeated retries/re-uploads don't pile up. */
-export function ScanFileList({files, canEdit, company, version = null}: {files: UploadRow[]; canEdit: boolean; company: string; version?: FormVersion | null}) {
+export function ScanFileList({files, canEdit, company, version = null, title = null}: {files: UploadRow[]; canEdit: boolean; company: string; version?: FormVersion | null; /** The scan's name, for the condensed bar. */ title?: string | null}) {
   const router = useRouter();
   const params = useSearchParams();
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  // Condensed bar (Nov 25, owner QA): the scan's name and the same filters, pinned once the full
+  // filters scroll under the app header (components/analyst/sticky-bar.tsx).
+  const {ref: filtersEnd, stuck} = useStuckSentinel();
   // The filters and list page live in the URL (type / status / fv / lp), so browser Back from
   // a page review lands on exactly the list the reviewer left, not a reset one.
   const filters = parseFileFilter({type: params.get('type'), status: params.get('status'), fv: params.get('fv')});
@@ -213,8 +218,55 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
       return n;
     });
 
+  const SEL = 'h-8 rounded-lg text-xs';
+
   return (
     <div className="flex flex-col gap-4">
+      {/* The condensed bar: zero height in the flow (nothing shifts when it appears), pinned under
+          the app header. Same URL-backed filters as the chips below, so the two always agree. */}
+      <StickyBar stuck={stuck} gapClass="-mb-4">
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            {title && <span className="min-w-0 truncate font-heading text-sm font-semibold tracking-tight">{title}</span>}
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {total} {total === 1 ? 'page' : 'pages'}
+              {filtered ? ' shown' : ''}
+            </span>
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            {typesPresent.length >= 2 && (
+              <NativeSelect aria-label="Type" value={typeFilter} onChange={(e) => chooseType(e.target.value as PageType | 'all')} className={SEL}>
+                <option value="all">Every type · {counts.type.all}</option>
+                {typesPresent.map((t) => (
+                  <option key={t} value={t} disabled={counts.type[t] === 0}>
+                    {TYPE_LABEL[t]} · {counts.type[t]}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+            {statusesPresent.length >= 2 && (
+              <NativeSelect aria-label="Status" value={statusFilter} onChange={(e) => chooseStatus(e.target.value as UploadStatus | 'all')} className={SEL}>
+                <option value="all">Every status · {counts.status.all}</option>
+                {statusesPresent.map((st) => (
+                  <option key={st} value={st} disabled={counts.status[st] === 0}>
+                    {STATUS_LABEL[st]} · {counts.status[st]}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+            {versionsPresent.length >= 2 && (
+              <NativeSelect aria-label="Version" value={versionFilter} onChange={(e) => chooseVersion(e.target.value as FormVersion | 'all')} className={SEL}>
+                <option value="all">Every version · {counts.fv.all}</option>
+                {versionsPresent.map((v) => (
+                  <option key={v} value={v} disabled={counts.fv[v] === 0}>
+                    {VERSION_LABEL[v]} · {counts.fv[v]}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+            <TopButton />
+          </span>
+      </StickyBar>
+
       {/* Scan outcome, the same way the uploader showed it — so this stays the one place to
           come back to a scan and see what read, what was set aside, and what failed. */}
       <div className="flex flex-col gap-3">
@@ -269,6 +321,7 @@ export function ScanFileList({files, canEdit, company, version = null}: {files: 
           </div>
         )}
       </div>
+      <div ref={filtersEnd} aria-hidden className="-mt-4 h-0" />
 
       {shown.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-10 text-center text-sm text-muted-foreground">

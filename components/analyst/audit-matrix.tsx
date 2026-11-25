@@ -8,9 +8,10 @@ import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {MonthPicker, StorePicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
-import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
+import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, RECO_LETTERS, RECO_META, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
-import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, ReconTabs, StateChip, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
+import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, RecoStrip, ReconTabs, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
+import {StickyBar, TopButton, useStuckSentinel} from '@/components/analyst/sticky-bar';
 
 // Reconciliation · By store (NICH-17). One store (or every store) and month: every product's
 // three legs (Watsons · Inventory · PO) and its recommendation on the line. The tiles are the
@@ -28,7 +29,8 @@ const STORE_PAGE = 12;
 /** The query as URL params, leaving out whatever is already the default. */
 function toParams(store: string, month: string, query: AuditQuery): URLSearchParams {
   const sp = new URLSearchParams({store, month, state: query.state});
-  if (query.state === 'unknown' && query.why) sp.set('why', query.why);
+  if (query.reco) sp.set('reco', query.reco);
+  else if (query.state === 'unknown' && query.why) sp.set('why', query.why);
   if (query.q.trim()) sp.set('q', query.q.trim());
   if (query.sort !== 'reco') sp.set('sort', query.sort);
   if (query.dir !== 'asc') sp.set('dir', query.dir);
@@ -61,6 +63,9 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   const asState = typed ? patternState(typed) : null;
   const state: AuditState = asState ?? query.state;
   const searching = Boolean(typed) && !asState;
+  // A Reco letter is the filter unless a box or a search took over.
+  const letter = !typed && query.reco ? query.reco : null;
+  const lm = letter ? RECO_META[letter] : null;
   const pattern = searching ? parsePattern(typed) : null;
 
   const hits = useMemo(() => (all ? data.rows : auditRows(data.rows, query)), [all, data.rows, query]);
@@ -88,12 +93,64 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   };
 
   const otherMonth = data.months.find((mo) => mo.loaded && mo.month !== sel?.month)?.month ?? null;
+  // Condensed bar (Nov 25, owner QA): store, month, the Reco letters and what the table shows,
+  // pinned once the tiles and grid scroll under the app header (components/analyst/sticky-bar.tsx).
+  const {ref: filtersEnd, stuck} = useStuckSentinel();
   const m = AUDIT_META[state];
-  const c = toneOf(state);
+  const c = toneOf(lm ? lm.states[0] : state);
+  const owner = lm ? lm.owner : m.owner;
+  const label = lm ? lm.label : m.label;
   const where = all ? 'any store' : 'this store';
 
   return (
     <div className={GL_PAGE}>
+      {sel && (
+        <StickyBar stuck={stuck} gapClass="-mb-6">
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="shrink-0 font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">Reconcile</span>
+            <span className="min-w-0 truncate text-sm font-semibold">
+              {all ? 'All stores' : `Store ${sel.code}${sel.name ? ` · ${sel.name}` : ''}`} · {monthLabel(sel.month)}
+            </span>
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            {data.coverage.loaded && (
+              <span role="group" aria-label="Reco A to D" className="flex gap-1">
+                {RECO_LETTERS.map((l) => {
+                  const tone = toneOf(RECO_META[l].states[0]);
+                  const on = letter === l;
+                  return (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => go({reco: on ? null : l, why: null, q: ''})}
+                      title={RECO_META[l].label}
+                      className={cn(
+                        'inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs transition-[transform,border-color,background-color] duration-150 ease-out active:scale-[0.97]',
+                        on ? 'border-transparent' : 'border-border bg-background [@media(hover:hover)]:hover:border-foreground/25',
+                        data.summary.letters[l] === 0 && !on && 'opacity-55',
+                      )}
+                      style={on ? {background: tint(tone, 16), color: ink(tone)} : undefined}
+                    >
+                      <span className="font-mono font-semibold" style={on ? undefined : {color: ink(tone)}}>
+                        {l}
+                      </span>
+                      <span className="tabular-nums">{data.summary.letters[l].toLocaleString('en-US')}</span>
+                    </button>
+                  );
+                })}
+              </span>
+            )}
+            {!searching && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                {lm ? <span className="font-medium text-foreground">{lm.label}</span> : <StateChip state={state} />}
+                <span className="tabular-nums">{total.toLocaleString('en-US')}</span>
+              </span>
+            )}
+            <TopButton />
+          </span>
+        </StickyBar>
+      )}
       <header className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="max-w-2xl">
@@ -152,9 +209,13 @@ export function AuditMatrix({data}: {data: AuditResult}) {
               otherHref={otherMonth ? `/stock/audit?${new URLSearchParams({store: sel.code, month: otherMonth})}` : null}
             />
           ) : (
-            <NotebookGrid summary={data.summary} active={searching ? null : state} onPick={(s) => go({state: s, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
+            <>
+              <RecoStrip summary={data.summary} active={letter} onPick={(l) => go({reco: letter === l ? null : l, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
+              <NotebookGrid summary={data.summary} active={searching ? null : lm ? lm.states : state} onPick={(s) => go({state: s, reco: null, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
+            </>
           )}
-          <UnknownReasons summary={data.summary} active={!searching && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', why, q: ''})} />
+          <UnknownReasons summary={data.summary} active={!searching && !letter && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', reco: null, why, q: ''})} />
+          <div ref={filtersEnd} aria-hidden className="-mt-6 h-0" />
 
           <Card className="gap-0 overflow-hidden py-0">
             {/* The table's header says what it shows. No second filter here. */}
@@ -166,16 +227,23 @@ export function AuditMatrix({data}: {data: AuditResult}) {
                 </p>
               ) : (
                 <>
-                  <StateChip state={state} />
+                  {lm && letter ? (
+                    <span className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap" style={{color: ink(c), background: tint(c)}}>
+                      <span className="font-mono font-semibold">{letter}</span>
+                      {lm.label}
+                    </span>
+                  ) : (
+                    <StateChip state={state} />
+                  )}
                   <span className="font-heading text-sm font-semibold tabular-nums">{total.toLocaleString('en-US')}</span>
                   <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-                    {m.owner !== 'None' && (
+                    {owner !== 'None' && (
                       <span className="font-medium" style={{color: ink(c)}}>
-                        {m.owner === 'Admin' ? 'You' : m.owner} ·{' '}
+                        {owner === 'Admin' ? 'You' : owner} ·{' '}
                       </span>
                     )}
-                    {state === 'unknown' && query.why ? `Only lines missing: ${WHY_LABEL[query.why].toLowerCase()}. ` : ''}
-                    {m.action}
+                    {!lm && state === 'unknown' && query.why ? `Only lines missing: ${WHY_LABEL[query.why].toLowerCase()}. ` : ''}
+                    {lm ? lm.action : m.action}
                   </span>
                 </>
               )}
@@ -209,13 +277,22 @@ export function AuditMatrix({data}: {data: AuditResult}) {
                     <Download className="size-4" aria-hidden /> CSV
                   </a>
                 )}
+                {/* One line per product with the stores it is at (Syl's Reco C report, Nov 25). */}
+                {!data.mock && total > 0 && all && (
+                  <a
+                    href={`/api/goldline/audit-export?${toParams(sel.code, sel.month, {...query, page: 0})}&by=sku`}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium transition-[transform,border-color] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)]:hover:border-foreground/25"
+                  >
+                    <Download className="size-4" aria-hidden /> By SKU
+                  </a>
+                )}
               </div>
             </div>
 
             <div aria-busy={pending} className={cn('transition-opacity duration-150', pending && 'opacity-50')}>
               {shown.length === 0 ? (
                 <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  {searching ? `Nothing at ${where} matches that search.` : `Nothing is at “${m.label}” at ${where}${state !== 'unknown' && data.summary.unknown > 0 ? ` yet. ${data.summary.unknown.toLocaleString('en-US')} ${data.summary.unknown === 1 ? 'line is' : 'lines are'} still missing data, so this can change.` : '.'}`}
+                  {searching ? `Nothing at ${where} matches that search.` : `Nothing is at “${label}” at ${where}${state !== 'unknown' && data.summary.unknown > 0 ? ` yet. ${data.summary.unknown.toLocaleString('en-US')} ${data.summary.unknown === 1 ? 'line is' : 'lines are'} still missing data, so this can change.` : '.'}`}
                 </p>
               ) : (
                 <div className="overflow-x-auto">
@@ -241,7 +318,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
               )}
               {pages > 1 && (
                 <div className="border-t border-border px-4 py-2.5">
-                  <Pager page={at} pages={pages} total={total} size={size} onPage={(page) => go({page})} label={searching ? 'Search results' : m.label} />
+                  <Pager page={at} pages={pages} total={total} size={size} onPage={(page) => go({page})} label={searching ? 'Search results' : label} />
                 </div>
               )}
             </div>

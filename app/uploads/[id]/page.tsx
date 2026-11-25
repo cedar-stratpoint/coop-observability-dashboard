@@ -14,6 +14,8 @@ import {duplicateMatchFor, scanScopeIds} from '@/src/goldline-triage-data';
 import {committedSnapshotFor, previousCounts} from '@/src/goldline-inventory-data';
 import {historyCheckEnabled, historyNotes, latestBefore} from '@/src/goldline-history-check';
 import {UploadReview} from '@/components/analyst/upload-review';
+import {marksForUploads} from '@/src/goldline-review-marks-data';
+import {addableProducts} from '@/src/goldline-add-row-data';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
 import {firstIsoDate, isoPeriod} from '@/src/period-date';
 
@@ -176,6 +178,14 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   const duplicate = upload.kind === 'inventory_pdf' && upload.status === 'needs_review'
     ? await duplicateMatchFor(ctx.companyId, upload.id)
     : null;
+  // Review flags (NICH-42). A database without the table yet (p6_review_marks.sql) just shows none.
+  const marks = upload.kind === 'inventory_pdf'
+    ? await marksForUploads(ctx.companyId, [upload.id]).catch((e) => (console.error('review marks', e), []))
+    : [];
+  // Add product row (NICH-42): only while the page can still be edited and committed.
+  const addable = upload.kind === 'inventory_pdf' && upload.status === 'needs_review' && canEditData(ctx.role)
+    ? await addableProducts(ctx.companyId, upload.form_version).catch((e) => (console.error('addable products', e), []))
+    : [];
   return (
     <div className="flex flex-col gap-4">
       {duplicate && (
@@ -188,6 +198,8 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       company={ctx.companyId}
       canEdit={canEditData(ctx.role)}
       upload={upload}
+      marks={marks}
+      addable={addable}
       extraction={extraction}
       scanUrl={scanUrl}
       productNames={productNames}
