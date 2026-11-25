@@ -77,6 +77,20 @@ export function batchReadiness(input: {
   return {ready: true};
 }
 
+/**
+ * "Commit all" on a grouped upload (Nov 25): may this form commit without opening it?
+ * Exactly the single-form rules (batchReadiness), except low-confidence rows. Nobody has
+ * checked those, so a form with any is `flagged`, committed only when the person asks for
+ * it in the confirm. Anything else that would stop a single commit stops this one too.
+ */
+export type BulkVerdict = {state: 'ready'} | {state: 'flagged'; rows: number} | {state: 'blocked'; reason: string};
+export function bulkVerdict(input: {storeCode: string; periodStart: string; periodEnd: string; pages: BatchPageInfo[]}): BulkVerdict {
+  const r = batchReadiness({...input, pages: input.pages.map((p) => ({...p, resolved: p.flagged}))});
+  if (!r.ready) return {state: 'blocked', reason: r.reason};
+  const rows = input.pages.filter((p) => p.status === 'needs_review').reduce((n, p) => n + p.flagged, 0);
+  return rows ? {state: 'flagged', rows} : {state: 'ready'};
+}
+
 /** "store-a.pdf" → "store-a (page 2 of 5).pdf" for pages split out of a multi-page PDF. */
 export function splitName(original: string, index: number, total: number): string {
   const dot = original.toLowerCase().endsWith('.pdf') ? original.length - 4 : original.length;
