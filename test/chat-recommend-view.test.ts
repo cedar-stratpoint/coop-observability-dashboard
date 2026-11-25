@@ -511,6 +511,17 @@ describe('a list of people with a date is a table, not a trend (owner 2026-11-25
     );
     expect(first(sales).block).toBe('table');
   });
+  it('an id plus a time typed as text that repeats (same minute) -> table', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category'), col('sold_at', 'text', 'category'), col('total_php', 'PHP', 'measure')],
+      ['a1', 'b2', 'c3', 'd4', 'e5'].map((order_id, i) => ({order_id, sold_at: i < 3 ? '2026-11-03 16:32' : `2026-10-2${i} 09:07`, total_php: 500 + i})),
+    );
+    expect(first(sales).block).toBe('table');
+  });
+  it('revenue by week typed as text is still a chart', () => {
+    const weeks = mk([col('week', 'text', 'category'), col('revenue', 'PHP', 'measure')], ['2026-11-02', '2026-11-09', '2026-11-16'].map((week, i) => ({week, revenue: 100 + i})));
+    expect(first(weeks).block).toBe('chart');
+  });
   it('top products by revenue (one label per row, no date) is still a bar', () => {
     expect(first(cat(5)).block).toBe('chart');
   });
