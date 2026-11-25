@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {AlertTriangle, Check, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, SlidersHorizontal, Trash2, X, XCircle} from 'lucide-react';
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
@@ -13,6 +13,8 @@ import {DeleteScanDialog} from '@/components/analyst/delete-scan-dialog';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
+import {FilterSelect, type FilterOption} from '@/components/ui/filter-select';
+import {DateRangeFilter} from '@/components/analyst/date-range-filter';
 import {Pagination} from '@/components/analyst/pagination';
 import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {cn} from '@/lib/utils';
@@ -37,6 +39,20 @@ type StatusFilter = 'all' | UploadStatus;
 type KindFilter = 'all' | UploadKind;
 const STATUS_KEYS: Record<StatusFilter, true> = {all: true, needs_review: true, committed: true, processing: true, failed: true, rejected: true} as Record<StatusFilter, true>;
 const KIND_KEYS: Record<KindFilter, true> = {all: true, pos_csv: true, pos_xlsx: true, inventory_pdf: true} as Record<KindFilter, true>;
+const STATUS_OPTIONS: Array<FilterOption<StatusFilter>> = [
+  {value: 'all', label: 'All statuses'},
+  {value: 'needs_review', label: 'Needs review', dot: 'var(--status-warn)'},
+  {value: 'committed', label: 'Committed', dot: 'var(--status-good)'},
+  {value: 'processing', label: 'Processing', dot: 'var(--primary)'},
+  {value: 'failed', label: 'Failed', dot: 'var(--status-crit)'},
+  {value: 'rejected', label: 'Rejected', dot: 'var(--muted-foreground)'},
+];
+const KIND_OPTIONS: Array<FilterOption<KindFilter>> = [
+  {value: 'all', label: 'All types'},
+  {value: 'pos_csv', label: 'Sales CSV'},
+  {value: 'pos_xlsx', label: 'POS Sales Data'},
+  {value: 'inventory_pdf', label: 'Inventory PDF'},
+];
 // Filters, view and page live in the URL (replaceState, not Back steps), so opening a scan or
 // a file and coming back returns to the list as you left it. `?status=` was already a param.
 const UPLOADS_LIST = {q: '', status: 'all', kind: 'all', from: '', to: '', view: 'groups', page: '1'};
@@ -268,7 +284,13 @@ export function UploadsView({
   const view: 'list' | 'groups' = lp.view === 'list' ? 'list' : 'groups';
   const setView = (v: 'list' | 'groups') => setLp({view: v});
   const [groupKey, setGroupKey] = useState<string | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Opens on its own when the link already carries a filter; after that the button decides.
+  const [filtersOpen, setFiltersOpen] = useState(() => Boolean(lp.from || lp.to || statusFilter !== 'all' || kindFilter !== 'all'));
+  const filtersRef = useRef<HTMLDivElement>(null);
+  // A collapsed panel stays mounted (so it can animate) but out of the tab order.
+  useEffect(() => {
+    if (filtersRef.current) filtersRef.current.inert = !filtersOpen;
+  }, [filtersOpen]);
 
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
 
@@ -331,7 +353,8 @@ export function UploadsView({
   // Search lives in the header (Nov 25), so it no longer counts as an open filter.
   const hasActiveFilters = Boolean(from || to || statusFilter !== 'all' || kindFilter !== 'all');
   const searching = Boolean(query.trim());
-  const showFilters = filtersOpen || hasActiveFilters;
+  const activeFilterCount = (from || to ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (kindFilter !== 'all' ? 1 : 0);
+  const showFilters = filtersOpen;
 
   return (
     <div className={cn(GL_PAGE, 'gap-8')}>
@@ -360,7 +383,7 @@ export function UploadsView({
 
       {/* File list */}
       <Card>
-        <CardHeader className="gap-4">
+        <CardHeader className="grid-cols-[minmax(0,1fr)] gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {selectedGroup ? (
               <button
@@ -380,7 +403,7 @@ export function UploadsView({
             ) : (
               <CardTitle>Files</CardTitle>
             )}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {selectedGroup && (
                 <Link
                   href={`/uploads/scan/${encodeURIComponent(selectedGroup.source)}${selectedGroup.batchId ? `?batch=${encodeURIComponent(selectedGroup.batchId)}` : ''}`}
@@ -434,10 +457,33 @@ export function UploadsView({
                 type="button"
                 onClick={() => setFiltersOpen((o) => !o)}
                 aria-expanded={showFilters}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:border-foreground/25"
+                aria-controls="upload-filters"
+                aria-label={activeFilterCount ? `Filters, ${activeFilterCount} on` : 'Filters'}
+                className={cn(
+                  'group/filters inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none',
+                  'transition-[border-color,background-color,color,scale] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] active:duration-100 motion-reduce:active:scale-100',
+                  'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40',
+                  showFilters
+                    ? 'border-foreground/25 bg-muted text-foreground'
+                    : 'border-border bg-background text-foreground/85 pointer-fine:hover:border-foreground/25 pointer-fine:hover:text-foreground',
+                )}
               >
-                <SlidersHorizontal className="size-3.5 text-muted-foreground" /> Filters
-                {hasActiveFilters && <span aria-hidden className="size-1.5 rounded-full bg-primary" />}
+                <SlidersHorizontal
+                  aria-hidden
+                  className={cn(
+                    'size-3.5 transition-[color,rotate] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:rotate-0',
+                    showFilters ? 'rotate-90 text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                Filters
+                {activeFilterCount > 0 && (
+                  <span
+                    aria-hidden
+                    className="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums transition-[scale,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] starting:scale-50 starting:opacity-0"
+                  >
+                    {activeFilterCount}
+                  </span>
+                )}
               </button>
               {!selectedGroup && (
                 <div className="inline-flex rounded-md border border-border p-0.5" role="tablist" aria-label="View">
@@ -463,78 +509,81 @@ export function UploadsView({
               )}
             </div>
           </div>
-          {showFilters && (
-          <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-3">
-            {/* Upload date range — applies to both views. */}
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              From
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  setPage(1);
-                }}
-                aria-label="Uploaded on or after"
-                className="h-8 rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-              />
-            </label>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              To
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  setPage(1);
-                }}
-                aria-label="Uploaded on or before"
-                className="h-8 rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-              />
-            </label>
-            {(from || to) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setFrom('');
-                  setTo('');
-                  setPage(1);
-                }}
-                className="h-8 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Clear dates
-              </button>
+          {/* The filter row slides open under the toolbar (grid rows 0fr to 1fr, so it animates to its
+              real height); its controls rise in one after another. Kept mounted, inert while shut. */}
+          <div
+            id="upload-filters"
+            ref={filtersRef}
+            role="group"
+            aria-label="Filters"
+            className={cn(
+              'grid w-full transition-[grid-template-rows,opacity,margin] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none',
+              showFilters ? 'grid-rows-[1fr] opacity-100' : '-mt-4 grid-rows-[0fr] opacity-0',
             )}
-            <NativeSelect
-              aria-label="Filter by status"
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value as StatusFilter);
-                setPage(1);
-              }}
-            >
-              <option value="all">All statuses</option>
-              <option value="needs_review">Needs review</option>
-              <option value="committed">Committed</option>
-              <option value="processing">Processing</option>
-              <option value="failed">Failed</option>
-              <option value="rejected">Rejected</option>
-            </NativeSelect>
-            <NativeSelect
-              aria-label="Filter by type"
-              value={kindFilter}
-              onChange={(e) => {
-                setKindFilter(e.target.value as KindFilter);
-                setPage(1);
-              }}
-            >
-              <option value="all">All types</option>
-              <option value="pos_csv">Sales CSV</option>
-              <option value="pos_xlsx">POS Sales Data</option>
-              <option value="inventory_pdf">Inventory PDF</option>
-            </NativeSelect>
+          >
+            <div className="-m-1 min-h-0 overflow-hidden p-1">
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                {[
+                  <DateRangeFilter
+                    key="dates"
+                    from={from}
+                    to={to}
+                    label="Filter by upload date"
+                    onChange={(r) => {
+                      setLp({from: r.from, to: r.to});
+                      setPage(1);
+                    }}
+                  />,
+                  <FilterSelect
+                    key="status"
+                    label="Filter by status"
+                    value={statusFilter}
+                    defaultValue="all"
+                    options={STATUS_OPTIONS}
+                    onValueChange={(v) => {
+                      setStatusFilter(v);
+                      setPage(1);
+                    }}
+                  />,
+                  <FilterSelect
+                    key="kind"
+                    label="Filter by type"
+                    value={kindFilter}
+                    defaultValue="all"
+                    options={KIND_OPTIONS}
+                    icon={<FileStack aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+                    onValueChange={(v) => {
+                      setKindFilter(v);
+                      setPage(1);
+                    }}
+                  />,
+                ].map((control, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      'inline-flex transition-[opacity,translate] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:translate-y-0',
+                      showFilters ? 'translate-y-0 opacity-100' : '-translate-y-1.5 opacity-0',
+                    )}
+                    style={{transitionDelay: showFilters ? `${60 + i * 40}ms` : '0ms'}}
+                  >
+                    {control}
+                  </span>
+                ))}
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLp({from: '', to: '', status: 'all', kind: 'all'});
+                      setPage(1);
+                    }}
+                    className="ml-1 h-8 rounded-full px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-          )}
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
           {view === 'groups' && !selectedGroup ? (
