@@ -25,6 +25,7 @@
 import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
 import {generatedTemplateItems} from './goldline-form-templates.generated';
 import {printedNames, printedPageItems, type PrintedItem} from './goldline-printed-page';
+import {applyReaderFlags, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_LEGACY, type ReaderFlag} from './goldline-reader-marks';
 
 /** One Legacy item row, in printed column order (handwritten int or null each). */
 export type LegacyExtractedRow = {
@@ -36,6 +37,8 @@ export type LegacyExtractedRow = {
   ending_on_hand: number | null; // col6
   confidence: number;
   alt?: string | null;
+  /** NICH-36 · the reader's review flags (GOLDLINE_READ_MARKS): a BA note, or "Damage" in a count. */
+  flags?: string[];
 };
 
 /** The core row our pipeline reconciles against (shape-compatible with the three-
@@ -51,6 +54,7 @@ export type CoreRow = {
   confidence: number;
   alt?: string | null;
   extra?: Record<string, number | null>;
+  reader_flags?: ReaderFlag[] | null;
 };
 
 /** How a Legacy page's handwritten columns are used. `locations`: col1-col3 are stockroom /
@@ -77,6 +81,11 @@ export function legacyPageLayout(rows: LegacyExtractedRow[]): LegacyLayout {
  *  in `extra`). `printed`: delivery + ending, with the deducted-model fields in `extra` so
  *  they survive into the inventory sidecar. */
 export function legacyRowToCore(r: LegacyExtractedRow, layout: LegacyLayout = 'printed'): CoreRow {
+  // The reader's review flags (NICH-36) go on the row and send it to review; none = unchanged.
+  return applyReaderFlags(legacyRowCore(r, layout), cleanReaderFlags(r.flags));
+}
+
+function legacyRowCore(r: LegacyExtractedRow, layout: LegacyLayout): CoreRow {
   if (layout === 'locations') {
     return {
       item_code: r.item_code,
@@ -220,7 +229,7 @@ export function pageItemNames(version: string | null | undefined, page: number |
   return printedNames(printedPageItems(version, page));
 }
 
-export function buildLegacyManifestPrompt(page: number): string {
+export function buildLegacyManifestPrompt(page: number, opts: {marks?: boolean} = {}): string {
   const items = legacyPageItems(page);
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
@@ -255,12 +264,22 @@ export function buildLegacyManifestPrompt(page: number): string {
     'candidate in "alt". This overrides any general rule about making rows add up.',
     'Name columns in "alt" by what this page uses them for (Stockroom, Drawer, Selling area,',
     'or Beginning, Delivery, Beginning + Delivery, Deducted) and Ending, never "col3".',
+    ...(opts.marks ? MARKS_PROMPT_LEGACY : []),
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
     banded
       ? 'Item rows on this page, in printed order under their [heading ₱price] — read a value or null for each:'
       : 'Item rows on this page, in printed order — read a value or null for each:',
     `  ${list}`,
   ].join('\n');
+}
+
+/** The Legacy schema + the reader's optional per-row `flags` (NICH-36). */
+export function withLegacyMarksSchema(schema: typeof LEGACY_EXTRACTION_SCHEMA): typeof LEGACY_EXTRACTION_SCHEMA {
+  const items = schema.properties.rows.items;
+  return {
+    ...schema,
+    properties: {...schema.properties, rows: {...schema.properties.rows, items: {...items, properties: {...items.properties, flags: FLAGS_PROPERTY}}}},
+  } as typeof LEGACY_EXTRACTION_SCHEMA;
 }
 
 /** JSON schema for a Legacy page extraction (header + one object per item). */

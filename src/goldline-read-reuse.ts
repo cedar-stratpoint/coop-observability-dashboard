@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {nichidoDb} from './nichido-client';
 import {EXTRACT_MODEL} from './goldline-extract';
 import {readReuseKey} from './goldline-read-reuse-key';
+import {syncReaderMarks} from './goldline-review-marks-data';
 
 // QA fix 9: the same page uploaded twice gave different confidence and notes. The reader model
 // takes no temperature setting, so its self-rated confidence and wording drift run to run (QA's
@@ -93,6 +94,8 @@ export async function reuseIdenticalRead(
     {onConflict: 'upload_id,page'},
   );
   if (ins.error) throw new Error(`reuse extraction copy failed: ${ins.error.message}`);
+  // The copied read's reader flags (NICH-36) belong to this page too.
+  await syncReaderMarks(companyId, uploadId, ex.data.rows as Parameters<typeof syncReaderMarks>[2]);
   return {
     fromId: prior.id,
     page: ex.data.page as number,

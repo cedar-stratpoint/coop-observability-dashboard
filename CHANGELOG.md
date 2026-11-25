@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Reader sets review flags: notes, Damage, relabelled columns, written-in rows (NICH-36, flagged off)
+
+Syl (Nov 25): flag BA notes and revisions, "Damage" written in a count, and relabelled columns with the file, page and row, without capturing the note's text. Decided with the user: the reader detects them and reviewers can add or clear flags by hand (#799). Behind `GOLDLINE_READ_MARKS=1`; **off by default, byte-identical read when off**.
+
+- **P1 anchored read (V1/V2) and Legacy read:** one optional per-row `flags` list (`note`, `damage`). It is left out on a clean row, so it costs no output there. A Damage cell is left blank, never a guessed number. In the anchored schema, `flags` comes after the counts (the row is read, then judged). The anchored read also returns a required page-level `headers_written_over`. A flagged row goes to review (confidence capped at 0.6, or 0.5 for Damage) with a plain note ("“Damage” written in a count, left blank").
+- **After a read is saved** (inline, batch poller, or a reused earlier read), the page's reader flags are replaced: Note or revision and Damage per row; Product written in for each off-template hand-written row the read already returns as `extras`; Columns changed for the page when headers were written over. Reviewer flags are never touched. A failure only logs; it never fails the read.
+- **Not covered:** the original non-P1 anchored read and the free V1/V2 read (unresolved version) are unchanged. Legacy pages are not auto-flagged Columns changed: about 96% of Legacy rows are filled as Stockroom/Drawer/Selling and #685 already files them by arithmetic, so the flag would be on nearly every Legacy page.
+- Tests pin the switch (off = no field, no prompt lines) and the schema budget (24 optional / 16 union params) for P1 + unsure + marks and for Legacy + marks.
+
 ## 2026-11-25 — Add product row on the inventory review (NICH-42)
 
 Syl (Nov 25): BAs hand-write products onto the form between the printed rows (e.g. "P.Glow" under Creamy Glow), and the review had no way to count them. Decided with the user: build Add product row now.

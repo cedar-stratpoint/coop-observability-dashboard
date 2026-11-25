@@ -1,6 +1,7 @@
 import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
+import {applyReaderFlags, cleanHeaders, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_ANCHORED} from './goldline-reader-marks';
 
 // Phase 1 of template-anchored extraction (plan: knowledge/tasks/2026-11-12-template-anchored-extraction.md).
 //
@@ -437,9 +438,9 @@ export function mapAnchoredToExtractedPage(template: FormTemplate, out: Anchored
 
 /** One P1 row: the printed row key the model read beside the numbers, plus the numbers. */
 export type UnsureCell = {col: string; alt: number};
-export type AnchoredRowP1 = CountCols & {row: string; confidence?: number; unsure?: UnsureCell[]};
+export type AnchoredRowP1 = CountCols & {row: string; confidence?: number; unsure?: UnsureCell[]; flags?: string[]};
 export type FamilyTotal = {family: string; amount: number};
-export type AnchoredOutputP1 = Omit<AnchoredOutput, 'rows'> & {rows: AnchoredRowP1[]; family_totals?: FamilyTotal[]};
+export type AnchoredOutputP1 = Omit<AnchoredOutput, 'rows'> & {rows: AnchoredRowP1[]; family_totals?: FamilyTotal[]; headers_written_over?: string[]};
 
 /** The row key shown to (and returned by) the model: the printed ITEM#, plus the product name
  *  only when the code repeats on the page (accessories reuse codes like "ACCS 288"). */
@@ -474,7 +475,7 @@ function columnsTextP1(template: FormTemplate): string[] {
   return [`Columns to read, left to right (handwritten integer): ${cols.map((c) => `${c.key} (col ${c.position}, "${c.label}")`).join(' · ')}.`];
 }
 
-export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: boolean} = {}): string {
+export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: boolean; marks?: boolean} = {}): string {
   const keys = p1RowKeys(template);
   const lines: string[] = [];
   let idx = 0;
@@ -522,6 +523,7 @@ export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: bo
     '- Read the header once: store code + name, period (MM/DD to MM/DD), beauty consultant.',
     '- A handwritten row that is NOT one of the rows below goes in "extras" with its printed code/name.',
     '- A handwritten price that differs from a family\'s printed price goes in "price_notes". Never change a count.',
+    ...(opts.marks ? MARKS_PROMPT_ANCHORED : []),
     ...(opts.unsure
       ? [
           '- DOUBTFUL CELLS: if a written number could honestly be read two ways (4 or 9, 1 or 7, 3 or 8, 5 or 6, 0 or 6,',
@@ -563,6 +565,21 @@ export function withUnsureSchema<S extends typeof ANCHORED_EXTRACTION_SCHEMA_P1>
         },
       },
     },
+  } as S;
+}
+
+/** P1 schema + the reader's review flags (NICH-36): an optional per-row `flags` list (one optional
+ *  param) and a required page-level `headers_written_over` (required, so no optional budget). */
+export function withMarksSchema<S extends typeof ANCHORED_EXTRACTION_SCHEMA_P1>(schema: S): S {
+  const items = schema.properties.rows.items;
+  return {
+    ...schema,
+    properties: {
+      ...schema.properties,
+      rows: {...schema.properties.rows, items: {...items, properties: {...items.properties, flags: FLAGS_PROPERTY}}},
+      headers_written_over: {type: 'array', items: {type: 'string'}},
+    },
+    required: [...schema.required, 'headers_written_over'],
   } as S;
 }
 
@@ -665,6 +682,12 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
     r.alt = r.alt ? `${r.alt}; ${say}` : say;
   }
 
+  // The reader's review flags (NICH-36): a BA note or revision, or "Damage" in a count. Kept on the
+  // row for the review flags, and the row goes to review.
+  for (let i = 0; i < items.length; i++) applyReaderFlags(rows[i], cleanReaderFlags(claimed[i]?.flags));
+  const headersOver = cleanHeaders(out.headers_written_over);
+  if (headersOver.length) base.page.headers_written_over = headersOver;
+
   // Row math: ending = stockroom + drawer + selling_area. A mismatch keeps the written values but
   // drops confidence so the row is looked at.
   let rowMathOff = 0;
@@ -729,7 +752,8 @@ export function anchoredSchemaFor<S extends typeof ANCHORED_EXTRACTION_SCHEMA | 
   const props = schema.properties.rows.items.properties as Record<string, unknown>;
   const keys = Object.keys(props);
   const counts = keys.filter((k) => order.includes(k)).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  const tail = ['unsure', 'confidence'];
+  // The reader's own judgements come after the counts it judges (flags: NICH-36, off = unchanged).
+  const tail = ['unsure', 'flags', 'confidence'];
   const lead = keys.filter((k) => !order.includes(k) && !tail.includes(k));
   const ordered: Record<string, unknown> = {};
   for (const k of [...lead, ...counts, ...tail.filter((k) => keys.includes(k))]) ordered[k] = props[k];
