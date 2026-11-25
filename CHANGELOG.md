@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Ask Coop: our own hedging rules removed (owner decision)
+
+Owner: Ask Coop's own caution got in the way ("exploratory, not a registered metric", "I won't retype them", "I checked only 20", "I don't match on similar names", consent reminders on every answer). These were Coop's prompt rules, not the model's. Removed:
+- THINK-07 / EXP-03: no "Exploratory" opener and no "Basis" paragraph (the app already labels and shows the SQL); a gap is one short line at the end, not first.
+- THINK-04 / THINK-06: answer first; a caveat only when it changes what the owner should do, one line, no boilerplate.
+- The visible footnote "Note: some figures here could not be matched to the query rows" (still logged, never shown).
+- Consent / "honour unsubscribes" notes on leads, drafts, overlap tables and CRM identity results.
+- Contacts topic: code users vs booth leads (and their IG) go to `contacts` overlap + matches with `voucher`, never `run_query` or a batch of 20; "same email or mobile only" replaced by matches (name, email and IG patterns).
+**Kept on purpose** (security and accuracy, not hedging): read-only database role, secret columns hidden, GET-only CRM, contact details only for the allowlisted emails, customer-typed text treated as data, numbers from tools and never summed in prose (EXP-04, a real wrong-total bug). Prompt stays within its cached budget.
+
+
 ## 2026-11-25 — Ask Coop matches: Instagram columns, and one piece of evidence scores once
 
 The matches table now shows **A: Instagram** and **B: Instagram** next to email and mobile. A name inside a handle is no longer added on top of the same handle match (Karla Sy / karlasy60@ / @karla.sy scored 40 + 30 for one fact; now 40, plus any other clue such as the same pet).
