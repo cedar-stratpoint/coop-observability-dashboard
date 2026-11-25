@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
+
+Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
+- **Instagram filter** (All / Has Instagram · N / No Instagram). A customer whose booth leads or links haven't loaded yet is "unknown" and stays out of both lists, so a failed read never shows as "No Instagram" (`instagramState` in `src/customer-links.ts`, tested).
+- **Log contact** is now the column right after Name, as a labelled button, not an icon at the far right.
+- **Profile drawer** shows the clickable `@handle`, the booth sign-up (event · prize · pet) and whether it came from a Same person link or the same email or mobile.
 ## 2026-11-25 — Release v1.27.0: review flags, Add product row, Reco A to D (Nichido)
 
 Promotes the Nov 25 Nichido work from staging (#796, #799, #800, #801, #802, #803, #804), cherry-picked onto main; every file identical to staging. Needs `supabase/nichido/p6_review_marks.sql` on Nichido PROD (applied before the merge). The reader flags switch `GOLDLINE_READ_MARKS` stays OFF on Production until asked (staging test: +17% read cost).
