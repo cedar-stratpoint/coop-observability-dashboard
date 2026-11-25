@@ -10,7 +10,7 @@ import {manilaDayKey} from '../../pos-sales-compute';
 import type {SpinLead} from '../../spin-leads-types';
 import type {ClarifyResult} from '../clarify';
 import type {MetricRow, ResultColumn} from '../result-types';
-import {clean, CONSENT_NOTE, selectLeads, slug, type DraftInput, type LeadsOutcome, type LeadsSource} from './leads';
+import {clean, selectLeads, slug, type DraftInput, type LeadsOutcome, type LeadsSource} from './leads';
 
 export const PLACEHOLDERS = ['pet', 'prize', 'event', 'treats', 'collected_date'] as const;
 const SAMPLES = 5;
@@ -87,7 +87,6 @@ export function draftLeads(input: DraftInput, source: LeadsSource): DraftOutcome
   const counts = {listed: listed.length, drafted: rows.length, skipped_no_channel: skipped, without_consent_date: chosen.filter((c) => !c.lead.consentAt).length};
   const notes = [
     `${rows.length} ${CHANNEL_LABEL[input.channel]} drafts for ${label}. Nothing was sent: the owner copies them out and sends them.`,
-    CONSENT_NOTE,
     ...(skipped > 0 ? [`${skipped} chosen lead${skipped === 1 ? ' has' : 's have'} no ${field}, so no draft was made for them.`] : []),
     ...(unsure > 0 ? [`${unsure} draft${unsure === 1 ? ' uses' : 's use'} an unsure order match for the treats (booth timing was close to another order).`] : []),
     'Leads with no pet name read "your furbaby"; leads with no order match read "treats". You see only a few sample drafts; the owner sees them all.',

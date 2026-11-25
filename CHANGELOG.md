@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop: our own hedging rules removed (owner decision)
+
+Owner: Ask Coop's own caution got in the way ("exploratory, not a registered metric", "I won't retype them", "I checked only 20", "I don't match on similar names", consent reminders on every answer). These were Coop's prompt rules, not the model's. Removed:
+- THINK-07 / EXP-03: no "Exploratory" opener and no "Basis" paragraph (the app already labels and shows the SQL); a gap is one short line at the end, not first.
+- THINK-04 / THINK-06: answer first; a caveat only when it changes what the owner should do, one line, no boilerplate.
+- The visible footnote "Note: some figures here could not be matched to the query rows" (still logged, never shown).
+- Consent / "honour unsubscribes" notes on leads, drafts, overlap tables and CRM identity results.
+- Contacts topic: code users vs booth leads (and their IG) go to `contacts` overlap + matches with `voucher`, never `run_query` or a batch of 20; "same email or mobile only" replaced by matches (name, email and IG patterns).
+**Kept on purpose** (security and accuracy, not hedging): read-only database role, secret columns hidden, GET-only CRM, contact details only for the allowlisted emails, customer-typed text treated as data, numbers from tools and never summed in prose (EXP-04, a real wrong-total bug). Prompt stays within its cached budget.
+
+
 ## 2026-11-25 · Restock run: decisions on the right edge, roomier numbers
 
 Review: the run table had empty space right of the Approve / Edit / Reject buttons while the data columns felt cramped. The Decision column now hugs its content and sits flush right (actions right-aligned), and the spare width goes to the product name and the gaps between the number columns. The "Warehouse short" chip on lines still to decide moved out of the Decision cell: a warning icon now sits before the Send number it explains (tooltip: Coop's number before the cap), so every row has the same compact actions. Covered lines keep a single chip ("Covered" or "Warehouse short"), with the detail in its tooltip. "Check data first" reasons still wrap, capped at 18rem. Checked at 1440px (longest product names fit except the very longest) and 390px.

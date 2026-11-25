@@ -186,7 +186,6 @@ export function buildTable(page: Page, rows: MetricRow[], spec: WireSpec, d: Del
   const names = new Set(columns.map((c) => c.key));
   const title = `${labelOf(spec.table)}${d.identity ? ': customers' : ''}`;
   const caveats = [
-    ...(d.identity ? ['Contact data: use it only on the basis the person gave it. Honour unsubscribes.'] : []),
     ...(rows.length > L.screenRows ? [`The table shows the first ${L.screenRows} of ${rows.length} rows. Download CSV has all of them.`] : []),
     ...(d.stopped ? [`Not every row is here (${d.stopped === 'budget' ? 'time budget' : d.stopped === 'ceiling' ? 'row ceiling' : 'request limit'} reached). Narrow the dates or ask to continue.`] : []),
   ];
