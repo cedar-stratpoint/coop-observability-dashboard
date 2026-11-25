@@ -1108,6 +1108,7 @@ export async function fileFormPages(
   if (batchIds.size !== 1 || !rows[0].batch_id) throw new Error('pages_in_several_batches');
   const batch = await getBatch(companyId, rows[0].batch_id);
   if (!batch || batch.status !== 'open') throw new Error('batch_not_open');
+  // pagination-ok: a head count, no rows.
   const others = await supa.from('uploads').select('id', {count: 'exact', head: true}).eq('company_id', companyId).eq('batch_id', batch.id).not('id', 'in', `(${ids.join(',')})`);
   if (others.error) throw new Error(`uploads count failed: ${others.error.message}`);
   let target = batch.id;
