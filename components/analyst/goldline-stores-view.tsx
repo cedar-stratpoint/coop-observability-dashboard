@@ -21,6 +21,8 @@ import {GL_PAGE, GL_TILES_MOBILE, titleName} from '@/src/goldline-ui';
 const PAGE_SIZE = 25;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtMonth = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+const FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const fullMonth = (ym: string) => `${FULL[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
 /** The 3 months the rule looks at, from the latest loaded month: "Jul to Sep 2026". */
 const windowOf = (end: string | null) => {
   if (!end) return null;
@@ -41,6 +43,9 @@ export function GoldlineStoresView({
   scope = [],
   canEditScope = false,
   initialSort = 'gross',
+  latestEnd = null,
+  months = [],
+  month = null,
 }: {
   company?: string;
   stores: StoreRollup[];
@@ -48,6 +53,12 @@ export function GoldlineStoresView({
   scope?: StoreScope[];
   canEditScope?: boolean;
   initialSort?: SortKey;
+  /** The latest loaded period's end, for the restock rule's 3-month window. */
+  latestEnd?: string | null;
+  /** Months with sales, newest first (YYYY-MM); empty hides the month picker. */
+  months?: string[];
+  /** The month in view (YYYY-MM), or null for every month on file. */
+  month?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -59,6 +70,15 @@ export function GoldlineStoresView({
   const [sort, setSort] = useState<SortKey>(initialSort);
   const [asc, setAsc] = useState(initialSort === 'name');
   const [page, setPage] = useState(1);
+  const [loadingMonth, startMonth] = useTransition();
+
+  function pickMonth(next: string) {
+    const qs = new URLSearchParams();
+    if (next) qs.set('month', next);
+    if (sort !== 'gross') qs.set('sort', sort);
+    const q = qs.toString();
+    startMonth(() => router.push(q ? `/stores?${q}` : '/stores', {scroll: false}));
+  }
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -115,12 +135,38 @@ export function GoldlineStoresView({
 
   return (
     <div className={GL_PAGE}>
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold tracking-tight">Stores</h1>
-        <p className="text-sm text-muted-foreground">
-          Sales by store for the current period
-          {summary.periodStart && summary.periodEnd ? ` (${fmtMonth(summary.periodStart)} to ${fmtMonth(summary.periodEnd)})` : ''}.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-heading text-xl font-semibold tracking-tight">Stores</h1>
+          <p className="text-sm text-muted-foreground">
+            {month ? (
+              <>Sales by store in {fullMonth(month)}.</>
+            ) : (
+              <>
+                Sales by store, every month on file
+                {summary.periodStart && summary.periodEnd ? ` (${fmtMonth(summary.periodStart)} to ${fmtMonth(summary.periodEnd)})` : ''}.
+              </>
+            )}
+          </p>
+        </div>
+        {months.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Month</span>
+            <NativeSelect
+              value={month ?? ''}
+              onChange={(e) => pickMonth(e.target.value)}
+              aria-label="Show sales for one month"
+              className={cn('min-w-40', month && 'border-primary/50')}
+            >
+              <option value="">All months</option>
+              {months.map((m) => (
+                <option key={m} value={m}>
+                  {fullMonth(m)}
+                </option>
+              ))}
+            </NativeSelect>
+          </label>
+        )}
       </header>
 
       {scope.length > 0 && (
@@ -137,19 +183,19 @@ export function GoldlineStoresView({
           </p>
           <p className="text-muted-foreground">
             Coop only suggests restock for stores that are still selling: at least one sale in the last 3 months of Watsons data
-            {windowOf(summary.periodEnd) ? ` (${windowOf(summary.periodEnd)})` : ''}. A store with no sales then is paused. If you know better (a paused store is open again, or a selling store is closing), set it by hand in the Restock column.
+            {windowOf(latestEnd ?? summary.periodEnd) ? ` (${windowOf(latestEnd ?? summary.periodEnd)})` : ''}. A store with no sales then is paused. If you know better (a paused store is open again, or a selling store is closing), set it by hand in the Restock column.
           </p>
         </section>
       )}
 
-      <div className={cn("grid grid-cols-2 gap-4 sm:grid-cols-4", GL_TILES_MOBILE)}>
+      <div aria-busy={loadingMonth} className={cn('grid grid-cols-2 gap-4 transition-opacity duration-200 sm:grid-cols-4', loadingMonth && 'opacity-60', GL_TILES_MOBILE)}>
         <Stat label="Stores" value={stores.length.toLocaleString()} />
         <Stat label="Gross sales" value={peso(summary.gross)} />
         <Stat label="Units" value={summary.units.toLocaleString()} />
         <Stat label="Net of VAT" value={peso(summary.net)} />
       </div>
 
-      <Card>
+      <Card aria-busy={loadingMonth} className={cn('transition-opacity duration-200', loadingMonth && 'opacity-60')}>
         <CardHeader className="gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>Leaderboard</CardTitle>
