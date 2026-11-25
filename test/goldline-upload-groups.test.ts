@@ -132,3 +132,17 @@ describe('groupUploads — per-batch tiles + duplicates', () => {
     expect(groups[0]).toMatchObject({batchId: null, duplicateOf: null, pages: 2});
   });
 });
+
+describe('pages that need a store (Nov 25)', () => {
+  const at = '2026-11-24T09:53:00Z';
+  const page = (n: number, status: string, needs_store = false) => ({filename: `Scan (page ${n} of 9).pdf`, created_at: at, status, batch_id: 'drop', needs_store});
+  it('counts pages still to review with no store, once each', () => {
+    const [g] = groupUploads([page(1, 'needs_review', true), page(2, 'needs_review', true), page(2, 'needs_review', true), page(3, 'needs_review'), page(4, 'committed')]);
+    expect(g.needsStore).toBe(2);
+    expect(g.byStatus).toMatchObject({needs_review: 3, committed: 1});
+  });
+  it('a page committed on a re-upload no longer needs a store', () => {
+    const [g] = groupUploads([page(1, 'needs_review', true), {...page(1, 'committed'), batch_id: 'drop'}]);
+    expect(g.needsStore).toBe(0);
+  });
+});
