@@ -10,7 +10,7 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 ## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
 
-Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured.
+Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). Checked on staging, the same bug showed as a bar per receipt id for "latest offline sales" (the time came back as text), so the rule also counts two columns that differ on every row (an id and a time, a name and an email). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured.
 
 ## 2026-11-25 — Commit all: a success screen you can see, and committed tiles
 
