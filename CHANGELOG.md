@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Release v1.27.2: the Same person button looks like a button
+
+Owner: "di kasi mukhang button". The Same person link (Ask Coop matches table) is now a filled button with a link icon, hover and press states; a saved link shows as a green Linked chip. Was PR #780 (v1.26.16), which went stale behind v1.27.0 / v1.27.1 and is re-cut on top of main.
+
 ## 2026-11-25 — Release v1.27.1: log a contact for any event lead, Has Instagram filter, Ask Coop lists as tables, "Leave a review email"
 
 PROD release of our own changes only (cherry-picked onto main after v1.27.0): RET-17 (SQL `customer_contacts_lead_keys.sql` applied on PROD by the owner 2026-11-25), the Website CRM Instagram filter / Log contact next to Name / Instagram on the profile, Ask Coop showing one-row-per-record answers as tables, and the "Leave a review email" label. Checked on coop-cedar-staging first.
