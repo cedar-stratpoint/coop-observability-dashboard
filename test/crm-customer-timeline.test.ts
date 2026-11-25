@@ -51,8 +51,8 @@ const CHECKOUTS: CrmCheckout[] = [
 ];
 const VOUCHERS = [{email: 'ana@example.com', year: 2026, tier: 'gold', sentAt: '2026-05-01T00:00:00Z'}];
 const MANUAL: CustomerContact[] = [
-  {id: 'm1', email: 'ana@example.com', channel: 'sms', note: 'asked about salmon', contactedAt: '2026-10-20T02:00:00Z', createdBy: 'team@example.com'},
-  {id: 'm2', email: 'ben@example.com', channel: 'call', note: null, contactedAt: '2026-10-21T02:00:00Z', createdBy: 'team@example.com'},
+  {id: 'm1', email: 'ana@example.com', instagram: null, mobile: null, replied: false, channel: 'sms', note: 'asked about salmon', contactedAt: '2026-10-20T02:00:00Z', createdBy: 'team@example.com'},
+  {id: 'm2', email: 'ben@example.com', instagram: null, mobile: null, replied: false, channel: 'call', note: null, contactedAt: '2026-10-21T02:00:00Z', createdBy: 'team@example.com'},
 ];
 const SRC = {orders: ORDERS, checkouts: CHECKOUTS, birthdayVouchers: VOUCHERS, manualContacts: MANUAL};
 const tl = (src: Partial<typeof SRC> = {}): TimelineEvent[] => customerTimeline(CUSTOMER, {...SRC, ...src});
@@ -122,7 +122,7 @@ describe('8C customerTimeline', () => {
   });
 
   it('a logged contact appears at the top', () => {
-    const logged: CustomerContact = {id: 'm3', email: 'ana@example.com', channel: 'dm', note: null, contactedAt: '2026-11-12T01:00:00Z', createdBy: 'me@example.com'};
+    const logged: CustomerContact = {id: 'm3', email: 'ana@example.com', instagram: null, mobile: null, replied: false, channel: 'dm', note: null, contactedAt: '2026-11-12T01:00:00Z', createdBy: 'me@example.com'};
     expect(tl({manualContacts: [logged, ...MANUAL]})[0]).toMatchObject({kind: 'dm', id: 'manual:m3'});
   });
 });
