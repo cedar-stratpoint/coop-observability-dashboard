@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {createCrmClient, CrmError} from '../src/chat/crm/client';
+import {CRM_LIMITS, createCrmClient, CrmError} from '../src/chat/crm/client';
 import {crmHealth, crmReason} from '../src/chat/crm/health';
 import {createExecutors} from '../src/chat/tool-executors';
 import type {DigestSource} from '../src/chat/digest-lookup';
@@ -92,7 +92,7 @@ describe('crmHealth (for /api/chat/health)', () => {
     expect(JSON.stringify(h)).not.toMatch(/internal detail/);
   });
   it('a response over the size cap is reported as such (the likeliest failure on a busy store)', async () => {
-    const big = vi.fn(async () => new Response('x'.repeat(10), {status: 200, headers: {'content-length': '9000000'}})) as unknown as typeof fetch;
+    const big = vi.fn(async () => new Response('x'.repeat(10), {status: 200, headers: {'content-length': String(CRM_LIMITS.maxResponseBytes + 1)}})) as unknown as typeof fetch;
     const h = await crmHealth({CRM_API_URL: 'https://crm.example', CRM_API_READ_TOKEN: 'tok'}, {fetch: big});
     expect(h.probes[0].reason).toMatch(/size cap/);
   });
