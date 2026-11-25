@@ -7,23 +7,76 @@ import type {LeadMatch} from '@/src/lead-order-match';
 import {FOLLOW_UP_DAYS, addDays, followUpMessage, leadKey, petName, treatPhrase, type FollowUpStage} from '@/src/lead-order-match';
 import {manilaDayKey} from '@/src/pos-sales-compute';
 import {SegmentedControl} from './segmented-control';
-import {LeadCapture, type VoucherProps} from './lead-capture';
+import {LeadCapture} from './lead-capture';
+import {LeadsContacts, LogButton, StatusChip, hasContactKey} from './leads-contacts';
+import {ContactLogDialog} from './contact-log-dialog';
+import {leadPerson} from '@/src/spin-leads-types';
+import type {CustomerContact} from '@/src/customer-contacts';
+import type {ContactStatus} from '@/src/person-identity';
+import type {SpinVoucherInfo} from '@/src/spin-voucher';
 
 const VIEWS = [
   {value: 'contacts', label: 'Contacts'},
   {value: 'followups', label: 'Follow-ups'},
 ] as const;
 
-/** /customers/leads: the contact list, or the day's follow-up messages built from it. */
-export function LeadsView({leads, matches, ...voucher}: {leads: SpinLead[]; matches: Record<string, LeadMatch>} & VoucherProps) {
+const UNKNOWN: ContactStatus = {state: 'unknown', lastAt: null, lastChannel: null};
+
+/**
+ * /customers/leads: the contact list (status first, RET-17), or the day's follow-up messages built from it. One Log dialog
+ * serves both views; statuses and each lead's contacts are computed on the server (src/person-identity.ts).
+ */
+export function LeadsView({
+  leads,
+  matches,
+  vouchers,
+  statuses,
+  histories,
+  logRead,
+  legacy,
+  viewer,
+}: {
+  leads: SpinLead[];
+  matches: Record<string, LeadMatch>;
+  /** Per lead (leadKey): whether a website order followed the spin. Computed on the server; null state = orders unread. */
+  vouchers: Record<string, SpinVoucherInfo>;
+  /** Per lead (leadKey): contact status from the manual log (D1, D2); 'unknown' never counts as not contacted. */
+  statuses: Record<string, ContactStatus>;
+  /** Per lead with contacts (or unreadable ones, null); a lead missing here has none yet. */
+  histories: Record<string, CustomerContact[] | null>;
+  /** False = the log could not be read (every status Unknown, nothing can be logged). */
+  logRead: boolean;
+  /** The log was read without the Instagram / mobile columns (SQL not applied yet). */
+  legacy: boolean;
+  viewer: string | null;
+}) {
   const [view, setView] = useState<'contacts' | 'followups'>('contacts');
+  const [logFor, setLogFor] = useState<SpinLead | null>(null);
+  const statusOf = (l: SpinLead): ContactStatus => statuses[leadKey(l)] ?? UNKNOWN;
+  const historyOf = (l: SpinLead): CustomerContact[] | null => (!logRead ? null : leadKey(l) in histories ? histories[leadKey(l)] : []);
   return (
     <div className="flex flex-col gap-6">
       <SegmentedControl ariaLabel="Leads view" options={VIEWS} value={view} onChange={setView} />
-      {view === 'contacts' ? <LeadCapture leads={leads} orders={0} matches={matches} voucher={voucher} /> : <FollowUps leads={leads} matches={matches} />}
+      {view === 'contacts' ? (
+        <LeadCapture leads={leads} orders={0} matches={matches} list={<LeadsContacts leads={leads} matches={matches} data={{vouchers, statuses}} logRead={logRead} onLog={setLogFor} />} />
+      ) : (
+        <FollowUps leads={leads} matches={matches} statusOf={statusOf} onLog={setLogFor} />
+      )}
+      {logFor && (
+        <ContactLogDialog
+          name={logFor.name ?? ''}
+          person={leadPerson(logFor)}
+          history={historyOf(logFor)}
+          viewer={viewer}
+          legacy={legacy}
+          onClose={() => setLogFor(null)}
+        />
+      )}
     </div>
   );
 }
+
+type LogProps = {statusOf: (l: SpinLead) => ContactStatus; onLog: (l: SpinLead) => void};
 
 const STAGES: {stage: FollowUpStage; title: string; hint: string}[] = [
   {stage: 'thanks', title: 'Thank-you', hint: `Spun ${FOLLOW_UP_DAYS.thanks} day before`},
@@ -35,7 +88,7 @@ const STAGES: {stage: FollowUpStage; title: string; hint: string}[] = [
  * purchase matches are listed: an unsure one could thank someone for a
  * stranger's order. A copy-and-paste list, not a sender.
  */
-function FollowUps({leads, matches}: {leads: SpinLead[]; matches: Record<string, LeadMatch>}) {
+function FollowUps({leads, matches, statusOf, onLog}: {leads: SpinLead[]; matches: Record<string, LeadMatch>} & LogProps) {
   const [day, setDay] = useState(() => manilaDayKey(new Date().toISOString()));
 
   const due = useMemo(
@@ -82,7 +135,7 @@ function FollowUps({leads, matches}: {leads: SpinLead[]; matches: Record<string,
           ) : (
             <ul className="flex flex-col divide-y rounded-lg border">
               {s.rows.map(({l, m}) => (
-                <FollowUpRow key={leadKey(l)} lead={l} match={m} stage={s.stage} />
+                <FollowUpRow key={leadKey(l)} lead={l} match={m} stage={s.stage} statusOf={statusOf} onLog={onLog} />
               ))}
             </ul>
           )}
@@ -92,7 +145,7 @@ function FollowUps({leads, matches}: {leads: SpinLead[]; matches: Record<string,
   );
 }
 
-function FollowUpRow({lead, match, stage}: {lead: SpinLead; match: LeadMatch; stage: FollowUpStage}) {
+function FollowUpRow({lead, match, stage, statusOf, onLog}: {lead: SpinLead; match: LeadMatch; stage: FollowUpStage} & LogProps) {
   const [copied, setCopied] = useState(false);
   const message = followUpMessage(stage, lead, match);
   const copy = async () => {
@@ -111,16 +164,22 @@ function FollowUpRow({lead, match, stage}: {lead: SpinLead; match: LeadMatch; st
         <div className="truncate text-muted-foreground">
           {petName(lead)} · {treatPhrase(match.products)}
         </div>
+        <div className="mt-1.5">
+          <StatusChip status={statusOf(lead)} onLog={hasContactKey(lead) ? () => onLog(lead) : undefined} name={lead.name ?? undefined} />
+        </div>
       </div>
       <p className="flex-1 leading-relaxed">{message}</p>
-      <button
-        type="button"
-        onClick={copy}
-        className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      <span className="flex shrink-0 items-center gap-1.5 self-start">
+        <button
+          type="button"
+          onClick={copy}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        {hasContactKey(lead) && <LogButton onClick={() => onLog(lead)} name={lead.name ?? lead.email ?? (lead.instagram ? `@${lead.instagram}` : 'this lead')} compact />}
+      </span>
     </li>
   );
 }
