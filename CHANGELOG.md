@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop reads website orders again: CRM response cap 4 MB → 16 MB
+
+PROD `/api/orders` reached 4,026,463 bytes on 2026-11-25 (every order carries its raw Shopify payload), over Ask Coop's 4,000,000-byte cap per CRM response (`CRM_LIMITS.maxResponseBytes`). Every answer that reads website orders failed with "the website CRM sent more data than Ask Coop reads at once": customer lists (GRAND300 buyers), order lists, the Website row of the channel report. The Website CRM page was unaffected (its reader has no cap). Cap raised to 16 MB (about 4x headroom, the read takes about 1.2 s). **Decision:** raise now; when orders near the new cap, page `/api/orders` with `cursor` + `fields` the way the Business Health Report already does, instead of raising it again.
+
 ## 2026-11-25 — Ask Coop lists the customers who used a discount code (RET-14)
 
 Owner asked "who are the customers who ordered and used the voucher GRAND300" and Ask Coop answered with counts only: `crm_query` counts discount uses but returns no customers, and `list_crm_customers` had no code filter. `list_crm_customers` now takes `voucher` (a code used on ANY order, `any`, `none`, or `""`), the same `voucherMatch` as the Website CRM page's Voucher filter, so the answer is the customer list with name and email. No new tool (the count stays at the ceiling); the tool text routes "customers who used a code" to it. Tests `test/chat-crm-voucher.test.ts`.
