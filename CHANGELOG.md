@@ -10,7 +10,7 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
-## 2026-11-25 · v1.26.5 Voucher families (*300) and Ask Coop matches without asking (prod release)
+## 2026-11-25 · v1.26.6 Voucher families (*300) and Ask Coop matches without asking (prod release)
 Ships only #742 (staging #743), cherry-picked onto `main`.
 
 ## 2026-11-25 — Voucher families: "*300" covers every ₱300-off code; Ask Coop runs matches without asking
