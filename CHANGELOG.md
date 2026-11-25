@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Orders and Restock: shorter copy, more room to breathe
+
+Review: Orders opened with a four-line paragraph, the Restock run with a long sentence, and both felt cramped and dated. Goal: say less, space it out, lower eye strain (aesthetic-usability). Decisions:
+
+- **Orders.** One-line lede ("Purchase orders by the day they were made, one per store."); the how-it-works detail moved behind an ⓘ. The month picker moved into the page header, and the card's own heading is now the month with a summary line (POs · approved total · lines received). Rows are taller with no tinted header band; Received shows a thin progress bar; the restock run is a chip; a chevron shows the row opens. The year was dropped from each date (the month heading carries it).
+- **Orders empty state.** Instead of a paragraph: three numbered steps (approve lines, make purchase orders, fill in what arrives) and a **Go to Restock** button. Numbers are used because the order is real.
+- **Restock run.** Header is title + actions, then tabs, then a two-line run summary ("Covers Dec 2026 to Feb 2027 · Second half of November run, from last year's…" / "Made … by ricketson.palacio") beside the store and run-date filters. The decorative gradient rule under the header is gone. The four tall KPI cards became one stats strip with hairline dividers and shorter subs; the floating "Not in this run" line folded into the Stores stat ("299 waiting on a form · 17 paused", full sentence in its tooltip). Store names show in title case (Cubao, not CUBAO). Each row keeps one labeled action (Approve); Edit and Reject became icon buttons with labels for screen readers. Selected rows tint with the accent.
+- **Shared.** Page padding and section gaps grew (gap 8, py 8 to 10, px up to 10); table cells use px 6 and py 3.5 to 4; Restock tabs are spaced a little wider (all three tabs). Orders day page got the same spacing for consistency.
+
+Checked in dark and light at 1440px and 390px (no sideways page scroll), with real Staging data and a forced empty state.
+
 ## 2026-11-25 — Website CRM: Voucher filter and voucher search on the Customers tab (RET-14)
 
 Owner asked to find customers by voucher right on the table. The Customers tab gets a **Voucher** filter next to Tier and Bought: **All**, **Used a voucher**, **Bought, no voucher**, then every code with buyers and its buyer count (`GRAND300 · 63`), most buyers first. A code matches on **any** order, not just the first (the RET-12 `codesUsed` keys), so a customer who used GRAND300 on a second order shows up. The search box now also matches voucher codes ("Search name, email or code"). Rules kept: a customer whose orders were not read, or who never ordered, is never "no voucher" (unknown is never "never"); birthday codes stay folded into "birthday voucher" and never reach the browser. The CSV header names the Voucher filter. Pure logic in `src/crm-compute.ts` (`voucherMatch`, `voucherOptions`; `codesUsedList` now reuses `voucherOptions`), tests `test/crm-voucher-filter.test.ts`. Verified locally against a fake CRM.

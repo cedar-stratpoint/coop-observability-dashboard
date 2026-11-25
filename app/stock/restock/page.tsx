@@ -67,9 +67,9 @@ function RestockTabs({tab: active, store, asOf}: {tab: 'run' | 'inputs' | 'hits'
     return q.size ? `/stock/restock?${q}` : '/stock/restock';
   };
   const item = (active: boolean) =>
-    cn('border-b-2 px-1 pb-1 text-sm font-medium transition-colors', active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground');
+    cn('border-b-2 px-0.5 pb-2 text-sm font-medium transition-colors duration-150', active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground');
   return (
-    <nav aria-label="Restock" className="flex gap-4">
+    <nav aria-label="Restock" className="flex gap-6">
       <Link href={href('run')} aria-current={active === 'run' ? 'page' : undefined} className={item(active === 'run')}>
         Run
       </Link>
