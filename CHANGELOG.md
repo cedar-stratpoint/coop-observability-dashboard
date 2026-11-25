@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Voucher families: "*300" covers every ₱300-off code; Ask Coop runs matches without asking
+
+Owner asked for "the other 300 off vouchers, not just GRAND300" against booth leads and their IG. `voucher` took one exact code, so Ask Coop fell back to a general overlap and only offered name/IG matching. `voucherMatch` (one rule for the Website CRM page and Ask Coop) now takes a family with `*` ("*300" = every code ending in 300: GRAND300, ZOOMY300, WEB300, EAST300, ZMY300, STRAT300 and the one-off ones) or a comma list; regex characters stay literal. The contacts topic tells Ask Coop to run overlap AND matches in the same turn for IG questions, never ask first. Measured on PROD: 10 codes end in 300, 121 customers used one; 604 of 744 booth leads gave only an Instagram handle, so name/IG matching is the main way to link them. Tests in `test/crm-voucher-filter.test.ts`.
+
+
 ## 2026-11-25 — Per store board: confirming a store says it worked
 
 Confirming a store on a "Needs a store" card moved the card away with no word, so it looked like nothing happened. A confirmation now appears ("Store 473 · SM CITY-SAN PABLO 1 set for Gaisano Mall Digos (Sep 16 to 30, 2026)") with a Show button that filters the board to where the form went (its store, or One-off stores when it is that store's only form). The Uploads page's confirmation is now a shared `ToastStack` with an optional action.
