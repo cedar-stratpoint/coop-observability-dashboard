@@ -15,8 +15,8 @@ import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
 import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
 import {AddRowDialog} from './add-row-dialog';
 import {addedRow, type AddableItem} from '@/src/review-add-row';
-import {bandOpen, type PaperBand} from '@/src/band-prices';
-import {BandPrice} from './band-price';
+import {bandOpen, peso, type PaperBand} from '@/src/band-prices';
+import {BandPrice, BandPricesBar} from './band-price';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -109,6 +109,8 @@ type Props = {
   /** Pick (or take back, null) the price a flagged band is valued at on this form. Returns an
    *  error message, or null when saved. */
   onBandPrice?: (group: string, price: number | null) => Promise<string | null>;
+  /** Pick the paper's price on several bands at once (the page bar). */
+  onBandPrices?: (picks: Array<{group: string; price: number}>) => Promise<string | null>;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -160,6 +162,7 @@ export function ReviewRows({
   onRemoveRow,
   bands,
   onBandPrice,
+  onBandPrices,
 }: Props) {
   const [adding, setAdding] = useState(false);
   // Added rows aren't in the page's catalog slice: borrow their line and price from the
@@ -286,20 +289,20 @@ export function ReviewRows({
       <span className="flex items-baseline justify-between gap-3">
         <span>
           {g.family}
-          {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+          {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· {peso(g.price)}</span>}
           {b && bandOpen(b) && b.offer_price != null && (
             <span className="ml-1.5 font-mono font-normal" style={{color: toneText('var(--status-warn)')}}>
-              · ₱{b.offer_price.toLocaleString('en-US')} on paper
+              · {peso(b.offer_price)} on paper
             </span>
           )}
           {changed && b.printed_price != null && (
-            <span className="ml-1.5 font-mono font-normal text-muted-foreground">· printed ₱{b.printed_price.toLocaleString('en-US')}</span>
+            <span className="ml-1.5 font-mono font-normal text-muted-foreground">· printed {peso(b.printed_price)}</span>
           )}
         </span>
         {t.priced > 0 && (
           <span className="shrink-0 font-mono font-normal text-muted-foreground tabular-nums" title={changed ? 'Total amount: on hand × the price picked for this form' : 'Total amount: on hand × printed price'}>
-            {b?.amount != null && <span className="mr-2">Paper ₱{b.amount.toLocaleString('en-US')} ·</span>}
-            ₱{t.total.toLocaleString('en-US')}
+            {b?.amount != null && <span className="mr-2">Paper {peso(b.amount)} ·</span>}
+            {peso(Math.round(t.total * 100) / 100)}
           </span>
         )}
       </span>
@@ -335,7 +338,7 @@ export function ReviewRows({
                 <span className="font-mono text-xs font-medium">{r.item_code}</span>
                 {nameOf(r) && <span className="min-w-0 text-xs text-muted-foreground">{nameOf(r)}</span>}
                 {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{peso(priceOf(r.item_code)!)}</span>
                 )}
               </div>
               {printedNameHint(r, knownName(r)) && (
@@ -352,6 +355,7 @@ export function ReviewRows({
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
               )}
+              {r.os_printed && <span className="mt-0.5 block text-[11px] text-muted-foreground">O/S printed on the form</span>}
               {bandPrice(r)}
               <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
             </div>
@@ -427,13 +431,14 @@ export function ReviewRows({
             <span className="font-mono text-xs font-medium">{r.item_code}</span>
             {nameOf(r) && <span className="block text-sm">{nameOf(r)}</span>}
             {ownPrice.has(r.i) && priceOf(r.item_code) != null && (
-              <span className="block font-mono text-xs text-muted-foreground tabular-nums">₱{priceOf(r.item_code)!.toLocaleString('en-US')}</span>
+              <span className="block font-mono text-xs text-muted-foreground tabular-nums">{peso(priceOf(r.item_code)!)}</span>
             )}
             {printedNameHint(r, knownName(r)) && (
               <span className="mt-0.5 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{printedNameHint(r, knownName(r))}</span>
             )}
             {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
+            {r.os_printed && <span className="mt-0.5 block text-xs text-muted-foreground">O/S printed on the form</span>}
             {bandPrice(r)}
             <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
           </div>
@@ -544,6 +549,7 @@ export function ReviewRows({
         </div>
       </CardHeader>
       <CardContent>
+        <BandPricesBar bands={bands ?? []} editable={editable} onPickAll={onBandPrices} />
         {visible.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             {rows.length === 0

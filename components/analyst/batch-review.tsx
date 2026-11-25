@@ -12,7 +12,7 @@ import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {estimateRowBoxes} from '@/src/row-box-fill';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitBatchAction, setBandPriceAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {commitBatchAction, setBandPriceAction, setBandPricesAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
@@ -279,8 +279,19 @@ export function BatchReview({
     const b = res.bands.find((x) => x.group === group);
     const i = b?.first_index;
     // The pick answers the band's flag; a row also low on confidence still wants its own look.
-    const answers = price != null && i != null && rowConfidence(cur.extraction?.data?.rows?.[i]?.confidence) >= LOW_BELOW;
+    const answers = price != null && i != null && rowConfidence(cur.extraction?.data?.rows?.[i]?.confidence) >= LOW_BELOW && !cur.extraction?.data?.rows?.[i]?.oos?.check;
     setCur((s) => ({bands: res.bands, resolved: answers ? new Set(s.resolved).add(i as number) : s.resolved}));
+    return null;
+  }
+  async function pickBandPrices(picks: Array<{group: string; price: number}>): Promise<string | null> {
+    if (!cur) return 'That page could not be found.';
+    const res = await setBandPricesAction({company, uploadId: cur.upload.id, picks});
+    if (!res.ok) return res.error;
+    const read = cur.extraction?.data?.rows ?? [];
+    const answered = picks
+      .map((p) => res.bands.find((x) => x.group === p.group)?.first_index)
+      .filter((i): i is number => i != null && rowConfidence(read[i]?.confidence) >= LOW_BELOW && !read[i]?.oos?.check);
+    setCur((s) => ({bands: res.bands, resolved: new Set([...s.resolved, ...answered])}));
     return null;
   }
 
@@ -693,6 +704,7 @@ export function BatchReview({
                   flagged={curFlags}
                   bands={curBands}
                   onBandPrice={pickBandPrice}
+                  onBandPrices={pickBandPrices}
                   resolved={curState.resolved}
                   active={curState.active}
                   view={curState.view}

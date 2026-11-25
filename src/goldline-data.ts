@@ -632,13 +632,20 @@ export async function saveExtraction(input: {
 /** Save a band's price pick on the page's read (bands[].use_price; null takes it back). Returns
  *  the page's bands as saved, or null when the band isn't on this page. */
 export async function setExtractionBandPrice(companyId: string, uploadId: string, group: string, price: number | null): Promise<PaperBand[] | null> {
+  return setExtractionBandPrices(companyId, uploadId, [{group, price}]);
+}
+
+/** Several band picks on one page in one write (Use the paper prices on this page). Null when
+ *  any band isn't on this page. */
+export async function setExtractionBandPrices(companyId: string, uploadId: string, picks: ReadonlyArray<{group: string; price: number | null}>): Promise<PaperBand[] | null> {
   const ex = await getExtraction(companyId, uploadId);
   if (!ex?.data) return null;
   const bands = cleanBands(ex.data.bands);
-  const i = bands.findIndex((b) => b.group === group);
-  if (i < 0) return null;
-  const next = bands.map((b, k) => {
-    if (k !== i) return b;
+  const want = new Map(picks.map((p) => [p.group, p.price]));
+  if ([...want.keys()].some((g) => !bands.some((b) => b.group === g))) return null;
+  const next = bands.map((b) => {
+    if (!want.has(b.group)) return b;
+    const price = want.get(b.group) ?? null;
     const {use_price: _drop, ...rest} = b;
     return price == null ? rest : {...rest, use_price: price};
   });

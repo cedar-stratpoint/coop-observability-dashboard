@@ -2,7 +2,7 @@ import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
 import {checkBands, type PaperTotal} from './band-prices';
-import {applyOutOfStock, cleanOsFlags} from './out-of-stock';
+import {applyPageOsFlags} from './printed-os';
 import {applyReaderFlags, cleanHeaders, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_ANCHORED} from './goldline-reader-marks';
 
 // Phase 1 of template-anchored extraction (plan: knowledge/tasks/2026-11-12-template-anchored-extraction.md).
@@ -701,11 +701,9 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
   // The reader's review flags (NICH-36): a BA note or revision, or "Damage" in a count. Kept on the
   // row for the review flags, and the row goes to review.
   for (let i = 0; i < items.length; i++) applyReaderFlags(rows[i], cleanReaderFlags(claimed[i]?.flags));
-  // "O/S" the reader flagged in a cell (os_drawer, ...) becomes 0 there (QA Nov 25).
-  for (let i = 0; i < items.length; i++) {
-    const cells = cleanOsFlags(claimed[i]?.flags);
-    if (cells.length) applyOutOfStock(rows[i], {cells, row: false});
-  }
+  // "O/S" the reader flagged in a cell (os_drawer, ...) becomes 0 there (QA Nov 25), unless the
+  // form prints that O/S itself (audit Nov 25): then the row only says so.
+  applyPageOsFlags(rows.slice(0, items.length), items.map((_, i) => claimed[i]?.flags), {version: template.version, page: template.page});
   const headersOver = cleanHeaders(out.headers_written_over);
   if (headersOver.length) base.page.headers_written_over = headersOver;
 
@@ -734,6 +732,10 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
     const paper = totals.find((t) => t.k === gk || t.k.includes(gk) || gk.includes(t.k));
     if (!paper) continue;
     familyChecked++;
+    // A band the paper prices differently, whose total reconciles at that price, is the band
+    // price flag's job (src/band-prices.ts), not a misread: no "family total" note on its rows.
+    const repriced = (base.page.bands ?? []).find((b) => b.group === group && b.kind != null && b.offer_price != null && b.amount != null && Math.abs(b.amount - b.pieces * b.offer_price) <= 1);
+    if (repriced) continue;
     const price = items[idxs[0]].unitPrice as number;
     const sum = idxs.reduce((a, i) => a + (rows[i].ending_on_hand ?? 0), 0) * price;
     if (Math.abs(sum - paper.amount) > 1) {
