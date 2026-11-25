@@ -21,7 +21,6 @@ Staging and production now deploy from a GitLab pipeline (`.gitlab-ci.yml`) inst
 - **Missed deploy:** GitLab skips push pipelines when one push moves more than 4 refs. Run the pipeline on the branch from Build > Pipelines.
 - **Rollback:** remove `git` from `vercel.json`, and GitHub auto-deploys resume on the next push.
 
-
 ## 2026-11-25 — "Same person" links: Instagram + Booth on the Website CRM table, not a merge (RET-15 Slice B)
 
 Owner: link a website customer to a booth lead from Ask Coop's matches table, and see the booth's Instagram and event beside the customer. **Decision: extra metadata, not a total merge.** The website row keeps its own name, email, orders, spend and vouchers (the CRM stays the source), so orders, spend, cohorts and repeat rate never change, and **Unlink** removes only the extra metadata. Only the person who linked can unlink (same delete-own rule as the contact log).
