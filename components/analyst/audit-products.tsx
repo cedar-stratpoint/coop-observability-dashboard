@@ -10,7 +10,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {ALL_STORES, AUDIT_META, AUDIT_STATES, NEEDS_ACTION, openingState, patternState, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
-import {CoverageNote, ink, LegKey, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf} from '@/components/analyst/audit-shared';
+import {CoverageNote, ink, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By product (NICH-17). Every counted store in a month, rolled up per
 // product: how many stores sit in each of the 8 states, as one stacked bar per product.
@@ -42,6 +42,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
     if (needle) return data.rows.filter((r) => r.item_code.toLowerCase().includes(needle) || r.product.toLowerCase().includes(needle));
     return data.rows.filter((r) => r.counts[state] > 0).sort((a, b) => b.counts[state] - a.counts[state] || a.item_code.localeCompare(b.item_code));
   }, [data.rows, state, q, searching]);
+  const otherMonth = data.months.find((mo) => mo.loaded && mo.month !== data.month)?.month ?? null;
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const at = Math.min(page, pages - 1);
   const filter = (fn: () => void) => {
@@ -105,9 +106,16 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
 
           <CoverageNote month={data.month} coverage={data.coverage} all />
 
-          <div className="flex flex-col gap-3">
-            <LegKey />
-            <MatrixLegend
+          {!data.coverage.loaded ? (
+            <NoSalesNotice
+              month={data.month}
+              total={data.summary.total}
+              unit="store and product pairs"
+              otherMonth={otherMonth}
+              otherHref={otherMonth ? `/stock/audit/products?month=${otherMonth}` : null}
+            />
+          ) : (
+            <NotebookGrid
               summary={data.summary}
               active={searching ? null : state}
               onPick={(s) =>
@@ -118,7 +126,14 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
               }
               unit="store and product pairs"
             />
-          </div>
+          )}
+          {/* This view counts products, not lines: a reason opens its lines across all stores. */}
+          <UnknownReasons
+            summary={data.summary}
+            active={false}
+            activeWhy={null}
+            hrefFor={(why) => `/stock/audit?${new URLSearchParams({store: 'all', month: data.month!, state: 'unknown', ...(why ? {why} : {})})}`}
+          />
 
           <Card className="gap-0 overflow-hidden py-0">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">

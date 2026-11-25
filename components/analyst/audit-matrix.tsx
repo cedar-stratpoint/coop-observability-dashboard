@@ -10,7 +10,7 @@ import {NativeSelect} from '@/components/ui/native-select';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
 import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
-import {CoverageNote, ink, LegKey, Mark, MatrixLegend, monthLabel, Pager, PoSourceBar, ReconTabs, StateChip, toneOf} from '@/components/analyst/audit-shared';
+import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, ReconTabs, StateChip, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By store (NICH-17). One store (or every store) and month: every product's
 // three legs (Watsons · Inventory · PO) and its recommendation on the line. The tiles are the
@@ -31,6 +31,7 @@ const STORE_PAGE = 12;
 /** The query as URL params, leaving out whatever is already the default. */
 function toParams(store: string, month: string, query: AuditQuery): URLSearchParams {
   const sp = new URLSearchParams({store, month, state: query.state});
+  if (query.state === 'unknown' && query.why) sp.set('why', query.why);
   if (query.q.trim()) sp.set('q', query.q.trim());
   if (query.sort !== 'reco') sp.set('sort', query.sort);
   if (query.dir !== 'asc') sp.set('dir', query.dir);
@@ -89,6 +90,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
     go({sort, dir: query.sort === sort ? (query.dir === 'asc' ? 'desc' : 'asc') : first});
   };
 
+  const otherMonth = data.months.find((mo) => mo.loaded && mo.month !== sel?.month)?.month ?? null;
   const m = AUDIT_META[state];
   const c = toneOf(state);
   const where = all ? 'any store' : 'this store';
@@ -157,10 +159,19 @@ export function AuditMatrix({data}: {data: AuditResult}) {
 
           <CoverageNote month={sel.month} coverage={data.coverage} all={all} />
 
-          <div className="flex flex-col gap-3">
-            <LegKey />
-            <MatrixLegend summary={data.summary} active={searching ? null : state} onPick={(s) => go({state: s, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
-          </div>
+          {/* A month without sales can't be judged: one notice instead of a grid of zeros. */}
+          {!data.coverage.loaded ? (
+            <NoSalesNotice
+              month={sel.month}
+              total={data.summary.total}
+              unit={all ? 'store and product pairs' : 'products'}
+              otherMonth={otherMonth}
+              otherHref={otherMonth ? `/stock/audit?${new URLSearchParams({store: sel.code, month: otherMonth})}` : null}
+            />
+          ) : (
+            <NotebookGrid summary={data.summary} active={searching ? null : state} onPick={(s) => go({state: s, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
+          )}
+          <UnknownReasons summary={data.summary} active={!searching && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', why, q: ''})} />
 
           <Card className="gap-0 overflow-hidden py-0">
             {/* The table's header says what it shows. No second filter here. */}
@@ -180,6 +191,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
                         {m.owner === 'Admin' ? 'You' : m.owner} ·{' '}
                       </span>
                     )}
+                    {state === 'unknown' && query.why ? `Only lines missing: ${WHY_LABEL[query.why].toLowerCase()}. ` : ''}
                     {m.action}
                   </span>
                 </>

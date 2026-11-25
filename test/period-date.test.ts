@@ -56,3 +56,21 @@ describe('isoPeriod', () => {
     expect(isoPeriod(['09/15'], ['09/30'])).toEqual({start: null, end: null});
   });
 });
+
+import {storableDate} from '../src/period-date';
+
+describe('storableDate', () => {
+  it('keeps valid dates and turns an end day past the month into its last day', () => {
+    expect(storableDate('2026-09-15')).toBe('2026-09-15');
+    expect(storableDate('2026-09-31', true)).toBe('2026-09-30');
+    expect(storableDate('2026-02-30', true)).toBe('2026-02-28');
+    expect(storableDate('2024-02-30', true)).toBe('2024-02-29');
+  });
+  it('blanks what it cannot store', () => {
+    expect(storableDate('2026-09-31')).toBeNull();
+    expect(storableDate('2026-13-01', true)).toBeNull();
+    expect(storableDate('2026-09-32', true)).toBeNull();
+    expect(storableDate('09/15', true)).toBeNull();
+    expect(storableDate(null)).toBeNull();
+  });
+});

@@ -168,3 +168,26 @@ describe('productRollup', () => {
     expect(r[0]).toMatchObject({stores: 2, needsAction: 1});
   });
 });
+
+describe('what the unknown lines are missing (Nov 25)', () => {
+  const rows: SearchableRow[] = [
+    {...auditCell(inp({item_code: 'A', watsons: 'month_not_loaded', inventory: 'blank'}))!, store: '1', storeName: null, product: 'A'},
+    {...auditCell(inp({item_code: 'B', watsons: 'month_not_loaded'}))!, store: '1', storeName: null, product: 'B'},
+    {...auditCell(inp({item_code: 'C', inventory: 'page_missing'}))!, store: '1', storeName: null, product: 'C'},
+    {...auditCell(inp({item_code: 'D'}))!, store: '1', storeName: null, product: 'D'},
+  ];
+  it('counts each reason over the unknown lines (a line can miss two)', () => {
+    const s = auditSummary(rows);
+    expect(s.unknown).toBe(3);
+    expect(s.why).toMatchObject({month_not_loaded: 2, blank: 1, page_missing: 1, not_linked: 0});
+  });
+  it('a reason narrows "Can’t tell yet" to the lines missing it', () => {
+    const run = (why: Parameters<typeof auditRows>[1]['why']) => auditRows(rows, {state: 'unknown', why, q: '', sort: 'product', dir: 'asc'}).map((r) => r.item_code);
+    expect(run(null)).toEqual(['A', 'B', 'C']);
+    expect(run('month_not_loaded')).toEqual(['A', 'B']);
+    expect(run('blank')).toEqual(['A']);
+  });
+  it('the reason is ignored for any other state', () => {
+    expect(auditRows(rows, {state: 'ok', why: 'blank', q: '', sort: 'product', dir: 'asc'}).map((r) => r.item_code)).toEqual(['D']);
+  });
+});

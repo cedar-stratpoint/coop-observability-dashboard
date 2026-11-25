@@ -1,3 +1,5 @@
+import {dropOf, familyOf, type BatchLink} from './upload-drops';
+import {storableDate} from './period-date';
 import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
@@ -68,6 +70,7 @@ export type UploadRow = {
   created_at: string;
   storage_path: string | null;
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
+  drop_id?: string | null; // the upload batch_id was split from (one Uploads tile per upload); listUploads fills it
   batch_name?: string | null; // optional name the user gave this upload at drop time (else filename)
   form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
   page_kind?: string | null; // inventory | sales | blank | unknown, once classified
@@ -519,8 +522,10 @@ export async function deleteScanGroup(companyId: string, source: string): Promis
 export async function deleteBatch(companyId: string, batchId: string): Promise<number> {
   if (!goldlineConfigured() || !batchId) return 0;
   const supa = db();
+  // The whole upload: the batch and every group store sorting split off it.
+  const family = await batchFamily(companyId, batchId);
   const rows = (await fetchAllRows('uploads', (from, to) =>
-    supa.from('uploads').select('id,batch_id,storage_path').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+    supa.from('uploads').select('id,batch_id,storage_path').eq('company_id', companyId).in('batch_id', family).order('created_at', {ascending: false}).range(from, to),
   )) as unknown as Array<{id: string; batch_id: string | null; storage_path: string | null}>;
   if (!rows.length) return 0;
   const pathById = new Map(rows.map((r) => [r.id, r.storage_path]));
@@ -547,8 +552,9 @@ export async function deleteBatch(companyId: string, batchId: string): Promise<n
  *  delete confirmation, scoped to the batch instead of the whole scan source. */
 export async function scanBatchSummary(companyId: string, batchId: string): Promise<ScanGroupSummary> {
   if (!goldlineConfigured() || !batchId) return {files: 0, pages: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  const family = await batchFamily(companyId, batchId);
   const scoped = (await fetchAllRows('uploads', (from, to) =>
-    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).in('batch_id', family).order('created_at', {ascending: false}).range(from, to),
   )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
   const stores = new Set<string>();
   const bas = new Set<string>();
@@ -857,8 +863,10 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
   if (!goldlineConfigured()) return Promise.resolve([]);
   const supa = db();
   return unstable_cache(
-    async () =>
-      (await fetchAllRows('uploads', (from, to) =>
+    async () => {
+      // Which upload each batch was split from, so a sorted upload stays one tile.
+      const drops = dropOf(await batchLinks(companyId));
+      const rows = (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
           .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation')
@@ -866,7 +874,9 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})
           .range(from, to),
-      )) as unknown as UploadRow[],
+      )) as unknown as UploadRow[];
+      return rows.map((u) => (u.batch_id ? {...u, drop_id: drops.get(u.batch_id) ?? u.batch_id} : u));
+    },
     ['gl-uploads', companyId],
     {tags: [glTags.uploads(companyId)], revalidate: 30},
   )();
@@ -1028,20 +1038,22 @@ export type BatchRow = {
   created_by: string | null;
   created_at: string;
   committed_at: string | null;
+  /** The batch this one was split from by store sorting (null for an upload as made). */
+  parent_batch_id?: string | null;
 };
 
-const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,kind,created_by,created_at,committed_at';
+const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,kind,created_by,created_at,committed_at,parent_batch_id';
 
 export async function createBatch(
   companyId: string,
   createdBy: string | null,
   // 'scan' for a server-ingested whole-scan batch; defaults to 'form' (one store's form) so
   // the manual upload / split paths are unchanged.
-  opts?: {kind?: 'form' | 'scan'},
+  opts?: {kind?: 'form' | 'scan'; parentBatchId?: string | null},
 ): Promise<string> {
   const res = await db()
     .from('upload_batches')
-    .insert({company_id: companyId, created_by: createdBy, kind: opts?.kind ?? 'form'})
+    .insert({company_id: companyId, created_by: createdBy, kind: opts?.kind ?? 'form', parent_batch_id: opts?.parentBatchId ?? null})
     .select('id')
     .single();
   if (res.error) throw new Error(`upload_batches insert failed: ${res.error.message}`);
@@ -1049,6 +1061,20 @@ export async function createBatch(
 }
 
 /** A batch, scoped to the company (null when it isn't theirs or doesn't exist). */
+/** Every batch's split-from link for a company (small: one row per upload batch). */
+export async function batchLinks(companyId: string): Promise<BatchLink[]> {
+  if (!goldlineConfigured()) return [];
+  const supa = db();
+  return (await fetchAllRows('upload_batches', (from, to) =>
+    supa.from('upload_batches').select('id,parent_batch_id').eq('company_id', companyId).order('id').range(from, to),
+  )) as unknown as BatchLink[];
+}
+
+/** The batch and every batch split off the same upload. */
+export async function batchFamily(companyId: string, batchId: string): Promise<string[]> {
+  return familyOf(await batchLinks(companyId), batchId);
+}
+
 export async function getBatch(companyId: string, id: string): Promise<BatchRow | null> {
   if (!goldlineConfigured()) return null;
   // pagination-ok: single row by primary key.
@@ -1064,7 +1090,9 @@ export async function updateBatchInfo(
 ): Promise<void> {
   const res = await db()
     .from('upload_batches')
-    .update({store_code: info.storeCode, period_start: info.periodStart, period_end: info.periodEnd})
+    // A read period can hold an impossible date (2026-09-31); the database refuses it, which used to
+    // fail the whole store assignment. Store the month's last day for an end, or nothing.
+    .update({store_code: info.storeCode, period_start: storableDate(info.periodStart), period_end: storableDate(info.periodEnd, true)})
     .eq('company_id', companyId)
     .eq('id', id)
     .eq('status', 'open');
@@ -1136,7 +1164,8 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
     const ids = g.slots.flatMap((s) => s.ids);
     let id = batchId;
     if (ownBatch) {
-      id = await createBatch(companyId, createdBy);
+      // Remember the upload it came from, so the Uploads page keeps one tile per upload.
+      id = await createBatch(companyId, createdBy, {parentBatchId: batch.parent_batch_id ?? batchId});
       const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', ids);
       if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
       // Pre-fill each peeled form with its grouped store + period (the reviewer can still

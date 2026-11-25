@@ -83,7 +83,10 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   // The name the user typed for this drop (same on every page of the batch), shown as the
   // scan's title with the file name as a quiet subtitle. Null when they named nothing.
-  const scanName = uploads.find((u) => uploadSource(u.filename) === source && (!batchId || u.batch_id === batchId) && u.batch_name?.trim())?.batch_name?.trim() ?? null;
+  // `?batch=` names one upload; groups that store sorting split off it belong to it too.
+  const drop = batchId ? uploads.find((u) => u.batch_id === batchId)?.drop_id ?? batchId : null;
+  const inDrop = (u: {batch_id?: string | null; drop_id?: string | null}) => (u.drop_id ?? u.batch_id) === drop;
+  const scanName = uploads.find((u) => uploadSource(u.filename) === source && (!batchId || inDrop(u)) && u.batch_name?.trim())?.batch_name?.trim() ?? null;
 
   // How many forms of each layout are in this scan — the summary cards, and a filter.
   const versionCounts = rawBoard.forms.reduce((m, f) => ((m[f.version] = (m[f.version] ?? 0) + 1), m), {} as Partial<Record<FormVersion, number>>);
@@ -91,7 +94,7 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
 
   const files =
     view === 'file'
-      ? uploads.filter((u) => uploadSource(u.filename) === source && (!batchId || u.batch_id === batchId) && (!version || (u.form_version ?? 'unknown') === version))
+      ? uploads.filter((u) => uploadSource(u.filename) === source && (!batchId || inDrop(u)) && (!version || (u.form_version ?? 'unknown') === version))
       : [];
   // The same person is written many ways; reconcile to one canonical BA (a registry name
   // when known) so every card reads it the same way and a BA card groups all their forms.

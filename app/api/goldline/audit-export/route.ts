@@ -22,7 +22,7 @@ export async function GET(req: Request): Promise<Response> {
   const get = (k: string) => sp.get(k);
   let out: Awaited<ReturnType<typeof auditExport>>;
   try {
-    out = await auditExport(ctx.companyId, {store: get('store'), month: get('month'), state: get('state'), q: get('q'), sort: get('sort'), dir: get('dir')}, ctx.storeScope ?? null);
+    out = await auditExport(ctx.companyId, {store: get('store'), month: get('month'), state: get('state'), why: get('why'), q: get('q'), sort: get('sort'), dir: get('dir')}, ctx.storeScope ?? null);
   } catch (err) {
     console.error('audit-export', err);
     return new Response('Could not build the file. Please try again.', {status: 500});
