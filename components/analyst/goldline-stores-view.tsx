@@ -40,12 +40,14 @@ export function GoldlineStoresView({
   summary,
   scope = [],
   canEditScope = false,
+  initialSort = 'gross',
 }: {
   company?: string;
   stores: StoreRollup[];
   summary: SalesSummary;
   scope?: StoreScope[];
   canEditScope?: boolean;
+  initialSort?: SortKey;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -54,8 +56,8 @@ export function GoldlineStoresView({
   const scopeOf = useMemo(() => new Map(scope.map((s) => [s.store_code, s])), [scope]);
   const inCount = scope.filter((s) => s.in_scope).length;
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<SortKey>('gross');
-  const [asc, setAsc] = useState(false);
+  const [sort, setSort] = useState<SortKey>(initialSort);
+  const [asc, setAsc] = useState(initialSort === 'name');
   const [page, setPage] = useState(1);
 
   const rows = useMemo(() => {

@@ -7,7 +7,7 @@
 
 import {useMemo, useRef, useState, useTransition} from 'react';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {Menu} from '@base-ui/react/menu';
 import {Archive, ArchiveRestore, ArrowDown, CalendarRange, ArrowUp, ChevronRight, ChevronsUpDown, Eye, EyeOff, Factory, FileText, Info, MoreHorizontal, Package, PackageX, Pencil, RefreshCw, Search, Settings2, Star, Truck, Upload, Warehouse, X} from 'lucide-react';
 import type {BoardFocus, BoardRow, BoardSummary, Shipment, SupplyConfig} from '@/src/goldline-supply';
@@ -115,7 +115,9 @@ export function GoldlineInventoryBoard({data}: {data: BoardViewData}) {
   // the status segments to All so the two never stack into an empty table.
   const [focus, setFocus] = useState<BoardFocus | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
-  const [line, setLine] = useState('');
+  // ?line= (the Overview's top categories link here) starts the board on that product line.
+  const searchParams = useSearchParams();
+  const [line, setLine] = useState(() => searchParams.get('line') ?? '');
   const [query, setQuery] = useState('');
   const [showHidden, setShowHidden] = useState(false);
   const [sort, setSort] = useState<{key: SortKey; dir: 1 | -1}>({key: 'urgency', dir: 1});
