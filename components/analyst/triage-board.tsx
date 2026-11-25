@@ -52,6 +52,7 @@ function statusOf(f: TriageForm): FormStatus {
  *  The wrapper (a Link to review, or the needs-a-store picker) is chosen by FormCard. */
 function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
   const dupPages = new Set(form.duplicates.map((d) => d.page));
+  const received = INVENTORY_PAGES.filter((p) => form.present.includes(p)).length;
   const unreadable = !form.storeCode;
   const extraFlags = form.flags.filter((fl) => fl !== 'unknown-store' && fl !== 'store-unmatched' && fl !== 'incomplete');
   return (
@@ -83,28 +84,38 @@ function CardBody({form, s}: {form: TriageForm; s: FormStatus}) {
       </div>
 
       {/* Page coverage: pages 1 to 5 in one tray (the same tray as the view tabs and pager).
-          Came through = green, missing = faded, duplicate = red ring. */}
-      <div className="grid grid-cols-5 gap-1 rounded-xl bg-muted/70 p-1 ring-1 ring-border/70 ring-inset" aria-label={`Pages ${form.present.length} of 5 came through`}>
-        {INVENTORY_PAGES.map((p) => {
-          const present = form.present.includes(p);
-          const dup = dupPages.has(p);
-          return (
-            <span
-              key={p}
-              title={`Page ${p}${dup ? ' (duplicate)' : present ? '' : ' (missing)'}`}
-              className={cn('flex h-7 min-w-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums', !present && !dup && 'text-muted-foreground/45')}
-              style={
-                dup
-                  ? {...tint('crit'), boxShadow: `inset 0 0 0 1.5px ${TONE_VAR.crit}`}
-                  : present
-                    ? {background: 'color-mix(in oklab, var(--status-good) 18%, var(--background))', color: toneText(TONE_VAR.good), boxShadow: '0 1px 2px rgb(0 0 0 / 0.06)'}
-                    : undefined
-              }
-            >
-              {p}
-            </span>
-          );
-        })}
+          Came through = green, missing = faded, duplicate = red ring. The caption says what
+          the numbers are without hovering (QA, Nov 25). */}
+      <div className="flex flex-col gap-1.5">
+        <div aria-hidden className="flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground">
+          <span className="font-medium">Pages received</span>
+          <span className="tabular-nums">
+            {received} of 5
+            {dupPages.size > 0 ? <span style={{color: toneText(TONE_VAR.crit)}}> · {dupPages.size} scanned twice</span> : null}
+          </span>
+        </div>
+        <div className="grid grid-cols-5 gap-1 rounded-xl bg-muted/70 p-1 ring-1 ring-border/70 ring-inset" aria-label={`Pages received: ${received} of 5${dupPages.size ? `, ${dupPages.size} scanned twice` : ''}`}>
+          {INVENTORY_PAGES.map((p) => {
+            const present = form.present.includes(p);
+            const dup = dupPages.has(p);
+            return (
+              <span
+                key={p}
+                title={`Page ${p}${dup ? ' (duplicate)' : present ? '' : ' (missing)'}`}
+                className={cn('flex h-7 min-w-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums', !present && !dup && 'text-muted-foreground/45')}
+                style={
+                  dup
+                    ? {...tint('crit'), boxShadow: `inset 0 0 0 1.5px ${TONE_VAR.crit}`}
+                    : present
+                      ? {background: 'color-mix(in oklab, var(--status-good) 18%, var(--background))', color: toneText(TONE_VAR.good), boxShadow: '0 1px 2px rgb(0 0 0 / 0.06)'}
+                      : undefined
+                }
+              >
+                {p}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
       {(VERSION_LABEL[form.version] || extraFlags.length > 0) && (

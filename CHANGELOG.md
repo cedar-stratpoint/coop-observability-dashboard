@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.14 Per store board: the page row says what it is (prod release)
+Ships only #758 (staging), cherry-picked onto `main`.
+
+## 2026-11-25 — Per store board: the page row says what it is
+
+Owner asked what the 1 to 5 numbers on a form card mean. They are the five pages of the inventory form (green = in this scan, faded = missing, red ring = scanned twice), but only a hover said so. A small caption now sits above the row: "Pages received" with "2 of 5", plus "· 1 scanned twice" when a page came through twice. The row's screen-reader label matches.
+
 ## 2026-11-25 · v1.26.13 Reconcile pickers, Commit all, scan toolbar (prod release)
 Ships #756 (Reconcile Store/Month pickers, All stores by default), #770 (scan zoom controls moved off the page) and #769 (Commit all on grouped uploads), cherry-picked onto `main`. No schema change.
 
