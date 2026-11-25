@@ -1,5 +1,6 @@
 import {dropOf, familyOf, type BatchLink} from './upload-drops';
 import {storableDate} from './period-date';
+import {cleanBands, flaggedRowIndexes, type PaperBand} from './band-prices';
 import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
@@ -628,6 +629,29 @@ export async function saveExtraction(input: {
   if (res.error) throw new Error(`extractions upsert failed: ${res.error.message}`);
 }
 
+/** Save a band's price pick on the page's read (bands[].use_price; null takes it back). Returns
+ *  the page's bands as saved, or null when the band isn't on this page. */
+export async function setExtractionBandPrice(companyId: string, uploadId: string, group: string, price: number | null): Promise<PaperBand[] | null> {
+  const ex = await getExtraction(companyId, uploadId);
+  if (!ex?.data) return null;
+  const bands = cleanBands(ex.data.bands);
+  const i = bands.findIndex((b) => b.group === group);
+  if (i < 0) return null;
+  const next = bands.map((b, k) => {
+    if (k !== i) return b;
+    const {use_price: _drop, ...rest} = b;
+    return price == null ? rest : {...rest, use_price: price};
+  });
+  const res = await db()
+    .from('extractions') // pagination-ok: an update of one page's read, no rows returned
+    .update({rows: {...ex.data, bands: next}})
+    .eq('company_id', companyId)
+    .eq('upload_id', uploadId)
+    .eq('page', ex.page);
+  if (res.error) throw new Error(`extractions band price update failed: ${res.error.message}`);
+  return next;
+}
+
 /** One upload, scoped to a company (null if not found / not this company's). */
 export async function getUpload(companyId: string, id: string): Promise<UploadRow | null> {
   if (!goldlineConfigured()) return null;
@@ -808,6 +832,8 @@ export async function commitInventory(input: {
     selling_area: r.selling_area,
     delivery: r.delivery,
     ending_on_hand: r.ending_on_hand,
+    // The price this form was valued at when the reviewer picked a band's written price.
+    extra: r.extra ?? null,
     source_upload_id: input.uploadId,
   }));
   if (payload.length) {
@@ -1010,14 +1036,10 @@ export async function formPageStrip(companyId: string, currentUploadId: string, 
   if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
   if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
   const meta = new Map(((ups.data ?? []) as Array<{id: string; status: UploadStatus; created_at: string}>).map((u) => [u.id, u]));
-  const list = ((ext.data ?? []) as Array<{upload_id: string; page: number; rows: {rows?: Array<{confidence?: unknown}>} | null}>)
+  const list = ((ext.data ?? []) as Array<{upload_id: string; page: number; rows: {rows?: Array<{confidence?: unknown}>; bands?: PaperBand[] | null} | null}>)
     .filter((e) => meta.has(e.upload_id))
     .sort((a, b) => (meta.get(b.upload_id)?.created_at ?? '').localeCompare(meta.get(a.upload_id)?.created_at ?? ''));
-  const flaggedOf = (e: (typeof list)[number]) =>
-    (e.rows?.rows ?? []).filter((r) => {
-      const c = typeof r.confidence === 'number' && Number.isFinite(r.confidence) ? r.confidence : 1;
-      return c < flagBelow;
-    }).length;
+  const flaggedOf = (e: (typeof list)[number]) => flaggedRowIndexes(e.rows, flagBelow).length;
 
   const current = list.find((e) => e.upload_id === currentUploadId);
   const cells = [1, 2, 3, 4, 5].map((page) => {

@@ -1,4 +1,5 @@
 'use server';
+import {allowedPrices, cleanBands, flaggedRowIndexes, stampPickedPrices, type PaperBand} from '@/src/band-prices';
 
 import {revalidatePath, revalidateTag} from 'next/cache';
 import {expireSalesTotals, glTags} from '@/src/goldline-ref-data';
@@ -11,6 +12,7 @@ import {summarizeScanRows, type ScanReadingSummary} from '@/src/scan-reading';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
+import {setBandMarkStatus} from '@/src/goldline-review-marks-data';
 import {auth} from '@/auth';
 import {bulkVerdict, type BulkVerdict} from '@/src/upload-batch';
 import {LOW_BELOW, rowConfidence} from '@/src/review-confidence';
@@ -20,6 +22,7 @@ import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
   fileFormPages,
   setAsidePages,
+  setExtractionBandPrice,
   batchFamily,
   BatchConflictError,
   BatchStateError,
@@ -189,7 +192,8 @@ export async function commitReview(input: {
   if (!coerced.length) return {ok: false, error: 'No valid rows to commit.'};
   // Accessories are printed under shared price codes; save each under its own product code.
   const extraction = await getExtraction(ctx.companyId, input.uploadId);
-  const rows = withProductCodes(coerced, upload.form_version, extraction?.page);
+  // A band whose written price the reviewer picked keeps that price on its committed rows.
+  const rows = withProductCodes(stampPickedPrices(coerced, cleanBands(extraction?.data?.bands)), upload.form_version, extraction?.page);
   const dup = duplicateCodeMessage(rows);
   if (dup) return {ok: false, error: dup};
 
@@ -229,6 +233,47 @@ export async function commitReview(input: {
   }
 }
 
+
+// ── Band prices (QA San Pablo, Nov 25) ────────────────────────────────────────────────
+
+export type BandPriceResult = {ok: true; bands: PaperBand[]} | {ok: false; error: string};
+
+/**
+ * Pick the price a flagged band is valued at for THIS form: the printed price or the one the
+ * paper points at (written beside the band, or implied by its total). `price: null` takes the
+ * pick back. Only those two prices are accepted; the catalog never changes. The band's
+ * "Price written" flag is cleared by a pick and reopened when it is taken back.
+ */
+export async function setBandPriceAction(input: {company: string | null; uploadId: string; group: string; price: number | null}): Promise<BandPriceResult> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot edit reviews.'};
+  if (typeof input.uploadId !== 'string' || !UUID.test(input.uploadId)) return {ok: false, error: 'That page could not be found.'};
+  if (typeof input.group !== 'string' || !input.group.trim() || input.group.length > 200) return {ok: false, error: 'That band could not be found.'};
+  try {
+    const out = await outOfScopeFor(ctx, input.uploadId);
+    if (out) return {ok: false, error: out};
+    const upload = await getUpload(ctx.companyId, input.uploadId);
+    if (!upload) return {ok: false, error: 'That page could not be found.'};
+    if (upload.status !== 'needs_review') return {ok: false, error: 'This page is already committed.'};
+    const ex = await getExtraction(ctx.companyId, input.uploadId);
+    const band = cleanBands(ex?.data?.bands).find((b) => b.group === input.group);
+    if (!band || band.kind == null) return {ok: false, error: 'That band could not be found. Reload the page.'};
+    if (input.price != null && !allowedPrices(band).includes(input.price)) return {ok: false, error: 'Pick the printed price or the one on the paper.'};
+    const bands = await setExtractionBandPrice(ctx.companyId, input.uploadId, input.group, input.price);
+    if (!bands) return {ok: false, error: 'That band could not be found. Reload the page.'};
+    const code = ex?.data?.rows?.[band.first_index ?? -1]?.item_code;
+    if (code) {
+      await setBandMarkStatus(ctx.companyId, input.uploadId, code, input.price == null, (await auth())?.user?.email ?? null).catch((e) => console.error('band mark', e));
+    }
+    revalidatePath(`/uploads/${input.uploadId}`);
+    if (upload.batch_id) revalidatePath(`/uploads/batch/${upload.batch_id}`);
+    return {ok: true, bands};
+  } catch (e) {
+    console.error('setBandPriceAction', e);
+    return {ok: false, error: 'Could not save the price. Please try again.'};
+  }
+}
 
 // ── Upload batches ──────────────────────────────────────────────────────────────
 
@@ -338,7 +383,7 @@ export async function commitBatchAction(input: {
     sent.add(p.uploadId);
     const clean = cleanRows(p.rows);
     if (!clean.ok) return clean;
-    pages.push({uploadId: p.uploadId, rows: withProductCodes(clean.rows, mine.upload.form_version, mine.extraction?.page)});
+    pages.push({uploadId: p.uploadId, rows: withProductCodes(stampPickedPrices(clean.rows, cleanBands(mine.extraction?.data?.bands)), mine.upload.form_version, mine.extraction?.page)});
   }
   // Every page awaiting review commits together — none left behind in an emptied batch.
   if (awaiting.length !== sent.size || awaiting.some((p) => !sent.has(p.upload.id))) {
@@ -429,7 +474,7 @@ async function planBulk(companyId: string, batchIds: string[], dropId?: string |
     const info = pdf.map((p) => ({
       uploadId: p.upload.id,
       page: p.extraction?.page ?? null,
-      flagged: (p.extraction?.data?.rows ?? []).filter((r) => rowConfidence(r.confidence) < LOW_BELOW).length,
+      flagged: flaggedRowIndexes(p.extraction?.data, LOW_BELOW).length,
       resolved: 0,
       status: p.upload.status,
       detectedStore: p.detectedStore,
@@ -636,7 +681,7 @@ export async function serverBatchProgressAction(input: {
           page: p.extraction?.page ?? null,
           formVersion: p.upload.form_version ?? null,
           pageKind: p.upload.page_kind ?? null,
-          flagged: rows ? rows.filter((r) => (typeof r.confidence === 'number' ? r.confidence : 1) < 0.6).length : null,
+          flagged: rows ? flaggedRowIndexes(p.extraction?.data, LOW_BELOW).length : null,
           rows: rows ? rows.length : null,
         };
       });

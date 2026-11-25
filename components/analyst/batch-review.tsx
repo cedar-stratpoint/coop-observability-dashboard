@@ -12,12 +12,13 @@ import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {estimateRowBoxes} from '@/src/row-box-fill';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {commitBatchAction, setBandPriceAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
+import {cleanBands, flaggedRowIndexes, withPickedPrices, type PaperBand} from '@/src/band-prices';
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
@@ -52,6 +53,8 @@ type PageState = {
   view: ReviewView;
   query: string;
   seed: string; // which server snapshot the edits started from (see seedKey)
+  /** Band price picks saved this session (absent: the page's bands as read). */
+  bands?: PaperBand[];
 };
 
 // A page's edits start from its extraction. Re-seed only when the server has something
@@ -60,10 +63,8 @@ type PageState = {
 const seedKey = (p: BatchReviewPage) => `${p.upload.status}:${p.extraction ? p.extraction.data?.rows?.length ?? 0 : 'none'}`;
 
 function flagsOf(p: BatchReviewPage): number[] {
-  return (p.extraction?.data?.rows ?? [])
-    .map((r, i) => ({c: rowConfidence(r.confidence), i}))
-    .filter((x) => x.c < LOW_BELOW)
-    .map((x) => x.i);
+  // Low-confidence rows, plus one row per band whose paper points at another price.
+  return flaggedRowIndexes(p.extraction?.data, LOW_BELOW);
 }
 
 function seedPage(p: BatchReviewPage): PageState {
@@ -268,6 +269,20 @@ export function BatchReview({
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));
+  // This page's band price picks (QA Nov 25): a picked band is valued at its picked price.
+  const curBands = curState?.bands ?? cleanBands(cur?.extraction?.data?.bands);
+  const curCatalog = useMemo(() => withPickedPrices(catalog, curBands), [catalog, curBands]);
+  async function pickBandPrice(group: string, price: number | null): Promise<string | null> {
+    if (!cur) return 'That page could not be found.';
+    const res = await setBandPriceAction({company, uploadId: cur.upload.id, group, price});
+    if (!res.ok) return res.error;
+    const b = res.bands.find((x) => x.group === group);
+    const i = b?.first_index;
+    // The pick answers the band's flag; a row also low on confidence still wants its own look.
+    const answers = price != null && i != null && rowConfidence(cur.extraction?.data?.rows?.[i]?.confidence) >= LOW_BELOW;
+    setCur((s) => ({bands: res.bands, resolved: answers ? new Set(s.resolved).add(i as number) : s.resolved}));
+    return null;
+  }
 
   function saveInfo(next: {storeCode?: string; periodStart?: string; periodEnd?: string}) {
     const v = {storeCode, periodStart, periodEnd, ...next};
@@ -673,8 +688,10 @@ export function BatchReview({
                   rows={curState.rows}
                   productNames={cur.productNames}
                   rowNames={cur.rowNames}
-                  catalog={catalog}
+                  catalog={curCatalog}
                   flagged={curFlags}
+                  bands={curBands}
+                  onBandPrice={pickBandPrice}
                   resolved={curState.resolved}
                   active={curState.active}
                   view={curState.view}

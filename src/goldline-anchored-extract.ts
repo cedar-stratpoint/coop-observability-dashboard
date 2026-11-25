@@ -1,6 +1,7 @@
 import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
+import {checkBands, type PaperTotal} from './band-prices';
 import {applyReaderFlags, cleanHeaders, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_ANCHORED} from './goldline-reader-marks';
 
 // Phase 1 of template-anchored extraction (plan: knowledge/tasks/2026-11-12-template-anchored-extraction.md).
@@ -397,6 +398,20 @@ export function mapAnchoredToExtractedPage(template: FormTemplate, out: Anchored
     consultant: h.consultant ?? null,
     rows,
   };
+
+  // Each band's paper total (P1 reads them) and any written price (price_notes), saved with the
+  // page and flagged when the paper points at another price than the printed one (QA Nov 25).
+  const paper: PaperTotal[] = ((out as {family_totals?: Array<{family?: unknown; amount?: unknown}>}).family_totals ?? [])
+    .filter((f) => f && typeof f.family === 'string')
+    .map((f) => ({family: f.family as string, amount: typeof f.amount === 'number' ? f.amount : null}));
+  for (const pn of out.price_notes ?? []) {
+    if (!pn || typeof pn.group !== 'string' || typeof pn.written_price !== 'number') continue;
+    const same = paper.find((t) => t.family.toUpperCase() === (pn.group as string).toUpperCase());
+    if (same) same.written_price = pn.written_price;
+    else paper.push({family: pn.group, amount: null, written_price: pn.written_price});
+  }
+  const bands = checkBands(items.map((it) => ({code: it.itemCode, group: it.group, price: it.unitPrice})), rows, paper);
+  if (bands.length) page.bands = bands;
 
   // Safeguard (B): verify the page's real layout against the template's version. A seen Delivery
   // position that disagrees with the expected one means a confident version mis-tag slipped past
