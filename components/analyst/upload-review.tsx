@@ -8,7 +8,8 @@ import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshai
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitReview} from '@/app/uploads/actions';
+import {commitReview, setBandPriceAction} from '@/app/uploads/actions';
+import {bandFlagRows, cleanBands, withPickedPrices} from '@/src/band-prices';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
@@ -92,7 +93,7 @@ export function UploadReview({
   productNames = {},
   rowNames,
   inventoryHref = null,
-  catalog = {},
+  catalog: baseCatalog = {},
   pageStrip = null,
   stores = [],
   nav = null,
@@ -220,10 +221,23 @@ export function UploadReview({
   }, [nav, router, lightboxOpen]);
   // Flags = rows under the threshold, fixed at load (editing a value doesn't change
   // the reader's confidence). A flag is resolved by editing its row or "Looks right".
-  const flagged = useMemo(
-    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null).map((x) => x.i),
-    [head, rowNotes],
-  );
+  // Plus one row per band whose paper points at another price than the printed one (QA Nov 25).
+  const flagged = useMemo(() => {
+    const band = new Set(bandFlagRows(cleanBands(head?.bands)));
+    return (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null || band.has(x.i)).map((x) => x.i);
+  }, [head, rowNotes]);
+  // The band price picks for this form; the totals value a picked band at its picked price.
+  const [bands, setBands] = useState(() => cleanBands(head?.bands));
+  const catalog = useMemo(() => withPickedPrices(baseCatalog, bands), [baseCatalog, bands]);
+  async function pickBandPrice(group: string, price: number | null): Promise<string | null> {
+    const res = await setBandPriceAction({company, uploadId: upload.id, group, price});
+    if (!res.ok) return res.error;
+    setBands(res.bands);
+    const b = res.bands.find((x) => x.group === group);
+    // The pick answers the band's flag; a row also low on confidence still wants its own look.
+    if (price != null && b?.first_index != null && rowConfidence(rows[b.first_index]?.confidence) >= LOW && rowNotes[b.first_index] == null) resolve(b.first_index);
+    return null;
+  }
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState<number | null>(null);
   // Jumping to a flag (the navigator) points the scan at that row too.
@@ -735,6 +749,8 @@ export function UploadReview({
             catalog={catalog}
             flagged={flagged}
             rowNotes={rowNotes}
+            bands={bands}
+            onBandPrice={pickBandPrice}
             resolved={resolved}
             active={active}
             view={view}

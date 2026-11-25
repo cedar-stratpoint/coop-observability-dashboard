@@ -3,7 +3,7 @@
 import {useMemo, useState} from 'react';
 import {Check, ChevronLeft, ChevronRight, Plus, Search, Trash2} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
+import {bandOf, LOW_BELOW, rowConfidence, toneText, type Band} from '@/src/review-confidence';
 import {groupByFamily, pageTotal, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
@@ -15,6 +15,8 @@ import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
 import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
 import {AddRowDialog} from './add-row-dialog';
 import {addedRow, type AddableItem} from '@/src/review-add-row';
+import {bandOpen, type PaperBand} from '@/src/band-prices';
+import {BandPrice} from './band-price';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -101,6 +103,12 @@ type Props = {
   page?: number | null;
   onAddRow?: (row: ExtractedRow) => void;
   onRemoveRow?: (index: number) => void;
+  /** The page's heading bands as read: paper total, written price, and the reviewer's price
+   *  pick (QA Nov 25). A flagged band shows its pick on its first row. */
+  bands?: PaperBand[];
+  /** Pick (or take back, null) the price a flagged band is valued at on this form. Returns an
+   *  error message, or null when saved. */
+  onBandPrice?: (group: string, price: number | null) => Promise<string | null>;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -150,6 +158,8 @@ export function ReviewRows({
   page,
   onAddRow,
   onRemoveRow,
+  bands,
+  onBandPrice,
 }: Props) {
   const [adding, setAdding] = useState(false);
   // Added rows aren't in the page's catalog slice: borrow their line and price from the
@@ -162,7 +172,8 @@ export function ReviewRows({
   }, [rows, catalogIn, addable]);
   const flagCtx = useReviewFlags();
   const onPage = useMemo(() => (flagCtx && uploadId ? flagCtx.marks.filter((m) => m.uploadId === uploadId) : []), [flagCtx, uploadId]);
-  const flagsOf = (code: string) => rowMarks(onPage, code);
+  // A band's "Price written" mark is answered on the band itself (BandPrice), not as a chip.
+  const flagsOf = (code: string) => rowMarks(onPage, code).filter((m) => m.kind !== 'price');
   const pageFlags = pageMarks(onPage);
   const canAdd = Boolean(editable && onAddRow && addable?.length);
   const pageCodes = useMemo(() => new Set(rows.map((r) => r.item_code)), [rows]);
@@ -203,6 +214,19 @@ export function ReviewRows({
   const flagTarget = (r: {item_code: string; i: number}) =>
     uploadId ? {uploadId, itemCode: r.item_code, rowIndex: r.i, label: `${r.item_code}${nameOf(r as (typeof indexed)[number]) ? ` · ${nameOf(r as (typeof indexed)[number])}` : ''}`} : null;
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
+  // Flagged bands sit on their first row; headings look a band up by any of its codes.
+  const bandAt = useMemo(() => new Map((bands ?? []).filter((b) => b.kind != null && b.first_index != null).map((b) => [b.first_index as number, b])), [bands]);
+  const bandByCode = useMemo(() => new Map((bands ?? []).filter((b) => b.kind != null).flatMap((b) => b.codes.map((c) => [c, b] as const))), [bands]);
+  const piecesOf = (b: PaperBand) => rows.reduce((a, r) => a + (b.codes.includes(r.item_code) && typeof r.ending_on_hand === 'number' ? r.ending_on_hand : 0), 0);
+  // A row flagged only for its band's price is answered by the price pick, not "Looks right".
+  const bandOnly = (r: ExtractedRow & {i: number}) => {
+    const b = bandAt.get(r.i);
+    return Boolean(b && bandOpen(b) && rowConfidence(r.confidence) >= LOW_BELOW && !rowNotes?.[r.i]);
+  };
+  const bandPrice = (r: ExtractedRow & {i: number}) => {
+    const b = bandAt.get(r.i);
+    return b ? <BandPrice band={b} pieces={piecesOf(b)} editable={editable} onPick={onBandPrice ? (price) => onBandPrice(b.group, price) : undefined} /> : null;
+  };
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
   const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
   const q = query.trim().toLowerCase();
@@ -238,14 +262,27 @@ export function ReviewRows({
   // consultant writes beside each band.
   const heading = (g: {family: string; price: number | null; items: (typeof indexed)[number][]}) => {
     const t = pageTotal(g.items, catalog);
+    // A band whose paper points at another price says so beside its price, and shows the paper
+    // total next to Coop's (QA Nov 25: ₱180 written on a ₱225 band, ₱6,480 on paper).
+    const b = g.items.length ? bandByCode.get(g.items[0].item_code) : undefined;
+    const changed = b && b.use_price != null && b.use_price !== b.printed_price;
     return (
       <span className="flex items-baseline justify-between gap-3">
         <span>
           {g.family}
           {g.price != null && <span className="ml-1.5 font-mono font-normal text-muted-foreground">· ₱{g.price.toLocaleString('en-US')}</span>}
+          {b && bandOpen(b) && b.offer_price != null && (
+            <span className="ml-1.5 font-mono font-normal" style={{color: toneText('var(--status-warn)')}}>
+              · ₱{b.offer_price.toLocaleString('en-US')} on paper
+            </span>
+          )}
+          {changed && b.printed_price != null && (
+            <span className="ml-1.5 font-mono font-normal text-muted-foreground">· printed ₱{b.printed_price.toLocaleString('en-US')}</span>
+          )}
         </span>
         {t.priced > 0 && (
-          <span className="shrink-0 font-mono font-normal text-muted-foreground tabular-nums" title="Total amount: on hand × printed price">
+          <span className="shrink-0 font-mono font-normal text-muted-foreground tabular-nums" title={changed ? 'Total amount: on hand × the price picked for this form' : 'Total amount: on hand × printed price'}>
+            {b?.amount != null && <span className="mr-2">Paper ₱{b.amount.toLocaleString('en-US')} ·</span>}
             ₱{t.total.toLocaleString('en-US')}
           </span>
         )}
@@ -299,6 +336,7 @@ export function ReviewRows({
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
               )}
+              {bandPrice(r)}
               <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
             </div>
             {removeButton(r)}
@@ -330,7 +368,7 @@ export function ReviewRows({
         </td>
         {editable && (
           <td className="py-1.5 text-right whitespace-nowrap">
-            {isFlag &&
+            {isFlag && !bandOnly(r) &&
               (done ? (
                 <span className="inline-flex items-center gap-1 text-xs" style={{color: toneText('var(--status-good)')}}>
                   <Check className="size-3.5" /> Resolved
@@ -377,6 +415,7 @@ export function ReviewRows({
             )}
             {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
+            {bandPrice(r)}
             <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
           </div>
           <span className="flex shrink-0 items-center gap-1.5">
@@ -408,7 +447,7 @@ export function ReviewRows({
             </label>
           ))}
         </div>
-        {editable && isFlag && (
+        {editable && isFlag && !bandOnly(r) && (
           <div className="flex justify-end">
             {done ? (
               <span className="inline-flex items-center gap-1 text-xs" style={{color: toneText('var(--status-good)')}}>

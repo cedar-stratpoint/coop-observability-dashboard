@@ -24,6 +24,7 @@ import {
   type FamilyTotal,
 } from './goldline-legacy-extract';
 import {printedPageItems} from './goldline-printed-page';
+import {checkBands, type PaperBand} from './band-prices';
 import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 import {
@@ -114,6 +115,9 @@ export type ExtractedPage = {
   slant?: {angle: number; px: number} | null;
   /** NICH-36 · printed column headers the BA wrote their own names over (GOLDLINE_READ_MARKS). */
   headers_written_over?: string[] | null;
+  /** Each heading band's paper total and written price, and whether the paper points at another
+   *  price than the printed one (QA Nov 25). Absent on pages read before then. */
+  bands?: PaperBand[] | null;
 };
 
 /** True when extraction is configured (a primary OR fallback key is set). */
@@ -526,8 +530,14 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
     const p = parsed as LegacyPage;
     const {rows} = legacyPageToCore(p.rows);
     // Band totals (written per heading band) catch misreads that still add up within a row.
-    legacyBandCheck(rows, printedPageItems('legacy', page), Array.isArray(p.family_totals) ? p.family_totals : []);
+    const totals = Array.isArray(p.family_totals) ? p.family_totals : [];
+    const printed = printedPageItems('legacy', page);
+    legacyBandCheck(rows, printed, totals);
+    // Saved with the page: each band's paper total and written price, flagged when they point at
+    // another price than the printed one (36 x 180 = 6,480 on a printed ₱225 band).
+    const bands = checkBands(printed, rows, totals);
     return {
+      ...(bands.length ? {bands} : {}),
       store_code: typeof p.store_code === 'string' ? p.store_code : '',
       store_name: p.store_name ?? undefined,
       period_start: p.period_start ?? null,

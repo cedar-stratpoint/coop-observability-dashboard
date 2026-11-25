@@ -8,6 +8,16 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — A band priced differently on the paper gets one flag, and the reviewer picks the price
+
+QA (SM San Pablo, Legacy page 2): the ULTRA STAY MATTE LIQUID LIP COLOR band prints ₱225, the BA wrote 180 beside it and totalled the band at ₱6,480 (36 pcs x 180). Coop valued it at ₱8,100 and said nothing. The reader already returned the band totals and written prices, but the band check only spoke on a mismatch, and here the numbers agree at the written price (or, when the 180 wasn't read, 6,480 isn't whole pieces at ₱225, so the band was skipped). Band totals weren't saved, and V1/V2 written prices only reached the read log.
+
+- **Every read saves its bands** (`extractions.rows.bands`): each heading band's paper total, written price, printed price and pieces. A band is flagged when a written price differs from the printed one, or when no price was read but the paper total only works at another whole price within 0.25x to 2x of the printed one (`src/band-prices.ts`, Legacy and V1/V2 anchored reads).
+- **One flag per band**, on its first row: one item in Needs review, rows untouched. It also writes a reader mark of the new kind **Price written** (`review_marks`, migration `supabase/nichido/p7_review_marks_price.sql`, applied on Nichido Staging), so it shows in Every flag and the per-store CSV. It runs on every read, not behind the reader-notes switch.
+- **The reviewer picks the price for this form**: "Use ₱180" or "Keep ₱225" on the band's first row, with the paper total against Coop's. Only those two prices are accepted (`setBandPriceAction`); the catalog never changes. The pick is saved on the page's read, clears the mark, and Change takes it back. A picked band shows "₱180 · printed ₱225" and "Paper ₱6,480" on its heading, and the page's ending value uses it.
+- **At commit** a picked price is stamped on the band's rows (`inventory.extra.unit_price`), single-page and batch commits alike. Unanswered, the form commits at the printed price and the flag stays open; Commit all lists it with the other rows nobody has checked.
+- Older pages only get this when re-read (their band totals were never saved).
+
 ## 2026-11-25 — "Review request" is now called "Leave a review email"
 
 Owner: "Leave a Review email hindi review request". It is the automatic email the website sends after an order is fulfilled, asking the customer to leave a review; nobody on the team sends it. Renamed everywhere it shows (Website CRM columns and CSV, customer profile and timeline, "Last contacted" kind, Ask Coop's column labels and tool text). Data keys (`review_request`, `reviewRequestSentAt`) are unchanged.
