@@ -134,56 +134,112 @@ function KpiTile({href, Icon, label, value, delta, sub}: {href: string; Icon: ty
   );
 }
 
-/** Units sold per month for the last 12 months; the latest month stands out, a missing month is dashed. */
+/** Units sold per month for the last 12 months; the latest month stands out, a missing month
+ *  is dashed. Each loaded month is its own link to that month's store leaderboard: hovering
+ *  one lifts it out (its figure rises in, the other months fade back). */
 function TrendCard({trend}: {trend: TrendMonth[]}) {
   const max = Math.max(1, ...trend.map((t) => t.units));
   const latest = trend[trend.length - 1];
   const peak = trend.reduce((a, t) => (t.units > a.units ? t : a), trend[0]);
   const avg = trend.filter((t) => t.loaded).reduce((a, t, _, arr) => a + t.units / arr.length, 0);
+  const EASE = 'ease-[cubic-bezier(0.23,1,0.32,1)]';
   return (
-    <Link
-      href="/stores?sort=units"
-      aria-label="Units sold, last 12 months. See units by store"
-      className={cn(GL_CARD_LINK, 'flex min-w-0 flex-col gap-5 rounded-xl border bg-card px-6 py-5 max-sm:px-4')}
-    >
+    <section aria-labelledby="trend-title" className="flex min-w-0 flex-col gap-5 rounded-xl border bg-card px-6 py-5 max-sm:px-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">Units sold, last 12 months</h2>
+        <h2 id="trend-title" className="font-heading text-lg font-semibold tracking-tight">
+          Units sold, last 12 months
+        </h2>
         <p className="text-xs text-muted-foreground tabular-nums">
           Peak {MONTHS[Number(peak.month.slice(5, 7)) - 1]} {compact(peak.units)} · monthly average {compact(avg)}
         </p>
       </div>
-      <div className="flex min-h-44 flex-1 items-end gap-1.5 sm:gap-2.5" role="img" aria-label={trend.map((t) => `${FULL[Number(t.month.slice(5, 7)) - 1]} ${t.month.slice(0, 4)}: ${t.loaded ? t.units.toLocaleString('en-US') : 'not loaded'}`).join(', ')}>
-        {trend.map((t) => {
+      <ol className="flex min-h-56 flex-1 gap-1 sm:gap-2" aria-label="Units sold per month. Pick a month to see its stores.">
+        {trend.map((t, i) => {
           const isLatest = t === latest;
+          const isPeak = t === peak;
+          const mon = MONTHS[Number(t.month.slice(5, 7)) - 1];
+          const full = `${FULL[Number(t.month.slice(5, 7)) - 1]} ${t.month.slice(0, 4)}`;
           const h = t.loaded ? Math.max(4, (t.units / max) * 100) : 18;
-          return (
-            <div key={t.month} className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2" title={`${FULL[Number(t.month.slice(5, 7)) - 1]} ${t.month.slice(0, 4)}: ${t.loaded ? `${t.units.toLocaleString('en-US')} units` : 'not loaded'}`}>
-              <span className={cn('text-[11px] tabular-nums', isLatest || t === peak ? 'font-medium text-foreground' : 'text-transparent group-hover:text-muted-foreground')}>{t.loaded ? compact(t.units) : ''}</span>
-              <div
+          const always = isLatest || isPeak;
+          const column = (
+            <>
+              {/* Track: the bar grows from the bottom; the top 24px leaves room for the peak's figure. */}
+              <span className="relative w-full flex-1">
+                <span className="absolute inset-x-0 top-6 bottom-0">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'absolute inset-x-0 text-center text-[11px] tabular-nums transition-[opacity,translate,color] duration-200',
+                      EASE,
+                      always ? 'font-medium text-foreground' : 'translate-y-1 text-muted-foreground opacity-0 group-hover/bar:translate-y-0 group-hover/bar:text-foreground group-hover/bar:opacity-100 group-focus-visible/bar:translate-y-0 group-focus-visible/bar:opacity-100 motion-reduce:translate-y-0',
+                    )}
+                    style={{bottom: `calc(${h}% + 6px)`}}
+                  >
+                    {t.loaded ? compact(t.units) : ''}
+                  </span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'absolute inset-x-0 bottom-0 origin-bottom rounded-md transition-[background-color,box-shadow,scale] duration-200',
+                      EASE,
+                      !t.loaded
+                        ? 'border border-dashed border-border'
+                        : isLatest
+                          ? 'bg-primary group-hover/bar:shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_22%,transparent)]'
+                          : 'bg-primary/30 group-hover/bar:bg-primary/70 group-hover/bar:shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_16%,transparent)] group-focus-visible/bar:bg-primary/70',
+                      t.loaded && 'group-active/bar:scale-y-[0.98] group-active/bar:duration-100 motion-reduce:group-active/bar:scale-y-100',
+                      'group-focus-visible/bar:ring-2 group-focus-visible/bar:ring-ring group-focus-visible/bar:ring-offset-2 group-focus-visible/bar:ring-offset-card',
+                    )}
+                    style={{height: `${h}%`}}
+                  />
+                </span>
+              </span>
+              <span
                 className={cn(
-                  'w-full rounded-md transition-colors duration-150',
-                  !t.loaded ? 'border border-dashed border-border' : isLatest ? 'bg-primary' : 'bg-primary/30 group-hover/card:bg-primary/40 group-hover:bg-primary/55',
+                  'h-8 text-center text-[11px] text-muted-foreground transition-colors duration-200',
+                  isLatest && 'font-medium text-foreground',
+                  t.loaded && 'group-hover/bar:text-foreground',
                 )}
-                style={{height: `${h}%`}}
-              />
-            </div>
+              >
+                {mon}
+                {(i === 0 || t.month.slice(5, 7) === '01') && <span className="block text-[10px] tabular-nums">{t.month.slice(0, 4)}</span>}
+              </span>
+            </>
+          );
+          return (
+            <li key={t.month} className="flex min-w-0 flex-1">
+              {t.loaded ? (
+                <Link
+                  href={`/stores?month=${t.month.slice(0, 7)}&sort=units`}
+                  aria-label={`${full}: ${t.units.toLocaleString('en-US')} units. See stores for ${full}`}
+                  className={cn(
+                    'group/bar flex min-w-0 flex-1 flex-col items-center gap-2 outline-none transition-opacity duration-200',
+                    EASE,
+                    // The other months fade back while one is hovered or focused (pointer devices).
+                    'pointer-fine:[ol:has(a:hover)_&:not(:hover)]:opacity-50 [ol:has(a:focus-visible)_&:not(:focus-visible)]:opacity-50',
+                  )}
+                >
+                  {column}
+                </Link>
+              ) : (
+                <div
+                  aria-label={`${full}: not loaded`}
+                  className="group/bar flex min-w-0 flex-1 flex-col items-center gap-2 transition-opacity duration-200 pointer-fine:[ol:has(a:hover)_&]:opacity-50"
+                >
+                  {column}
+                </div>
+              )}
+            </li>
           );
         })}
+      </ol>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+        <p className="text-xs text-muted-foreground">Pick a month to see its stores.</p>
+        <Link href="/stores?sort=units" className={cn(GL_CARD_CUE, 'group/card rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring')}>
+          Units by store, all months <ChevronRight className="size-3.5" />
+        </Link>
       </div>
-      <div className="-mt-3 flex gap-1.5 sm:gap-2.5">
-        {trend.map((t, i) => (
-          <span key={t.month} className={cn('min-w-0 flex-1 text-center text-[11px] text-muted-foreground', t === latest && 'font-medium text-foreground')}>
-            {MONTHS[Number(t.month.slice(5, 7)) - 1]}
-            {(i === 0 || t.month.slice(5, 7) === '01') && <span className="block text-[10px] tabular-nums">{t.month.slice(0, 4)}</span>}
-          </span>
-        ))}
-      </div>
-      <div className="flex justify-end border-t pt-4">
-        <span className={GL_CARD_CUE} aria-hidden>
-          Units by store <ChevronRight className="size-3.5" />
-        </span>
-      </div>
-    </Link>
+    </section>
   );
 }
 
