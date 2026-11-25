@@ -160,10 +160,10 @@ export function reminderSchedule(m: CrmMetrics | null): string | null {
   return `Reminder: sent ${steps.map(fmtMinutes).join(', then ')} after abandonment${paused(m.remindersEnabled)}`;
 }
 
-/** "Review email: sent 7 days after fulfillment[ · paused]"; null when the CRM did not send the delay. */
+/** "Leave a review email: sent 7 days after fulfillment[ · paused]"; null when the CRM did not send the delay. */
 export function reviewSchedule(m: CrmMetrics | null): string | null {
   if (!m || m.reviewAfterMinutes === undefined) return null;
-  return `Review email: sent ${fmtMinutes(m.reviewAfterMinutes)} after fulfillment${paused(m.reviewEmailsEnabled)}`;
+  return `Leave a review email: sent ${fmtMinutes(m.reviewAfterMinutes)} after fulfillment${paused(m.reviewEmailsEnabled)}`;
 }
 
 /** "1 of 1" when the CRM said how many reminders a cart gets; just the count otherwise (never a guessed total). */
@@ -292,7 +292,7 @@ export function orderCsv(rows: readonly CrmOrder[], asOf: string, note: string):
       ['Paid revenue (test orders excluded)', sum(paid.map((o) => amount(o.totalPrice)))],
       ['Shopify test orders in export', rows.filter((o) => o.test === true).length],
     ]),
-    ['Order', 'Email', 'Total', 'Payment', 'Fulfillment', 'Placed (PH time)', 'Turnaround', 'Fulfilled (PH time)', 'Review sent (PH time)', 'Reviewed (PH time)', 'Shopify test order'],
+    ['Order', 'Email', 'Total', 'Payment', 'Fulfillment', 'Placed (PH time)', 'Turnaround', 'Fulfilled (PH time)', 'Leave a review email sent (PH time)', 'Reviewed (PH time)', 'Shopify test order'],
     ...rows.map((o) => [
       o.orderNumber ?? o.shopifyOrderId,
       o.email ?? '',

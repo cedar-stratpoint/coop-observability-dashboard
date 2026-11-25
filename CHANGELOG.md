@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — "Review request" is now called "Leave a review email"
+
+Owner: "Leave a Review email hindi review request". It is the automatic email the website sends after an order is fulfilled, asking the customer to leave a review; nobody on the team sends it. Renamed everywhere it shows (Website CRM columns and CSV, customer profile and timeline, "Last contacted" kind, Ask Coop's column labels and tool text). Data keys (`review_request`, `reviewRequestSentAt`) are unchanged.
+
 ## 2026-11-25 — Scan page list and Reconcile: a condensed header and filters follow the scroll
 
 Owner QA on staging: deep in a scan's Per file list, the scan's name and the Type / Status / Version filters scroll away. Now, once the full filters pass under the app header, a slim bar pins below it with the scan's name, the page count, the same three filters as compact selects (with counts) and Top. It is zero height in the flow (nothing shifts when it appears), out of the tab order while hidden, fades in 150ms, and uses the same URL-backed filters as the chips, so both always agree. Per store and Per BA views unchanged.
