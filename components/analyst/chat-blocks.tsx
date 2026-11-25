@@ -107,6 +107,7 @@ function cell(c: ResultColumn, row: MetricRow): string {
 
 /** Rows per page in a chat table. Copy and Download CSV still take every row; only the screen pages. */
 export const TABLE_PAGE_ROWS = 10;
+const PAGE_BTN = 'rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted motion-reduce:transition-none';
 
 /** Compact table: numbers right-aligned in tabular numerals, sticky first column, scrolls sideways inside its own box. Over
  * TABLE_PAGE_ROWS rows it pages (Prev / Next, "11–20 of 67"); the total row stays on every page because it sums all rows. */
@@ -156,10 +157,10 @@ export function DataTable({columns, rows: all, total, label}: {columns: ResultCo
           {at * TABLE_PAGE_ROWS + 1}–{Math.min((at + 1) * TABLE_PAGE_ROWS, all.length)} of {all.length}
         </span>
         <span className="flex gap-1">
-          <button type="button" onClick={() => setPage(at - 1)} disabled={at === 0} className={cn(ACTION_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
+          <button type="button" onClick={() => setPage(at - 1)} disabled={at === 0} className={cn(PAGE_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
             Prev
           </button>
-          <button type="button" onClick={() => setPage(at + 1)} disabled={at >= pages - 1} className={cn(ACTION_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
+          <button type="button" onClick={() => setPage(at + 1)} disabled={at >= pages - 1} className={cn(PAGE_BTN, FOCUS, 'disabled:cursor-not-allowed disabled:opacity-40')}>
             Next
           </button>
         </span>
