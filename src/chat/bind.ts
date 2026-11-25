@@ -173,7 +173,8 @@ export function bindBlock(tool: RenderTool, input: unknown, store: ResultStore, 
   const label = (d: BlockDecision): string => {
     if (title) return title;
     if (d.block === 'chart') return chartTitle(result, d.chart);
-    return result.metric.replace(/_/g, ' ');
+    // An Explore table has no metric name (it read "explore"): name it by its column labels, never by row values.
+    return result.meta.exploratory ? joinAnd(result.columns.map((c) => c.label)).slice(0, MAX_TITLE) : result.metric.replace(/_/g, ' ');
   };
   const blocks = view.decisions.flatMap((d) => fromDecision(result, d, label(d), nextId));
   return {blocks, chosen: view.decisions.map((d) => d.chosen)};
