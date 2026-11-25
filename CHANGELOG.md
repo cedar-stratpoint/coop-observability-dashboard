@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Event leads: log a contact for any lead, status first (RET-17)
+
+Syl's list: see who we have / haven't contacted or who replied, log a contact by hand, edit "when I last talked to them". 604 of 744 booth leads gave only an Instagram handle, so the email-only contact log couldn't record them.
+- **Contact log takes email, Instagram or mobile, plus "They replied" and a "When" day** (default today, never future). SQL `supabase/customer_contacts_lead_keys.sql` (applied on Staging 2026-11-25; PROD pending). Until it runs, email logging still works and Instagram / mobile logging says "not set up".
+- **Decided: "Contacted" means logged by the team.** Automated emails (cart reminder, Leave a review email, …) never set the status.
+- **One person, one status:** same email, same Instagram handle, a Same person link, or the same mobile, but a mobile never joins two people with different emails (household phones), and a contact logged only by mobile never attaches to someone who has an email.
+- **Unknown is never "Not contacted":** an unreadable log, or the pre-SQL log for someone without an email, reads Unknown.
+- **Event leads page:** Status chip first, Log right after the name on every row with a key, Status filter with counts, **Not contacted yet (N)**, copy IG handles / emails / mobiles, CSV with status, last contacted and replied.
+- **Website CRM:** clicking **Last contacted** opens the Log dialog for that person on a chosen day (Syl: "can I edit when I last talked to them"). A wrong entry is fixed by deleting your own entry and logging again; automated emails stay read-only.
+- Not in this change: the merged timeline (lead contacts on the Website CRM profile), the "auto" label on Last contacted, Ask Coop status.
+
 ## 2026-11-25 — "Review request" is now called "Leave a review email"
 
 Owner: "Leave a Review email hindi review request". It is the automatic email the website sends after an order is fulfilled, asking the customer to leave a review; nobody on the team sends it. Renamed everywhere it shows (Website CRM columns and CSV, customer profile and timeline, "Last contacted" kind, Ask Coop's column labels and tool text). Data keys (`review_request`, `reviewRequestSentAt`) are unchanged.
