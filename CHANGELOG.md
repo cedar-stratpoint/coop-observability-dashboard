@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Reconcile: Reco A to D tiles and a by-SKU Reco C report (NICH-43 §1, §2)
+
+Syl asked (Nov 25) to see how many lines need Reco A (retire, sell through), B (flag for accounting), C (Watsons to audit) and D (update the Nichido inventory form), and for a report of every SKU under Reco C. Decided with the user: A = Retire, sell through; B = Send to accounting; **C = both Watsons-owned boxes** (Watsons to audit + Report to Watsons, on the PO form or not); D = Add to form. Check delivery, Flag to retire and Keep stay as boxes only.
+
+- **Four Reco tiles above the notebook grid** (`RecoStrip`), each a filter like a box (`?reco=A..D`); picking C lights both Watsons boxes. A letter follows the line's own recommendation, so a sold-out line ("Restock", "Flag to retire") is in no letter (`recoLetterOf`, `summary.letters`).
+- **By SKU download** next to CSV on the every-store view: one line per product with its recommendations, store count, store codes and totals (`skuLines`, `?by=sku` on `/api/goldline/audit-export`). With Reco C picked, that is Syl's Reco C report.
+- Staging Sept 2026, every store: A 1 · B 2 · C 207 · D 0; the Reco C by-SKU file lists 114 SKUs.
+- Plan for the rest (review marks, manual flag, Add row, flag drill-down, per-store flag export): `knowledge/tasks/2026-11-25-review-marks-and-reco-reports.md`.
+
 ## 2026-11-25 — Commit all means all: pick stores in the confirm, whole-upload plan, tiles say why
 
 QA: after Commit all, "Nov 24 Test Run" still read Partly committed. Expected: Commit all commits every form, reviewed or not. Checked on Staging: 39 of the 43 pages left had **no store** (none read, or a code not in the store list) and 4 were San Pablo Sep 16 to 30, whose page 9 was read as **2020**, so the board split it off its batch and Commit all never offered it. The 28 "issues" are sales sheets and blank backs, set aside on purpose.
