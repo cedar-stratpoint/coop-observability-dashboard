@@ -49,6 +49,7 @@ import {
   CircleCheck,
   Clock,
   Crown,
+  Link2,
   Mail,
   MailCheck,
   MessageSquarePlus,
@@ -146,6 +147,8 @@ import type {CustomerContact} from '@/src/customer-contacts';
 import {cohortLabel, cohortPreview, cohortSuggestions, cohortsOf, compareCohorts, type CustomerCohort} from '@/src/customer-cohorts';
 import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
+import {unlinkPeople} from '@/src/customer-links-actions';
+import {boothCell, boothText, type CustomerBooth} from '@/src/customer-links';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -330,6 +333,45 @@ function VoucherChips({uses}: {uses: VoucherUse[] | null | undefined}) {
   );
 }
 
+/** RET-15 Slice B: the Instagram cell. A linked handle carries a link marker and, for the person who linked it, an Unlink button. */
+function InstagramCell({found, read, linkId, onUnlink, busy}: {found: CustomerBooth | undefined; read: {leads: boolean; links: boolean}; linkId: string | null; onUnlink: (id: string) => void; busy: boolean}) {
+  const cell = boothCell(found, read);
+  if (cell === 'unknown') return <span className="text-xs text-muted-foreground" title="Unknown: the booth leads or the Same person links could not be read">unknown</span>;
+  if (cell === 'none') return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-1.5 text-xs">
+      {cell.instagram ? <span className="text-foreground">@{cell.instagram}</span> : <span className="text-muted-foreground">—</span>}
+      {cell.source === 'linked' && (
+        <span className="inline-flex items-center gap-1 text-muted-foreground" title="Linked by hand with Same person in Ask Coop. The customer's own record is unchanged.">
+          <Link2 className="size-3" aria-hidden />
+          <span className="sr-only">Linked by hand</span>
+          {linkId && (
+            <button type="button" disabled={busy} onClick={() => onUnlink(linkId)} className="rounded px-1 underline underline-offset-2 hover:text-foreground disabled:opacity-50">
+              Unlink
+            </button>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** RET-15 Slice B: the Booth cell, one chip per lead: campaign, prize, pet. */
+function BoothChips({found, read}: {found: CustomerBooth | undefined; read: {leads: boolean; links: boolean}}) {
+  const cell = boothCell(found, read);
+  if (cell === 'unknown') return <span className="text-xs text-muted-foreground" title="Unknown: the booth leads or the Same person links could not be read">unknown</span>;
+  if (cell === 'none') return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <span className="flex min-w-[11rem] max-w-[16rem] flex-wrap gap-1">
+      {cell.booth.map((b, i) => (
+        <span key={i} className="inline-flex max-w-full items-center overflow-hidden rounded-md border border-border bg-card px-1.5 text-[11px] leading-5 whitespace-nowrap">
+          <span className="truncate text-foreground">{boothText(b) || 'Booth lead'}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 const nextLabel = (days: number | null): string =>
   days === null ? '—' : days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `in ${days} days`;
 const birthdayLabel = (b: string | null): string => (b ? fmtPhDate(b).replace(/,\s*\d{4}$/, '') : '—');
@@ -386,6 +428,8 @@ export function CrmView({
   membership,
   contacts,
   cohorts,
+  booth,
+  boothRead,
   viewer,
   configured,
   now,
@@ -403,6 +447,10 @@ export function CrmView({
   contacts: CustomerContact[] | null;
   /** RET-10 saved cohorts (rules only); null when the table is not set up here or could not be read: shown as unavailable. */
   cohorts: CustomerCohort[] | null;
+  /** RET-15 Slice B: per customer email, the Instagram + booth metadata from exact matches and saved "Same person" links (computed on the server). */
+  booth: Record<string, CustomerBooth>;
+  /** Whether the booth leads and the links were read; when not, a customer with nothing found reads "unknown", never "—". */
+  boothRead: {leads: boolean; links: boolean};
   /** The signed-in email: the log shows Delete only on this person's own contacts. */
   viewer: string | null;
   configured: boolean;
@@ -431,6 +479,15 @@ export function CrmView({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [cohortMsg, setCohortMsg] = useState<string | null>(null);
   const [deleting, startDelete] = useTransition();
+  const [unlinking, startUnlink] = useTransition();
+  const boothOf = (c: CustomerRow): CustomerBooth | undefined => booth[(c.email ?? '').trim().toLowerCase()];
+  // The viewer can only unlink a link they made (the action checks again).
+  const myLinkId = (c: CustomerRow): string | null => (viewer === null ? null : (boothOf(c)?.links.find((l) => l.createdBy === viewer)?.id ?? null));
+  const unlink = (id: string) =>
+    startUnlink(async () => {
+      const r = await unlinkPeople(id);
+      setCohortMsg(r.ok ? 'Unlinked. The customer keeps their own record; only the Instagram and Booth details went.' : r.error);
+    });
   // Vince's defaults: newest abandoned and newest placed first, soonest birthday first. Customers keep their list order until sorted.
   const [cartSort, setCartSort] = useState<Sort<CartSortKey> | null>({key: 'abandoned', dir: 'desc'});
   const [orderSort, setOrderSort] = useState<Sort<OrderSortKey> | null>({key: 'placed', dir: 'desc'});
@@ -682,7 +739,7 @@ export function CrmView({
     } else if (tab === 'customers') {
       const name = savedCohort ? 'crm-customers-cohort' : ruleBuiltin ? `crm-customers-${ruleBuiltin.key.replace('_', '-')}` : preset === 'all' ? 'crm-customers' : `crm-customers-${preset.replace('_', '-')}`;
       const note = filterNote([['Cohort', cohortOn ? cohortName : 'all'], ['Tier', customerFilter.tier], ['Bought', customerFilter.buyers], ['Voucher', customerFilter.voucher ?? 'all']], q);
-      downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name, ruleBuiltin !== null));
+      downloadCsv(`${name} (${customerList.length}).csv`, customerCsv(customerList, asOf, note, membership.platinumThreshold, name, ruleBuiltin !== null, {map: new Map(Object.entries(booth)), read: boothRead}));
     } else {
       const note = filterNote([['Voucher', petFilter]], q);
       downloadCsv(`crm-pet-birthdays (${petList.length}).csv`, petCsv(petList, asOf, note, thisYear));
@@ -1332,6 +1389,8 @@ export function CrmView({
                           onSort={sortCustomers}
                           title="Discount codes redeemed on counted orders, most uses first. Hover a code for its orders"
                         />
+                        <th className={th} title="Instagram from the booth lead with the same email or mobile, or one you linked with Same person in Ask Coop">Instagram</th>
+                        <th className={th} title="Booth sign-up: campaign, prize, pet">Booth</th>
                         {ruleBuiltin && <th className={th} title="This year's birthday voucher: sent, not used (with its expiry), expired, or used">Birthday voucher</th>}
                         <SortTh label="First order" k="firstOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Last order" k="lastOrder" sort={customerSort} onSort={sortCustomers} />
@@ -1450,6 +1509,8 @@ export function CrmView({
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.createdAt)}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{c.orderCount}</td>
                           <td className="px-4 py-2.5"><VoucherChips uses={c.vouchers} /></td>
+                          <td className="px-4 py-2.5"><InstagramCell found={boothOf(c)} read={boothRead} linkId={myLinkId(c)} onUnlink={unlink} busy={unlinking} /></td>
+                          <td className="px-4 py-2.5"><BoothChips found={boothOf(c)} read={boothRead} /></td>
                           {ruleBuiltin && <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{bdayVoucherText(c.bdayVoucher)}</td>}
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.firstOrderAt)}</td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.lastOrderAt)}</td>
@@ -1636,6 +1697,14 @@ export function CrmView({
                         <div className="col-span-3 flex justify-between gap-2">
                           <dt>Vouchers used</dt>
                           <dd><VoucherChips uses={c.vouchers} /></dd>
+                        </div>
+                        <div className="col-span-3 flex justify-between gap-2">
+                          <dt>Instagram</dt>
+                          <dd><InstagramCell found={boothOf(c)} read={boothRead} linkId={myLinkId(c)} onUnlink={unlink} busy={unlinking} /></dd>
+                        </div>
+                        <div className="col-span-3 flex justify-between gap-2">
+                          <dt>Booth</dt>
+                          <dd><BoothChips found={boothOf(c)} read={boothRead} /></dd>
                         </div>
                         {ruleBuiltin && (
                           <div className="col-span-3 flex justify-between gap-2">

@@ -55,6 +55,7 @@
    "tables": [
     "spin_wheel_leads",
     "customer_contacts",
+    "customer_links",
     "customer_cohorts"
    ]
   },
@@ -353,6 +354,14 @@
    "domain": "booth-leads",
    "about": "The manual contact log (RET-05, 2026-11-10): an Instagram, Facebook or Viber message, a DM on another app, an SMS, call, hand-sent email or other contact a team member logged against a website customer, so \"times contacted\" counts more than the automated CRM emails. It records a contact; nothing sends one.",
    "columns": "id, customer_email (the website customer's email, lower-cased), channel, note (free text, nullable), contacted_at (default now), created_by (the signed-in Coop email that logged it), created_at.",
+   "prefer": null,
+   "testOrders": null
+  },
+  "customer_links": {
+   "name": "customer_links",
+   "domain": "booth-leads",
+   "about": "Owner-approved \"Same person\" links (RET-15 Slice B, 2026-11-25) between a website customer and a booth lead, saved from Ask Coop's matches table. A link only adds Instagram and Booth metadata beside the customer on the Website CRM Customers tab; it is NOT a merge (the CRM stays the source: name, email, orders, spend and vouchers never change, and no count, cohort or repeat rate moves). Exact matches (same email, or same mobile by its last 10 digits) need no row and show automatically.",
+   "columns": "id, customer_email, lead_email (lower-cased), lead_mobile (last 10 digits), lead_instagram (no \"@\", lower-cased), lead_campaign (the event shown on the row; a hint), created_by (the signed-in Coop email), created_at.",
    "prefer": null,
    "testOrders": null
   },
@@ -1277,7 +1286,7 @@
     "booth-leads (customer_contacts and customer_cohorts)"
    ],
    "fenced": false,
-   "access": "partial: CRM tools (metrics, customers incl. audiences, saved cohorts (cohort, group_by cohort_group, not_contacted_days) and cohort drafts (propose_crm_cohort, saved only by a person's click), repeat rate, emails sent, manual contacts, times contacted and last contacted with the contacted_desc / last_contacted_asc sorts, orders, checkouts); voucher codes and checkout links withheld",
+   "access": "partial: CRM tools (metrics, customers incl. audiences, saved cohorts (cohort, group_by cohort_group, not_contacted_days) and cohort drafts (propose_crm_cohort, saved only by a person's click), repeat rate, emails sent, manual contacts, times contacted and last contacted with the contacted_desc / last_contacted_asc sorts, orders, checkouts); voucher codes and checkout links withheld RET-15 Slice B: Instagram and Booth columns (exact email/mobile matches to booth leads plus owner-approved customer_links, Unlink by the person who linked; CSV too).",
    "redirectTo": null
   },
   {

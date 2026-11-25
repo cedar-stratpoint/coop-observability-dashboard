@@ -10,6 +10,7 @@ import type {ChartBlock, ChatBlock, CohortDraftBlock, KpiBlock, TableBlock} from
 import type {MetricRow, ResultColumn} from '@/src/chat/result-types';
 import {cn} from '@/lib/utils';
 import {downloadCsv} from '../../src/csv';
+import {samePersonOffer} from '../../src/customer-links';
 import {copyList, csvRows, formatCategory, formatValue} from './chat-blocks-format';
 
 // Recharts is an async chunk (same pattern as charts-lazy.tsx); the skeleton holds the height so there is no layout jump.
@@ -17,6 +18,9 @@ const ChartView = dynamic(() => import('./chat-charts').then((m) => m.ChartView)
   ssr: false,
   loading: () => <div className="h-[200px] w-full animate-pulse rounded-lg bg-muted/40" aria-hidden />,
 });
+
+// RET-15 Slice B: the Same person button carries a server action, so it loads on first use (like the cohort draft below).
+const SamePersonCell = dynamic(() => import('./same-person-button').then((m) => m.SamePersonCell), {ssr: false}) as React.ComponentType<{row: MetricRow}>;
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
 
@@ -111,7 +115,7 @@ const PAGE_BTN = 'rounded-md border border-border px-2.5 py-1 text-[11px] font-m
 
 /** Compact table: numbers right-aligned in tabular numerals, sticky first column, scrolls sideways inside its own box. Over
  * TABLE_PAGE_ROWS rows it pages (Prev / Next, "11–20 of 67"); the total row stays on every page because it sums all rows. */
-export function DataTable({columns, rows: all, total, label}: {columns: ResultColumn[]; rows: MetricRow[]; total: MetricRow | null; label: string}) {
+export function DataTable({columns, rows: all, total, label, linkable}: {columns: ResultColumn[]; rows: MetricRow[]; total: MetricRow | null; label: string; /** RET-15 Slice B: a matches table of website customers and event leads gets a "Same person" column. */ linkable?: boolean}) {
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(all.length / TABLE_PAGE_ROWS));
   const at = Math.min(page, pages - 1);
@@ -127,6 +131,7 @@ export function DataTable({columns, rows: all, total, label}: {columns: ResultCo
                 {c.label}
               </th>
             ))}
+            {linkable && <th scope="col" className="whitespace-nowrap px-2.5 py-1.5 text-left font-medium">Same person</th>}
           </tr>
         </thead>
         <tbody>
@@ -137,6 +142,11 @@ export function DataTable({columns, rows: all, total, label}: {columns: ResultCo
                   {cell(c, r)}
                 </td>
               ))}
+              {linkable && (
+                <td className="px-2.5 py-1.5 text-left">
+                  <SamePersonCell row={r} />
+                </td>
+              )}
             </tr>
           ))}
           {total && (
@@ -146,6 +156,7 @@ export function DataTable({columns, rows: all, total, label}: {columns: ResultCo
                   {i === 0 && total[c.key] == null ? 'Total' : cell(c, total)}
                 </td>
               ))}
+              {linkable && <td />}
             </tr>
           )}
         </tbody>
@@ -279,7 +290,7 @@ export function ChatBlocks({blocks}: {blocks: ChatBlock[]}) {
       ) : (
         <BlockCard key={b.id} block={b}>
           {(b.pii || b.exportable) && <ContactActions block={b} />}
-          <DataTable columns={b.columns} rows={b.screenRows ? b.rows.slice(0, b.screenRows) : b.rows} total={b.total} label={b.title} />
+          <DataTable columns={b.columns} rows={b.screenRows ? b.rows.slice(0, b.screenRows) : b.rows} total={b.total} label={b.title} linkable={b.source.startsWith('contacts:') && b.rows.some((r) => samePersonOffer(r) !== null)} />
         </BlockCard>
       ),
     );
