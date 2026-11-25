@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Restock run: decisions on the right edge, roomier numbers
+
+Review: the run table had empty space right of the Approve / Edit / Reject buttons while the data columns felt cramped. The Decision column now hugs its content and sits flush right (actions right-aligned), and the spare width goes to the product name and the gaps between the number columns. The "Warehouse short" chip on lines still to decide moved out of the Decision cell: a warning icon now sits before the Send number it explains (tooltip: Coop's number before the cap), so every row has the same compact actions. Covered lines keep a single chip ("Covered" or "Warehouse short"), with the detail in its tooltip. "Check data first" reasons still wrap, capped at 18rem. Checked at 1440px (longest product names fit except the very longest) and 390px.
 ## 2026-11-25 — Ask Coop: which code users are also booth leads, with their Instagram (RET-14)
 
 Owner asked "are the GRAND300 customers also in the event leads, and can we merge their IG?". Ask Coop answered with the overlap of ALL website customers and booth leads (10 people) and could not show any Instagram: the `contacts` overlap had no code filter and its table had no Instagram column. Now `contacts` mode overlap takes `voucher` (website side = customers who used that code on any order, the same `voucherMatch` as the Website CRM page), and the people table carries **Instagram (booth)**, the handle the lead typed (`UnifiedContact.instagram`, booth only). "Merge" stays read-only: the handle shows next to the website record; nothing is written. Also confirmed: GRAND300 orders total ₱0.00 (the ₱300 covers the whole order), so "Spent ₱0" on those buyers is right, not a gap. Tests `test/chat-contacts-voucher-overlap.test.ts`.
