@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.9 Ask Coop matches table by source (prod release)
+Ships only the matches table layout (name first; Website CRM / Event leads columns), cherry-picked onto `main`.
+
 ## 2026-11-25 — Ask Coop matches table: name first, sides named by source
 
 Owner: the matches table read "A: name … B: Instagram". It now leads with **Name** (the website or Lazada name first, then the booth's typed name, then the handle), then **Match**, **Score**, **Why**, and each side is labelled by where it came from: **Website CRM: name / email / mobile** and **Event leads: name / Instagram / email / mobile / event** (Lazada: name / mobile). The internal "Signals" and "seen in" columns are gone from the table (the model still gets the signals). Tables whose sides are not fixed (one person, one event) say "Record 1 / Record 2" with a "from" column.
