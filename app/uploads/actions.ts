@@ -23,7 +23,7 @@ import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
   fileFormPages,
   setAsidePages,
-  setExtractionBandPrice,
+  setExtractionBandPrices,
   batchFamily,
   BatchConflictError,
   BatchStateError,
@@ -247,11 +247,20 @@ export type BandPriceResult = {ok: true; bands: PaperBand[]} | {ok: false; error
  * "Price written" flag is cleared by a pick and reopened when it is taken back.
  */
 export async function setBandPriceAction(input: {company: string | null; uploadId: string; group: string; price: number | null}): Promise<BandPriceResult> {
+  return setBandPricesAction({company: input.company, uploadId: input.uploadId, picks: [{group: input.group, price: input.price}]});
+}
+
+/** Several band picks on one page at once ("Use the paper prices on this page"). Same rules as
+ *  one pick, for every band in the list; nothing is saved when any pick is refused. */
+export async function setBandPricesAction(input: {company: string | null; uploadId: string; picks: Array<{group: string; price: number | null}>}): Promise<BandPriceResult> {
   const ctx = await getDataContext(input.company);
   if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized.'};
   if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot edit reviews.'};
   if (typeof input.uploadId !== 'string' || !UUID.test(input.uploadId)) return {ok: false, error: 'That page could not be found.'};
-  if (typeof input.group !== 'string' || !input.group.trim() || input.group.length > 200) return {ok: false, error: 'That band could not be found.'};
+  const picks = Array.isArray(input.picks) ? input.picks.slice(0, 60) : [];
+  if (!picks.length || picks.some((p) => !p || typeof p.group !== 'string' || !p.group.trim() || p.group.length > 200 || (p.price != null && typeof p.price !== 'number'))) {
+    return {ok: false, error: 'That band could not be found.'};
+  }
   try {
     const out = await outOfScopeFor(ctx, input.uploadId);
     if (out) return {ok: false, error: out};
@@ -259,21 +268,27 @@ export async function setBandPriceAction(input: {company: string | null; uploadI
     if (!upload) return {ok: false, error: 'That page could not be found.'};
     if (upload.status !== 'needs_review') return {ok: false, error: 'This page is already committed.'};
     const ex = await getExtraction(ctx.companyId, input.uploadId);
-    const band = cleanBands(ex?.data?.bands).find((b) => b.group === input.group);
-    if (!band || band.kind == null) return {ok: false, error: 'That band could not be found. Reload the page.'};
-    if (input.price != null && !allowedPrices(band).includes(input.price)) return {ok: false, error: 'Pick the printed price or the one on the paper.'};
-    const bands = await setExtractionBandPrice(ctx.companyId, input.uploadId, input.group, input.price);
+    const onPage = cleanBands(ex?.data?.bands);
+    const touched: PaperBand[] = [];
+    for (const p of picks) {
+      const band = onPage.find((b) => b.group === p.group);
+      if (!band || band.kind == null) return {ok: false, error: 'That band could not be found. Reload the page.'};
+      if (p.price != null && !allowedPrices(band).includes(p.price)) return {ok: false, error: 'Pick the printed price or the one on the paper.'};
+      touched.push(band);
+    }
+    const bands = await setExtractionBandPrices(ctx.companyId, input.uploadId, picks);
     if (!bands) return {ok: false, error: 'That band could not be found. Reload the page.'};
-    const code = ex?.data?.rows?.[band.first_index ?? -1]?.item_code;
-    if (code) {
-      await setBandMarkStatus(ctx.companyId, input.uploadId, code, input.price == null, (await auth())?.user?.email ?? null).catch((e) => console.error('band mark', e));
+    const by = (await auth())?.user?.email ?? null;
+    for (const [k, band] of touched.entries()) {
+      const code = ex?.data?.rows?.[band.first_index ?? -1]?.item_code;
+      if (code) await setBandMarkStatus(ctx.companyId, input.uploadId, code, picks[k].price == null, by).catch((e) => console.error('band mark', e));
     }
     revalidatePath(`/uploads/${input.uploadId}`);
     if (upload.batch_id) revalidatePath(`/uploads/batch/${upload.batch_id}`);
     return {ok: true, bands};
   } catch (e) {
-    console.error('setBandPriceAction', e);
-    return {ok: false, error: 'Could not save the price. Please try again.'};
+    console.error('setBandPricesAction', e);
+    return {ok: false, error: 'Could not save the prices. Please try again.'};
   }
 }
 

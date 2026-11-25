@@ -8,6 +8,19 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — "O/S" printed on the form is a note, not a count; band price flags tuned; one click for every paper price on a page
+
+A full 98-page staging upload ("Oct scan · band prices + O/S") was audited against the scans after #808 and #809.
+
+- **O/S is printed by Nichido, not written by BAs.** Every "O/S" on the Oct scan is typeset on the form, on the same rows of every store's copy (Legacy p.3 24HRMESGDE, 24HRMESGM, LEL091; V1/V2 p.4 six accessories; and so on). #809 read 116 of them as 0 and flagged them, and store 5300 counted 11 under one. Now a printed O/S leaves the row as the BA filled it, is never flagged, drops the reader's O/S remark, and shows a quiet "O/S printed on the form". Printed rows come from a fixed list per form version and page (`src/printed-os.ts`), so it doesn't rely on the reader telling print from handwriting. An O/S on any other row (one a BA wrote) still reads as 0 in its cell, as decided.
+- **Band price flags tuned.**
+  - A total that is a whole number of pieces at the printed price no longer offers a new price. That's a count misread: Elise Lashes ₱4,522 = 19 x ₱238, read as 17 pieces, was offered "₱266".
+  - A band with nothing on hand is never flagged, because there's nothing to value.
+  - Prices with centavos show two places (₱158.40, ₱213.75).
+  - On V1/V2, the older "Family total on paper …" note no longer repeats on a band that reconciles at the paper's price.
+- **"Use the paper prices on all N"**: stores 473 and 5300 write about 20% off on most bands (up to 9 flags a page). When two or more bands on a page are open, a bar above the rows lists them and one click picks the paper's price for all of them, for this form only (`setBandPricesAction`, one write). Each band can still be changed on its own.
+- The condensed confidence bar now shows the same flagged count as Needs review.
+
 ## 2026-11-25 — Event leads: log a contact for any lead, status first (RET-17)
 
 Syl's list: see who we have / haven't contacted or who replied, log a contact by hand, edit "when I last talked to them". 604 of 744 booth leads gave only an Instagram handle, so the email-only contact log couldn't record them.

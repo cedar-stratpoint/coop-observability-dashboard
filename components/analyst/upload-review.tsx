@@ -8,7 +8,7 @@ import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshai
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitReview, setBandPriceAction} from '@/app/uploads/actions';
+import {commitReview, setBandPriceAction, setBandPricesAction} from '@/app/uploads/actions';
 import {bandFlagRows, cleanBands, withPickedPrices} from '@/src/band-prices';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
@@ -229,13 +229,22 @@ export function UploadReview({
   // The band price picks for this form; the totals value a picked band at its picked price.
   const [bands, setBands] = useState(() => cleanBands(head?.bands));
   const catalog = useMemo(() => withPickedPrices(baseCatalog, bands), [baseCatalog, bands]);
+  // The pick answers the band's flag; a row also low on confidence still wants its own look.
+  const answerBand = (i: number | null | undefined) => {
+    if (i != null && rowConfidence(rows[i]?.confidence) >= LOW && !rows[i]?.oos?.check && rowNotes[i] == null) resolve(i);
+  };
   async function pickBandPrice(group: string, price: number | null): Promise<string | null> {
     const res = await setBandPriceAction({company, uploadId: upload.id, group, price});
     if (!res.ok) return res.error;
     setBands(res.bands);
-    const b = res.bands.find((x) => x.group === group);
-    // The pick answers the band's flag; a row also low on confidence still wants its own look.
-    if (price != null && b?.first_index != null && rowConfidence(rows[b.first_index]?.confidence) >= LOW && !rows[b.first_index]?.oos?.check && rowNotes[b.first_index] == null) resolve(b.first_index);
+    if (price != null) answerBand(res.bands.find((x) => x.group === group)?.first_index);
+    return null;
+  }
+  async function pickBandPrices(picks: Array<{group: string; price: number}>): Promise<string | null> {
+    const res = await setBandPricesAction({company, uploadId: upload.id, picks});
+    if (!res.ok) return res.error;
+    setBands(res.bands);
+    for (const p of picks) answerBand(res.bands.find((x) => x.group === p.group)?.first_index);
     return null;
   }
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
@@ -610,6 +619,7 @@ export function UploadReview({
             docConfidence={docConfidence}
             rowConfidences={rows.map((r) => r.confidence)}
             page={extraction.page}
+            flagged={flagged.length}
             onReviewFlagged={() => {
               setView('needs');
               goToFlag(open[0] ?? flagged[0] ?? null);
@@ -752,6 +762,7 @@ export function UploadReview({
             rowNotes={rowNotes}
             bands={bands}
             onBandPrice={pickBandPrice}
+            onBandPrices={pickBandPrices}
             resolved={resolved}
             active={active}
             view={view}
