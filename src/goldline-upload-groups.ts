@@ -7,7 +7,9 @@
 
 import {scanPosition} from './upload-batch';
 
-export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null};
+export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null;
+  /** The upload this page's batch was split from (see src/upload-drops.ts); its own batch when never split. */
+  drop_id?: string | null};
 
 export type UploadGroup = {
   key: string;
@@ -51,8 +53,9 @@ export function uploadSource(filename: string): string {
 
 /** The group key for one upload: the batch id when the drop was batched (so each drop is its
  *  own group, even re-uploads of the same scan), else `source|YYYY-MM-DD` (legacy / un-batched). */
-export function uploadGroupKey(u: Pick<GroupableUpload, 'filename' | 'created_at' | 'batch_id'>): string {
-  const batchId = u.batch_id?.trim();
+export function uploadGroupKey(u: Pick<GroupableUpload, 'filename' | 'created_at' | 'batch_id' | 'drop_id'>): string {
+  // One tile per upload: a batch split off by store sorting groups under the upload it came from.
+  const batchId = u.drop_id?.trim() || u.batch_id?.trim();
   if (batchId) return `b|${batchId}`;
   return `${uploadSource(u.filename)}|${(u.created_at ?? '').slice(0, 10)}`;
 }
@@ -126,7 +129,7 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
         firstAt: at,
         lastAt: at,
         isSplit: false,
-        batchId: u.batch_id?.trim() || null,
+        batchId: u.drop_id?.trim() || u.batch_id?.trim() || null,
         duplicateOf: null,
         _files: 0,
         _pageStatus: new Map<string, string>(),

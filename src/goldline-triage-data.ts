@@ -8,6 +8,7 @@ import {knownStoreCodes} from './goldline-store-registry';
 import {reconcileBaNames} from './goldline-ba-reconcile';
 import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
+import {familyOf, type BatchLink} from './upload-drops';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -202,6 +203,15 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
   // the exact uploadSource filter below still narrows it, so this only ever over-matches,
   // never under-matches). LIKE metacharacters in the source are escaped.
   const likePrefix = source ? `${source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%` : null;
+  // A view of one upload covers every group store sorting split off it.
+  const family = batchId
+    ? familyOf(
+        (await fetchAllRows('upload_batches', (from, to) =>
+          supa.from('upload_batches').select('id,parent_batch_id').eq('company_id', companyId).order('id').range(from, to),
+        )) as unknown as BatchLink[],
+        batchId,
+      )
+    : null;
   const all = (await fetchAllRows('uploads', (from, to) => {
     let q = supa
       .from('uploads') // pagination-ok: paged by fetchAllRows via .range(from, to) below
@@ -210,13 +220,13 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
       .eq('kind', 'inventory_pdf')
       .not('classified_at', 'is', null);
     if (likePrefix) q = q.like('filename', likePrefix);
-    if (batchId) q = q.eq('batch_id', batchId);
+    if (family) q = q.in('batch_id', family);
     return q.order('created_at', {ascending: false}).range(from, to);
   })) as unknown as UploadClsRow[];
   const bySource = source ? all.filter((r) => uploadSource(r.filename) === source) : all;
   // batchId (when the view is scoped to one upload drop) pins it to that single batch, so
   // re-uploads of the same scan file don't pile into one view.
-  const rows = batchId ? bySource.filter((r) => r.batch_id === batchId) : bySource;
+  const rows = family ? bySource.filter((r) => r.batch_id != null && family.includes(r.batch_id)) : bySource;
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Re-snap store codes against the current registry, then reconcile OCR year noise
