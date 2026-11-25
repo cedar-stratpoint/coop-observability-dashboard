@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.2 Ask Coop: website orders readable again (prod hotfix)
+Ships only #719 (CRM response cap 4 MB → 16 MB), cherry-picked onto `main`.
+
 ## 2026-11-25 — Ask Coop reads website orders again: CRM response cap 4 MB → 16 MB
 
 PROD `/api/orders` reached 4,026,463 bytes on 2026-11-25 (every order carries its raw Shopify payload), over Ask Coop's 4,000,000-byte cap per CRM response (`CRM_LIMITS.maxResponseBytes`). Every answer that reads website orders failed with "the website CRM sent more data than Ask Coop reads at once": customer lists (GRAND300 buyers), order lists, the Website row of the channel report. The Website CRM page was unaffected (its reader has no cap). Cap raised to 16 MB (about 4x headroom, the read takes about 1.2 s). **Decision:** raise now; when orders near the new cap, page `/api/orders` with `cursor` + `fields` the way the Business Health Report already does, instead of raising it again.
