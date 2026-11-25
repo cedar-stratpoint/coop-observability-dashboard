@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Per store board: the page row says what it is
+
+Owner asked what the 1 to 5 numbers on a form card mean. They are the five pages of the inventory form (green = in this scan, faded = missing, red ring = scanned twice), but only a hover said so. A small caption now sits above the row: "Pages received" with "2 of 5", plus "· 1 scanned twice" when a page came through twice. The row's screen-reader label matches.
+
 ## 2026-11-25 — Reconcile: new Store and Month pickers, All stores by default
 
 Feedback: the two native dropdowns looked plain, and the month list was a long run of "(no forms)". Hick's law: fewer, clearer choices first.
