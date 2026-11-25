@@ -554,6 +554,13 @@ function autoY(result: MetricResult, title = ''): ResultColumn[] {
   return sameUnit.length >= 3 && totalColumn(sameUnit, result.rows) ? sameUnit : [primary];
 }
 
+/** Owner 2026-11-25 ("who are the latest linked …" drew a trend): a text column with a different value on every row means each row is a person or
+ * record, so a time column beside it is when it happened, not a period to plot. A time series split by a category repeats that category. */
+function isEntityListing(result: MetricResult): boolean {
+  const {columns, rows} = result;
+  return rows.length >= 2 && columns.some((c) => c.role === 'category' && c.unit === 'text' && new Set(rows.map((r) => cell(r, c.key))).size === rows.length);
+}
+
 /**
  * Decide what to draw. Rules (first match wins): no rows -> table; one row -> stat tiles (more than KPI_MAX numbers
  * -> table); no category or time field, or no number -> table; measures of different units -> one chart per unit;
@@ -611,6 +618,7 @@ function decideView(result: MetricResult, request: ViewRequest, pick: {x?: strin
   const x = (pick.x ? col(pick.x) : undefined) ?? columns.find((c) => c.role === 'time') ?? columns.find((c) => c.role === 'category');
   const ys = pick.y?.length ? pick.y.map(col).filter((c): c is ResultColumn => c !== undefined && isNumericColumn(c)) : autoY(result, pick.title ?? '');
   if (!x || ys.length === 0) return {decisions: [tableDecision(result, request, 'This is a detail listing, which reads best as a table.')]};
+  if (request.kind === 'auto' && x.role === 'time' && isEntityListing(result)) return {decisions: [tableDecision(result, request, 'One row per person or record, with a date, is a list, not a trend: a table.')]};
 
   const groups = byUnit(ys);
   const decisions = groups.flatMap((g) => decideChart({result, request, x, ys: g}, groups.length > 1));
