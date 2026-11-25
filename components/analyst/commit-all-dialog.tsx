@@ -1,9 +1,10 @@
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, Check, CheckCheck, CircleSlash, Loader2, X} from 'lucide-react';
+import {AlertTriangle, ArrowRight, Check, CheckCheck, CircleSlash, Loader2, X} from 'lucide-react';
+import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
 import {commitAllAction, planCommitAllAction, type BulkCommitForm} from '@/app/uploads/actions';
@@ -62,9 +63,15 @@ export function CommitAllDialog({
     [forms, storeNames],
   );
   const ids = useMemo(() => forms.map((f) => f.batchId).filter((x): x is string => Boolean(x)), [forms]);
+  // Read when the dialog opens, not on every change: committing refreshes the page, and that
+  // must not throw the dialog back to its confirm screen mid-way (Nov 25 QA).
+  const latest = useRef({ids, labels});
+  latest.current = {ids, labels};
+  const {toasts, push, dismiss} = useToasts(8000);
 
   useEffect(() => {
     if (!open) return;
+    const {ids, labels} = latest.current;
     setPhase('confirm');
     setResults([]);
     setIncludeFlagged(false);
@@ -80,7 +87,7 @@ export function CommitAllDialog({
     return () => {
       live = false;
     };
-  }, [open, company, ids, labels]);
+  }, [open, company]);
 
   const rows = Array.isArray(plan) ? plan : [];
   const ready = rows.filter((r) => !r.draft && r.verdict.state === 'ready');
@@ -108,17 +115,34 @@ export function CommitAllDialog({
   const close = () => {
     if (phase === 'committing') return; // never abandon a commit in flight
     setOpen(false);
+    // Leave a receipt on the page once the dialog is gone.
+    if (phase === 'done' && okCount > 0) {
+      push({
+        kind: 'ok',
+        text: `Committed ${okCount} ${okCount === 1 ? 'form' : 'forms'} · ${okRows.toLocaleString('en-US')} rows. Inventory and Reconcile have them now.`,
+        action: {label: 'Open Reconcile', onClick: () => router.push(reconcileHref)},
+      });
+    }
   };
+  // Reconcile opens on the month most of the committed forms count.
+  const committedForms = going.filter((g) => results.some((r) => r.ok && r.batchId === g.batchId));
+  const months = committedForms.map((f) => f.periodStart.slice(0, 7)).filter(Boolean);
+  const topMonth = months.sort((a, b) => months.filter((m) => m === b).length - months.filter((m) => m === a).length)[0];
+  const reconcileHref = topMonth ? `/stock/audit?month=${topMonth}` : '/stock/audit';
 
   return (
+    <>
+    <ToastStack toasts={toasts} dismiss={dismiss} />
     <AlertDialog.Root open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
-      <AlertDialog.Trigger
-        render={
-          <Button size="sm" className="shrink-0 gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]">
-            <CheckCheck className="size-4" /> Commit all
-          </Button>
-        }
-      />
+      {forms.length > 0 && (
+        <AlertDialog.Trigger
+          render={
+            <Button size="sm" className="shrink-0 gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]">
+              <CheckCheck className="size-4" /> Commit all
+            </Button>
+          }
+        />
+      )}
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(44rem,calc(100dvh-2rem))] w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-200 ease-out data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0">
@@ -247,8 +271,36 @@ export function CommitAllDialog({
                     })}
                 </ul>
               )}
+              {/* The receipt: every form that went in, so it's plain what was committed. */}
+              {committedForms.length > 0 && (
+                <ul className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
+                  {committedForms.map((f) => (
+                    <li key={f.batchId} className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg px-2 py-1.5 transition-opacity duration-200 ease-out starting:opacity-0">
+                      <span className="grid size-5 place-items-center rounded-full" style={{background: tint('good', 16), color: ink('good')}}>
+                        <Check className="size-3" aria-hidden />
+                      </span>
+                      <span className="min-w-0 truncate text-sm">
+                        <span className="font-medium">{f.label}</span> <span className="text-muted-foreground">{fmtTriagePeriod(f.periodStart, f.periodEnd)}</span>
+                      </span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{(results.find((r) => r.batchId === f.batchId)?.committed ?? 0).toLocaleString('en-US')} rows</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {phase === 'done' && (
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-2">
+                  {okCount > 0 && (
+                    <Button
+                      variant="outline"
+                      className="gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]"
+                      onClick={() => {
+                        setOpen(false);
+                        router.push(reconcileHref);
+                      }}
+                    >
+                      Open Reconcile <ArrowRight className="size-4" />
+                    </Button>
+                  )}
                   <AlertDialog.Close render={<Button />}>Done</AlertDialog.Close>
                 </div>
               )}
@@ -257,6 +309,7 @@ export function CommitAllDialog({
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+    </>
   );
 }
 

@@ -10,6 +10,15 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.16 Commit all success screen, committed upload tiles (prod release)
+Ships #783, cherry-picked onto `main`: the Commit all success step survives the page refresh (with a toast receipt and Open Reconcile), and Uploads tiles show how much of a drop is committed.
+
+## 2026-11-25 — Commit all: a success screen you can see, and committed tiles
+
+QA: after Commit all on "Nov 24 Test Run" (7 forms, 27 pages went in) it "didn't feel committed". Cause: the page refresh after the last form unmounted the button (nothing left to commit) and with it the dialog, and the refresh also reset the dialog to its confirm step. So the success step never showed.
+
+- **The dialog stays mounted** (it hides only its button when nothing is left) and reads its forms when it opens, not on every refresh. Its success step lists each committed form with its rows, with **Open Reconcile** (on the month most of them count) and **Done**. Closing leaves a toast: "Committed 7 forms · N rows. Inventory and Reconcile have them now." with Open Reconcile.
+- **Uploads tiles show it.** Once any page of a drop is committed, the tile's icon becomes a ring filling with the committed share of its pages (a solid check when every page is in) and the date line says **Partly committed** or **Committed**. The count pills stay as they were.
 ## 2026-11-25 · v1.26.15 Commit all in the upload's header (prod release)
 Ships #776, cherry-picked onto `main`: Commit all sits beside Delete scan on every view of a grouped upload.
 
