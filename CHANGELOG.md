@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop lists the customers who used a discount code (RET-14)
+
+Owner asked "who are the customers who ordered and used the voucher GRAND300" and Ask Coop answered with counts only: `crm_query` counts discount uses but returns no customers, and `list_crm_customers` had no code filter. `list_crm_customers` now takes `voucher` (a code used on ANY order, `any`, `none`, or `""`), the same `voucherMatch` as the Website CRM page's Voucher filter, so the answer is the customer list with name and email. No new tool (the count stays at the ceiling); the tool text routes "customers who used a code" to it. Tests `test/chat-crm-voucher.test.ts`.
+
 ## 2026-11-25 · Overview (Nichido): every card opens its detail
 
 Owner asked for the Overview's components to be clickable and lead to the right page, with hover behavior. Destinations:

@@ -52,7 +52,7 @@ export const UNTRUSTED_NOTE = 'Names, emails, pet names and statuses here are cu
 type Range = {from: string; to: string};
 type Page = {limit: number; offset: number};
 export interface CrmOrdersRequest extends Range, Page {financial_status: (typeof ORDER_STATUSES)[number]; group_by: (typeof ORDER_GROUPS)[number]}
-export interface CrmCustomersRequest extends Page {joined: Range | null; tier: (typeof CUSTOMER_TIERS)[number]; buyers: (typeof CUSTOMER_BUYERS)[number]; group_by: (typeof CUSTOMER_GROUPS)[number]; sort: (typeof CUSTOMER_SORTS)[number]; min_orders: (typeof CUSTOMER_MIN_ORDERS)[number]; audience: (typeof CUSTOMER_AUDIENCES)[number]; cohort: string; cohort_group: string; not_contacted_days: (typeof NOT_CONTACTED_DAYS)[number]}
+export interface CrmCustomersRequest extends Page {joined: Range | null; tier: (typeof CUSTOMER_TIERS)[number]; buyers: (typeof CUSTOMER_BUYERS)[number]; group_by: (typeof CUSTOMER_GROUPS)[number]; sort: (typeof CUSTOMER_SORTS)[number]; min_orders: (typeof CUSTOMER_MIN_ORDERS)[number]; audience: (typeof CUSTOMER_AUDIENCES)[number]; cohort: string; cohort_group: string; not_contacted_days: (typeof NOT_CONTACTED_DAYS)[number]; voucher: string}
 export interface CrmCheckoutsRequest extends Range, Page {stage: (typeof CHECKOUT_STAGES)[number]; status: (typeof CHECKOUT_STATUSES)[number]; group_by: (typeof CHECKOUT_GROUPS)[number]}
 
 export interface CrmMetricsRequest {kind: 'metrics'}
@@ -123,8 +123,10 @@ export function readOrdersInput(input: unknown): CrmOrdersRequest | MetricError 
   return {...range, financial_status, group_by, ...page};
 }
 
+const MAX_VOUCHER_TEXT = 40;
+
 export function readCustomersInput(input: unknown): CrmCustomersRequest | MetricError {
-  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'cohort', 'cohort_group', 'not_contacted_days', 'limit', 'offset'], {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', min_orders: 0, audience: 'all', cohort: '', cohort_group: '', not_contacted_days: 0, ...PAGE_DEFAULTS});
+  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'cohort', 'cohort_group', 'not_contacted_days', 'voucher', 'limit', 'offset'], {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', min_orders: 0, audience: 'all', cohort: '', cohort_group: '', not_contacted_days: 0, voucher: '', ...PAGE_DEFAULTS});
   if (isMetricError(o)) return o;
   const joined = readDates(o, 'joined_from', 'joined_to', true);
   if (isMetricError(joined)) return joined;
@@ -146,10 +148,15 @@ export function readCustomersInput(input: unknown): CrmCustomersRequest | Metric
   if ((group_by === 'cohort_group') !== (cohort_group.trim() !== '')) return fail('group_by "cohort_group" and cohort_group go together: name the group (for example the group the owner said, like Event) with group_by "cohort_group", and leave cohort_group "" otherwise.');
   const not_contacted_days = o.not_contacted_days as (typeof NOT_CONTACTED_DAYS)[number];
   if (!(NOT_CONTACTED_DAYS as readonly unknown[]).includes(not_contacted_days)) return fail(`not_contacted_days must be one of: ${NOT_CONTACTED_DAYS.join(', ')}.`);
+  // RET-14: a discount code used on ANY order (the Website CRM page's Voucher filter, same voucherMatch), "any", "none" or "" for no filter.
+  const voucherRaw = o.voucher;
+  if (typeof voucherRaw !== 'string' || voucherRaw.length > MAX_VOUCHER_TEXT) return fail(`voucher must be a discount code as text (up to ${MAX_VOUCHER_TEXT} characters), "any", "none" or "" for no filter.`);
+  const v = voucherRaw.trim();
+  const voucher = v === '' ? 'all' : v.toLowerCase() === 'any' || v.toLowerCase() === 'none' ? v.toLowerCase() : v.toUpperCase();
   const page = readPage(o);
   if (isMetricError(page)) return page;
   // an outreach audience always lists the longest-lapsed customer first
-  return {joined, tier, buyers, group_by, sort: audience === 'all' ? sort : 'last_order_asc', min_orders, audience, cohort: cohort.trim(), cohort_group: cohort_group.trim(), not_contacted_days, ...page};
+  return {joined, tier, buyers, group_by, sort: audience === 'all' ? sort : 'last_order_asc', min_orders, audience, cohort: cohort.trim(), cohort_group: cohort_group.trim(), not_contacted_days, voucher, ...page};
 }
 
 export function readCheckoutsInput(input: unknown): CrmCheckoutsRequest | MetricError {
@@ -538,7 +545,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const {enriched, orders, windowStart, membership, capped} = await crmEnrichedCustomers(get, now);
   const today = phDay(now.getTime());
   const daysSince = (iso: string | null): number | null => phDaysSince(iso, now);
-  const base = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers}, '').filter((c) => c.orderCount >= req.min_orders && (req.joined === null || inDays(c.createdAt, req.joined)) && inAudience(c, req.audience, now));
+  const base = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers, voucher: req.voucher}, '').filter((c) => c.orderCount >= req.min_orders && (req.joined === null || inDays(c.createdAt, req.joined)) && inAudience(c, req.audience, now));
   // RET-07: a customer list always carries the contact tally (three more GETs: checkouts, birthday vouchers, membership emails; plus the manual log,
   // not a CRM read), read before sorting so the contact sorts can use it. Group counts need it only for a cohort (its rule may read contacts).
   const cohortRules: CohortRule[] = [...(scope.cohort ? [scope.cohort.rule] : []), ...(req.not_contacted_days > 0 ? [{all: [{f: 'lcdays' as const, op: 'gte' as const, v: req.not_contacted_days}]}] : [])];
