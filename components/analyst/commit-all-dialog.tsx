@@ -8,7 +8,7 @@ import {AlertTriangle, ArrowRight, Check, CheckCheck, ChevronsUpDown, CircleSlas
 import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
-import {assignFormStoreAction, commitAllAction, planCommitAllAction, type BulkCommitForm} from '@/app/uploads/actions';
+import {commitAllAction, fileFormAction, planCommitAllAction, setAsideAction, type BulkCommitForm} from '@/app/uploads/actions';
 import {suggestStore} from '@/src/store-suggest';
 import type {StoreOption} from '@/src/goldline-data';
 import {draftKey, parseDraft} from '@/src/review-draft';
@@ -51,6 +51,8 @@ export function CommitAllDialog({
   dropId,
   forms,
   needsStore,
+  strays,
+  needsDate,
   stores,
   storeNames,
   notListed,
@@ -61,6 +63,11 @@ export function CommitAllDialog({
   forms: TriageForm[];
   /** Forms with pages to commit but no store (none read, or one not in the store list). */
   needsStore: TriageForm[];
+  /** Forms whose store and period were read (a misread year already corrected) but whose
+   *  pages never became a store form, e.g. a lone page. Filed automatically on commit. */
+  strays: TriageForm[];
+  /** Forms with a store but no date read: they need a person to set the period. */
+  needsDate: TriageForm[];
   stores: StoreOption[];
   /** The registry's name per store code, so a form reads by its real store name. */
   storeNames: Record<string, string | null>;
@@ -73,9 +80,10 @@ export function CommitAllDialog({
   const [includeFlagged, setIncludeFlagged] = useState(true);
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [suggested, setSuggested] = useState<Record<string, string>>({});
+  const [aside, setAside] = useState<Set<string>>(new Set());
   // What is actually committing (the confirm's forms, plus the forms a picked store creates).
   const [queue, setQueue] = useState<Row[]>([]);
-  const [step, setStep] = useState<{stores: number; of: number} | null>(null);
+  const [step, setStep] = useState<{at: number; of: number} | null>(null);
   const [phase, setPhase] = useState<'confirm' | 'committing' | 'done'>('confirm');
   const [results, setResults] = useState<Result[]>([]);
 
@@ -98,8 +106,9 @@ export function CommitAllDialog({
     setQueue([]);
     setStep(null);
     setIncludeFlagged(true);
+    setAside(new Set());
     const guess = Object.fromEntries(needsStore.flatMap((f) => {
-      const code = suggestStore(f.storeName, stores);
+      const code = f.periodStart ? suggestStore(f.storeName, stores) : null; // no date: it can't be filed anyway
       return code ? [[f.key, code]] : [];
     }));
     setSuggested(guess);
@@ -126,9 +135,10 @@ export function CommitAllDialog({
   const skipped = rows.filter((r) => r.draft || (r.verdict.state === 'blocked' && !noStore(r)));
   const going = includeFlagged ? [...ready, ...flagged] : ready;
   const goingRows = going.reduce((n, r) => n + r.rows, 0);
-  const picked = needsStore.filter((f) => picks[f.key]);
-  const total = going.length + picked.length;
-  const storeCount = new Set([...going.map((g) => g.storeCode), ...picked.map((f) => picks[f.key])]).size;
+  const picked = needsStore.filter((f) => picks[f.key] && !aside.has(f.key) && f.periodStart && f.periodEnd);
+  const asideForms = needsStore.filter((f) => aside.has(f.key));
+  const total = going.length + picked.length + strays.length;
+  const storeCount = new Set([...going.map((g) => g.storeCode), ...picked.map((f) => picks[f.key]), ...strays.map((f) => f.storeCode)]).size;
   const flaggedRows = flagged.reduce((n, r) => n + (r.verdict.state === 'flagged' ? r.verdict.rows : 0), 0);
   const done = results.length;
   const okCount = results.filter((r) => r.ok).length;
@@ -139,14 +149,23 @@ export function CommitAllDialog({
     const out: Result[] = [];
     const todo: Row[] = [...going];
     const shown: Row[] = [...going];
-    if (picked.length) {
-      // 1. Save the picked stores: each form's pages become a store form, as Confirm store does.
-      for (let i = 0; i < picked.length; i++) {
-        setStep({stores: i + 1, of: picked.length});
-        const f = picked[i];
-        const r = await assignFormStoreAction({company, uploadIds: f.uploadIds, storeCode: picks[f.key]}).catch(() => ({ok: false as const, error: 'Could not reach the server.'}));
+    if (asideForms.length) {
+      // Set aside what has no store to go under (nearly blank sheets), so it leaves the queue.
+      await setAsideAction({company, uploadIds: asideForms.flatMap((f) => f.uploadIds)}).catch(() => null);
+    }
+    // 1. File each form that will commit but isn't a store form yet: a picked store, or a
+    //    stray whose store and period were read. Each becomes a store form of its own.
+    const toFile = [...picked.map((f) => ({f, store: picks[f.key], picked: true})), ...strays.map((f) => ({f, store: f.storeCode ?? '', picked: false}))];
+    if (toFile.length) {
+      for (let i = 0; i < toFile.length; i++) {
+        setStep({at: i + 1, of: toFile.length});
+        const {f, store, picked: isPick} = toFile[i];
+        const r = await fileFormAction({company, uploadIds: f.uploadIds, storeCode: store, periodStart: f.periodStart ?? '', periodEnd: f.periodEnd ?? '', picked: isPick}).catch(() => ({
+          ok: false as const,
+          error: 'Could not reach the server.',
+        }));
         if (!r.ok) {
-          const row: Row = {batchId: `store:${f.key}`, storeCode: picks[f.key], periodStart: f.periodStart ?? '', periodEnd: f.periodEnd ?? '', pages: f.uploadIds.length, rows: 0, verdict: {state: 'blocked', reason: r.error}, label: storeNames[picks[f.key]] ?? `Store ${picks[f.key]}`, draft: false};
+          const row: Row = {batchId: `file:${f.key}`, storeCode: store, periodStart: f.periodStart ?? '', periodEnd: f.periodEnd ?? '', pages: f.uploadIds.length, rows: 0, verdict: {state: 'blocked', reason: r.error}, label: storeNames[store] ?? `Store ${store}`, draft: false};
           shown.push(row);
           out.push({batchId: row.batchId, ok: false, committed: 0, error: r.error});
         }
@@ -266,10 +285,33 @@ export function CommitAllDialog({
                       </Section>
                     )}
 
+                    {strays.length > 0 && (
+                      <Section title="Sorted into store forms on commit" count={strays.length} tone="good">
+                        <li className="mb-1 list-none text-xs text-muted-foreground">Their store was read but their pages never became a store form (often a lone page). Coop files each under its store first.</li>
+                        {strays.map((f) => (
+                          <li key={f.key} className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-x-2.5 rounded-xl px-2 py-2">
+                            <span className="mt-0.5 grid size-6 place-items-center rounded-full" style={{background: tint('good', 14), color: ink('good')}}>
+                              <Check className="size-3.5" />
+                            </span>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="flex min-w-0 items-baseline gap-2">
+                                <span className="truncate text-sm font-medium">{(f.storeCode && storeNames[f.storeCode]) || f.storeName}</span>
+                                <span className="shrink-0 font-mono text-xs text-muted-foreground">{f.storeCode}</span>
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {fmtTriagePeriod(f.periodStart, f.periodEnd)} · {f.uploadIds.length} {f.uploadIds.length === 1 ? 'page' : 'pages'}
+                                {f.flags.includes('year-reconciled') && ' · year corrected from the misread'}
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </Section>
+                    )}
+
                     {needsStore.length > 0 && (
                       <Section title="Needs a store" count={needsStore.length} tone="crit">
                         <li className="mb-1 list-none text-xs text-muted-foreground">
-                          Pick each form&apos;s store and it commits with the rest. Left empty, the form stays for later.
+                          Pick each form&apos;s store and it commits with the rest, or set a page aside when it has nothing to file (a nearly blank sheet). Left empty, the form stays for later.
                           {Object.keys(suggested).length > 0 && ' Suggestions come from the store name read off the form, so check them.'}
                         </li>
                         {needsStore.map((f) => (
@@ -280,15 +322,55 @@ export function CommitAllDialog({
                                 {f.storeCode && <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">read {f.storeCode}</span>}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {f.periodStart ? fmtTriagePeriod(f.periodStart, f.periodEnd) : 'No period'} · {f.uploadIds.length} {f.uploadIds.length === 1 ? 'page' : 'pages'}
+                                {f.periodStart ? fmtTriagePeriod(f.periodStart, f.periodEnd) : 'No date read either'} · {f.uploadIds.length} {f.uploadIds.length === 1 ? 'page' : 'pages'}
                               </span>
                             </span>
-                            <StoreSelect
-                              stores={stores}
-                              value={picks[f.key] ?? ''}
-                              suggested={suggested[f.key] === picks[f.key] && Boolean(picks[f.key])}
-                              onChange={(code) => setPicks((p) => ({...p, [f.key]: code}))}
-                            />
+                            <span className="flex shrink-0 items-center gap-1.5">
+                              {aside.has(f.key) ? (
+                                <span className="inline-flex h-9 items-center rounded-lg bg-muted px-3 text-sm text-muted-foreground sm:w-64">Set aside on commit</span>
+                              ) : f.periodStart ? (
+                                <StoreSelect
+                                  stores={stores}
+                                  value={picks[f.key] ?? ''}
+                                  suggested={suggested[f.key] === picks[f.key] && Boolean(picks[f.key])}
+                                  onChange={(code) => setPicks((p) => ({...p, [f.key]: code}))}
+                                />
+                              ) : null}
+                              <button
+                                type="button"
+                                aria-pressed={aside.has(f.key)}
+                                onClick={() =>
+                                  setAside((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(f.key)) next.delete(f.key);
+                                    else next.add(f.key);
+                                    return next;
+                                  })
+                                }
+                                className="h-9 shrink-0 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+                              >
+                                {aside.has(f.key) ? 'Undo' : 'Set aside'}
+                              </button>
+                            </span>
+                          </li>
+                        ))}
+                      </Section>
+                    )}
+
+                    {needsDate.length > 0 && (
+                      <Section title="Needs a date" count={needsDate.length} tone={null}>
+                        {needsDate.map((f) => (
+                          <li key={f.key} className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-x-2.5 rounded-xl px-2 py-2">
+                            <span className="mt-0.5 grid size-6 place-items-center rounded-full text-muted-foreground">
+                              <CircleSlash className="size-3.5" />
+                            </span>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="flex min-w-0 items-baseline gap-2">
+                                <span className="truncate text-sm font-medium">{(f.storeCode && storeNames[f.storeCode]) || f.storeName}</span>
+                                <span className="shrink-0 font-mono text-xs text-muted-foreground">{f.storeCode}</span>
+                              </span>
+                              <span className="text-xs text-muted-foreground">No date was read off it. Open it from the board to set the period.</span>
+                            </span>
                           </li>
                         ))}
                       </Section>
@@ -308,7 +390,7 @@ export function CommitAllDialog({
                       </Section>
                     )}
 
-                    {rows.length === 0 && needsStore.length === 0 && <p className="py-6 text-sm text-muted-foreground">No forms in this upload are waiting to be committed.</p>}
+                    {rows.length === 0 && needsStore.length === 0 && strays.length === 0 && <p className="py-6 text-sm text-muted-foreground">No forms in this upload are waiting to be committed.</p>}
                     {notListed > 0 && (
                       <p className="text-xs text-muted-foreground">
                         {notListed} more {notListed === 1 ? 'form isn’t' : 'forms aren’t'} listed: {notListed === 1 ? 'its' : 'their'} pages are mixed with another form. Open {notListed === 1 ? 'it' : 'those'} from the board.
@@ -320,7 +402,7 @@ export function CommitAllDialog({
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  {total > 0 ? `${total} ${total === 1 ? 'form' : 'forms'} across ${storeCount} ${storeCount === 1 ? 'store' : 'stores'}${picked.length ? '' : ` · ${goingRows.toLocaleString('en-US')} rows`}` : ''}
+                  {total > 0 ? `${total} ${total === 1 ? 'form' : 'forms'} across ${storeCount} ${storeCount === 1 ? 'store' : 'stores'}${picked.length || strays.length ? '' : ` · ${goingRows.toLocaleString('en-US')} rows`}` : ''}
                 </p>
                 <div className="flex gap-2">
                   <AlertDialog.Close render={<Button variant="ghost" />}>Cancel</AlertDialog.Close>
@@ -339,7 +421,7 @@ export function CommitAllDialog({
                 <div className="flex flex-col gap-0.5">
                   <AlertDialog.Title className="font-heading text-lg font-semibold tracking-tight">
                     {step
-                      ? `Saving stores · ${step.stores} of ${step.of}`
+                      ? `Sorting into store forms · ${step.at} of ${step.of}`
                       : phase === 'committing'
                         ? `Committing form ${Math.min(done + 1, Math.max(queue.length, 1))} of ${Math.max(queue.length, total)}`
                         : `Committed ${okCount} of ${queue.length} ${queue.length === 1 ? 'form' : 'forms'}`}

@@ -6,12 +6,28 @@
 // unit-tests. Used by the Uploads "Groups" view.
 
 import {scanPosition} from './upload-batch';
+import {snapStoreCode} from './goldline-segment';
+
+/** What a page still to review is missing before Commit all can file it (Nov 25):
+ *  'store' when no registry store can be read off it, 'date' when the store is known but no
+ *  period was read. Null when nothing is missing: it sits in a store form already, or Commit
+ *  all can file it (a misread year is corrected the way the board corrects it). */
+export type PageNeed = 'store' | 'date';
+export function pageNeed(
+  p: {status: string; batchHasStore: boolean; readStore: string | null | undefined; readStart: string | null | undefined},
+  knownStores: Iterable<string>,
+): PageNeed | null {
+  if (p.status !== 'needs_review' || p.batchHasStore) return null;
+  const snap = snapStoreCode(p.readStore ?? null, knownStores);
+  if (snap.status !== 'exact' && snap.status !== 'corrected') return 'store';
+  return p.readStart ? null : 'date';
+}
 
 export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null;
   /** The upload this page's batch was split from (see src/upload-drops.ts); its own batch when never split. */
   drop_id?: string | null;
-  /** Waiting for review in a batch with no store yet: nobody can commit it until a store is picked. */
-  needs_store?: boolean};
+  /** What this page still to review is missing before it can be committed (see pageNeed). */
+  needs?: PageNeed | null};
 
 export type UploadGroup = {
   key: string;
@@ -36,8 +52,9 @@ export type UploadGroup = {
    *  per page at its furthest-along outcome, so this sums to `pages`. A page re-fed after a
    *  failed read and then committed counts as committed, not as both an issue and a commit. */
   byStatus: Record<string, number>;
-  /** Pages still to review that have no store yet (of `byStatus.needs_review`). */
+  /** Pages still to review that need a person: no store to file them under, or no date. */
   needsStore: number;
+  needsDate: number;
   /** True when this group is a split multi-page scan (not a lone file). */
   isSplit: boolean;
   /** The upload batch this tile is one drop of, when the drop was batched (a multi-file
@@ -118,7 +135,7 @@ export function pagesByStatus(items: Array<Pick<GroupableUpload, 'filename' | 's
  * `pages` and a page that failed then read on a retry counts once, under its good status.
  */
 export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGroup[] {
-  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus' | 'needsStore'> & {_files: number; _pageStatus: Map<string, string>; _noStore: Set<string>};
+  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus' | 'needsStore' | 'needsDate'> & {_files: number; _pageStatus: Map<string, string>; _need: Map<string, PageNeed>};
   const map = new Map<string, Acc>();
   for (const u of uploads) {
     const key = uploadGroupKey(u);
@@ -137,7 +154,7 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
         duplicateOf: null,
         _files: 0,
         _pageStatus: new Map<string, string>(),
-        _noStore: new Set<string>(),
+        _need: new Map<string, PageNeed>(),
       };
       map.set(key, g);
     }
@@ -146,17 +163,19 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
     const id = pageIdentity(u.filename);
     const prev = g._pageStatus.get(id);
     g._pageStatus.set(id, prev === undefined ? u.status : betterStatus(prev, u.status));
-    if (u.status === 'needs_review' && u.needs_store) g._noStore.add(id);
+    if (u.status === 'needs_review' && u.needs) g._need.set(id, u.needs);
     if (at && at < g.firstAt) g.firstAt = at;
     if (at && at > g.lastAt) g.lastAt = at;
     if (scanPosition(u.filename)) g.isSplit = true;
   }
-  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, _noStore, ...g}) => {
+  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, _need, ...g}) => {
     const byStatus: Record<string, number> = {};
     for (const s of _pageStatus.values()) byStatus[s] = (byStatus[s] ?? 0) + 1;
     // Only pages that are still to review at their best status (a re-upload committed elsewhere doesn't count).
-    const needsStore = [..._noStore].filter((id) => _pageStatus.get(id) === 'needs_review').length;
-    return {...g, files: _files, pages: _pageStatus.size, byStatus, needsStore};
+    const left = [..._need].filter(([id]) => _pageStatus.get(id) === 'needs_review');
+    const needsStore = left.filter(([, n]) => n === 'store').length;
+    const needsDate = left.filter(([, n]) => n === 'date').length;
+    return {...g, files: _files, pages: _pageStatus.size, byStatus, needsStore, needsDate};
   });
   // Mark re-uploads: among groups that share a source (the same scan uploaded more than once),
   // the earliest drop by firstAt is canonical; the rest point at it as duplicates, so a
