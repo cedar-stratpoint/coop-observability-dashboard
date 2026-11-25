@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Per store board: one store picker at a time; confirmations stay on screen
+
+QA (Nov 25): opening "Confirm store" on a second card left the first card's picker open too, so two search boxes showed at once. The board now keeps one open picker; opening another closes the first. Also, the store-confirm confirmation landed at the very bottom of a long scan board instead of on screen: an animated (transformed) page wrapper turns `position: fixed` into "bottom of the page". `ToastStack` now renders into `<body>` through a portal, so it stays at the bottom right of the visible screen however far down the reviewer is. The Uploads page had its own copy of the same stack and now uses the shared one, so its confirmations get the same fix.
+
 ## 2026-11-25 — Event lead contacts: "Collected" is a From–To range
 
 Owner: the Collected filter picked one day only. It is now **Collected from … to …** (PH days, inclusive), with the same day list (only days that have leads); "First day" / "Last day" leave a side open, and the "to" list only offers days on or after "from". Pure `inDayRange` in `src/spin-leads-types.ts`, tested in `test/spin-leads-search.test.ts`.

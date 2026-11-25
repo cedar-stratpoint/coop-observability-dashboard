@@ -1,10 +1,13 @@
 'use client';
 
 import {useCallback, useEffect, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {CheckCircle2, X, XCircle} from 'lucide-react';
 
 // Short confirmations, the same look as the Uploads page's: bottom right on desktop, bottom
 // centre above the phone tab bar, auto-dismissed, announced politely to screen readers.
+// Portalled to <body>: an animated (transformed) page wrapper turns `fixed` into "bottom of
+// the page", so on a long scan board the toast landed far below the screen (QA, Nov 25).
 
 export type ToastItem = {id: number; kind: 'ok' | 'error'; text: string; action?: {label: string; onClick: () => void}};
 
@@ -24,7 +27,10 @@ export function useToasts(ms = 6000) {
 }
 
 export function ToastStack({toasts, dismiss}: {toasts: ToastItem[]; dismiss: (id: number) => void}) {
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
     <div
       aria-live="polite"
       className="pointer-events-none fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] z-50 flex flex-col items-center gap-2 md:inset-x-auto md:right-6 md:bottom-6 md:items-end"
@@ -63,6 +69,7 @@ export function ToastStack({toasts, dismiss}: {toasts: ToastItem[]; dismiss: (id
           </button>
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
