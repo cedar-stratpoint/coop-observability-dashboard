@@ -13,7 +13,7 @@ import {AlertTriangle, CalendarClock, ChartColumn, Check, ChevronDown, ChevronRi
 import type {RestockRunData, RunLine} from '@/src/goldline-restock-data';
 import type {Decision} from '@/src/goldline-restock';
 import {restockItemHref} from '@/src/goldline-restock-item';
-import {Metric} from '@/components/analyst/metric';
+import {metricValueClass} from '@/components/analyst/metric';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {Pagination} from '@/components/analyst/pagination';
 import {NativeSelect} from '@/components/ui/native-select';
@@ -24,7 +24,7 @@ import {Modal} from '@/components/analyst/goldline-supply-dialogs';
 import {HOLD_LABEL, monthLabel, num, span} from '@/components/analyst/goldline-restock-inputs';
 import {decideRecommendationsAction, makePurchaseOrdersAction, makeRestockRunAction} from '@/app/stock/actions';
 import {cn} from '@/lib/utils';
-import {GL_SCROLL_ROW_MOBILE, GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {GL_SCROLL_ROW_MOBILE, titleName} from '@/src/goldline-ui';
 
 export type RestockRunViewData = RestockRunData & {
   company: string | null;
@@ -140,145 +140,146 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
     return next;
   };
 
+  const madeBy = run?.updatedBy ? run.updatedBy.split('@')[0] : null;
+  const notInRun = skipped
+    ? [
+        skipped.no_count.stores > 0 && `${num(skipped.no_count.stores)} waiting on a form`,
+        skipped.out_of_scope.stores > 0 && `${num(skipped.out_of_scope.stores)} paused`,
+      ].filter(Boolean).join(' · ')
+    : '';
+  const notInRunTitle = skipped
+    ? `Not in this run: ${num(skipped.no_count.stores)} ${skipped.no_count.stores === 1 ? 'store' : 'stores'} with no counted form yet (${num(skipped.no_count.lines)} lines), ${num(skipped.out_of_scope.stores)} paused (${num(skipped.out_of_scope.lines)} lines).`
+    : undefined;
+
   return (
-    <div className="mx-auto flex max-w-7xl min-w-0 flex-col gap-6 px-4 py-6 *:min-w-0">
-      <header className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-baseline gap-3">
-              <h1 className="font-heading text-2xl font-semibold tracking-tight">Restock</h1>
-              <Link href="/stock" className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-                Inventory
-              </Link>
-            </div>
-            {data.nav}
-            <p className="max-w-[70ch] text-sm text-muted-foreground text-pretty">
-              {run ? (
-                <>
-                  The run for the {half(run.cycle)} covers <span className="font-medium text-foreground">{span(run.months)}</span>, from last year&apos;s {span(run.lastYear)}. Made{' '}
-                  {stamp(run.updatedAt)}
-                  {run.updatedBy ? ` by ${run.updatedBy}` : ''}, for {fmtDay(run.runDate)}.
-                </>
-              ) : (
-                <>No run for the {half(data.cycle)} yet. Making one works out what each store needs for the coming months and saves it for approval.</>
-              )}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {run && (
-                <NativeSelect aria-label="Store" value={store ?? ''} onChange={(e) => go({store: e.target.value || null})}>
-                  <option value="">All stores ({data.stores.length})</option>
-                  {data.stores.map((s) => (
-                    <option key={s.storeCode} value={s.storeCode}>
-                      {s.name ? `${s.storeCode} · ${s.name}` : `Store ${s.storeCode}`}
-                    </option>
-                  ))}
-                </NativeSelect>
-              )}
-              <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CalendarClock className="size-3.5" aria-hidden />
-                Run date
-                <input
-                  id="restock-run-date"
-                  type="date"
-                  value={data.runDate}
-                  onChange={(e) => e.target.value && go({asOf: e.target.value})}
-                  className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground tabular-nums outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-                />
-              </label>
-              {data.preview && (
-                <button type="button" onClick={() => go({asOf: null})} className="text-xs font-medium underline-offset-4 hover:underline">
-                  Back to today
-                </button>
-              )}
-            </div>
+    <div className={PAGE}>
+      <header className="flex flex-col gap-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-baseline gap-3">
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">Restock</h1>
+            <Link href="/stock" className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Inventory
+            </Link>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-          {run && data.canDecide && data.toOrder.lines > 0 && (
-            <Button size="sm" onClick={makeOrders} disabled={pending} title="Puts approved lines on each store's purchase order and ships them from the warehouse.">
-              <ClipboardList className="size-4" /> Make purchase orders ({num(data.toOrder.lines)} {data.toOrder.lines === 1 ? 'line' : 'lines'}, {num(data.toOrder.stores)}{' '}
-              {data.toOrder.stores === 1 ? 'store' : 'stores'})
+            {run && data.canDecide && data.toOrder.lines > 0 && (
+              <Button onClick={makeOrders} disabled={pending} title="Puts approved lines on each store's purchase order and ships them from the warehouse.">
+                <ClipboardList className="size-4" /> Make purchase orders
+                <span className="text-primary-foreground/75 tabular-nums">
+                  {num(data.toOrder.lines)} {data.toOrder.lines === 1 ? 'line' : 'lines'} · {num(data.toOrder.stores)} {data.toOrder.stores === 1 ? 'store' : 'stores'}
+                </span>
+              </Button>
+            )}
+            <Button
+              variant={run ? 'outline' : 'default'}
+              onClick={makeRun}
+              disabled={pending || !data.canMakeRun || !data.configured}
+              title={data.canMakeRun ? 'Works out every line again. Decided lines keep their numbers.' : 'Company-wide admins make the run'}
+            >
+              {pending ? <Loader2 className="size-4 animate-spin" /> : <PackageCheck className="size-4" />} {run ? 'Make run again' : 'Make run'}
             </Button>
-          )}
-          <Button
-            variant={run ? 'outline' : 'default'}
-            size="sm"
-            onClick={makeRun}
-            disabled={pending || !data.canMakeRun || !data.configured}
-            title={data.canMakeRun ? 'Works out every line again. Decided lines keep their numbers.' : 'Company-wide admins make the run'}
-          >
-            {pending ? <Loader2 className="size-4 animate-spin" /> : <PackageCheck className="size-4" />} {run ? 'Make run again' : 'Make run'}
-          </Button>
           </div>
         </div>
-        <div className="h-0.5 w-24 rounded-full bg-gradient-to-r from-primary to-transparent" aria-hidden />
+        {data.nav}
+        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+          <div className="flex min-w-0 flex-col gap-1.5 text-sm">
+            {run ? (
+              <>
+                <p className="text-pretty">
+                  <span className="font-medium">Covers {span(run.months)}</span>
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · {cap(half(run.cycle))} run, from last year&apos;s {span(run.lastYear)}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Made {stamp(run.updatedAt)}
+                  {madeBy && (
+                    <>
+                      {' '}
+                      by <span title={run.updatedBy ?? undefined}>{madeBy}</span>
+                    </>
+                  )}
+                  , for {fmtDay(run.runDate)}
+                </p>
+              </>
+            ) : (
+              <p className="max-w-[60ch] text-muted-foreground text-pretty">No run for the {half(data.cycle)} yet.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {run && (
+              <NativeSelect aria-label="Store" value={store ?? ''} onChange={(e) => go({store: e.target.value || null})}>
+                <option value="">All stores ({data.stores.length})</option>
+                {data.stores.map((s) => (
+                  <option key={s.storeCode} value={s.storeCode}>
+                    {s.name ? `${s.storeCode} · ${titleName(s.name)}` : `Store ${s.storeCode}`}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+              <CalendarClock className="size-3.5" aria-hidden />
+              Run date
+              <input
+                id="restock-run-date"
+                type="date"
+                value={data.runDate}
+                onChange={(e) => e.target.value && go({asOf: e.target.value})}
+                className="h-8 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground tabular-nums outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+              />
+            </label>
+            {data.preview && (
+              <button type="button" onClick={() => go({asOf: null})} className="text-xs font-medium underline-offset-4 hover:underline">
+                Back to today
+              </button>
+            )}
+          </div>
+        </div>
       </header>
 
       {(error || notice) && (
-        <p role={error ? 'alert' : 'status'} className={cn('text-sm', error ? 'text-destructive' : 'text-muted-foreground')}>
+        <p role={error ? 'alert' : 'status'} className={cn('-mt-2 text-sm', error ? 'text-destructive' : 'text-muted-foreground')}>
           {error ?? notice}
         </p>
       )}
 
       {!data.configured ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-            <Info className="size-6 text-muted-foreground" aria-hidden />
-            <h2 className="font-heading text-base font-semibold">Sales data isn&apos;t connected</h2>
-            <p className="max-w-md text-sm text-muted-foreground">The restock reads the Nichido database, which isn&apos;t set up in this environment.</p>
-          </CardContent>
-        </Card>
+        <EmptyCard icon={Info} title="Sales data isn't connected">
+          The restock reads the Nichido database, which isn&apos;t set up in this environment.
+        </EmptyCard>
       ) : !run ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-            <PackageCheck className="size-6 text-muted-foreground" aria-hidden />
-            <h2 className="font-heading text-base font-semibold">Make the run after each form</h2>
-            <p className="max-w-md text-sm text-muted-foreground text-pretty">
-              Coop checks whether each store is good for the window plus safety stock, and suggests what to send when it isn&apos;t. Lines that need a check first are listed on the Inputs tab.
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyCard icon={PackageCheck} title="Make the run after each form">
+          Coop checks whether each store has enough for the coming months plus safety stock, and suggests what to send. Lines that need a check first are on the Inputs tab.
+        </EmptyCard>
       ) : (
         <>
-          {data.warehouseSample && <Banner>Warehouse stock is still sample data, so the cap on what Coop suggests isn&apos;t real yet. Enter real counts on the Inventory board.</Banner>}
-          {skipped && (skipped.no_count.stores > 0 || skipped.out_of_scope.stores > 0) && (
-            <p className="-mt-2 text-xs text-muted-foreground">
-              Not in this run:{' '}
-              {skipped.no_count.stores > 0 && (
-                <>
-                  {num(skipped.no_count.stores)} {skipped.no_count.stores === 1 ? 'store' : 'stores'} with no counted form yet ({num(skipped.no_count.lines)} lines)
-                </>
-              )}
-              {skipped.no_count.stores > 0 && skipped.out_of_scope.stores > 0 && ', '}
-              {skipped.out_of_scope.stores > 0 && (
-                <>
-                  {num(skipped.out_of_scope.stores)} paused {skipped.out_of_scope.stores === 1 ? 'store' : 'stores'} ({num(skipped.out_of_scope.lines)} lines)
-                </>
-              )}
-              .
-            </p>
-          )}
-
-          <section aria-label="Summary" className={cn('grid grid-cols-2 gap-4 lg:grid-cols-4', GL_TILES_MOBILE)}>
-            <Metric label="To decide" value={num(data.toDecide)} sub="lines with something to send" valueClassName={data.toDecide ? 'text-[var(--status-warn)]' : undefined} />
-            <Metric label="Units to send" value={num(sendUnits)} sub="suggested or decided, every store" />
-            <Metric
-              label="Hit rate"
-              value={pct(data.score)}
-              sub={
-                <>
-                  approved as is, this run ·{' '}
-                  <Link href="/stock/restock?tab=hits" className="underline underline-offset-4 hover:text-foreground">
-                    Hit or miss
-                  </Link>
-                </>
-              }
-            />
-            <Metric label="Stores" value={num(data.stores.length)} sub="with a counted form, restock on" />
-          </section>
+          {data.warehouseSample && <Banner>Warehouse stock is still sample data, so the cap on suggestions isn&apos;t real yet. Enter real counts on the Inventory board.</Banner>}
 
           <Card className="py-0">
-            <CardContent className="flex flex-col gap-3 px-0 pt-4 pb-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-4">
+            <dl className="grid grid-cols-2 lg:grid-cols-4">
+              <Stat i={0} label="To decide" value={num(data.toDecide)} sub="lines to review" valueClassName={data.toDecide ? 'text-[var(--status-warn)]' : undefined} />
+              <Stat i={1} label="Units to send" value={num(sendUnits)} sub="across every store" />
+              <Stat
+                i={2}
+                label="Hit rate"
+                value={pct(data.score)}
+                sub={
+                  <>
+                    approved as is ·{' '}
+                    <Link href="/stock/restock?tab=hits" className="underline underline-offset-4 hover:text-foreground">
+                      Hit or miss
+                    </Link>
+                  </>
+                }
+              />
+              <Stat i={3} label="Stores" value={num(data.stores.length)} sub={notInRun ? <span title={notInRunTitle}>{notInRun}</span> : 'with a counted form'} />
+            </dl>
+          </Card>
+
+          <Card className="py-0">
+            <CardContent className="flex flex-col gap-0 px-0 pt-0 pb-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-4">
                 <div className={GL_SCROLL_ROW_MOBILE}>
                   <SegmentedControl<Filter>
                     ariaLabel="Filter lines"
@@ -301,22 +302,22 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                   />
                 </div>
                 {data.canDecide && (
-                  <Button size="sm" onClick={() => decide([...selected], 'approved')} disabled={pending || !selected.size}>
+                  <Button onClick={() => decide([...selected], 'approved')} disabled={pending || !selected.size}>
                     <Check className="size-4" /> Approve {selected.size ? `${num(selected.size)} selected` : 'selected'}
                   </Button>
                 )}
               </div>
 
               {rows.length === 0 ? (
-                <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                <p className="px-6 pt-8 pb-14 text-center text-sm text-muted-foreground">
                   {filter === 'to_decide' && counts.decided ? 'Every line is decided.' : data.lines.length ? 'Nothing matches this filter.' : 'Every store in this run is covered.'}
                 </p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
                     <thead>
-                      <tr className="border-y border-border bg-muted/40 text-left text-[11px] tracking-wide whitespace-nowrap text-muted-foreground uppercase">
-                        <th className={cn(TH, 'w-8 pl-4')}>
+                      <tr className={THEAD}>
+                        <th className={cn(TH, 'w-10 pl-6')}>
                           {data.canDecide && selectable.length > 0 && (
                             <input
                               type="checkbox"
@@ -337,12 +338,12 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                           )}
                         </th>
                         {!store && <th className={TH}>Store</th>}
-                        <th className={TH}>Product</th>
+                        <th className={cn(TH, 'min-w-[16rem]')}>Product</th>
                         <th className={cn(TH, 'text-right')}>Last year {run.lastYear.map((m) => monthLabel(m, {month: 'short'})).join(' · ')}</th>
                         <th className={cn(TH, 'text-right')}>On hand</th>
                         <th className={cn(TH, 'text-right')}>Safety</th>
                         <th className={cn(TH, 'text-right')}>Send</th>
-                        <th className={cn(TH, 'pr-4')}>Decision</th>
+                        <th className={cn(TH, 'pr-6')}>Decision</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -351,8 +352,8 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                         const canPick = data.canDecide && l.state === 'send' && l.decision === 'pending';
                         return (
                           <Fragment key={l.id}>
-                            <tr className={cn('border-b border-border/60 transition-colors duration-150 hover:bg-muted/40', selected.has(l.id) && 'bg-muted/50')}>
-                              <td className={cn(TD, 'pl-4')}>
+                            <tr className={cn('border-b border-border/50 transition-colors duration-150 hover:bg-muted/35', selected.has(l.id) && 'bg-primary/[0.06] hover:bg-primary/[0.09]')}>
+                              <td className={cn(TD, 'pl-6')}>
                                 {canPick && (
                                   <input
                                     type="checkbox"
@@ -366,7 +367,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                               {!store && (
                                 <td className={TD}>
                                   <button type="button" onClick={() => go({store: l.storeCode})} className="text-left underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none">
-                                    {l.storeName ?? `Store ${l.storeCode}`}
+                                    {l.storeName ? titleName(l.storeName) : `Store ${l.storeCode}`}
                                   </button>
                                 </td>
                               )}
@@ -379,7 +380,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                 >
                                   {isOpen ? <ChevronDown className="mt-0.5 size-3.5 shrink-0" aria-hidden /> : <ChevronRight className="mt-0.5 size-3.5 shrink-0" aria-hidden />}
                                   <span>
-                                    <span className="font-medium">{l.name}</span> <span className="font-mono text-xs text-muted-foreground">{l.itemCode}</span>
+                                    <span className="font-medium">{l.name}</span> <span className="ml-1 font-mono text-[11px] tracking-wide text-muted-foreground">{l.itemCode}</span>
                                   </span>
                                 </button>
                                 <Link
@@ -410,14 +411,14 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                   <span className={cn(l.state === 'send' && 'font-semibold')}>{num(l.suggested ?? 0)}</span>
                                 )}
                               </td>
-                              <td className={cn(TD, 'pr-4')}>
+                              <td className={cn(TD, 'pr-6')}>
                                 <DecisionCell line={l} canDecide={data.canDecide} pending={pending} onApprove={() => decide([l.id], 'approved')} onUndo={() => decide([l.id], 'pending')} onDialog={(kind) => setDialog({line: l, kind})} />
                               </td>
                             </tr>
                             {isOpen && (
-                              <tr className="border-b border-border/60 bg-muted/30">
+                              <tr className="border-b border-border/50 bg-muted/25">
                                 <td />
-                                <td colSpan={store ? 6 : 7} className="py-2.5 pr-4 text-xs text-muted-foreground">
+                                <td colSpan={store ? 6 : 7} className="py-3.5 pr-6 text-xs leading-relaxed text-muted-foreground">
                                   <Working line={l} months={run.months} lastYear={run.lastYear} />
                                 </td>
                               </tr>
@@ -429,7 +430,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                   </table>
                 </div>
               )}
-              {pageCount > 1 && <Pagination page={at} pageCount={pageCount} onPage={setPage} className="px-4" />}
+              {pageCount > 1 && <Pagination page={at} pageCount={pageCount} onPage={setPage} className="px-6 py-4" />}
             </CardContent>
           </Card>
 
@@ -451,12 +452,48 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
   );
 }
 
-const TH = 'py-2 pr-3 font-medium';
-const TD = 'py-2.5 pr-3 align-top';
+const PAGE = 'mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-8 px-4 py-8 sm:px-6 lg:px-10 lg:py-10 *:min-w-0';
+const THEAD = 'border-b border-border/70 text-left text-[11px] tracking-wide whitespace-nowrap text-muted-foreground uppercase';
+const TH = 'py-3 pr-4 font-medium';
+const TD = 'py-3.5 pr-4 align-middle';
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** One cell of the summary strip. Hairlines between cells, not a card per number. */
+function Stat({i, label, value, sub, valueClassName}: {i: number; label: string; value: string; sub: React.ReactNode; valueClassName?: string}) {
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-2 border-border/60 px-6 py-5',
+        i % 2 === 0 && 'border-r',
+        i < 2 && 'border-b lg:border-b-0',
+        i === 1 && 'lg:border-r',
+        i === 3 && 'lg:border-r-0',
+      )}
+    >
+      <dt className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{label}</dt>
+      <dd className={cn(metricValueClass, 'text-3xl', valueClassName)}>{value}</dd>
+      <dd className="text-xs text-muted-foreground">{sub}</dd>
+    </div>
+  );
+}
+
+function EmptyCard({icon: Icon, title, children}: {icon: React.ComponentType<{className?: string}>; title: string; children: React.ReactNode}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-4 px-6 py-16 text-center">
+        <span className="flex size-12 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/5">
+          <Icon className="size-5 text-muted-foreground" aria-hidden />
+        </span>
+        <h2 className="font-heading text-xl font-semibold tracking-tight">{title}</h2>
+        <p className="max-w-md text-sm text-muted-foreground text-pretty">{children}</p>
+      </CardContent>
+    </Card>
+  );
+}
 
 function Banner({children}: {children: React.ReactNode}) {
   return (
-    <div role="status" className="flex items-start gap-2.5 rounded-lg border border-[color-mix(in_oklab,var(--status-warn)_35%,transparent)] bg-[color-mix(in_oklab,var(--status-warn)_9%,transparent)] px-3.5 py-3 text-sm">
+    <div role="status" className="flex items-start gap-3 rounded-xl border border-[color-mix(in_oklab,var(--status-warn)_28%,transparent)] bg-[color-mix(in_oklab,var(--status-warn)_7%,transparent)] px-4 py-3 text-sm text-[color-mix(in_oklab,var(--status-warn)_30%,var(--foreground))]">
       <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--status-warn)]" aria-hidden />
       <p>{children}</p>
     </div>
@@ -536,14 +573,14 @@ function DecisionCell({
       )}
       {canDecide ? (
         <>
-          <Button size="xs" variant="outline" onClick={onApprove} disabled={pending}>
+          <Button size="sm" variant="outline" onClick={onApprove} disabled={pending}>
             <Check className="size-3.5" /> Approve
           </Button>
-          <Button size="xs" variant="ghost" onClick={() => onDialog('edited')} disabled={pending}>
-            <Pencil className="size-3.5" /> Edit
+          <Button size="icon-sm" variant="ghost" onClick={() => onDialog('edited')} disabled={pending} aria-label={`Edit the number for ${l.name}`} title="Edit the number" className="text-muted-foreground">
+            <Pencil className="size-3.5" />
           </Button>
-          <Button size="xs" variant="ghost" onClick={() => onDialog('rejected')} disabled={pending}>
-            <X className="size-3.5" /> Reject
+          <Button size="icon-sm" variant="ghost" onClick={() => onDialog('rejected')} disabled={pending} aria-label={`Reject ${l.name}`} title="Reject" className="text-muted-foreground hover:text-[var(--status-crit)]">
+            <X className="size-3.5" />
           </Button>
         </>
       ) : (
@@ -575,31 +612,31 @@ function Working({line: l, months, lastYear}: {line: RunLine; months: string[]; 
 
 function ScoreTable({rows, onPick}: {rows: RestockRunData['stores']; onPick: (code: string) => void}) {
   return (
-    <section aria-label="Score by store" className="flex flex-col gap-2">
-      <h2 className="font-heading text-base font-semibold">By store</h2>
+    <section aria-label="Score by store" className="flex flex-col gap-4 pt-2">
+      <h2 className="font-heading text-lg font-semibold">By store</h2>
       <Card className="py-0">
         <CardContent className="px-0 py-0">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/40 text-left text-[11px] tracking-wide whitespace-nowrap text-muted-foreground uppercase">
-                  <th className={cn(TH, 'pl-4')}>Store</th>
+                <tr className={THEAD}>
+                  <th className={cn(TH, 'pl-6')}>Store</th>
                   <th className={cn(TH, 'text-right')}>To send</th>
                   <th className={cn(TH, 'text-right')}>Covered</th>
                   <th className={cn(TH, 'text-right')}>Check data first</th>
                   <th className={cn(TH, 'text-right')}>To decide</th>
                   <th className={cn(TH, 'text-right')}>Units</th>
-                  <th className={cn(TH, 'pr-4 text-right')} title="Approved as is ÷ decided">
+                  <th className={cn(TH, 'pr-6 text-right')} title="Approved as is ÷ decided">
                     Approved as is
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.storeCode} className="border-b border-border/60 transition-colors duration-150 last:border-b-0 hover:bg-muted/40">
-                    <td className={cn(TD, 'pl-4')}>
+                  <tr key={r.storeCode} className="border-b border-border/50 transition-colors duration-150 last:border-b-0 hover:bg-muted/35">
+                    <td className={cn(TD, 'pl-6')}>
                       <button type="button" onClick={() => onPick(r.storeCode)} className="text-left underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none">
-                        <span className="font-medium">{r.name ?? `Store ${r.storeCode}`}</span> <span className="font-mono text-xs text-muted-foreground">{r.storeCode}</span>
+                        <span className="font-medium">{r.name ? titleName(r.name) : `Store ${r.storeCode}`}</span> <span className="ml-1 font-mono text-[11px] text-muted-foreground">{r.storeCode}</span>
                       </button>
                     </td>
                     <td className={cn(TD, 'text-right tabular-nums')}>{num(r.send)}</td>
@@ -607,7 +644,7 @@ function ScoreTable({rows, onPick}: {rows: RestockRunData['stores']; onPick: (co
                     <td className={cn(TD, 'text-right tabular-nums', r.held && 'text-[var(--status-warn)]')}>{num(r.held)}</td>
                     <td className={cn(TD, 'text-right tabular-nums')}>{num(r.pending)}</td>
                     <td className={cn(TD, 'text-right tabular-nums')}>{num(r.sendUnits)}</td>
-                    <td className={cn(TD, 'pr-4 text-right tabular-nums')}>{r.score == null ? <span className="text-muted-foreground">·</span> : `${Math.round(r.score * 100)}%`}</td>
+                    <td className={cn(TD, 'pr-6 text-right tabular-nums')}>{r.score == null ? <span className="text-muted-foreground">·</span> : `${Math.round(r.score * 100)}%`}</td>
                   </tr>
                 ))}
               </tbody>
