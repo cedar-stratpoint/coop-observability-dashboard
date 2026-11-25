@@ -10,6 +10,52 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — v1.26.5 Nichido: #711, #713, #714, #726, #728, #736 from staging
+
+Nichido-only release cut from `main` (v1.26.4) by cherry-picking the six Nichido PRs merged to staging since v1.25.2; every touched file is identical to staging. Left out on purpose: the Ask Coop / CRM commits (not Nichido) and `supabase/product_channel_alias.sql` (Coop archive, not Nichido). Database: `supabase/nichido/batch_parent.sql` (adds `upload_batches.parent_batch_id` + partial index, additive) applied to Nichido PROD before this deploy; prod had no store-split batches yet, so no backfill was needed. All other Nichido functions and columns already match staging (the only drift is s2's pending plain `sales` columns on prod).
+
+## 2026-11-25 — Uploads: one tile per upload, even after its forms are sorted
+
+Picking a store sorts an upload into one batch per store form, and the Uploads page showed one tile per batch, so the 98-page "Nov 24 Test Run" became 10 tiles with the same name, each badged Duplicate. A batch split off now records the upload it came from (`upload_batches.parent_batch_id`, migration `supabase/nichido/batch_parent.sql`, applied to Nichido Staging; the 9 existing split groups linked to their upload). The Uploads page groups by the original upload, and its scan page, Per store view, delete and delete preview cover every group split off it. Checked on staging data: one tile, 98 pages (70 to review, 28 issues).
+
+## 2026-11-25 · Restock run: decisions on the right edge, roomier numbers
+
+Review: the run table had empty space right of the Approve / Edit / Reject buttons while the data columns felt cramped. The Decision column now hugs its content and sits flush right (actions right-aligned), and the spare width goes to the product name and the gaps between the number columns. The "Warehouse short" chip on lines still to decide moved out of the Decision cell: a warning icon now sits before the Send number it explains (tooltip: Coop's number before the cap), so every row has the same compact actions. Covered lines keep a single chip ("Covered" or "Warehouse short"), with the detail in its tooltip. "Check data first" reasons still wrap, capped at 18rem. Checked at 1440px (longest product names fit except the very longest) and 390px.
+
+## 2026-11-25 — Picking a store no longer fails on an impossible period date
+
+Picking a store on the per-store board failed with "upload_batches update failed: date/time field value out of range: 2026-09-31". Picking a store re-sorts every form in the upload and saves each one's period; a BA who wrote "Sept 16 to 31" gives an end of September 31, which the database refuses, so the whole step stopped (39 pages under review on staging carry such an end date). Batch periods are now stored safely (`storableDate`): an end day past the month's last becomes the last day (Sept 31 -> Sept 30), anything else unusable is left blank for the reviewer.
+
+## 2026-11-25 · Overview (Nichido): every card opens its detail
+
+Owner asked for the Overview's components to be clickable and lead to the right page, with hover behavior. Destinations:
+
+- **Net sales, Units sold, Gross sales** open **Stores** ranked by that figure (`/stores?sort=net|units|gross`; Stores now accepts `?sort=`). Each tile shows a muted "By store ›" cue at rest so touch users can tell it opens.
+- **Units sold, last 12 months** opens Stores ranked by units ("Units by store ›").
+- **Stores live** pill opens Stores.
+- **Top categories:** each line opens the **Inventory** board filtered to that product line (`/stock?line=`). Uncategorized and the "N SKUs aren't mapped" note ("Link SKUs") open **SKU linking**, where the fix is.
+
+Hover (`GL_CARD_LINK` / `GL_CARD_CUE` in `src/goldline-ui.ts`): kept small because it's seen many times a day. The border warms to the accent, the card tints 4% and lifts 2px with a soft shadow, and the cue turns accent with its chevron sliding 2px; press scales to 0.99. 200ms on a strong ease-out (100ms on press). Category rows tint, brighten their bar and slide their chevron. Reduced motion keeps the color changes and drops the lift, slide and scale; Tailwind v4 only applies hover on devices that can hover. Checked in dark at 1440px and 390px, and that each destination lands filtered or sorted.
+
+## 2026-11-25 — Reconcile: the notebook grid, what's missing, and a notice for a month without sales
+
+Built from the mock the owner picked (`MobilePOS/Reconcile_Grid_Mock.html`). On By store and By product:
+- **The eight recommendations sit in Justin's notebook layout:** a 2 × 4 grid, rows On the PO / Not on the PO, columns Sold + counted · Sold, not counted · Counted, no sale · Neither. Each box shows its count, recommendation and who acts; boxes that need a step are tinted, empty ones fade but stay clickable, hover or focus explains a box. It replaces the tiles and chips and is the page's only filter.
+- **W I P letters** (green yes, struck grey no, dashed not known) label the columns, so no legend line is needed; the legend and the YYX tip moved into a "How to read this" (?) popover.
+- **"Can't tell yet" is broken down by what's missing** ("Blank on the form 12 · Open the scan", "Page not uploaded 6 · Upload the page", "No Watsons SKU linked · Link SKUs"). A reason filters the lines (`why=` in the URL and the CSV); on By product it opens those lines across All stores. Counts come from the summary over every line, so All stores' paging doesn't change them.
+- **A month without Watsons sales** shows "Nothing to recommend for Oct 2026 yet" with Upload POS sales and the nearest month that can be judged, instead of a grid of zeros.
+
+## 2026-11-25 · Orders and Restock: shorter copy, more room to breathe
+
+Review: Orders opened with a four-line paragraph, the Restock run with a long sentence, and both felt cramped and dated. Goal: say less, space it out, lower eye strain (aesthetic-usability). Decisions:
+
+- **Orders.** One-line lede ("Purchase orders by the day they were made, one per store."); the how-it-works detail moved behind an ⓘ. The month picker moved into the page header, and the card's own heading is now the month with a summary line (POs · approved total · lines received). Rows are taller with no tinted header band; Received shows a thin progress bar; the restock run is a chip; a chevron shows the row opens. The year was dropped from each date (the month heading carries it).
+- **Orders empty state.** Instead of a paragraph: three numbered steps (approve lines, make purchase orders, fill in what arrives) and a **Go to Restock** button. Numbers are used because the order is real.
+- **Restock run.** Header is title + actions, then tabs, then a two-line run summary ("Covers Dec 2026 to Feb 2027 · Second half of November run, from last year's…" / "Made … by ricketson.palacio") beside the store and run-date filters. The decorative gradient rule under the header is gone. The four tall KPI cards became one stats strip with hairline dividers and shorter subs; the floating "Not in this run" line folded into the Stores stat ("299 waiting on a form · 17 paused", full sentence in its tooltip). Store names show in title case (Cubao, not CUBAO). Each row keeps one labeled action (Approve); Edit and Reject became icon buttons with labels for screen readers. Selected rows tint with the accent.
+- **Shared.** Page padding and section gaps grew (gap 8, py 8 to 10, px up to 10); table cells use px 6 and py 3.5 to 4; Restock tabs are spaced a little wider (all three tabs). Orders day page got the same spacing for consistency.
+
+Checked in dark and light at 1440px and 390px (no sideways page scroll), with real Staging data and a forced empty state.
+
 ## 2026-11-25 · v1.26.4 Ask Coop: our own hedging rules removed (prod release)
 Ships only #737 (staging #738), cherry-picked onto `main`.
 
