@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Review: the Flag button shows only when it can be wanted
+
+Owner QA on staging: a Flag button on every row of the review grid is noise (Hick's law). A row's Flag button now shows only on hover, keyboard focus in the row, the row pointed at on the scan, or a phone row being edited, and always on a row that already has a flag (tinted). Hidden buttons keep their space, so the count columns don't shift. Flag page in the header is unchanged.
+
 ## 2026-11-25 — Every flag with its page and row, and a per-store flag CSV (NICH-43 §3, §4)
 
 Syl (Nov 25): "if there's a flag, can I see the page and row where it was flagged and why, which store, which BA", and "export all SKUs that need flagging per store". Built as one list for both kinds of flag: the BA scorecard's checks and the review flags (reader and reviewer, #799/#801).

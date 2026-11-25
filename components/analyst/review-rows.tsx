@@ -265,8 +265,9 @@ export function ReviewRows({
         data-review-row={r.i}
         onPointerEnter={onPoint ? () => onPoint(r.i) : undefined}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
+        data-pointed={pointed === r.i || active === r.i || undefined}
         className={cn(
-          'scroll-mt-24 border-b border-border/60 transition-colors',
+          'group/row scroll-mt-24 border-b border-border/60 transition-colors',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
@@ -356,8 +357,9 @@ export function ReviewRows({
         key={`${r.item_code}-${r.i}`}
         data-review-row={r.i}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
+        data-pointed={pointed === r.i || active === r.i || undefined}
         className={cn(
-          'flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
+          'group/row flex scroll-mt-24 flex-col gap-2.5 px-4 py-3',
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
