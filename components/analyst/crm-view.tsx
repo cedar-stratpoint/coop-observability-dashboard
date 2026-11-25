@@ -1522,9 +1522,18 @@ export function CrmView({
                           <td className="px-4 py-2.5 text-right tabular-nums" title={c.manualContacts === null ? 'Unavailable: the contact log is not set up here' : undefined}>
                             {c.manualContacts ?? '—'}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground" title={c.lastContactKnown ? undefined : 'Unknown: a CRM source or the contact log did not answer'}>
-                            {lastContactLabel(c)}
-                            {c.lastContactKind && <span className="block">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
+                          <td className="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">
+                            {/* RET-17 (owner 2026-11-25): click Last contacted to log a contact on a chosen day. Automated emails stay read-only. */}
+                            <button
+                              type="button"
+                              onClick={() => setLogFor(c)}
+                              title={c.lastContactKnown ? 'Log a contact, on the day it happened. Automated emails stay as they are.' : 'Unknown: a CRM source or the contact log did not answer. Click to log a contact.'}
+                              aria-label={`Last contacted ${lastContactLabel(c)}. Log a contact with ${nameOf(c) || c.email || 'this customer'}`}
+                              className="rounded-md px-2 py-1 text-left underline decoration-dotted decoration-muted-foreground/50 underline-offset-[3px] transition-[color,background-color] duration-150 hover:bg-primary/5 hover:text-foreground hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            >
+                              {lastContactLabel(c)}
+                              {c.lastContactKind && <span className="block no-underline">{CONTACT_KIND_LABEL[c.lastContactKind]}</span>}
+                            </button>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.consent.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.petName ?? '—'}</td>
