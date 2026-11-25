@@ -103,12 +103,14 @@ export function LogButton({onClick, name, compact = false}: {onClick: () => void
 const iconLink =
   'inline-flex size-7 items-center justify-center rounded-md border text-muted-foreground transition-[color,border-color,transform] duration-150 hover:border-primary hover:text-foreground active:scale-[0.97]';
 
-/** IG ↗ · Email · Copy mobile · Log. Opening and copying only: nothing is sent from Coop. */
+/** Log · IG ↗ · Email · Copy mobile. Opening and copying only: nothing is sent from Coop. */
 function Actions({lead, onLog}: {lead: SpinLead; onLog: () => void}) {
   const ig = instagramUrl(lead.instagram);
   const who = leadName(lead);
   return (
     <span className="inline-flex items-center gap-1">
+      {/* Log first, so it lines up row to row whatever else the lead gave. */}
+      {hasContactKey(lead) && <LogButton onClick={onLog} name={who} compact />}
       {ig && (
         <a href={ig} target="_blank" rel="noopener noreferrer" className={iconLink} aria-label={`Open @${lead.instagram} on Instagram`} title="Open on Instagram">
           <AtSign className="size-3.5" aria-hidden />
@@ -120,7 +122,6 @@ function Actions({lead, onLog}: {lead: SpinLead; onLog: () => void}) {
         </a>
       )}
       {lead.mobile && <CopyButton text={lead.mobile} className="h-7 px-2 text-[11px]">Mobile</CopyButton>}
-      {hasContactKey(lead) && <LogButton onClick={onLog} name={who} compact />}
     </span>
   );
 }
@@ -334,25 +335,27 @@ export function LeadsContacts({
 
       {/* Desktop: one table. Phone: a card per lead with the chip and the actions. */}
       <div className="hidden overflow-x-auto rounded-xl border md:block">
-        <table className="w-full text-xs">
+        {/* w-max: columns size to their content, so a nowrap cell never spills into the next one; the card scrolls instead of the
+            page. Actions sit right after the name (owner 2026-11-25 on the Website CRM: Log next to the name), so nothing is pinned
+            over another column and Log is in reach without scrolling. Bought at booth, the widest and least used, goes last. */}
+        <table className="w-max min-w-full text-xs">
           <thead className="whitespace-nowrap border-b bg-muted/40 text-left text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-semibold">Status</th>
               <th className="px-3 py-2 font-semibold">Name</th>
+              <th className="px-3 py-2 font-semibold">Actions</th>
               <th className="px-3 py-2 font-semibold">Instagram</th>
               <th className="px-3 py-2 font-semibold">Email</th>
               <th className="px-3 py-2 font-semibold">Mobile</th>
               <th className="px-3 py-2 font-semibold">Pet</th>
               <th className="px-3 py-2 font-semibold">Prize</th>
+              <th className="px-3 py-2 text-right font-semibold">Collected</th>
+              <th className="px-3 py-2 font-semibold">Website</th>
               {matches && (
                 <th className="px-3 py-2 font-semibold">
                   <span className="inline-flex items-center gap-1">Bought at booth <BoughtHelp /></span>
                 </th>
               )}
-              <th className="px-3 py-2 text-right font-semibold">Collected</th>
-              <th className="px-3 py-2 font-semibold">Website</th>
-              {/* Pinned right, so Log stays in reach while the wide table scrolls. */}
-              <th className="sticky right-0 bg-muted px-3 py-2 text-right font-semibold shadow-[-1px_0_0_var(--border)]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -365,6 +368,9 @@ export function LeadsContacts({
                     <StatusChip status={statusOf(l)} onLog={hasContactKey(l) ? () => onLog(l) : undefined} name={leadName(l)} />
                   </td>
                   <td className="max-w-[180px] truncate px-3 py-2 font-medium" title={l.name ?? undefined}>{l.name ?? <span className="font-normal text-muted-foreground">—</span>}</td>
+                  <td className="whitespace-nowrap px-3 py-1.5">
+                    <Actions lead={l} onLog={() => onLog(l)} />
+                  </td>
                   <td className="max-w-[160px] truncate px-3 py-2">
                     {ig ? (
                       <a href={ig} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-2 hover:underline">@{l.instagram}</a>
@@ -376,12 +382,9 @@ export function LeadsContacts({
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">{l.mobile ?? '—'}</td>
                   <td className="max-w-[160px] truncate px-3 py-2 text-muted-foreground" title={l.pet ?? undefined}>{l.pet ?? '—'}</td>
                   <td className="max-w-[140px] truncate px-3 py-2 text-muted-foreground" title={l.prize}>{l.prize}</td>
-                  {matches && <BoughtCell match={matches[leadKey(l)]} />}
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">{stamp(l.collectedAt)}</td>
                   <td className={cn('whitespace-nowrap px-3 py-2', w.tone === 'good' ? 'text-[var(--status-good)]' : 'text-muted-foreground')}>{w.text}</td>
-                  <td className="sticky right-0 bg-background px-3 py-1.5 text-right shadow-[-1px_0_0_var(--border)]">
-                    <Actions lead={l} onLog={() => onLog(l)} />
-                  </td>
+                  {matches && <BoughtCell match={matches[leadKey(l)]} />}
                 </tr>
               );
             })}
