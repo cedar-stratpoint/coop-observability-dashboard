@@ -345,11 +345,11 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                         </th>
                         {!store && <th className={TH}>Store</th>}
                         <th className={cn(TH, 'min-w-[16rem]')}>Product</th>
-                        <th className={cn(TH, 'text-right')}>Last year {run.lastYear.map((m) => monthLabel(m, {month: 'short'})).join(' · ')}</th>
-                        <th className={cn(TH, 'text-right')}>On hand</th>
-                        <th className={cn(TH, 'text-right')}>Safety</th>
-                        <th className={cn(TH, 'text-right')}>Send</th>
-                        <th className={cn(TH, 'pr-6')}>Decision</th>
+                        <th className={cn(TH, NUM)}>Last year {run.lastYear.map((m) => monthLabel(m, {month: 'short'})).join(' · ')}</th>
+                        <th className={cn(TH, NUM)}>On hand</th>
+                        <th className={cn(TH, NUM)}>Safety</th>
+                        <th className={cn(TH, NUM)}>Send</th>
+                        <th className={cn(TH, DECIDE)}>Decision</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -400,15 +400,23 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                   <ChartColumn className="size-3.5" aria-hidden />
                                 </Link>
                               </td>
-                              <td className={cn(TD, 'text-right whitespace-nowrap tabular-nums')}>
+                              <td className={cn(TD, NUM, 'whitespace-nowrap tabular-nums')}>
                                 <span className="text-muted-foreground">{l.lyUnits.map((u) => (u == null ? '?' : num(u))).join(' · ')} =</span> {l.need == null ? '·' : num(l.need)}
                               </td>
-                              <td className={cn(TD, 'text-right whitespace-nowrap tabular-nums')}>
+                              <td className={cn(TD, NUM, 'whitespace-nowrap tabular-nums')}>
                                 {l.onHand == null ? <span className="text-muted-foreground">Blank</span> : num(l.onHand)}
                                 {l.onTheWay > 0 && <span className="text-muted-foreground"> + {num(l.onTheWay)}</span>}
                               </td>
-                              <td className={cn(TD, 'text-right tabular-nums')}>{l.safety == null ? '·' : num(l.safety)}</td>
-                              <td className={cn(TD, 'text-right whitespace-nowrap tabular-nums')}>
+                              <td className={cn(TD, NUM, 'tabular-nums')}>{l.safety == null ? '·' : num(l.safety)}</td>
+                              <td className={cn(TD, NUM, 'whitespace-nowrap tabular-nums')}>
+                                {/* The cap explains the number, so it sits with it, before the digits so they stay
+                                    right-aligned (a covered line's chip already says it). */}
+                                {l.warehouseShort && l.state === 'send' && (
+                                  <span title={`Warehouse short. Coop's number before the cap was ${num(l.rawSend ?? 0)}.`} className="mr-1.5 inline-flex align-[-2px] text-[var(--status-warn)]">
+                                    <AlertTriangle className="size-3.5" aria-hidden />
+                                    <span className="sr-only">Warehouse short, capped from {num(l.rawSend ?? 0)}.</span>
+                                  </span>
+                                )}
                                 {l.state === 'held' ? (
                                   <span className="text-muted-foreground">·</span>
                                 ) : l.decision === 'edited' || l.decision === 'rejected' ? (
@@ -419,7 +427,7 @@ export function GoldlineRestockRun({data}: {data: RestockRunViewData}) {
                                   <span className={cn(l.state === 'send' && 'font-semibold')}>{num(l.suggested ?? 0)}</span>
                                 )}
                               </td>
-                              <td className={cn(TD, 'pr-6')}>
+                              <td className={cn(TD, DECIDE)}>
                                 <DecisionCell line={l} canDecide={data.canDecide} pending={pending} onApprove={() => decide([l.id], 'approved')} onUndo={() => decide([l.id], 'pending')} onDialog={(kind) => setDialog({line: l, kind})} />
                               </td>
                             </tr>
@@ -464,6 +472,11 @@ const PAGE = 'mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-8 px-4 py-8 sm:
 const THEAD = 'border-b border-border/70 text-left text-[11px] tracking-wide whitespace-nowrap text-muted-foreground uppercase';
 const TH = 'py-3 pr-4 font-medium';
 const TD = 'py-3.5 pr-4 align-middle';
+// Run table: wider gaps between the number columns, and the decision pinned to the
+// table's right edge (its actions right-aligned) so the row's spare width sits between
+// the data instead of after the buttons.
+const NUM = 'pl-4 text-right';
+const DECIDE = 'w-px pl-8 pr-6 text-right';
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** One cell of the summary strip. Hairlines between cells, not a card per number. */
@@ -525,7 +538,7 @@ function DecisionCell({
 }) {
   if (l.state === 'held') {
     return (
-      <span className="flex flex-wrap items-center gap-1">
+      <span className="ml-auto flex max-w-[18rem] flex-wrap items-center justify-end gap-1">
         <ToneChip tone="var(--status-warn)">Check data first</ToneChip>
         {l.holds.map((h) => (
           <span key={h} title={HOLD_LABEL[h].hint} className="text-xs text-muted-foreground">
@@ -537,10 +550,9 @@ function DecisionCell({
   }
   if (l.state === 'covered') {
     return (
-      <span className="flex flex-wrap items-center gap-1.5">
+      <span className="flex justify-end whitespace-nowrap" title={l.warehouseShort ? 'The store needs some, but the warehouse has none to spare.' : 'Nothing to send.'}>
         {/* Capped to 0: the store needs some, but the warehouse has none left (not covered). */}
         {l.warehouseShort ? <ToneChip tone="var(--status-warn)">Warehouse short</ToneChip> : <ToneChip tone={null}>Covered</ToneChip>}
-        {l.warehouseShort ? <span className="text-xs text-muted-foreground">Warehouse has none to spare</span> : <span className="text-xs text-muted-foreground">Nothing to send</span>}
       </span>
     );
   }
@@ -550,8 +562,8 @@ function DecisionCell({
     // until the stock is received or due to have arrived (F12).
     const locked = l.po?.locked ?? false;
     return (
-      <span className="flex flex-col gap-1">
-        <span className="flex flex-wrap items-center gap-1.5">
+      <span className="flex flex-col items-end gap-1">
+        <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
           <ToneChip tone={d.tone}>{d.label}</ToneChip>
           {l.po && (
             <Link
@@ -568,17 +580,12 @@ function DecisionCell({
             </button>
           )}
         </span>
-        {l.remark && <span className="max-w-[28ch] text-xs text-muted-foreground text-pretty">&ldquo;{l.remark}&rdquo;</span>}
+        {l.remark && <span className="max-w-[28ch] text-right text-xs text-muted-foreground text-pretty">&ldquo;{l.remark}&rdquo;</span>}
       </span>
     );
   }
   return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      {l.warehouseShort && (
-        <span title={`Coop's number before the cap was ${num(l.rawSend ?? 0)}`}>
-          <ToneChip tone="var(--status-warn)">Warehouse short</ToneChip>
-        </span>
-      )}
+    <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
       {canDecide ? (
         <>
           <Button size="sm" variant="outline" onClick={onApprove} disabled={pending}>
