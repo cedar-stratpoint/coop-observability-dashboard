@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
+
+Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured.
+
 ## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
 
 Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
