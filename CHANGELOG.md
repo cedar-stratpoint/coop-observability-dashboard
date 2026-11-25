@@ -21,6 +21,74 @@ Staging and production now deploy from a GitLab pipeline (`.gitlab-ci.yml`) inst
 - **Missed deploy:** GitLab skips push pipelines when one push moves more than 4 refs. Run the pipeline on the branch from Build > Pipelines.
 - **Rollback:** remove `git` from `vercel.json`, and GitHub auto-deploys resume on the next push.
 
+
+## 2026-11-25 — "Same person" links: Instagram + Booth on the Website CRM table, not a merge (RET-15 Slice B)
+
+Owner: link a website customer to a booth lead from Ask Coop's matches table, and see the booth's Instagram and event beside the customer. **Decision: extra metadata, not a total merge.** The website row keeps its own name, email, orders, spend and vouchers (the CRM stays the source), so orders, spend, cohorts and repeat rate never change, and **Unlink** removes only the extra metadata. Only the person who linked can unlink (same delete-own rule as the contact log).
+- **Matches table**: website CRM x event lead rows get a **Same person** button (saves a link, then "Linked ✓"); a row that already shares an email or mobile says "Already matched". Judged on the row's own fields, not its tier: a name plus Instagram can score "confirmed" with no shared email or mobile.
+- **Website CRM Customers tab**: new **Instagram** and **Booth** columns after Vouchers used (and on the mobile card and the CSV). Exact matches (same email, or same mobile by last 10 digits) show with no link and win over a saved link. Linked ones carry a link icon and, for their author, Unlink.
+- **Unknown is never "never"**: when the leads or the links cannot be read, the cells say "unknown", not "—". `getSpinLeads()` swallows a failed read into `[]`, so no leads at all is also treated as unread.
+- The booth leads are matched on the server, so their contact data never reaches the browser; only the matched Instagram, campaign, prize and pet do.
+- New table `customer_links` (`supabase/customer_links.sql`, RLS on, no policies); **not applied anywhere yet: the owner applies it**, staging first. Until then Same person says it is not set up. Data catalog updated.
+
+## 2026-11-25 — Ask Coop matches table: name first, sides named by source
+
+Owner: the matches table read "A: name … B: Instagram". It now leads with **Name** (the website or Lazada name first, then the booth's typed name, then the handle), then **Match**, **Score**, **Why**, and each side is labelled by where it came from: **Website CRM: name / email / mobile** and **Event leads: name / Instagram / email / mobile / event** (Lazada: name / mobile). The internal "Signals" and "seen in" columns are gone from the table (the model still gets the signals). Tables whose sides are not fixed (one person, one event) say "Record 1 / Record 2" with a "from" column.
+
+## 2026-11-25 — Event lead contacts: "Collected" is a From–To range
+
+Owner: the Collected filter picked one day only. It is now **Collected from … to …** (PH days, inclusive), with the same day list (only days that have leads); "First day" / "Last day" leave a side open, and the "to" list only offers days on or after "from". Pure `inDayRange` in `src/spin-leads-types.ts`, tested in `test/spin-leads-search.test.ts`.
+
+
+## 2026-11-25 — Voucher families: "*300" covers every ₱300-off code; Ask Coop runs matches without asking
+
+Owner asked for "the other 300 off vouchers, not just GRAND300" against booth leads and their IG. `voucher` took one exact code, so Ask Coop fell back to a general overlap and only offered name/IG matching. `voucherMatch` (one rule for the Website CRM page and Ask Coop) now takes a family with `*` ("*300" = every code ending in 300: GRAND300, ZOOMY300, WEB300, EAST300, ZMY300, STRAT300 and the one-off ones) or a comma list; regex characters stay literal. The contacts topic tells Ask Coop to run overlap AND matches in the same turn for IG questions, never ask first. Measured on PROD: 10 codes end in 300, 121 customers used one; 604 of 744 booth leads gave only an Instagram handle, so name/IG matching is the main way to link them. Tests in `test/crm-voucher-filter.test.ts`.
+
+## 2026-11-25 — Ask Coop: our own hedging rules removed (owner decision)
+
+Owner: Ask Coop's own caution got in the way ("exploratory, not a registered metric", "I won't retype them", "I checked only 20", "I don't match on similar names", consent reminders on every answer). These were Coop's prompt rules, not the model's. Removed:
+- THINK-07 / EXP-03: no "Exploratory" opener and no "Basis" paragraph (the app already labels and shows the SQL); a gap is one short line at the end, not first.
+- THINK-04 / THINK-06: answer first; a caveat only when it changes what the owner should do, one line, no boilerplate.
+- The visible footnote "Note: some figures here could not be matched to the query rows" (still logged, never shown).
+- Consent / "honour unsubscribes" notes on leads, drafts, overlap tables and CRM identity results.
+- Contacts topic: code users vs booth leads (and their IG) go to `contacts` overlap + matches with `voucher`, never `run_query` or a batch of 20; "same email or mobile only" replaced by matches (name, email and IG patterns).
+**Kept on purpose** (security and accuracy, not hedging): read-only database role, secret columns hidden, GET-only CRM, contact details only for the allowlisted emails, customer-typed text treated as data, numbers from tools and never summed in prose (EXP-04, a real wrong-total bug). Prompt stays within its cached budget.
+
+## 2026-11-25 — Ask Coop matches: Instagram columns, and one piece of evidence scores once
+
+The matches table now shows **A: Instagram** and **B: Instagram** next to email and mobile. A name inside a handle is no longer added on top of the same handle match (Karla Sy / karlasy60@ / @karla.sy scored 40 + 30 for one fact; now 40, plus any other clue such as the same pet).
+
+## 2026-11-25 — Ask Coop matches people by name, email and IG patterns (RET-14)
+
+Owner: "match by name and IG words or letters, or in the email". `contacts` mode matches gains two pattern clues: **same letters in an email or IG handle** (40: `karlasy60@gmail.com` and `@karla.sy` both read `karlasy`) and **a name written inside the other's email or handle** (30: "Karla Sy" in `karlasy60@`). Booth leads now bring their typed **name** into matching (it was ignored). Rules kept: only same email or mobile is "confirmed"; a clue never counts twice with an exact email or IG; handles under 5 letters and one-word or 2-letter names never match; new blocks are capped like the others. `voucher` now also scopes matches (website side = that code's users). Weights are starting points (`WEIGHTS` in `src/chat/contacts/match.ts`) for the owner to tune on labelled pairs. Tests `test/chat-contacts-match-handles.test.ts`.
+
+## 2026-11-25 — Ask Coop: which code users are also booth leads, with their Instagram (RET-14)
+
+Owner asked "are the GRAND300 customers also in the event leads, and can we merge their IG?". Ask Coop answered with the overlap of ALL website customers and booth leads (10 people) and could not show any Instagram: the `contacts` overlap had no code filter and its table had no Instagram column. Now `contacts` mode overlap takes `voucher` (website side = customers who used that code on any order, the same `voucherMatch` as the Website CRM page), and the people table carries **Instagram (booth)**, the handle the lead typed (`UnifiedContact.instagram`, booth only). "Merge" stays read-only: the handle shows next to the website record; nothing is written. Also confirmed: GRAND300 orders total ₱0.00 (the ₱300 covers the whole order), so "Spent ₱0" on those buyers is right, not a gap. Tests `test/chat-contacts-voucher-overlap.test.ts`.
+
+## 2026-11-25 — Ask Coop tables page 10 rows at a time
+
+Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
+
+## 2026-11-25 — Ask Coop reads website orders again: CRM response cap 4 MB → 16 MB
+
+PROD `/api/orders` reached 4,026,463 bytes on 2026-11-25 (every order carries its raw Shopify payload), over Ask Coop's 4,000,000-byte cap per CRM response (`CRM_LIMITS.maxResponseBytes`). Every answer that reads website orders failed with "the website CRM sent more data than Ask Coop reads at once": customer lists (GRAND300 buyers), order lists, the Website row of the channel report. The Website CRM page was unaffected (its reader has no cap). Cap raised to 16 MB (about 4x headroom, the read takes about 1.2 s). **Decision:** raise now; when orders near the new cap, page `/api/orders` with `cursor` + `fields` the way the Business Health Report already does, instead of raising it again.
+
+## 2026-11-25 — Ask Coop lists the customers who used a discount code (RET-14)
+
+Owner asked "who are the customers who ordered and used the voucher GRAND300" and Ask Coop answered with counts only: `crm_query` counts discount uses but returns no customers, and `list_crm_customers` had no code filter. `list_crm_customers` now takes `voucher` (a code used on ANY order, `any`, `none`, or `""`), the same `voucherMatch` as the Website CRM page's Voucher filter, so the answer is the customer list with name and email. No new tool (the count stays at the ceiling); the tool text routes "customers who used a code" to it. Tests `test/chat-crm-voucher.test.ts`.
+
+## 2026-11-25 · Overview (Nichido): every card opens its detail
+
+Owner asked for the Overview's components to be clickable and lead to the right page, with hover behavior. Destinations:
+
+- **Net sales, Units sold, Gross sales** open **Stores** ranked by that figure (`/stores?sort=net|units|gross`; Stores now accepts `?sort=`). Each tile shows a muted "By store ›" cue at rest so touch users can tell it opens.
+- **Units sold, last 12 months** opens Stores ranked by units ("Units by store ›").
+- **Stores live** pill opens Stores.
+- **Top categories:** each line opens the **Inventory** board filtered to that product line (`/stock?line=`). Uncategorized and the "N SKUs aren't mapped" note ("Link SKUs") open **SKU linking**, where the fix is.
+
+Hover (`GL_CARD_LINK` / `GL_CARD_CUE` in `src/goldline-ui.ts`): kept small because it's seen many times a day. The border warms to the accent, the card tints 4% and lifts 2px with a soft shadow, and the cue turns accent with its chevron sliding 2px; press scales to 0.99. 200ms on a strong ease-out (100ms on press). Category rows tint, brighten their bar and slide their chevron. Reduced motion keeps the color changes and drops the lift, slide and scale; Tailwind v4 only applies hover on devices that can hover. Checked in dark at 1440px and 390px, and that each destination lands filtered or sorted.
+
 ## 2026-11-25 · Orders and Restock: shorter copy, more room to breathe
 
 Review: Orders opened with a four-line paragraph, the Restock run with a long sentence, and both felt cramped and dated. Goal: say less, space it out, lower eye strain (aesthetic-usability). Decisions:

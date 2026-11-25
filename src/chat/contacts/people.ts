@@ -35,6 +35,7 @@ const COLUMNS: ResultColumn[] = [
   {key: 'n', label: '#', unit: 'count', role: 'category'},
   {key: 'name', label: 'Name', unit: 'text', role: 'category'},
   {key: 'email', label: 'Email', unit: 'text', role: 'category'},
+  {key: 'instagram', label: 'Instagram (booth)', unit: 'text', role: 'category'},
   {key: 'mobile', label: 'Mobile', unit: 'text', role: 'category'},
   {key: 'city', label: 'City', unit: 'text', role: 'category'},
   {key: 'sources', label: 'Seen in', unit: 'text', role: 'category'},
@@ -53,6 +54,7 @@ const toRow = (p: UnifiedContact, n: number): MetricRow => ({
   n,
   name: clean(p.name, 80),
   email: clean(p.email, 80),
+  instagram: p.instagram ? clean(`@${p.instagram}`, 60) : null,
   mobile: clean(p.mobile, 30),
   city: clean(p.city, 40),
   sources: p.sources.join(', '),
@@ -93,7 +95,7 @@ const BASIS = [
 ];
 
 function table(title: string, rows: MetricRow[], basis: string): LeadsTable {
-  return {title, columns: COLUMNS, rows, total: null, reliable: true, caveats: ['Contact data: use it only on the basis the person gave it. Honour unsubscribes.'], basis, pii: true, copyColumns: {emails: 'email', mobiles: 'mobile'}, csvName: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.csv`};
+  return {title, columns: COLUMNS, rows, total: null, reliable: true, caveats: [], basis, pii: true, copyColumns: {emails: 'email', mobiles: 'mobile'}, csvName: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.csv`};
 }
 
 const isEmailQuery = (q: string): boolean => /^[^@\s]+@[^@\s]+$/.test(q);
@@ -148,19 +150,20 @@ export function overlapPeople(input: OverlapInput, src: PeopleSource): PeopleOut
     if (missing.includes(s)) return {error: `${notes.find((n) => n.toLowerCase().includes(s === 'website' ? 'website' : 'lazada')) ?? `The ${SOURCE_LABEL[s]} could not be read.`} Without it an overlap would be wrong, so there is no answer.`};
   }
   const both = people.filter((p) => p.sources.includes(input.a) && p.sources.includes(input.b));
-  if (both.length === 0) return {error: `Nobody appears in both the ${SOURCE_LABEL[input.a]} and the ${SOURCE_LABEL[input.b]} (matched by the same email or mobile).`};
+  const scope = input.voucher ? ` who used ${input.voucher}` : '';
+  if (both.length === 0) return {error: `Nobody${scope ? ` among the website customers${scope}` : ''} appears in both the ${SOURCE_LABEL[input.a]} and the ${SOURCE_LABEL[input.b]} (matched by the same email or mobile).`};
   const shown = both.slice(0, PEOPLE_OVERLAP_MAX);
   const rows = shown.map((p, i) => toRow(p, i + 1));
   const modelRows = rows.slice(0, MODEL_ROWS);
   const outNotes = [
     ...(both.length > shown.length ? [`${both.length} people are in both; the table shows the first ${shown.length}.`] : []),
     ...(modelRows.length < rows.length ? [`You were given the first ${MODEL_ROWS} rows only; the owner's table has ${rows.length}.`] : []),
+    ...(input.voucher ? [`Website side = only the customers who used ${input.voucher} on any order (the Website CRM's Voucher filter); the booth side is every lead.`, 'Instagram (booth) is the handle the person typed at the booth; blank = they left none.'] : []),
     ...notes,
     ...BASIS,
-    'Market to them only on the basis they gave their contact, and honour an unsubscribe on either channel.',
   ];
   return {
-    table: table(`In both ${SOURCE_LABEL[input.a]} and ${SOURCE_LABEL[input.b]}`, rows, `${both.length} people in both`),
+    table: table(`In both ${SOURCE_LABEL[input.a]} and ${SOURCE_LABEL[input.b]}${scope ? ` (website: used ${input.voucher})` : ''}`, rows, `${both.length} people in both`),
     model: {counts: {people: both.length, shown: shown.length}, rows: modelRows, notes: outNotes},
     audit: {eventId: null, rows: rows.length, columns: COLUMNS.map((c) => c.key)},
   };

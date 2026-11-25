@@ -75,8 +75,8 @@ describe('draftLeads: template', () => {
     expect(r.table.csvName).toMatch(/^drafts-modern-market.*\.csv$/);
     const n = r.model.notes.join(' ');
     expect(n).toMatch(/nothing (was|is) sent/i);
-    expect(n).toMatch(/first sign-up/i);
-    expect(n).toMatch(/unsubscribe/i);
+    // owner 2026-11-25: no consent / unsubscribe boilerplate in the notes
+    expect(n).not.toMatch(/unsubscribe/i);
   });
   it('notes how many drafts used an unsure order match', () => {
     const r = ok(draftLeads(draft({template: T}), SOURCE));
