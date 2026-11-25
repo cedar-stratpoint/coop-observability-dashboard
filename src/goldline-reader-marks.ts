@@ -8,6 +8,7 @@
 // for the hand-written rows the read already returns as off-template extras.
 
 import type {MarkKind} from './goldline-review-marks';
+import {OS_FLAGS} from './out-of-stock';
 
 export type ReaderFlag = 'note' | 'damage';
 export const READER_FLAGS: readonly ReaderFlag[] = ['note', 'damage'];
@@ -45,6 +46,8 @@ export const MARKS_PROMPT_ANCHORED = [
   '  on or beside a row (anything besides its counts), add "note" to that row\'s "flags". If a count cell holds a word',
   '  such as "Damage" instead of a number, add "damage" to "flags" and leave that cell out. Leave "flags" out for a',
   '  clean row.',
+  '- If a count cell holds "O/S" (out of stock) instead of a number, add that cell\'s "os_" flag to "flags" (os_stockroom,',
+  '  os_drawer, os_selling_area, os_delivery or os_ending) and leave the cell out.',
   '- If the consultant wrote their own column names over printed DATA-column headers, list those PRINTED headers in',
   '  "headers_written_over"; otherwise return [].',
 ];
@@ -57,7 +60,7 @@ export const MARKS_PROMPT_LEGACY = [
 ];
 
 /** The optional per-row `flags` property (one optional param; schema budgets are tight). */
-export const FLAGS_PROPERTY = {type: 'array', items: {type: 'string', enum: [...READER_FLAGS]}} as const;
+export const FLAGS_PROPERTY = {type: 'array', items: {type: 'string', enum: [...READER_FLAGS, ...OS_FLAGS]}} as const;
 
 export type ReaderMark = {itemCode: string | null; rowIndex: number | null; kind: MarkKind};
 

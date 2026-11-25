@@ -224,7 +224,7 @@ export function UploadReview({
   // Plus one row per band whose paper points at another price than the printed one (QA Nov 25).
   const flagged = useMemo(() => {
     const band = new Set(bandFlagRows(cleanBands(head?.bands)));
-    return (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null || band.has(x.i)).map((x) => x.i);
+    return (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i, os: Boolean(r.oos?.check)})).filter((x) => x.c < LOW || x.os || rowNotes[x.i] != null || band.has(x.i)).map((x) => x.i);
   }, [head, rowNotes]);
   // The band price picks for this form; the totals value a picked band at its picked price.
   const [bands, setBands] = useState(() => cleanBands(head?.bands));
@@ -235,7 +235,7 @@ export function UploadReview({
     setBands(res.bands);
     const b = res.bands.find((x) => x.group === group);
     // The pick answers the band's flag; a row also low on confidence still wants its own look.
-    if (price != null && b?.first_index != null && rowConfidence(rows[b.first_index]?.confidence) >= LOW && rowNotes[b.first_index] == null) resolve(b.first_index);
+    if (price != null && b?.first_index != null && rowConfidence(rows[b.first_index]?.confidence) >= LOW && !rows[b.first_index]?.oos?.check && rowNotes[b.first_index] == null) resolve(b.first_index);
     return null;
   }
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
@@ -628,6 +628,7 @@ export function UploadReview({
               <DocumentConfidence
                 docConfidence={docConfidence}
                 rowConfidences={rows.map((r) => r.confidence)}
+                flagged={flagged.length}
                 onReviewFlagged={() => {
                   setView('needs');
                   goToFlag(open[0] ?? flagged[0] ?? null);

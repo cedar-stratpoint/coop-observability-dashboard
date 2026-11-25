@@ -134,15 +134,17 @@ export function bandFlagRows(bands: readonly PaperBand[] | null | undefined): nu
   return (bands ?? []).filter(bandOpen).map((b) => b.first_index as number);
 }
 
-/** A page's rows that need review: low confidence, plus one row per open band flag. Sorted. */
+/** A page's rows that need review: low confidence, O/S rows that want a look, plus one row per
+ *  open band flag. Sorted. */
 export function flaggedRowIndexes(
-  page: {rows?: ReadonlyArray<{confidence?: unknown}> | null; bands?: readonly PaperBand[] | null} | null | undefined,
+  page: {rows?: ReadonlyArray<{confidence?: unknown; oos?: {check?: boolean} | null}> | null; bands?: readonly PaperBand[] | null} | null | undefined,
   below: number,
 ): number[] {
   const set = new Set<number>();
   (page?.rows ?? []).forEach((r, i) => {
     const c = typeof r.confidence === 'number' && Number.isFinite(r.confidence) ? r.confidence : 1;
-    if (c < below) set.add(i);
+    // Low confidence, or "O/S" that wants a look (O/S only, or O/S and a number in one cell).
+    if (c < below || r.oos?.check) set.add(i);
   });
   for (const i of bandFlagRows(page?.bands)) if (i < (page?.rows?.length ?? 0)) set.add(i);
   return [...set].sort((a, b) => a - b);

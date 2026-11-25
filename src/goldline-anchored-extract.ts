@@ -2,6 +2,7 @@ import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
 import {checkBands, type PaperTotal} from './band-prices';
+import {applyOutOfStock, cleanOsFlags} from './out-of-stock';
 import {applyReaderFlags, cleanHeaders, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_ANCHORED} from './goldline-reader-marks';
 
 // Phase 1 of template-anchored extraction (plan: knowledge/tasks/2026-11-12-template-anchored-extraction.md).
@@ -700,6 +701,11 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
   // The reader's review flags (NICH-36): a BA note or revision, or "Damage" in a count. Kept on the
   // row for the review flags, and the row goes to review.
   for (let i = 0; i < items.length; i++) applyReaderFlags(rows[i], cleanReaderFlags(claimed[i]?.flags));
+  // "O/S" the reader flagged in a cell (os_drawer, ...) becomes 0 there (QA Nov 25).
+  for (let i = 0; i < items.length; i++) {
+    const cells = cleanOsFlags(claimed[i]?.flags);
+    if (cells.length) applyOutOfStock(rows[i], {cells, row: false});
+  }
   const headersOver = cleanHeaders(out.headers_written_over);
   if (headersOver.length) base.page.headers_written_over = headersOver;
 

@@ -223,6 +223,22 @@ export function ReviewRows({
     const b = bandAt.get(r.i);
     return Boolean(b && bandOpen(b) && rowConfidence(r.confidence) >= LOW_BELOW && !rowNotes?.[r.i]);
   };
+  // "O/S" written in this cell on the paper (read as 0), while the cell still holds that 0.
+  const osTag = (r: ExtractedRow & {i: number}, key: ColKey, at: 'table' | 'card') => {
+    if (!r.oos?.cells.includes(key) || (r[key] != null && r[key] !== 0)) return null;
+    return (
+      <span
+        title="O/S (out of stock) written on the paper, read as 0"
+        className={cn(
+          'font-mono font-semibold tracking-tight',
+          at === 'table' ? 'pointer-events-none absolute top-1/2 left-1.5 -translate-y-1/2 text-[9px] leading-none' : 'text-[10px]',
+        )}
+        style={{color: toneText('var(--status-warn)')}}
+      >
+        O/S
+      </span>
+    );
+  };
   const bandPrice = (r: ExtractedRow & {i: number}) => {
     const b = bandAt.get(r.i);
     return b ? <BandPrice band={b} pieces={piecesOf(b)} editable={editable} onPick={onBandPrice ? (price) => onBandPrice(b.group, price) : undefined} /> : null;
@@ -345,6 +361,8 @@ export function ReviewRows({
         </td>
         {cols.map((col) => (
           <td key={col.key} className="py-1.5 pr-2 text-right">
+            <span className="relative inline-block">
+            {osTag(r, col.key, 'table')}
             <input
               inputMode="numeric"
               aria-label={`${r.item_code} ${col.title}`}
@@ -356,6 +374,7 @@ export function ReviewRows({
                 isFlag && !done ? 'border-[color-mix(in_oklab,var(--status-crit)_55%,transparent)]' : 'border-border',
               )}
             />
+            </span>
           </td>
         ))}
         <td className="py-1.5 pr-2 text-right text-xs tabular-nums">
@@ -432,7 +451,10 @@ export function ReviewRows({
         <div className="grid grid-cols-5 gap-1.5">
           {cols.map((col) => (
             <label key={col.key} className="flex min-w-0 flex-col gap-1">
-              <span className="truncate text-[10.5px] text-muted-foreground">{MOBILE_LABEL[col.key]}</span>
+              <span className="flex min-w-0 items-baseline gap-1 truncate text-[10.5px] text-muted-foreground">
+                {MOBILE_LABEL[col.key]}
+                {osTag(r, col.key, 'card')}
+              </span>
               <input
                 inputMode="numeric"
                 aria-label={`${r.item_code} ${col.title}`}
