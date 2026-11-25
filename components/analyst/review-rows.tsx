@@ -11,6 +11,8 @@ import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
 import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols';
 import {noteLayout, readerNote} from './reader-note';
+import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
+import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -88,6 +90,9 @@ type Props = {
   onPoint?: (index: number) => void;
   /** The row currently pointed at: tinted to match the box drawn on the scan. */
   pointed?: number | null;
+  /** The page these rows are on, so a row (or the page) can be flagged (NICH-42). Needs a
+   *  ReviewFlagsProvider above; without either, no Flag buttons show. */
+  uploadId?: string;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -132,7 +137,14 @@ export function ReviewRows({
   onStep,
   onPoint,
   pointed,
+  uploadId,
 }: Props) {
+  const flagCtx = useReviewFlags();
+  const onPage = useMemo(() => (flagCtx && uploadId ? flagCtx.marks.filter((m) => m.uploadId === uploadId) : []), [flagCtx, uploadId]);
+  const flagsOf = (code: string) => rowMarks(onPage, code);
+  const pageFlags = pageMarks(onPage);
+  const flagTarget = (r: {item_code: string; i: number}) =>
+    uploadId ? {uploadId, itemCode: r.item_code, rowIndex: r.i, label: `${r.item_code}${nameOf(r as (typeof indexed)[number]) ? ` · ${nameOf(r as (typeof indexed)[number])}` : ''}`} : null;
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
   // Count columns in this version's printed order (V2 leads with Delivery); display only.
   const cols = useMemo(() => colsForPage(version, rows), [version, rows]);
@@ -229,7 +241,9 @@ export function ReviewRows({
               {legacyExtraText(r) && (
                 <span className="mt-0.5 block text-[11px] text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>
               )}
+              <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
             </div>
+            {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           </div>
         </td>
         {cols.map((col) => (
@@ -303,12 +317,16 @@ export function ReviewRows({
             )}
             {reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i]) && <span className="mt-1 block text-xs leading-snug" style={{color: toneText('var(--status-warn)')}}>{reasonText(r, version, Boolean(knownName(r)), rowNotes?.[r.i])}</span>}
             {legacyExtraText(r) && <span className="mt-0.5 block text-xs text-muted-foreground/60 tabular-nums">{legacyExtraText(r)}</span>}
+            <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
           </div>
+          <span className="flex shrink-0 items-center gap-1.5">
+          {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
             style={{color: toneText(tone), background: `color-mix(in oklab, ${tone} 14%, transparent)`}}
           >
             {Math.round(c * 100)}%
+          </span>
           </span>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
@@ -350,9 +368,12 @@ export function ReviewRows({
     <Card className="scroll-mt-4">
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>
-            Rows <span className="text-sm font-normal text-muted-foreground tabular-nums">({rows.length})</span>
-          </CardTitle>
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <CardTitle>
+              Rows <span className="text-sm font-normal text-muted-foreground tabular-nums">({rows.length})</span>
+            </CardTitle>
+            {uploadId && <FlagButton size="page" target={{uploadId, itemCode: null, rowIndex: null, label: 'Whole page'}} count={pageFlags.length} />}
+          </div>
           {flagged.length > 0 && (
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
@@ -372,6 +393,7 @@ export function ReviewRows({
             </div>
           )}
         </div>
+        {pageFlags.length > 0 && <FlagChips marks={pageFlags} />}
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedControl<ReviewView>
             ariaLabel="Which rows"
