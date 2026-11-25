@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Instagram handles are clickable: open the profile to message them
+
+Owner: "walang contact in IG?" Every `@handle` in Ask Coop's tables (leads, overlap, matches) and in the Website CRM Instagram column now opens `instagram.com/<handle>` in a new tab, where the team messages them. Nothing is sent from Coop. `instagramUrl` (`src/instagram.ts`) only links a real handle (letters, digits, "." and "_", up to 30), so customer-typed text can never become another link.
+
+
 ## 2026-11-25 — Grouped uploads: Commit all, with a confirmation
 
 Request: a way to commit every form of a grouped upload at once, behind a confirm. There was none (each store form committed from its own review page).
