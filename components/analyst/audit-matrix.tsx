@@ -8,9 +8,10 @@ import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {MonthPicker, StorePicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
-import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, RECO_META, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
+import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, RECO_LETTERS, RECO_META, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
 import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, RecoStrip, ReconTabs, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
+import {StickyBar, TopButton, useStuckSentinel} from '@/components/analyst/sticky-bar';
 
 // Reconciliation · By store (NICH-17). One store (or every store) and month: every product's
 // three legs (Watsons · Inventory · PO) and its recommendation on the line. The tiles are the
@@ -92,6 +93,9 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   };
 
   const otherMonth = data.months.find((mo) => mo.loaded && mo.month !== sel?.month)?.month ?? null;
+  // Condensed bar (Nov 25, owner QA): store, month, the Reco letters and what the table shows,
+  // pinned once the tiles and grid scroll under the app header (components/analyst/sticky-bar.tsx).
+  const {ref: filtersEnd, stuck} = useStuckSentinel();
   const m = AUDIT_META[state];
   const c = toneOf(lm ? lm.states[0] : state);
   const owner = lm ? lm.owner : m.owner;
@@ -100,6 +104,53 @@ export function AuditMatrix({data}: {data: AuditResult}) {
 
   return (
     <div className={GL_PAGE}>
+      {sel && (
+        <StickyBar stuck={stuck} gapClass="-mb-6">
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="shrink-0 font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">Reconcile</span>
+            <span className="min-w-0 truncate text-sm font-semibold">
+              {all ? 'All stores' : `Store ${sel.code}${sel.name ? ` · ${sel.name}` : ''}`} · {monthLabel(sel.month)}
+            </span>
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            {data.coverage.loaded && (
+              <span role="group" aria-label="Reco A to D" className="flex gap-1">
+                {RECO_LETTERS.map((l) => {
+                  const tone = toneOf(RECO_META[l].states[0]);
+                  const on = letter === l;
+                  return (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => go({reco: on ? null : l, why: null, q: ''})}
+                      title={RECO_META[l].label}
+                      className={cn(
+                        'inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs transition-[transform,border-color,background-color] duration-150 ease-out active:scale-[0.97]',
+                        on ? 'border-transparent' : 'border-border bg-background [@media(hover:hover)]:hover:border-foreground/25',
+                        data.summary.letters[l] === 0 && !on && 'opacity-55',
+                      )}
+                      style={on ? {background: tint(tone, 16), color: ink(tone)} : undefined}
+                    >
+                      <span className="font-mono font-semibold" style={on ? undefined : {color: ink(tone)}}>
+                        {l}
+                      </span>
+                      <span className="tabular-nums">{data.summary.letters[l].toLocaleString('en-US')}</span>
+                    </button>
+                  );
+                })}
+              </span>
+            )}
+            {!searching && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                {lm ? <span className="font-medium text-foreground">{lm.label}</span> : <StateChip state={state} />}
+                <span className="tabular-nums">{total.toLocaleString('en-US')}</span>
+              </span>
+            )}
+            <TopButton />
+          </span>
+        </StickyBar>
+      )}
       <header className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="max-w-2xl">
@@ -164,6 +215,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
             </>
           )}
           <UnknownReasons summary={data.summary} active={!searching && !letter && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', reco: null, why, q: ''})} />
+          <div ref={filtersEnd} aria-hidden className="-mt-6 h-0" />
 
           <Card className="gap-0 overflow-hidden py-0">
             {/* The table's header says what it shows. No second filter here. */}
