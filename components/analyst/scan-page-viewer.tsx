@@ -322,7 +322,60 @@ export function ScanPageViewer({
   }
 
   return (
-    <div className={`relative flex flex-col ${className ?? ''}`}>
+    <div className={`relative flex flex-col overflow-hidden ${className ?? ''}`}>
+      {/* The controls sit in a strip above the page, never on it: floating over the scan they
+          covered handwriting in the bottom corner (Nov 25). */}
+      <div role="toolbar" aria-label="Scan controls" className="flex shrink-0 items-center justify-end gap-0.5 border-b border-border bg-background px-1.5 py-1">
+        {onEnlarge && (
+          <button
+            type="button"
+            onClick={onEnlarge}
+            aria-label="Enlarge scan"
+            title="Enlarge"
+            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+          >
+            <Maximize2 className="size-4" />
+          </button>
+        )}
+        {onRotate && (
+          <button
+            type="button"
+            onClick={onRotate}
+            aria-label="Rotate 180°"
+            title="Rotate 180°"
+            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+          >
+            <RotateCw className="size-4" />
+          </button>
+        )}
+        {(onEnlarge || onRotate) && <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />}
+        <button
+          type="button"
+          onClick={() => zoomAt(Math.round((zoom - 0.25) * 100) / 100)}
+          disabled={zoom <= ZMIN}
+          aria-label="Zoom out"
+          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+        >
+          <Minus className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomAt(1)}
+          title="Back to fit"
+          className="w-11 rounded-md py-1 text-center text-xs font-medium tabular-nums transition-colors hover:bg-muted"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomAt(Math.round((zoom + 0.25) * 100) / 100)}
+          disabled={zoom >= ZMAX}
+          aria-label="Zoom in"
+          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
       <div
         ref={scrollRef}
         onPointerDown={onPointerDown}
@@ -332,7 +385,7 @@ export function ScanPageViewer({
         onPointerLeave={() => moveRuler(null)}
         onScroll={() => moveRuler(rulerAt.current)}
         style={{touchAction: 'pan-x pan-y'}}
-        className={`relative flex flex-1 overflow-auto overscroll-contain rounded-md bg-[color:var(--muted)] select-none ${dragging ? 'cursor-grabbing' : onEnlarge ? 'cursor-zoom-in' : 'cursor-grab'}`}
+        className={`relative flex min-h-0 flex-1 overflow-auto overscroll-contain bg-[color:var(--muted)] select-none ${dragging ? 'cursor-grabbing' : onEnlarge ? 'cursor-zoom-in' : 'cursor-grab'}`}
       >
         {state === 'loading' && (
           <div className="absolute inset-0 grid place-items-center">
@@ -389,57 +442,6 @@ export function ScanPageViewer({
             )}
           </div>
         </div>
-      </div>
-      <div className="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-lg border border-border bg-background/95 p-1 shadow-md backdrop-blur">
-        {onEnlarge && (
-          <button
-            type="button"
-            onClick={onEnlarge}
-            aria-label="Enlarge scan"
-            title="Enlarge"
-            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
-          >
-            <Maximize2 className="size-4" />
-          </button>
-        )}
-        {onRotate && (
-          <button
-            type="button"
-            onClick={onRotate}
-            aria-label="Rotate 180°"
-            title="Rotate 180°"
-            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
-          >
-            <RotateCw className="size-4" />
-          </button>
-        )}
-        {(onEnlarge || onRotate) && <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />}
-        <button
-          type="button"
-          onClick={() => zoomAt(Math.round((zoom - 0.25) * 100) / 100)}
-          disabled={zoom <= ZMIN}
-          aria-label="Zoom out"
-          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-        >
-          <Minus className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => zoomAt(1)}
-          title="Back to fit"
-          className="w-11 rounded-md py-1 text-center text-xs font-medium tabular-nums transition-colors hover:bg-muted"
-        >
-          {Math.round(zoom * 100)}%
-        </button>
-        <button
-          type="button"
-          onClick={() => zoomAt(Math.round((zoom + 0.25) * 100) / 100)}
-          disabled={zoom >= ZMAX}
-          aria-label="Zoom in"
-          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-        >
-          <Plus className="size-4" />
-        </button>
       </div>
     </div>
   );
