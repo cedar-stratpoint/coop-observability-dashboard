@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.7 Per store board: confirming a store says it worked (prod release)
+Ships only #741, cherry-picked onto `main`; both touched files are identical to staging. No database change.
+
+## 2026-11-25 — Per store board: confirming a store says it worked
+
+Confirming a store on a "Needs a store" card moved the card away with no word, so it looked like nothing happened. A confirmation now appears ("Store 473 · SM CITY-SAN PABLO 1 set for Gaisano Mall Digos (Sep 16 to 30, 2026)") with a Show button that filters the board to where the form went (its store, or One-off stores when it is that store's only form). The confirmation is a shared `ToastStack` with an optional action.
+
 ## 2026-11-25 · v1.26.6 Voucher families (*300) and Ask Coop matches without asking (prod release)
 Ships only #742 (staging #743), cherry-picked onto `main`.
 
