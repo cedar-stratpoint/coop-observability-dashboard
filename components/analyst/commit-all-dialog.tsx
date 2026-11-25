@@ -3,11 +3,14 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, ArrowRight, Check, CheckCheck, CircleSlash, Loader2, X} from 'lucide-react';
+import {Combobox} from '@base-ui/react/combobox';
+import {AlertTriangle, ArrowRight, Check, CheckCheck, ChevronsUpDown, CircleSlash, Loader2, MapPin, X} from 'lucide-react';
 import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
-import {commitAllAction, planCommitAllAction, type BulkCommitForm} from '@/app/uploads/actions';
+import {assignFormStoreAction, commitAllAction, planCommitAllAction, type BulkCommitForm} from '@/app/uploads/actions';
+import {suggestStore} from '@/src/store-suggest';
+import type {StoreOption} from '@/src/goldline-data';
 import {draftKey, parseDraft} from '@/src/review-draft';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import type {TriageForm} from '@/src/goldline-triage-data';
@@ -21,6 +24,11 @@ import type {TriageForm} from '@/src/goldline-triage-data';
 //   mixed stores), plus a form with edits saved in this browser, so a bulk commit never
 //   throws away someone's fixes. Those open on their own.
 // Forms commit one at a time, so the progress is real and one failure leaves the rest.
+//
+// Nov 25, "Commit all means everything": forms with no store get a store picker here
+// (pre-filled only when the name read off the form clearly points at one store). Picked
+// stores are saved first, which turns those pages into store forms, then everything commits
+// in the same pass. Unchecked rows are included by default; untick to leave them for review.
 
 type Row = BulkCommitForm & {label: string; draft: boolean};
 type Result = {batchId: string; ok: boolean; committed: number; error?: string};
@@ -40,21 +48,34 @@ function hasDraft(batchId: string): boolean {
 
 export function CommitAllDialog({
   company,
+  dropId,
   forms,
+  needsStore,
+  stores,
   storeNames,
   notListed,
 }: {
   company: string;
+  /** The upload these forms came from: the plan covers every open store form in it. */
+  dropId: string | null;
   forms: TriageForm[];
+  /** Forms with pages to commit but no store (none read, or one not in the store list). */
+  needsStore: TriageForm[];
+  stores: StoreOption[];
   /** The registry's name per store code, so a form reads by its real store name. */
   storeNames: Record<string, string | null>;
-  /** Forms with pages to commit that this can't take (no store yet, or pages shared with another form). */
+  /** Forms with pages to commit that this can't take (pages mixed with another form). */
   notListed: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [plan, setPlan] = useState<Row[] | 'loading' | {error: string}>('loading');
-  const [includeFlagged, setIncludeFlagged] = useState(false);
+  const [includeFlagged, setIncludeFlagged] = useState(true);
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [suggested, setSuggested] = useState<Record<string, string>>({});
+  // What is actually committing (the confirm's forms, plus the forms a picked store creates).
+  const [queue, setQueue] = useState<Row[]>([]);
+  const [step, setStep] = useState<{stores: number; of: number} | null>(null);
   const [phase, setPhase] = useState<'confirm' | 'committing' | 'done'>('confirm');
   const [results, setResults] = useState<Result[]>([]);
 
@@ -65,36 +86,49 @@ export function CommitAllDialog({
   const ids = useMemo(() => forms.map((f) => f.batchId).filter((x): x is string => Boolean(x)), [forms]);
   // Read when the dialog opens, not on every change: committing refreshes the page, and that
   // must not throw the dialog back to its confirm screen mid-way (Nov 25 QA).
-  const latest = useRef({ids, labels});
-  latest.current = {ids, labels};
+  const latest = useRef({ids, labels, needsStore, stores});
+  latest.current = {ids, labels, needsStore, stores};
   const {toasts, push, dismiss} = useToasts(8000);
 
   useEffect(() => {
     if (!open) return;
-    const {ids, labels} = latest.current;
+    const {ids, labels, needsStore, stores} = latest.current;
     setPhase('confirm');
     setResults([]);
-    setIncludeFlagged(false);
+    setQueue([]);
+    setStep(null);
+    setIncludeFlagged(true);
+    const guess = Object.fromEntries(needsStore.flatMap((f) => {
+      const code = suggestStore(f.storeName, stores);
+      return code ? [[f.key, code]] : [];
+    }));
+    setSuggested(guess);
+    setPicks(guess);
     setPlan('loading');
     let live = true;
-    planCommitAllAction({company, batchIds: ids})
+    planCommitAllAction({company, batchIds: ids, dropId})
       .then((r) => {
         if (!live) return;
         if (!r.ok) return setPlan({error: r.error});
-        setPlan(r.forms.map((f) => ({...f, label: labels.get(f.batchId) ?? `Store ${f.storeCode}`, draft: hasDraft(f.batchId)})));
+        setPlan(r.forms.map((f) => ({...f, label: labels.get(f.batchId) ?? storeNames[f.storeCode] ?? `Store ${f.storeCode}`, draft: hasDraft(f.batchId)})));
       })
       .catch(() => live && setPlan({error: 'Could not read these forms. Please try again.'}));
     return () => {
       live = false;
     };
-  }, [open, company]);
+  }, [open, company, dropId]); // eslint-disable-line react-hooks/exhaustive-deps -- read on open only (see latest)
 
   const rows = Array.isArray(plan) ? plan : [];
   const ready = rows.filter((r) => !r.draft && r.verdict.state === 'ready');
   const flagged = rows.filter((r) => !r.draft && r.verdict.state === 'flagged');
-  const skipped = rows.filter((r) => r.draft || r.verdict.state === 'blocked');
+  // A form blocked only for lack of a store shows under Needs a store instead.
+  const noStore = (r: Row) => r.verdict.state === 'blocked' && (!r.storeCode || !(r.storeCode in storeNames));
+  const skipped = rows.filter((r) => r.draft || (r.verdict.state === 'blocked' && !noStore(r)));
   const going = includeFlagged ? [...ready, ...flagged] : ready;
   const goingRows = going.reduce((n, r) => n + r.rows, 0);
+  const picked = needsStore.filter((f) => picks[f.key]);
+  const total = going.length + picked.length;
+  const storeCount = new Set([...going.map((g) => g.storeCode), ...picked.map((f) => picks[f.key])]).size;
   const flaggedRows = flagged.reduce((n, r) => n + (r.verdict.state === 'flagged' ? r.verdict.rows : 0), 0);
   const done = results.length;
   const okCount = results.filter((r) => r.ok).length;
@@ -103,7 +137,36 @@ export function CommitAllDialog({
   async function commit() {
     setPhase('committing');
     const out: Result[] = [];
-    for (const f of going) {
+    const todo: Row[] = [...going];
+    const shown: Row[] = [...going];
+    if (picked.length) {
+      // 1. Save the picked stores: each form's pages become a store form, as Confirm store does.
+      for (let i = 0; i < picked.length; i++) {
+        setStep({stores: i + 1, of: picked.length});
+        const f = picked[i];
+        const r = await assignFormStoreAction({company, uploadIds: f.uploadIds, storeCode: picks[f.key]}).catch(() => ({ok: false as const, error: 'Could not reach the server.'}));
+        if (!r.ok) {
+          const row: Row = {batchId: `store:${f.key}`, storeCode: picks[f.key], periodStart: f.periodStart ?? '', periodEnd: f.periodEnd ?? '', pages: f.uploadIds.length, rows: 0, verdict: {state: 'blocked', reason: r.error}, label: storeNames[picks[f.key]] ?? `Store ${picks[f.key]}`, draft: false};
+          shown.push(row);
+          out.push({batchId: row.batchId, ok: false, committed: 0, error: r.error});
+        }
+      }
+      setStep(null);
+      // 2. Re-read the upload: the forms that now have a store join the queue.
+      const before = new Map(rows.map((r) => [r.batchId, r]));
+      const again = await planCommitAllAction({company, batchIds: [], dropId}).catch(() => null);
+      for (const f of again && again.ok ? again.forms : []) {
+        const prev = before.get(f.batchId);
+        if (prev && !(prev.verdict.state === 'blocked' && prev.storeCode !== f.storeCode)) continue; // not one we just gave a store
+        const row: Row = {...f, label: storeNames[f.storeCode] ?? `Store ${f.storeCode}`, draft: hasDraft(f.batchId)};
+        shown.push(row);
+        if (!row.draft && (f.verdict.state === 'ready' || (f.verdict.state === 'flagged' && includeFlagged))) todo.push(row);
+        else out.push({batchId: f.batchId, ok: false, committed: 0, error: f.verdict.state === 'blocked' ? f.verdict.reason : row.draft ? 'Has edits saved in this browser.' : 'Has unchecked rows. Open it to check them.'});
+      }
+    }
+    setQueue(shown);
+    setResults([...out]);
+    for (const f of todo) {
       const r = await commitAllAction({company, batchIds: [f.batchId], includeFlagged}).catch(() => ({ok: false as const, error: 'Could not reach the server.'}));
       out.push(r.ok ? (r.results[0] ?? {batchId: f.batchId, ok: false, committed: 0, error: 'Not committed.'}) : {batchId: f.batchId, ok: false, committed: 0, error: r.error});
       setResults([...out]);
@@ -125,7 +188,7 @@ export function CommitAllDialog({
     }
   };
   // Reconcile opens on the month most of the committed forms count.
-  const committedForms = going.filter((g) => results.some((r) => r.ok && r.batchId === g.batchId));
+  const committedForms = queue.filter((g) => results.some((r) => r.ok && r.batchId === g.batchId));
   const months = committedForms.map((f) => f.periodStart.slice(0, 7)).filter(Boolean);
   const topMonth = months.sort((a, b) => months.filter((m) => m === b).length - months.filter((m) => m === a).length)[0];
   const reconcileHref = topMonth ? `/stock/audit?month=${topMonth}` : '/stock/audit';
@@ -134,7 +197,7 @@ export function CommitAllDialog({
     <>
     <ToastStack toasts={toasts} dismiss={dismiss} />
     <AlertDialog.Root open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
-      {forms.length > 0 && (
+      {forms.length + needsStore.length > 0 && (
         <AlertDialog.Trigger
           render={
             <Button size="sm" className="shrink-0 gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]">
@@ -154,7 +217,7 @@ export function CommitAllDialog({
                 </span>
                 <div className="flex min-w-0 flex-col gap-1">
                   <AlertDialog.Title className="font-heading text-lg font-semibold tracking-tight">
-                    {Array.isArray(plan) ? `Commit ${going.length} ${going.length === 1 ? 'form' : 'forms'}?` : 'Commit all forms?'}
+                    {Array.isArray(plan) ? `Commit ${total} ${total === 1 ? 'form' : 'forms'}?` : 'Commit all forms?'}
                   </AlertDialog.Title>
                   <AlertDialog.Description className="text-sm text-muted-foreground">
                     Each form&apos;s counts go into Inventory as read, with the store and period shown. Inventory and Reconcile use them right away.
@@ -181,13 +244,15 @@ export function CommitAllDialog({
 
                     {flagged.length > 0 && (
                       <Section title="Rows nobody has checked" count={flagged.length} tone="warn">
-                        <label className="mb-1 flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted/60" style={includeFlagged ? {borderColor: tint('warn', 55), background: tint('warn', 8)} : undefined}>
+                        <li className="mb-1 list-none">
+                        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition-colors duration-150 [@media(hover:hover)]:hover:bg-muted/60" style={includeFlagged ? {borderColor: tint('warn', 55), background: tint('warn', 8)} : undefined}>
                           <input type="checkbox" checked={includeFlagged} onChange={(e) => setIncludeFlagged(e.target.checked)} className="mt-0.5 size-4 accent-[var(--status-warn)]" />
                           <span>
                             Also commit these {flagged.length} {flagged.length === 1 ? 'form' : 'forms'} without checking their <strong className="tabular-nums">{flaggedRows}</strong> low-confidence rows
-                            <span className="block text-xs text-muted-foreground">Left unticked, open each form to check them first.</span>
+                            <span className="block text-xs text-muted-foreground">Untick to leave them for review on their own page.</span>
                           </span>
                         </label>
+                        </li>
                         {flagged.map((r) => (
                           <FormLine
                             key={r.batchId}
@@ -197,6 +262,34 @@ export function CommitAllDialog({
                             dim={!includeFlagged}
                             note={`${r.verdict.state === 'flagged' ? r.verdict.rows : 0} low-confidence rows · ${r.rows} rows`}
                           />
+                        ))}
+                      </Section>
+                    )}
+
+                    {needsStore.length > 0 && (
+                      <Section title="Needs a store" count={needsStore.length} tone="crit">
+                        <li className="mb-1 list-none text-xs text-muted-foreground">
+                          Pick each form&apos;s store and it commits with the rest. Left empty, the form stays for later.
+                          {Object.keys(suggested).length > 0 && ' Suggestions come from the store name read off the form, so check them.'}
+                        </li>
+                        {needsStore.map((f) => (
+                          <li key={f.key} className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate text-sm font-medium" title={f.storeName ?? undefined}>
+                                {f.storeName ?? 'Store not readable'}
+                                {f.storeCode && <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">read {f.storeCode}</span>}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {f.periodStart ? fmtTriagePeriod(f.periodStart, f.periodEnd) : 'No period'} · {f.uploadIds.length} {f.uploadIds.length === 1 ? 'page' : 'pages'}
+                              </span>
+                            </span>
+                            <StoreSelect
+                              stores={stores}
+                              value={picks[f.key] ?? ''}
+                              suggested={suggested[f.key] === picks[f.key] && Boolean(picks[f.key])}
+                              onChange={(code) => setPicks((p) => ({...p, [f.key]: code}))}
+                            />
+                          </li>
                         ))}
                       </Section>
                     )}
@@ -215,10 +308,10 @@ export function CommitAllDialog({
                       </Section>
                     )}
 
-                    {rows.length === 0 && <p className="py-6 text-sm text-muted-foreground">No forms in this upload are waiting to be committed.</p>}
+                    {rows.length === 0 && needsStore.length === 0 && <p className="py-6 text-sm text-muted-foreground">No forms in this upload are waiting to be committed.</p>}
                     {notListed > 0 && (
                       <p className="text-xs text-muted-foreground">
-                        {notListed} more {notListed === 1 ? 'form isn’t' : 'forms aren’t'} listed: {notListed === 1 ? 'it needs' : 'they need'} a store first, or {notListed === 1 ? 'its' : 'their'} pages are mixed with another form. Open {notListed === 1 ? 'it' : 'those'} from the board.
+                        {notListed} more {notListed === 1 ? 'form isn’t' : 'forms aren’t'} listed: {notListed === 1 ? 'its' : 'their'} pages are mixed with another form. Open {notListed === 1 ? 'it' : 'those'} from the board.
                       </p>
                     )}
                   </>
@@ -226,11 +319,13 @@ export function CommitAllDialog({
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
-                <p className="text-xs text-muted-foreground tabular-nums">{going.length > 0 ? `${goingRows.toLocaleString('en-US')} rows across ${new Set(going.map((g) => g.storeCode)).size} ${new Set(going.map((g) => g.storeCode)).size === 1 ? 'store' : 'stores'}` : ''}</p>
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {total > 0 ? `${total} ${total === 1 ? 'form' : 'forms'} across ${storeCount} ${storeCount === 1 ? 'store' : 'stores'}${picked.length ? '' : ` · ${goingRows.toLocaleString('en-US')} rows`}` : ''}
+                </p>
                 <div className="flex gap-2">
                   <AlertDialog.Close render={<Button variant="ghost" />}>Cancel</AlertDialog.Close>
-                  <Button onClick={commit} disabled={going.length === 0} className="gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]">
-                    <CheckCheck className="size-4" /> Commit {going.length} {going.length === 1 ? 'form' : 'forms'}
+                  <Button onClick={commit} disabled={total === 0} className="gap-1.5 transition-transform duration-150 ease-out active:scale-[0.97]">
+                    <CheckCheck className="size-4" /> Commit {total} {total === 1 ? 'form' : 'forms'}
                   </Button>
                 </div>
               </div>
@@ -243,7 +338,11 @@ export function CommitAllDialog({
                 </span>
                 <div className="flex flex-col gap-0.5">
                   <AlertDialog.Title className="font-heading text-lg font-semibold tracking-tight">
-                    {phase === 'committing' ? `Committing form ${Math.min(done + 1, going.length)} of ${going.length}` : `Committed ${okCount} of ${going.length} ${going.length === 1 ? 'form' : 'forms'}`}
+                    {step
+                      ? `Saving stores · ${step.stores} of ${step.of}`
+                      : phase === 'committing'
+                        ? `Committing form ${Math.min(done + 1, Math.max(queue.length, 1))} of ${Math.max(queue.length, total)}`
+                        : `Committed ${okCount} of ${queue.length} ${queue.length === 1 ? 'form' : 'forms'}`}
                   </AlertDialog.Title>
                   <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
                     {okRows.toLocaleString('en-US')} rows written{phase === 'committing' ? ' so far' : ''}
@@ -251,14 +350,14 @@ export function CommitAllDialog({
                 </div>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-[var(--status-good)] transition-[width] duration-300 ease-out" style={{width: `${going.length ? (done / going.length) * 100 : 0}%`}} />
+                <div className="h-full rounded-full bg-[var(--status-good)] transition-[width] duration-300 ease-out" style={{width: `${queue.length ? (done / queue.length) * 100 : 0}%`}} />
               </div>
               {results.some((r) => !r.ok) && (
                 <ul className="flex max-h-48 flex-col gap-1.5 overflow-y-auto text-sm">
                   {results
                     .filter((r) => !r.ok)
                     .map((r) => {
-                      const f = going.find((g) => g.batchId === r.batchId);
+                      const f = queue.find((g) => g.batchId === r.batchId);
                       return (
                         <li key={r.batchId} className="flex gap-2 rounded-lg px-3 py-2" style={{background: tint('crit', 8)}}>
                           <X className="mt-0.5 size-3.5 shrink-0" style={{color: ink('crit')}} aria-hidden />
@@ -310,6 +409,69 @@ export function CommitAllDialog({
       </AlertDialog.Portal>
     </AlertDialog.Root>
     </>
+  );
+}
+
+/** A compact store search for one form: the registry by name or code, with a clear. */
+function StoreSelect({stores, value, suggested, onChange}: {stores: StoreOption[]; value: string; suggested: boolean; onChange: (code: string) => void}) {
+  const selected = stores.find((s) => s.code === value) ?? null;
+  return (
+    <Combobox.Root<StoreOption>
+      items={stores}
+      value={selected}
+      onValueChange={(v) => onChange(v?.code ?? '')}
+      itemToStringLabel={(s) => `${s.name} · ${s.code}`}
+      isItemEqualToValue={(a, b) => a.code === b.code}
+      filter={(s, q) => {
+        const h = `${s.code} ${s.name}`.toLowerCase();
+        return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w));
+      }}
+      autoHighlight
+    >
+      <div className="relative w-full shrink-0 sm:w-64">
+        <MapPin aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Combobox.Input
+          aria-label="Store for this form"
+          placeholder="Pick a store"
+          className={cn(
+            'h-9 w-full truncate rounded-lg border bg-background pl-8 text-sm outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40',
+            value ? 'border-border' : 'border-dashed border-border',
+            suggested ? 'pr-[6.25rem]' : 'pr-10',
+          )}
+        />
+        <div className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
+          {suggested && <span className="mr-0.5 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Suggested</span>}
+          {value ? (
+            <Combobox.Clear aria-label="Leave this form for later" className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <X className="size-3.5" />
+            </Combobox.Clear>
+          ) : (
+            <Combobox.Trigger aria-label="Show stores" className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <ChevronsUpDown className="size-3.5" />
+            </Combobox.Trigger>
+          )}
+        </div>
+      </div>
+      <Combobox.Portal>
+        <Combobox.Positioner sideOffset={6} align="end" className="z-[60] outline-none">
+          <Combobox.Popup className="flex max-h-[min(18rem,var(--available-height))] w-[max(var(--anchor-width),18rem)] max-w-[calc(100vw-2rem)] origin-[var(--transform-origin)] flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0">
+            <Combobox.Empty className="px-4 py-5 text-center text-sm text-muted-foreground empty:hidden">No store matches. Try the code.</Combobox.Empty>
+            <Combobox.List className="flex flex-col overflow-y-auto overscroll-contain p-1.5 outline-none data-[empty]:p-0">
+              {(st: StoreOption) => (
+                <Combobox.Item
+                  key={st.code}
+                  value={st}
+                  className="grid cursor-default grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-muted"
+                >
+                  <span className="truncate">{st.name}</span>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">{st.code}</span>
+                </Combobox.Item>
+              )}
+            </Combobox.List>
+          </Combobox.Popup>
+        </Combobox.Positioner>
+      </Combobox.Portal>
+    </Combobox.Root>
   );
 }
 

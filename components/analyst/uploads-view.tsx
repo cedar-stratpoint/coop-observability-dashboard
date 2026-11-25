@@ -131,6 +131,15 @@ function GroupTile({
                 <span className="font-medium text-emerald-700 dark:text-emerald-400">{done ? 'Committed' : 'Partly committed'}</span>
               </>
             )}
+            {/* Why it isn't all in: pages that can't be committed until someone picks their store. */}
+            {g.needsStore > 0 && (
+              <>
+                {' · '}
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  {g.needsStore} {g.needsStore === 1 ? 'page needs' : 'pages need'} a store
+                </span>
+              </>
+            )}
           </div>
           {g.duplicateOf && (
             <div className="mt-1 text-[10px] text-muted-foreground">

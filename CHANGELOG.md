@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Commit all means all: pick stores in the confirm, whole-upload plan, tiles say why
+
+QA: after Commit all, "Nov 24 Test Run" still read Partly committed. Expected: Commit all commits every form, reviewed or not. Checked on Staging: 39 of the 43 pages left had **no store** (none read, or a code not in the store list) and 4 were San Pablo Sep 16 to 30, whose page 9 was read as **2020**, so the board split it off its batch and Commit all never offered it. The 28 "issues" are sales sheets and blank backs, set aside on purpose.
+
+- **Needs a store, inside Commit all.** Every store-less form is listed with a store search. A store is pre-filled only when the name read off the form clearly points at one registry store (rare words only, ties suggest nothing; `src/store-suggest.ts`, tested on real registry names), tagged "Suggested". Left empty, the form stays for later. On commit the picked stores are saved first (same path as Confirm store), the upload is re-read, and the new store forms commit in the same pass.
+- **The plan covers the whole upload,** found by its batches (`batchFamily`), not by how the board grouped pages, so a misread year no longer drops a form. Already-committed batches are left out of the confirm.
+- **Unchecked rows are included by default** (the box starts ticked; untick to leave them for review).
+- **Tiles say why:** "Partly committed · 39 pages need a store". A page needs a store when it is still to review in a batch with no store (`needs_store` from `listUploads`, `needsStore` per tile).
+
 ## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
 
 Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). Checked on staging, the same bug showed as a bar per receipt id for "latest offline sales" (the time came back as text), so the rule also counts two columns that differ on every row (an id and a time, a name and an email). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured. The table is titled by its columns ("Order id, Sold at and Total"), not "explore".
