@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useEffect, useMemo, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, SlidersHorizontal, Trash2, X, XCircle} from 'lucide-react';
+import {AlertTriangle, Check, CheckCircle2, ChevronLeft, Clock, FileStack, LayoutGrid, List, Loader2, Search, SlidersHorizontal, Trash2, X, XCircle} from 'lucide-react';
 import type {StoreOption, UploadKind, UploadRow, UploadStatus} from '@/src/goldline-data';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {BatchUploader} from '@/components/analyst/batch-uploader';
@@ -94,12 +94,19 @@ function GroupTile({
   const committed = g.byStatus.committed ?? 0;
   const bad = (g.byStatus.failed ?? 0) + (g.byStatus.rejected ?? 0);
   const processing = g.byStatus.processing ?? 0;
+  // How far the drop is committed (Nov 25): the pages that went in out of the pages that can.
+  const done = committed > 0 && review === 0 && processing === 0;
+  const share = committed + review > 0 ? committed / (committed + review) : 0;
   return (
     <div data-kept-id={keptId(g.key)} data-kept-tile className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/40">
       <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <FileStack className="size-4" />
-        </span>
+        {committed > 0 ? (
+          <CommitRing share={done ? 1 : share} done={done} label={done ? 'Every page committed' : `${Math.round(share * 100)}% of pages committed`} />
+        ) : (
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <FileStack className="size-4" />
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <Link
             data-row
@@ -118,6 +125,12 @@ function GroupTile({
           <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
             {fmtDay(g.day)} · {g.pages}{' '}
             {g.isSplit ? (g.pages === 1 ? 'page' : 'pages') : g.pages === 1 ? 'file' : 'files'}
+            {committed > 0 && (
+              <>
+                {' · '}
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">{done ? 'Committed' : 'Partly committed'}</span>
+              </>
+            )}
           </div>
           {g.duplicateOf && (
             <div className="mt-1 text-[10px] text-muted-foreground">
@@ -152,6 +165,34 @@ function GroupTile({
         {processing > 0 && <Tag cls="text-muted-foreground bg-muted" n={processing} label="reading" />}
       </div>
     </div>
+  );
+}
+
+/** The tile's icon once anything is committed: a ring filling with the committed share,
+ *  a check in the middle. Full and solid when every page is in. */
+function CommitRing({share, done, label}: {share: number; done: boolean; label: string}) {
+  const r = 13;
+  const c = 2 * Math.PI * r;
+  return (
+    <span role="img" aria-label={label} title={label} className="relative mt-0.5 grid size-8 shrink-0 place-items-center">
+      <svg viewBox="0 0 32 32" className="absolute inset-0 size-8 -rotate-90" aria-hidden>
+        <circle cx="16" cy="16" r={r} fill="none" strokeWidth="3" className="stroke-emerald-500/15" />
+        <circle
+          cx="16"
+          cy="16"
+          r={r}
+          fill="none"
+          strokeWidth="3"
+          strokeLinecap="round"
+          className="stroke-emerald-600 transition-[stroke-dashoffset] duration-500 ease-out dark:stroke-emerald-400"
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - Math.max(0.04, Math.min(1, share)))}
+        />
+      </svg>
+      <span className={cn('grid size-5 place-items-center rounded-full', done ? 'bg-emerald-600 text-white dark:bg-emerald-500' : 'text-emerald-700 dark:text-emerald-400')}>
+        <Check className={done ? 'size-3' : 'size-3.5'} strokeWidth={3} aria-hidden />
+      </span>
+    </span>
   );
 }
 
