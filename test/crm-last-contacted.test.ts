@@ -54,7 +54,7 @@ describe('7A contactTally: lastAt + lastKind, newest wins across every kind', ()
     expect(t.get('a@x.com')?.lastKind).toBe('other');
   });
   it('every kind has a label', () => {
-    expect(CONTACT_KIND_LABEL).toMatchObject({reminder: 'Cart reminder', winback: 'Win-back email', review_request: 'Review request', birthday_voucher: 'Birthday voucher', sms: 'SMS'});
+    expect(CONTACT_KIND_LABEL).toMatchObject({reminder: 'Cart reminder', winback: 'Win-back email', review_request: 'Leave a review email', birthday_voucher: 'Birthday voucher', sms: 'SMS'});
   });
 });
 

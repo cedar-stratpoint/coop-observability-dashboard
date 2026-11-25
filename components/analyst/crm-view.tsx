@@ -1390,7 +1390,7 @@ export function CrmView({
                         <SortTh label="Placed" k="placed" sort={orderSort} onSort={sortOrders} />
                         <SortTh label="Turnaround" k="turnaround" sort={orderSort} onSort={sortOrders} title="Placed to fulfilled" />
                         <SortTh label="Fulfilled" k="fulfilled" sort={orderSort} onSort={sortOrders} />
-                        <SortTh label="Review sent" k="reviewSent" sort={orderSort} onSort={sortOrders} title="When the CRM emailed the review request" />
+                        <SortTh label="Leave a review email" k="reviewSent" sort={orderSort} onSort={sortOrders} title="When the website sent the Leave a review email (automatic, after fulfillment)" />
                         <SortTh label="Reviewed" k="reviewed" sort={orderSort} onSort={sortOrders} />
                       </tr>
                     )}
@@ -1415,7 +1415,7 @@ export function CrmView({
                         <SortTh label="First order" k="firstOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Last order" k="lastOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Days since" k="daysSince" sort={customerSort} onSort={sortCustomers} className="text-right" title="Philippine days since the last counted order" />
-                        <SortTh label="Emails sent" k="emailsSent" sort={customerSort} onSort={sortCustomers} className="text-right" title="Automated CRM emails already sent: cart reminders, win-back, review requests, birthday vouchers" />
+                        <SortTh label="Emails sent" k="emailsSent" sort={customerSort} onSort={sortCustomers} className="text-right" title="Automated CRM emails already sent: cart reminders, win-back, Leave a review emails, birthday vouchers" />
                         <SortTh label="Manual" k="manual" sort={customerSort} onSort={sortCustomers} className="text-right" title="Contacts the team logged by hand: DM, SMS, call, email by hand, other" />
                         <SortTh label="Last contacted" k="lastContacted" sort={customerSort} onSort={sortCustomers} title="The newest contact of any kind, Philippine date. Unknown when a source could not be read" />
                         <SortTh label="Consent" k="consent" sort={customerSort} onSort={sortCustomers} />
@@ -1653,7 +1653,7 @@ export function CrmView({
                           <dd>{fmtPh(o.fulfilledAt)}</dd>
                         </div>
                         <div className="flex justify-between gap-2">
-                          <dt>Review sent</dt>
+                          <dt>Leave a review email</dt>
                           <dd>{fmtPh(o.reviewRequestSentAt)}</dd>
                         </div>
                         <div className="col-span-2 flex justify-between gap-2">

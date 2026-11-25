@@ -151,7 +151,7 @@ function eventText(e: TimelineEvent, viewer: string | null): {title: string; det
     case 'review_submitted':
       return {title: 'Left a review', detail: `Order ${no}`};
     case 'review_request':
-      return {title: 'Review request email', detail: `For order ${no}${e.test ? ' · test order, not counted' : ''}`};
+      return {title: 'Leave a review email', detail: `For order ${no}${e.test ? ' · test order, not counted' : ''}`};
     case 'checkout_abandoned':
       return {title: `Abandoned checkout · ${money(e.total ?? null, e.currency)}`, detail: null};
     case 'reminder':
@@ -637,7 +637,7 @@ function Orders({orders, expanded, onToggle, base}: {orders: CrmOrder[]; expande
                       ['Fulfilled', o.fulfilledAt ? fmtPh(o.fulfilledAt) : 'Not yet'],
                       ['Turnaround', turnaround(o.createdAt, o.fulfilledAt)],
                       ['Discount code', o.discountCodes?.length ? o.discountCodes.join(', ') : '—'],
-                      ['Review request', o.reviewRequestSentAt ? fmtPhDate(o.reviewRequestSentAt) : '—'],
+                      ['Leave a review email', o.reviewRequestSentAt ? fmtPhDate(o.reviewRequestSentAt) : '—'],
                       ['Reviewed', o.reviewSubmittedAt ? fmtPhDate(o.reviewSubmittedAt) : '—'],
                     ] as Array<[string, React.ReactNode]>
                   ).map(([k, v]) => (
