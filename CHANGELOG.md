@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — "Review request" is now called "Leave a review email"
+
+Owner: "Leave a Review email hindi review request". It is the automatic email the website sends after an order is fulfilled, asking the customer to leave a review; nobody on the team sends it. Renamed everywhere it shows (Website CRM columns and CSV, customer profile and timeline, "Last contacted" kind, Ask Coop's column labels and tool text). Data keys (`review_request`, `reviewRequestSentAt`) are unchanged.
+
 ## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
 
 Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). Checked on staging, the same bug showed as a bar per receipt id for "latest offline sales" (the time came back as text), so the rule also counts two columns that differ on every row (an id and a time, a name and an email). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured. The table is titled by its columns ("Order id, Sold at and Total"), not "explore". A date the SQL typed as text ("2026-11-03 16:32") counts as a date, so an id plus a sale time is a list even when several sales share a minute.

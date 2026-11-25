@@ -119,8 +119,8 @@ describe('schedule lines from /api/metrics', () => {
   });
 
   it('review line: N after fulfillment, paused when the CRM says so; absent = no line', () => {
-    expect(reviewSchedule({...base, reviewAfterMinutes: 10080})).toBe('Review email: sent 7 days after fulfillment');
-    expect(reviewSchedule({...base, reviewAfterMinutes: 4320, reviewEmailsEnabled: false})).toBe('Review email: sent 3 days after fulfillment · paused');
+    expect(reviewSchedule({...base, reviewAfterMinutes: 10080})).toBe('Leave a review email: sent 7 days after fulfillment');
+    expect(reviewSchedule({...base, reviewAfterMinutes: 4320, reviewEmailsEnabled: false})).toBe('Leave a review email: sent 3 days after fulfillment · paused');
     expect(reviewSchedule(base)).toBeNull();
   });
 
@@ -207,7 +207,7 @@ describe("CSV exports with Vince's summary header", () => {
   it('order summary: paid revenue leaves Shopify test orders out and says how many are in the export', () => {
     const csv = orderCsv([order('1'), order('2', {test: true}), order('3', {financialStatus: 'pending'})], 'now', 'none');
     expect(csv.slice(2, 5)).toEqual([['Rows in export', '3'], ['Paid revenue (test orders excluded)', '500.00'], ['Shopify test orders in export', '1']]);
-    expect(csv[6]).toContain('Review sent (PH time)');
+    expect(csv[6]).toContain('Leave a review email sent (PH time)');
   });
 
   it('customer summary: tiers and the threshold; To Platinum is the pesos left for Gold, Qualified for Platinum', () => {

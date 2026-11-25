@@ -107,7 +107,7 @@ export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_
 export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.freeze({
   reminder: 'Cart reminder',
   winback: 'Win-back email',
-  review_request: 'Review request',
+  review_request: 'Leave a review email',
   birthday_voucher: 'Birthday voucher',
   membership: 'Membership email',
   ...CHANNEL_LABEL,
