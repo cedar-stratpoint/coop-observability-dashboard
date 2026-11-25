@@ -554,11 +554,16 @@ function autoY(result: MetricResult, title = ''): ResultColumn[] {
   return sameUnit.length >= 3 && totalColumn(sameUnit, result.rows) ? sameUnit : [primary];
 }
 
-/** Owner 2026-11-25 ("who are the latest linked …" drew a trend): a text column with a different value on every row means each row is a person or
- * record, so a time column beside it is when it happened, not a period to plot. A time series split by a category repeats that category. */
+/** Owner 2026-11-25 ("who are the latest linked …" drew a trend; "latest offline sales" drew a bar per receipt id): when a text column has a
+ * different value on every row AND there is a date, or a second column that also differs on every row (an email, a handle, a time typed as
+ * text), each row is a person or record and the answer is a list. "Top products by revenue" (one label column) and week × channel (the
+ * category repeats) still chart. */
 function isEntityListing(result: MetricResult): boolean {
   const {columns, rows} = result;
-  return rows.length >= 2 && columns.some((c) => c.role === 'category' && c.unit === 'text' && new Set(rows.map((r) => cell(r, c.key))).size === rows.length);
+  if (rows.length < 2) return false;
+  const unique = (c: ResultColumn) => new Set(rows.map((r) => cell(r, c.key))).size === rows.length;
+  const labels = columns.filter((c) => c.role === 'category' && unique(c));
+  return labels.length >= 2 || (labels.length === 1 && columns.some((c) => c.role === 'time'));
 }
 
 /**
@@ -610,6 +615,8 @@ function decideView(result: MetricResult, request: ViewRequest, pick: {x?: strin
     };
   }
 
+  if (request.kind === 'auto' && isEntityListing(result)) return {decisions: [tableDecision(result, request, 'One row per person or record is a list, not a chart: a table.')]};
+
   // An explicit x on kind auto is a one-dimension ask; with a grouped/stacked/small-multiples kind, an x naming a category column still pivots (live A7).
   if (!pick.x || (request.kind !== 'auto' && columns.some((c) => c.key === pick.x && c.role === 'category'))) {
     const two = decideTwoDim(result, request, pick);
@@ -618,7 +625,6 @@ function decideView(result: MetricResult, request: ViewRequest, pick: {x?: strin
   const x = (pick.x ? col(pick.x) : undefined) ?? columns.find((c) => c.role === 'time') ?? columns.find((c) => c.role === 'category');
   const ys = pick.y?.length ? pick.y.map(col).filter((c): c is ResultColumn => c !== undefined && isNumericColumn(c)) : autoY(result, pick.title ?? '');
   if (!x || ys.length === 0) return {decisions: [tableDecision(result, request, 'This is a detail listing, which reads best as a table.')]};
-  if (request.kind === 'auto' && x.role === 'time' && isEntityListing(result)) return {decisions: [tableDecision(result, request, 'One row per person or record, with a date, is a list, not a trend: a table.')]};
 
   const groups = byUnit(ys);
   const decisions = groups.flatMap((g) => decideChart({result, request, x, ys: g}, groups.length > 1));
