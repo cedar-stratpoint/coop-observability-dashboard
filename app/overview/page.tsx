@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import {ArrowDownRight, ArrowUpRight, FileSpreadsheet, Package, Receipt, Store, Wallet} from 'lucide-react';
+import {ArrowDownRight, ArrowUpRight, ChevronRight, FileSpreadsheet, Package, Receipt, Store, Wallet} from 'lucide-react';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
 import {getGoldlineOverviewData, type TrendMonth} from '@/src/goldline-analytics';
@@ -7,7 +7,7 @@ import {greetingFor, type OverviewKpi} from '@/src/goldline-overview';
 import {GoldlineCategories} from '@/components/analyst/goldline-categories';
 import {buttonVariants} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
-import {GL_PAGE} from '@/src/goldline-ui';
+import {GL_CARD_CUE, GL_CARD_LINK, GL_PAGE} from '@/src/goldline-ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,9 +82,9 @@ export default async function Page() {
       </header>
 
       <section aria-label="Sales this window" className="grid grid-cols-2 gap-3 sm:grid-cols-3 max-sm:[&>*:last-child]:col-span-2">
-        <KpiTile Icon={Wallet} label="Net sales" value={o.hasSales ? peso(o.net.current) : '—'} delta={o.net.deltaPct} sub={sub(o.net, peso)} />
-        <KpiTile Icon={Package} label="Units sold" value={o.hasSales ? compact(o.units.current) : '—'} delta={o.units.deltaPct} sub={sub(o.units, compact)} />
-        <KpiTile Icon={Receipt} label="Gross sales" value={o.hasSales ? peso(o.gross.current) : '—'} delta={o.gross.deltaPct} sub={sub(o.gross, peso)} />
+        <KpiTile href="/stores?sort=net" Icon={Wallet} label="Net sales" value={o.hasSales ? peso(o.net.current) : '—'} delta={o.net.deltaPct} sub={sub(o.net, peso)} />
+        <KpiTile href="/stores?sort=units" Icon={Package} label="Units sold" value={o.hasSales ? compact(o.units.current) : '—'} delta={o.units.deltaPct} sub={sub(o.units, compact)} />
+        <KpiTile href="/stores?sort=gross" Icon={Receipt} label="Gross sales" value={o.hasSales ? peso(o.gross.current) : '—'} delta={o.gross.deltaPct} sub={sub(o.gross, peso)} />
       </section>
 
       {o.categories.length > 0 ? (
@@ -99,15 +99,16 @@ export default async function Page() {
   );
 }
 
-/** A KPI: tinted icon, big value, the change as a small pill, and what it's compared with. */
-function KpiTile({Icon, label, value, delta, sub}: {Icon: typeof Wallet; label: string; value: string; delta: number | null; sub: string}) {
+/** A KPI: tinted icon, big value, the change as a small pill, and what it's compared with.
+ *  The tile opens Stores ranked by the same figure. */
+function KpiTile({href, Icon, label, value, delta, sub}: {href: string; Icon: typeof Wallet; label: string; value: string; delta: number | null; sub: string}) {
   const up = delta != null && delta >= 0;
   const tone = up ? 'var(--status-good)' : 'var(--status-crit)';
   return (
-    <div className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card px-5 py-5 max-sm:gap-3 max-sm:px-4 max-sm:py-4">
+    <Link href={href} aria-label={`${label}: ${value}. See sales by store`} className={cn(GL_CARD_LINK, 'flex min-w-0 flex-col gap-4 rounded-xl border bg-card px-5 py-5 max-sm:gap-3 max-sm:px-4 max-sm:py-4')}>
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-2.5 text-sm font-medium">
-          <span className="grid size-8 place-items-center rounded-full bg-primary/12 text-primary">
+          <span className="grid size-8 place-items-center rounded-full bg-primary/12 text-primary transition-colors duration-200 group-hover/card:bg-primary/20">
             <Icon aria-hidden className="size-4" />
           </span>
           {label}
@@ -122,9 +123,14 @@ function KpiTile({Icon, label, value, delta, sub}: {Icon: typeof Wallet; label: 
       </div>
       <div className="flex flex-col gap-1">
         <p className="font-heading text-3xl font-semibold tracking-tight tabular-nums max-sm:text-2xl">{value}</p>
-        <p className="text-xs text-muted-foreground">{sub}</p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs text-muted-foreground">{sub}</p>
+          <span className={GL_CARD_CUE} aria-hidden>
+            By store <ChevronRight className="size-3.5" />
+          </span>
+        </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -135,7 +141,11 @@ function TrendCard({trend}: {trend: TrendMonth[]}) {
   const peak = trend.reduce((a, t) => (t.units > a.units ? t : a), trend[0]);
   const avg = trend.filter((t) => t.loaded).reduce((a, t, _, arr) => a + t.units / arr.length, 0);
   return (
-    <section aria-label="Units sold, last 12 months" className="flex min-w-0 flex-col gap-5 rounded-xl border bg-card px-6 py-5 max-sm:px-4">
+    <Link
+      href="/stores?sort=units"
+      aria-label="Units sold, last 12 months. See units by store"
+      className={cn(GL_CARD_LINK, 'flex min-w-0 flex-col gap-5 rounded-xl border bg-card px-6 py-5 max-sm:px-4')}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-heading text-lg font-semibold tracking-tight">Units sold, last 12 months</h2>
         <p className="text-xs text-muted-foreground tabular-nums">
@@ -152,7 +162,7 @@ function TrendCard({trend}: {trend: TrendMonth[]}) {
               <div
                 className={cn(
                   'w-full rounded-md transition-colors duration-150',
-                  !t.loaded ? 'border border-dashed border-border' : isLatest ? 'bg-primary' : 'bg-primary/30 group-hover:bg-primary/45',
+                  !t.loaded ? 'border border-dashed border-border' : isLatest ? 'bg-primary' : 'bg-primary/30 group-hover/card:bg-primary/40 group-hover:bg-primary/55',
                 )}
                 style={{height: `${h}%`}}
               />
@@ -168,23 +178,33 @@ function TrendCard({trend}: {trend: TrendMonth[]}) {
           </span>
         ))}
       </div>
-    </section>
+      <div className="flex justify-end border-t pt-4">
+        <span className={GL_CARD_CUE} aria-hidden>
+          Units by store <ChevronRight className="size-3.5" />
+        </span>
+      </div>
+    </Link>
   );
 }
 
 function StoresPill({count}: {count: number}) {
   const live = count > 0;
   return (
-    <span
+    <Link
+      href="/stores"
       className={cn(
-        'inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1 text-xs font-medium tabular-nums sm:self-auto',
-        live ? 'bg-[color-mix(in_oklab,var(--status-good)_14%,transparent)]' : 'bg-muted text-muted-foreground',
+        'group/pill inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1 text-xs font-medium tabular-nums outline-none sm:self-auto',
+        'ring-1 ring-transparent transition-[box-shadow,background-color,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.97] active:duration-100 focus-visible:ring-2 focus-visible:ring-ring motion-reduce:active:scale-100',
+        live
+          ? 'bg-[color-mix(in_oklab,var(--status-good)_14%,transparent)] hover:bg-[color-mix(in_oklab,var(--status-good)_22%,transparent)] hover:ring-[color-mix(in_oklab,var(--status-good)_35%,transparent)]'
+          : 'bg-muted text-muted-foreground hover:ring-border',
       )}
       style={live ? {color: 'var(--status-good)'} : undefined}
     >
       <Store className="size-3.5" aria-hidden />
       {live ? `${count} ${count === 1 ? 'store' : 'stores'} live` : 'No stores live yet'}
-    </span>
+      <ChevronRight className="-mr-1 size-3.5 opacity-60 transition-[translate,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover/pill:translate-x-0.5 group-hover/pill:opacity-100 motion-reduce:group-hover/pill:translate-x-0" aria-hidden />
+    </Link>
   );
 }
 

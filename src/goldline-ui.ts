@@ -28,3 +28,17 @@ export const titleName = (name: string) => {
     return out;
   });
 };
+
+/**
+ * A card that is a link (Overview tiles and cards). Hover is seen many times a day, so it
+ * stays small: the border warms to the accent, a soft shadow lifts the card 2px, and the
+ * card's "open" cue (a `group-hover/card` child) slides in. Press scales to 0.99. Strong
+ * ease-out under 200ms. Tailwind v4 only applies hover where the device can hover, and
+ * reduced motion keeps the color change but drops the lift and the scale.
+ */
+export const GL_CARD_LINK =
+  'group/card relative block outline-none transition-[border-color,background-color,box-shadow,translate,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-0.5 hover:border-primary/40 hover:bg-[color-mix(in_oklab,var(--card),var(--primary)_4%)] hover:shadow-[0_10px_28px_-14px_color-mix(in_oklab,var(--foreground)_30%,transparent)] active:translate-y-0 active:scale-[0.99] active:duration-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100';
+
+/** The "open" cue inside a GL_CARD_LINK: muted at rest (so touch users still see it), accent on hover. */
+export const GL_CARD_CUE =
+  'inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors duration-200 group-hover/card:text-primary [&>svg]:transition-transform [&>svg]:duration-200 [&>svg]:ease-[cubic-bezier(0.23,1,0.32,1)] group-hover/card:[&>svg]:translate-x-0.5 motion-reduce:group-hover/card:[&>svg]:translate-x-0';
