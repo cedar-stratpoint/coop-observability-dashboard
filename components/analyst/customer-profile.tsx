@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import {Badge} from '@/components/ui/badge';
 import {cn} from '@/lib/utils';
+import {boothText, type CustomerBooth} from '@/src/customer-links';
+import {instagramUrl} from '@/src/instagram';
 import {metricValueClass} from './metric';
 import {
   CONTACT_KIND_LABEL,
@@ -149,7 +151,7 @@ function eventText(e: TimelineEvent, viewer: string | null): {title: string; det
     case 'review_submitted':
       return {title: 'Left a review', detail: `Order ${no}`};
     case 'review_request':
-      return {title: 'Review request email', detail: `For order ${no}${e.test ? ' · test order, not counted' : ''}`};
+      return {title: 'Leave a review email', detail: `For order ${no}${e.test ? ' · test order, not counted' : ''}`};
     case 'checkout_abandoned':
       return {title: `Abandoned checkout · ${money(e.total ?? null, e.currency)}`, detail: null};
     case 'reminder':
@@ -201,7 +203,10 @@ export function CustomerProfile({
   onClose,
   onLogContact,
   reminderTotal,
+  boothInfo,
 }: {
+  /** RET-15 B: the booth lead's Instagram and sign-up details for this customer (exact match or a Same person link); undefined = none or not read. */
+  boothInfo?: CustomerBooth;
   /** The Customers tab row (null: the id in the URL matches no customer, or the CRM did not answer). */
   row: CustomerRow | null;
   orders: CrmOrder[] | null;
@@ -327,6 +332,20 @@ export function CustomerProfile({
                   {row.phone && <span>{row.phone}</span>}
                   <span>Member since {fmtPhDate(row.createdAt)}</span>
                   <span>Email consent: {row.consent.replace(/_/g, ' ')}</span>
+                </div>
+              )}
+              {row && boothInfo && (boothInfo.instagram || boothInfo.booth.length > 0) && (
+                // Owner 2026-11-25: a linked customer showed no Instagram on the profile. The handle opens their Instagram; nothing is sent from Coop.
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  {boothInfo.instagram && instagramUrl(boothInfo.instagram) && (
+                    <a href={instagramUrl(boothInfo.instagram)!} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline underline-offset-2" title="Open their Instagram to message them">
+                      @{boothInfo.instagram} ↗
+                    </a>
+                  )}
+                  {boothInfo.booth.map((b, i) => (
+                    <span key={i} className="rounded-md border border-border px-1.5 py-0.5 text-muted-foreground">{boothText(b) || 'Booth lead'}</span>
+                  ))}
+                  <span className="text-muted-foreground">{boothInfo.source === 'linked' ? 'Linked with Same person' : 'Same email or mobile as a booth lead'}</span>
                 </div>
               )}
             </div>
@@ -618,7 +637,7 @@ function Orders({orders, expanded, onToggle, base}: {orders: CrmOrder[]; expande
                       ['Fulfilled', o.fulfilledAt ? fmtPh(o.fulfilledAt) : 'Not yet'],
                       ['Turnaround', turnaround(o.createdAt, o.fulfilledAt)],
                       ['Discount code', o.discountCodes?.length ? o.discountCodes.join(', ') : '—'],
-                      ['Review request', o.reviewRequestSentAt ? fmtPhDate(o.reviewRequestSentAt) : '—'],
+                      ['Leave a review email', o.reviewRequestSentAt ? fmtPhDate(o.reviewRequestSentAt) : '—'],
                       ['Reviewed', o.reviewSubmittedAt ? fmtPhDate(o.reviewSubmittedAt) : '—'],
                     ] as Array<[string, React.ReactNode]>
                   ).map(([k, v]) => (

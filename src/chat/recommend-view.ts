@@ -554,6 +554,21 @@ function autoY(result: MetricResult, title = ''): ResultColumn[] {
   return sameUnit.length >= 3 && totalColumn(sameUnit, result.rows) ? sameUnit : [primary];
 }
 
+/** Owner 2026-11-25 ("who are the latest linked …" drew a trend; "latest offline sales" drew a bar per receipt id): when a text column has a
+ * different value on every row AND there is a date, or a second column that also differs on every row (an email, a handle, a time typed as
+ * text), each row is a person or record and the answer is a list. "Top products by revenue" (one label column) and week × channel (the
+ * category repeats) still chart. */
+const TEXT_DATE = /^(\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2} \d{1,2}, \d{4})/;
+function isEntityListing(result: MetricResult): boolean {
+  const {columns, rows} = result;
+  if (rows.length < 2) return false;
+  const unique = (c: ResultColumn) => new Set(rows.map((r) => cell(r, c.key))).size === rows.length;
+  // A date the SQL formatted as text ("2026-11-03 16:32", "Nov 3, 2026") is still a date (staging: three sales in the same minute).
+  const dateText = (c: ResultColumn) => c.role === 'category' && rows.every((r) => r[c.key] === null || TEXT_DATE.test(cell(r, c.key)));
+  const labels = columns.filter((c) => c.role === 'category' && !dateText(c) && unique(c));
+  return labels.length >= 2 || (labels.length === 1 && columns.some((c) => c.role === 'time' || dateText(c)));
+}
+
 /**
  * Decide what to draw. Rules (first match wins): no rows -> table; one row -> stat tiles (more than KPI_MAX numbers
  * -> table); no category or time field, or no number -> table; measures of different units -> one chart per unit;
@@ -602,6 +617,8 @@ function decideView(result: MetricResult, request: ViewRequest, pick: {x?: strin
       }],
     };
   }
+
+  if (request.kind === 'auto' && isEntityListing(result)) return {decisions: [tableDecision(result, request, 'One row per person or record is a list, not a chart: a table.')]};
 
   // An explicit x on kind auto is a one-dimension ask; with a grouped/stacked/small-multiples kind, an x naming a category column still pivots (live A7).
   if (!pick.x || (request.kind !== 'auto' && columns.some((c) => c.key === pick.x && c.role === 'category'))) {

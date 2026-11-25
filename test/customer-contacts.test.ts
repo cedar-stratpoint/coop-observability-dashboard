@@ -118,7 +118,7 @@ describe('S5.0 the read: a missing table is null ("unavailable"), never an empty
   const page = (rows: Record<string, unknown>[] | null, error: {code?: string; message: string} | null = null) => async () => ({data: rows, error});
   it('rows are projected (email lower-cased)', async () => {
     const rows = await loadContactRows(page([{id: ID, customer_email: 'Mia@Example.com', channel: 'sms', note: 'hi', contacted_at: '2026-11-10T02:00:00Z', created_by: ME}]));
-    expect(rows).toEqual([{id: ID, email: 'mia@example.com', channel: 'sms', note: 'hi', contactedAt: '2026-11-10T02:00:00Z', createdBy: ME}]);
+    expect(rows).toEqual([{id: ID, email: 'mia@example.com', instagram: null, mobile: null, channel: 'sms', note: 'hi', replied: false, contactedAt: '2026-11-10T02:00:00Z', createdBy: ME}]);
   });
   it.each([
     [{code: 'PGRST205', message: "Could not find the table 'public.customer_contacts' in the schema cache"}],

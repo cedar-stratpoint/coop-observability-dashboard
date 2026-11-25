@@ -98,6 +98,15 @@ export const boothText = (b: BoothInfo): string => [b.campaign, b.prize, b.pet].
  * What the Instagram / Booth cell of one customer says. Unknown is never "never": when the leads or the links could not be
  * read, a customer with nothing found reads "unknown", not "—". (Exact matches need only the leads, so they still show.)
  */
+/** The Website CRM "Instagram" filter (owner 2026-11-25): has a handle, has none, or unknown when the leads or links were not read. */
+export type InstagramFilter = 'all' | 'has' | 'none';
+export function instagramState(found: CustomerBooth | undefined, read: {leads: boolean; links: boolean}): 'has' | 'none' | 'unknown' {
+  if (found?.instagram) return 'has';
+  return read.leads && read.links ? 'none' : 'unknown';
+}
+/** Keep a customer under the filter; unknown matches neither "has" nor "none" (unknown is never "never"). */
+export const matchesInstagramFilter = (f: InstagramFilter, state: 'has' | 'none' | 'unknown'): boolean => f === 'all' || f === state;
+
 export function boothCell(found: CustomerBooth | undefined, read: {leads: boolean; links: boolean}): 'unknown' | 'none' | CustomerBooth {
   if (found) return found;
   return read.leads && read.links ? 'none' : 'unknown';

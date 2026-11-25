@@ -10,6 +10,35 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Release v1.27.1: log a contact for any event lead, Has Instagram filter, Ask Coop lists as tables, "Leave a review email"
+
+PROD release of our own changes only (cherry-picked onto main after v1.27.0): RET-17 (SQL `customer_contacts_lead_keys.sql` applied on PROD by the owner 2026-11-25), the Website CRM Instagram filter / Log contact next to Name / Instagram on the profile, Ask Coop showing one-row-per-record answers as tables, and the "Leave a review email" label. Checked on coop-cedar-staging first.
+
+## 2026-11-25 — Event leads: log a contact for any lead, status first (RET-17)
+
+Syl's list: see who we have / haven't contacted or who replied, log a contact by hand, edit "when I last talked to them". 604 of 744 booth leads gave only an Instagram handle, so the email-only contact log couldn't record them.
+- **Contact log takes email, Instagram or mobile, plus "They replied" and a "When" day** (default today, never future). SQL `supabase/customer_contacts_lead_keys.sql` (applied on Staging 2026-11-25; PROD pending). Until it runs, email logging still works and Instagram / mobile logging says "not set up".
+- **Decided: "Contacted" means logged by the team.** Automated emails (cart reminder, Leave a review email, …) never set the status.
+- **One person, one status:** same email, same Instagram handle, a Same person link, or the same mobile, but a mobile never joins two people with different emails (household phones), and a contact logged only by mobile never attaches to someone who has an email.
+- **Unknown is never "Not contacted":** an unreadable log, or the pre-SQL log for someone without an email, reads Unknown.
+- **Event leads page:** Status chip first, Log right after the name on every row with a key, Status filter with counts, **Not contacted yet (N)**, copy IG handles / emails / mobiles, CSV with status, last contacted and replied.
+- **Website CRM:** clicking **Last contacted** opens the Log dialog for that person on a chosen day (Syl: "can I edit when I last talked to them"). A wrong entry is fixed by deleting your own entry and logging again; automated emails stay read-only.
+- Not in this change: the merged timeline (lead contacts on the Website CRM profile), the "auto" label on Last contacted, Ask Coop status.
+
+## 2026-11-25 — "Review request" is now called "Leave a review email"
+
+Owner: "Leave a Review email hindi review request". It is the automatic email the website sends after an order is fulfilled, asking the customer to leave a review; nobody on the team sends it. Renamed everywhere it shows (Website CRM columns and CSV, customer profile and timeline, "Last contacted" kind, Ask Coop's column labels and tool text). Data keys (`review_request`, `reviewRequestSentAt`) are unchanged.
+
+## 2026-11-25 — Ask Coop: a list of people with a date shows as a table, not a trend chart
+
+Owner asked "Who are the latest linked match on website and event leads customers?" and got an area chart of "Links by Linked on" (5, 5, 5 over "Nov 25" ×5). The rows were one per person, and the view picker treated the linked-on time as a period to plot. Decided: when a text column has a different value on every row (a name, email or handle per row), the rows are people or records, so a time column beside it is *when*, not a trend, and the answer is the table (`isEntityListing` in `src/chat/recommend-view.ts`). Checked on staging, the same bug showed as a bar per receipt id for "latest offline sales" (the time came back as text), so the rule also counts two columns that differ on every row (an id and a time, a name and an email). A time series split by a repeating category (week × channel) still draws, and an explicit chart ask is still honoured. The table is titled by its columns ("Order id, Sold at and Total"), not "explore". A date the SQL typed as text ("2026-11-03 16:32") counts as a date, so an id plus a sale time is a list even when several sales share a minute.
+
+## 2026-11-25 — Website CRM: "Has Instagram" filter, Log contact next to the name, Instagram on the profile
+
+Owner: "dapat meron din akong filter nung has instagram", "log contact … sa una banda", and Karla Sy's profile showed no Instagram even though she was linked.
+- **Instagram filter** (All / Has Instagram · N / No Instagram). A customer whose booth leads or links haven't loaded yet is "unknown" and stays out of both lists, so a failed read never shows as "No Instagram" (`instagramState` in `src/customer-links.ts`, tested).
+- **Log contact** is now the column right after Name, as a labelled button, not an icon at the far right.
+- **Profile drawer** shows the clickable `@handle`, the booth sign-up (event · prize · pet) and whether it came from a Same person link or the same email or mobile.
 ## 2026-11-25 — Release v1.27.0: review flags, Add product row, Reco A to D (Nichido)
 
 Promotes the Nov 25 Nichido work from staging (#796, #799, #800, #801, #802, #803, #804), cherry-picked onto main; every file identical to staging. Needs `supabase/nichido/p6_review_marks.sql` on Nichido PROD (applied before the merge). The reader flags switch `GOLDLINE_READ_MARKS` stays OFF on Production until asked (staging test: +17% read cost).

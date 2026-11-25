@@ -492,3 +492,57 @@ describe('EXP-07: the skill text quotes the code\'s numbers', () => {
     expect(renderSkill()).not.toContain('EXP-07');
   });
 });
+
+describe('a list of people with a date is a table, not a trend (owner 2026-11-25: "who are the latest linked …" drew a chart)', () => {
+  const people = mk(
+    [col('name', 'text', 'category'), col('instagram', 'text', 'category'), col('linked_on', 'date', 'time'), col('orders', 'count', 'measure')],
+    names(5, 'Person').map((name, i) => ({name, instagram: `handle${i}`, linked_on: `2026-11-25T0${i}:00:00Z`, orders: 5})),
+  );
+  it('one distinct name per row next to a time column -> table', () => {
+    expect(first(people).block).toBe('table');
+  });
+  it('an explicit chart ask is still honoured', () => {
+    expect(first(people, ask('line')).block).toBe('chart');
+  });
+  it('a record id and a time typed as text (latest offline sales) -> table, not a bar per id', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category'), col('sold_at_manila', 'text', 'category'), col('total_php', 'PHP', 'measure')],
+      ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7', 'h8'].map((order_id, i) => ({order_id, sold_at_manila: `2026-10-2${i} 10:00`, total_php: 500 + i})),
+    );
+    expect(first(sales).block).toBe('table');
+  });
+  it('an id plus a time typed as text that repeats (same minute) -> table', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category'), col('sold_at', 'text', 'category'), col('total_php', 'PHP', 'measure')],
+      ['a1', 'b2', 'c3', 'd4', 'e5'].map((order_id, i) => ({order_id, sold_at: i < 3 ? '2026-11-03 16:32' : `2026-10-2${i} 09:07`, total_php: 500 + i})),
+    );
+    expect(first(sales).block).toBe('table');
+  });
+  it('revenue by week typed as text is still a chart', () => {
+    const weeks = mk([col('week', 'text', 'category'), col('revenue', 'PHP', 'measure')], ['2026-11-02', '2026-11-09', '2026-11-16'].map((week, i) => ({week, revenue: 100 + i})));
+    expect(first(weeks).block).toBe('chart');
+  });
+  it('top products by revenue (one label per row, no date) is still a bar', () => {
+    expect(first(cat(5)).block).toBe('chart');
+  });
+  it('a time series split by a repeating category is still a chart', () => {
+    const weeks = mk(
+      [col('week', 'date', 'time'), col('channel', 'text', 'category'), col('revenue', 'PHP', 'measure')],
+      ['2026-11-02', '2026-11-09', '2026-11-16'].flatMap((week) => ['Shopee', 'Lazada'].map((channel, j) => ({week, channel, revenue: 100 + j}))),
+    );
+    expect(first(weeks).block).toBe('chart');
+  });
+});
+
+describe('an Explore table is titled by its columns, not "explore"', () => {
+  it('names the columns', () => {
+    const sales = mk(
+      [col('order_id', 'text', 'category', 'Order id'), col('sold_at', 'text', 'category', 'Sold at'), col('total_php', 'PHP', 'measure', 'Total')],
+      [{order_id: 'a1', sold_at: '2026-10-20 10:00', total_php: 500}, {order_id: 'b2', sold_at: '2026-10-21 10:00', total_php: 600}],
+      {exploratory: {label: 'Exploratory', sql: 'select 1', coverage_note: '', warnings: []}},
+    );
+    const out = bindBlock('render_chart', {source: 'r1', kind: 'auto', orientation: 'auto', x: 'auto', y: ['auto'], title: ''}, new Map([['r1', {...sales, metric: 'explore'}]]), () => 'b1');
+    if ('error' in out) throw new Error(out.error);
+    expect(out.blocks[0]).toMatchObject({kind: 'table', title: 'Order id, Sold at and Total'});
+  });
+});
