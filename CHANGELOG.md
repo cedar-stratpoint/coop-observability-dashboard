@@ -8,6 +8,11 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+Dates are local working dates (GMT+8). Newest first.
+
+## 2026-11-25 · v1.26.13 Reconcile pickers, Commit all, scan toolbar (prod release)
+Ships #756 (Reconcile Store/Month pickers, All stores by default), #770 (scan zoom controls moved off the page) and #769 (Commit all on grouped uploads), cherry-picked onto `main`. No schema change.
+
 ## 2026-11-25 — Grouped uploads: Commit all, with a confirmation
 
 Request: a way to commit every form of a grouped upload at once, behind a confirm. There was none (each store form committed from its own review page).
@@ -23,32 +28,6 @@ Request: a way to commit every form of a grouped upload at once, behind a confir
 
 Feedback: the floating zoom bar (enlarge, rotate, zoom out, %, zoom in) sat on the bottom-right of the scan and covered handwriting there (totals, the page number). It is now a slim strip above the page, inside the viewer's frame, so nothing on the paper is ever covered. Same controls, same pinch/drag/click behaviour; applies to the review side pane and the enlarged view (`components/analyst/scan-page-viewer.tsx`).
 
-## 2026-11-25 · GitLab staging deploys use a Vercel "staging" environment
-
-The first GitLab deploy of `staging` built fine but failed at `vercel alias set` ("User not found": `COOP_VERCEL_TOKEN` is a team token and the alias command looks up a personal user). Testing that build showed a bigger problem: sign-in failed with `MissingSecret`. Vercel doesn't apply branch-scoped Preview vars to CLI deploys, even when the deploy records `gitCommitRef: staging`, so `AUTH_SECRET` and the other 20 `staging`-scoped vars were missing. The alias failure kept that build off the staging domain.
-
-- **Decided: a Vercel custom environment named `staging`** (`env_ADpm…`), not branch-scoped Preview vars. It holds the 37 Preview vars, with the `staging` branch value where both existed. `coop-cedar-staging.vercel.app` is attached to it, so `vercel deploy --environment=staging` moves the domain by itself and the alias step is gone. Applied by hand on 2026-11-25 and checked with a test deploy (sign-in config OK); live staging now serves that build.
-- **Still to add by hand:** `SHOPEE_SYNC_WAKE_TOKEN` and `SHOPEE_SYNC_WORKER_TOKEN` in the `staging` environment. Vercel marks them sensitive and never returns their values, so they couldn't be copied. Until then the Shopee sync routes on staging answer 503 (fail closed).
-- **Commit on CLI deploys.** Vercel fills `VERCEL_GIT_*` only for Git-integration builds. The job now passes `DEPLOY_COMMIT_SHA` / `DEPLOY_COMMIT_REF` with `--env`, and `/api/health` falls back to them. The smoke check requires the commit and branch to match the job, which also proves the domain moved to the new build.
-- The old branch-scoped Preview vars stay in place for now; remove them once GitLab deploys are settled.
-
-## 2026-11-25 · Vercel deploys move from GitHub to GitLab CI
-
-Staging and production now deploy from a GitLab pipeline (`.gitlab-ci.yml`) instead of Vercel's GitHub integration. Same Vercel project (`coop-observability-dashboard`), same domains: `main` → **coop-cedar.vercel.app** (Production), `staging` → **coop-cedar-staging.vercel.app** (a Preview build, aliased on every deploy).
-
-- **GitHub stays the source of truth.** PRs and merges happen on GitHub. `mirror-gitlab.yml` pushes to `gitlab.stratpoint.dev`, and that push starts the pipeline. Don't commit on GitLab, because the mirror force-pushes over it.
-- **Vercel CLI, remote build.** Vercel's native GitLab integration doesn't cover self-managed GitLab outside Enterprise. The job checks out the real branch name before deploying, because many Preview env vars (AUTH_*, NICHIDO_URL, GOLDLINE_*) are scoped to the `staging` branch and depend on the deploy's git metadata.
-- **Only staging and main build.** Feature-branch and PR previews are gone. Every push used to build, and the last `main` deploy failed with `function_creation_throttled`. `vercel.json` sets `git.deploymentEnabled: false`, so the GitHub link stays but no longer builds.
-- **Smoke check.** After each deploy the job reads the domain's `/api/health` and fails unless it is up, its database answers, and it reports the expected environment (and the branch/commit when Vercel fills them in).
-- **Notifications.** The Google Chat "Deployed to Staging/Production" message moved into the GitLab job (it also posts on failure). `deploy-gchat-notify.yml` stays for now as a fallback. It fires on Vercel's GitHub deployment statuses, which should stop once GitHub builds are off. Remove it once the first GitLab deploy is checked; if both post, each deploy shows up twice in Chat until then. PR notices stay on GitHub.
-- **Setup (GitLab, by hand):** CI/CD variables `COOP_VERCEL_TOKEN` (masked, protected), `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `GCHAT_WEBHOOK_URL` (masked). Protect `staging` and `main`.
-- **Missed deploy:** GitLab skips push pipelines when one push moves more than 4 refs. Run the pipeline on the branch from Build > Pipelines.
-- **Rollback:** remove `git` from `vercel.json`, and GitHub auto-deploys resume on the next push.
-
-## 2026-11-25 — Per store board: the page row says what it is
-
-Owner asked what the 1 to 5 numbers on a form card mean. They are the five pages of the inventory form (green = in this scan, faded = missing, red ring = scanned twice), but only a hover said so. A small caption now sits above the row: "Pages received" with "2 of 5", plus "· 1 scanned twice" when a page came through twice. The row's screen-reader label matches.
-
 ## 2026-11-25 — Reconcile: new Store and Month pickers, All stores by default
 
 Feedback: the two native dropdowns looked plain, and the month list was a long run of "(no forms)". Hick's law: fewer, clearer choices first.
@@ -58,8 +37,6 @@ Feedback: the two native dropdowns looked plain, and the month list was a long r
 - Both views use the same month picker. `AuditResult.stores` now carries `counted`.
 
 On Staging today, no month has both: October has forms for 2 stores but no POS sales, and November 2025 to September 2026 have sales but no committed forms (about 1,377 scanned pages wait in Needs review).
-Dates are local working dates (GMT+8). Newest first.
-
 ## 2026-11-25 · v1.26.12 Instagram handles open the profile (prod release)
 Ships only the Instagram links (#771), cherry-picked onto `main`.
 
