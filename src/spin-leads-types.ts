@@ -38,3 +38,8 @@ export function matchesLeadSearch(l: SpinLead, query: string): boolean {
   const digits = q.replace(/\D/g, '');
   return digits.length >= 3 && digits.length === q.replace(/[\s()+-]/g, '').length && (l.mobile ?? '').replace(/\D/g, '').includes(digits);
 }
+
+/** A PH day key (YYYY-MM-DD) inside an inclusive From–To range; 'all' on either end leaves that side open. Keys compare as text. */
+export function inDayRange(day: string, from: string, to: string): boolean {
+  return (from === 'all' || day >= from) && (to === 'all' || day <= to);
+}
