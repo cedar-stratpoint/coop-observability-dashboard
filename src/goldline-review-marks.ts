@@ -69,7 +69,8 @@ export function parseFlagInput(raw: unknown): {ok: true; input: FlagInput} | {ok
   if (code.length > 64) return {ok: false, error: 'That row could not be found.'};
   const itemCode = code || null;
   if (!isMarkKind(o.kind)) return {ok: false, error: 'Pick what to flag.'};
-  const allowed = itemCode ? ROW_KINDS : PAGE_KINDS;
+  // added_row is set by Add product row, not picked from the menu.
+  const allowed: MarkKind[] = itemCode ? [...ROW_KINDS, 'added_row'] : PAGE_KINDS;
   if (!allowed.includes(o.kind)) return {ok: false, error: itemCode ? 'That kind of flag is for the whole page.' : 'That kind of flag is for one row.'};
   const row = typeof o.rowIndex === 'number' && Number.isInteger(o.rowIndex) && o.rowIndex >= 0 && o.rowIndex < 5000 ? o.rowIndex : null;
   const text = typeof o.reason === 'string' ? o.reason.replace(/\s+/g, ' ').trim() : '';

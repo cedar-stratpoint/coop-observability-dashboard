@@ -1,7 +1,7 @@
 'use client';
 
-import {useMemo} from 'react';
-import {Check, ChevronLeft, ChevronRight, Search} from 'lucide-react';
+import {useMemo, useState} from 'react';
+import {Check, ChevronLeft, ChevronRight, Plus, Search, Trash2} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, rowConfidence, toneText, type Band} from '@/src/review-confidence';
 import {groupByFamily, pageTotal, printedNameConflict, type CatalogLite} from '@/src/review-workbench';
@@ -13,6 +13,8 @@ import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols
 import {noteLayout, readerNote} from './reader-note';
 import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
 import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
+import {AddRowDialog} from './add-row-dialog';
+import {addedRow, type AddableItem} from '@/src/review-add-row';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -93,6 +95,12 @@ type Props = {
   /** The page these rows are on, so a row (or the page) can be flagged (NICH-42). Needs a
    *  ReviewFlagsProvider above; without either, no Flag buttons show. */
   uploadId?: string;
+  /** Add product row (NICH-42): the catalog to pick from, this page's printed number (for the
+   *  "printed on another page" warning), and the parent's add/remove. Absent = no Add product. */
+  addable?: AddableItem[];
+  page?: number | null;
+  onAddRow?: (row: ExtractedRow) => void;
+  onRemoveRow?: (index: number) => void;
 };
 
 /** The one-line "why this row is doubtful": the reader's cell marks and/or the
@@ -121,7 +129,7 @@ export function ReviewRows({
   rows,
   productNames,
   rowNames,
-  catalog,
+  catalog: catalogIn,
   flagged,
   rowNotes,
   resolved,
@@ -138,11 +146,60 @@ export function ReviewRows({
   onPoint,
   pointed,
   uploadId,
+  addable,
+  page,
+  onAddRow,
+  onRemoveRow,
 }: Props) {
+  const [adding, setAdding] = useState(false);
+  // Added rows aren't in the page's catalog slice: borrow their line and price from the
+  // picker list so they sit under their heading and count in its total.
+  const catalog = useMemo(() => {
+    const extra = rows.filter((r) => r.added && !catalogIn[r.item_code]);
+    if (!extra.length || !addable) return catalogIn;
+    const by = new Map(addable.map((a) => [a.code, a]));
+    return {...catalogIn, ...Object.fromEntries(extra.map((r) => [r.item_code, {productLine: by.get(r.item_code)?.line ?? null, unitPrice: by.get(r.item_code)?.price ?? null}]))};
+  }, [rows, catalogIn, addable]);
   const flagCtx = useReviewFlags();
   const onPage = useMemo(() => (flagCtx && uploadId ? flagCtx.marks.filter((m) => m.uploadId === uploadId) : []), [flagCtx, uploadId]);
   const flagsOf = (code: string) => rowMarks(onPage, code);
   const pageFlags = pageMarks(onPage);
+  const canAdd = Boolean(editable && onAddRow && addable?.length);
+  const pageCodes = useMemo(() => new Set(rows.map((r) => r.item_code)), [rows]);
+  const pageLines = useMemo(() => new Set(rows.map((r) => catalog[r.item_code]?.productLine).filter((l): l is string => Boolean(l))), [rows, catalog]);
+  const addProduct = async (it: AddableItem): Promise<string | null> => {
+    const index = rows.length;
+    onAddRow?.(addedRow(it));
+    onView('all');
+    requestAnimationFrame(() => {
+      const el = reviewRowEl(index);
+      el?.scrollIntoView({behavior: 'smooth', block: 'center'});
+      el?.querySelector<HTMLInputElement>('input')?.focus({preventScroll: true});
+    });
+    // Flag it as written in, so the reports list it with its page and row.
+    if (flagCtx?.canFlag && uploadId) {
+      const err = await flagCtx.save({uploadId, itemCode: it.code, rowIndex: index, kind: 'added_row'});
+      if (err) console.error('added_row flag', err);
+    }
+    return null;
+  };
+  const removeAdded = (r: {item_code: string; i: number}) => {
+    onRemoveRow?.(r.i);
+    const m = onPage.find((x) => x.status === 'open' && x.itemCode === r.item_code && x.kind === 'added_row' && x.source === 'reviewer');
+    if (m && flagCtx) void flagCtx.clear(m.id);
+  };
+  const removeButton = (r: (typeof indexed)[number]) =>
+    r.added && editable && onRemoveRow ? (
+      <button
+        type="button"
+        onClick={() => removeAdded(r)}
+        aria-label={`Remove ${r.item_code}`}
+        title="Remove this added row"
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground outline-none transition-[transform,border-color,color] duration-150 ease-out active:scale-[0.97] focus-visible:ring-3 focus-visible:ring-ring/40 [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:text-foreground"
+      >
+        <Trash2 aria-hidden className="size-3.5" />
+      </button>
+    ) : null;
   const flagTarget = (r: {item_code: string; i: number}) =>
     uploadId ? {uploadId, itemCode: r.item_code, rowIndex: r.i, label: `${r.item_code}${nameOf(r as (typeof indexed)[number]) ? ` · ${nameOf(r as (typeof indexed)[number])}` : ''}`} : null;
   const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
@@ -243,6 +300,7 @@ export function ReviewRows({
               )}
               <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
             </div>
+            {removeButton(r)}
             {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           </div>
         </td>
@@ -320,6 +378,7 @@ export function ReviewRows({
             <FlagChips marks={flagsOf(r.item_code)} className="mt-1" />
           </div>
           <span className="flex shrink-0 items-center gap-1.5">
+          {removeButton(r)}
           {flagTarget(r) && <FlagButton target={flagTarget(r)!} count={flagsOf(r.item_code).length} />}
           <span
             className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums"
@@ -404,7 +463,12 @@ export function ReviewRows({
               {value: 'all', label: `All ${rows.length} · form grid`},
             ]}
           />
-          <div className="relative ml-auto min-w-[12rem]">
+          {canAdd && (
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)} className="ml-auto">
+              <Plus aria-hidden className="size-4" /> Add product
+            </Button>
+          )}
+          <div className={cn('relative min-w-[12rem]', !canAdd && 'ml-auto')}>
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}
@@ -459,6 +523,9 @@ export function ReviewRows({
           </>
         )}
       </CardContent>
+      {adding && addable && (
+        <AddRowDialog items={addable} pageCodes={pageCodes} pageLines={pageLines} page={page ?? null} onAdd={addProduct} onClose={() => setAdding(false)} />
+      )}
     </Card>
   );
 }

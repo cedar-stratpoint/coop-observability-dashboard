@@ -68,6 +68,9 @@ export type ExtractedRow = {
   ending_on_hand: number | null;
   confidence: number;
   alt?: string | null;
+  // NICH-42 · a product the reviewer added on the review screen (hand-written by the BA, not
+  // printed or not read). Browser-only: never set by the reader, commits like any row.
+  added?: boolean;
   // F3 · cells the reader couldn't read cleanly, so erasures can be counted (plan §06 b).
   // `written` keeps what was on the paper when the reader chose another reading.
   marks?: CellMark[] | null;
