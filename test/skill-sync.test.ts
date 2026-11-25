@@ -25,7 +25,8 @@ const exploreTags = tagsOf(exploreText);
 // The original pre-Explore hash was 963c0e5c4a98... (15,668 characters, fix/ask-coop b28abd0).
 // Re-pinned 2026-10-22 (calculation guardrail): THINK-03 now lets the model add, compare and average figures from this turn's tool results, with the working shown.
 // Re-pinned again the same day after review: THINK-03 also says never to add or average AOV, ROAS, ACOS or percentages.
-const BASELINE_SHA256 = 'b4a7be8c19aa0927944577f0cc0f34d27ca56a55db156831eb3e94f40531829c';
+// Owner 2026-11-25: less hedging (THINK-04/06/07 shorter caveats, no boilerplate). Reviewed change of the non-explore text.
+const BASELINE_SHA256 = '2ff0650e229f0be7b90d44739104fec41bb8af4ca7dc54a887bbb37d4375c516';
 
 function fixtureDir(files: {skill: string; topic?: string}): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'skill-'));
