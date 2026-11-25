@@ -11,6 +11,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 ## 2026-11-25 · Restock run: decisions on the right edge, roomier numbers
 
 Review: the run table had empty space right of the Approve / Edit / Reject buttons while the data columns felt cramped. The Decision column now hugs its content and sits flush right (actions right-aligned), and the spare width goes to the product name and the gaps between the number columns. The "Warehouse short" chip on lines still to decide moved out of the Decision cell: a warning icon now sits before the Send number it explains (tooltip: Coop's number before the cap), so every row has the same compact actions. Covered lines keep a single chip ("Covered" or "Warehouse short"), with the detail in its tooltip. "Check data first" reasons still wrap, capped at 18rem. Checked at 1440px (longest product names fit except the very longest) and 390px.
+## 2026-11-25 — Uploads: one tile per upload, even after its forms are sorted
+
+Picking a store sorts an upload into one batch per store form, and the Uploads page showed one tile per batch, so the 98-page "Nov 24 Test Run" became 10 tiles with the same name, each badged Duplicate. A batch split off now records the upload it came from (`upload_batches.parent_batch_id`, migration `supabase/nichido/batch_parent.sql`, applied to Nichido Staging; the 9 existing split groups linked to their upload). The Uploads page groups by the original upload, and its scan page, Per store view, delete and delete preview cover every group split off it. Checked on staging data: one tile, 98 pages (70 to review, 28 issues).
+
 ## 2026-11-25 — Ask Coop matches: Instagram columns, and one piece of evidence scores once
 
 The matches table now shows **A: Instagram** and **B: Instagram** next to email and mobile. A name inside a handle is no longer added on top of the same handle match (Karla Sy / karlasy60@ / @karla.sy scored 40 + 30 for one fact; now 40, plus any other clue such as the same pet).
