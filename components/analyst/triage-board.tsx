@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {useCallback, useMemo, useState, useTransition} from 'react';
+import {createContext, useCallback, useContext, useMemo, useRef, useState, useTransition} from 'react';
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {leaveList, useReturnTrip} from '@/components/analyst/back-nav';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
@@ -15,6 +15,10 @@ import type {StoreOption} from '@/src/goldline-data';
 import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {fmtTriagePeriod, FLAG_LABEL, flagTone, VERSION_LABEL} from '@/src/goldline-triage-format';
 import {assignFormStoreAction} from '@/app/uploads/actions';
+import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
+
+/** Told when a form's store is confirmed, so the board can say so (the card itself moves away). */
+const StoreAssigned = createContext<((a: {code: string; name: string; form: TriageForm}) => void) | null>(null);
 import {VersionPill} from '@/components/analyst/version-pill';
 
 const INVENTORY_PAGES = [1, 2, 3, 4, 5];
@@ -126,12 +130,14 @@ function StorePicker({company, form, stores}: {company: string; form: TriageForm
     const t = q.trim().toLowerCase();
     return stores.filter((s) => !t || s.code.toLowerCase().includes(t) || s.name.toLowerCase().includes(t)).slice(0, 8);
   }, [q, stores]);
+  const assigned = useContext(StoreAssigned);
   const pick = (code: string) =>
     start(async () => {
       setErr(null);
       const res = await assignFormStoreAction({company, uploadIds: form.uploadIds, storeCode: code});
       if (res.ok) {
         setOpen(false);
+        assigned?.({code, name: stores.find((s) => s.code === code)?.name ?? '', form});
         router.refresh();
       } else setErr(res.error);
     });
@@ -483,6 +489,23 @@ export function TriageBoard({
   }, [needsStore, groups, singles, storeByCode]);
   // Ignore a filter whose section no longer exists (data changed under it) so nothing blanks out.
   const activeFilter = storeFilter && sections.some((s) => s.key === storeFilter) ? storeFilter : null;
+  // Confirming a store moves the card out of "Needs a store", so say it worked and offer to
+  // follow it to its store (or to One-off stores when it is that store's only form).
+  const {toasts, push, dismiss} = useToasts();
+  // The sections as they are when Show is clicked (after the board refreshed with the move).
+  const sectionsNow = useRef(sections);
+  sectionsNow.current = sections;
+  const onAssigned = useCallback(
+    ({code, name, form}: {code: string; name: string; form: TriageForm}) => {
+      const label = form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'this form');
+      push({
+        kind: 'ok',
+        text: `Store ${code}${name ? ` · ${name}` : ''} set for ${label} (${fmtTriagePeriod(form.periodStart, form.periodEnd)})`,
+        action: {label: 'Show', onClick: () => setStoreFilter(sectionsNow.current.some((x) => x.key === code) ? code : 'singles')},
+      });
+    },
+    [push, setStoreFilter],
+  );
 
   const t = data.totals;
 
@@ -510,6 +533,7 @@ export function TriageBoard({
   );
 
   return (
+    <StoreAssigned.Provider value={onAssigned}>
     <div className={embedded ? 'flex flex-col gap-6' : GL_PAGE}>
       {embedded ? (
         <div className="flex flex-col gap-2.5">
@@ -612,7 +636,9 @@ export function TriageBoard({
       )}
 
       {editGroup && <GroupStoreDialog company={company} group={editGroup} stores={stores} onClose={() => setEditGroup(null)} />}
+      <ToastStack toasts={toasts} dismiss={dismiss} />
     </div>
+    </StoreAssigned.Provider>
   );
 }
 
