@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Scan page list: a condensed header and filters follow the scroll
+
+Owner QA on staging: deep in a scan's Per file list, the scan's name and the Type / Status / Version filters scroll away. Now, once the full filters pass under the app header, a slim bar pins below it with the scan's name, the page count, the same three filters as compact selects (with counts) and Top. It is zero height in the flow (nothing shifts when it appears), out of the tab order while hidden, fades in 150ms, and uses the same URL-backed filters as the chips, so both always agree. Per store and Per BA views unchanged.
 ## 2026-11-25 — Review: the Flag button shows only when it can be wanted
 
 Owner QA on staging: a Flag button on every row of the review grid is noise (Hick's law). A row's Flag button now shows only on hover, keyboard focus in the row, the row pointed at on the scan, or a phone row being edited, and always on a row that already has a flag (tinted). Hidden buttons keep their space, so the count columns don't shift. Flag page in the header is unchanged.
