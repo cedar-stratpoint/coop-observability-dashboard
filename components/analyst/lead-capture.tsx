@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState} from 'react';
 import {Check, Copy, Download, Info, MessageSquarePlus} from 'lucide-react';
 import type {SpinLead} from '@/src/spin-leads-types';
-import {matchesLeadSearch, prizeTally} from '@/src/spin-leads-types';
+import {matchesLeadSearch, prizeTally, inDayRange} from '@/src/spin-leads-types';
 import {leadKey, treatPhrase, type LeadMatch} from '@/src/lead-order-match';
 import {formatPeso} from '@/src/pos-format';
 import {contactTally, emailKey, fmtPhDate} from '@/src/crm-compute';
@@ -55,7 +55,9 @@ export function LeadCapture({leads, orders, matches, voucher}: {leads: SpinLead[
   const [page, setPage] = useState(1);
   const [copied, setCopied] = useState(false);
   const [prize, setPrize] = useState('all');
-  const [collectedOn, setCollectedOn] = useState('all');
+  // Collected range (PH days, inclusive): 'all' on either end = open on that side.
+  const [collectedFrom, setCollectedFrom] = useState('all');
+  const [collectedTo, setCollectedTo] = useState('all');
   const [q, setQ] = useState('');
   const [unused, setUnused] = useState(false);
   const [logFor, setLogFor] = useState<SpinLead | null>(null);
@@ -107,12 +109,12 @@ export function LeadCapture({leads, orders, matches, voucher}: {leads: SpinLead[
         (l) =>
           (!unused || voucher?.vouchers[leadKey(l)]?.state === 'not_used') &&
           (prize === 'all' || l.prize === prize) &&
-          (collectedOn === 'all' || manilaDayKey(l.collectedAt) === collectedOn) &&
+          inDayRange(manilaDayKey(l.collectedAt), collectedFrom, collectedTo) &&
           matchesLeadSearch(l, q),
       ),
-    [leads, prize, collectedOn, q, unused, voucher],
+    [leads, prize, collectedFrom, collectedTo, q, unused, voucher],
   );
-  const filtering = prize !== 'all' || collectedOn !== 'all' || q.trim() !== '' || unused;
+  const filtering = prize !== 'all' || collectedFrom !== 'all' || collectedTo !== 'all' || q.trim() !== '' || unused;
 
   // Clamp rather than reset: a filter change rewinds to page 1 through its own
   // handler, and this keeps the view valid if the list shrinks under it anyway.
@@ -196,12 +198,20 @@ export function LeadCapture({leads, orders, matches, voucher}: {leads: SpinLead[
               options={[{value: 'all', label: 'All prizes'}, ...prizes.map((p) => ({value: p.prize, label: `${p.prize} (${p.count})`}))]}
             />
             {days.length > 1 && (
-              <Filter
-                label="Collected"
-                value={collectedOn}
-                onChange={(v) => { setCollectedOn(v); setPage(1); }}
-                options={[{value: 'all', label: 'All dates'}, ...days.map((d) => ({value: d, label: dayShort(d)}))]}
-              />
+              <>
+                <Filter
+                  label="Collected from"
+                  value={collectedFrom}
+                  onChange={(v) => { setCollectedFrom(v); if (v !== 'all' && collectedTo !== 'all' && collectedTo < v) setCollectedTo(v); setPage(1); }}
+                  options={[{value: 'all', label: 'First day'}, ...[...days].reverse().map((d) => ({value: d, label: dayShort(d)}))]}
+                />
+                <Filter
+                  label="to"
+                  value={collectedTo}
+                  onChange={(v) => { setCollectedTo(v); setPage(1); }}
+                  options={[{value: 'all', label: 'Last day'}, ...days.filter((d) => collectedFrom === 'all' || d >= collectedFrom).map((d) => ({value: d, label: dayShort(d)}))]}
+                />
+              </>
             )}
             {voucher && (
               <button
