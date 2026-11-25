@@ -3,7 +3,7 @@
 // The stat tiles, charts and tables Ask Coop draws inside an answer (F7). Contract: src/chat/block-types.ts.
 // A block carries server-bound data; this file only presents it. Every chart has a table twin (every row, including
 // categories folded into "Other"), and a block whose source failed a check shows a "Not reliable" badge (icon + words).
-import {useState} from 'react';
+import {Fragment, useState} from 'react';
 import dynamic from 'next/dynamic';
 import {ChevronRight, FlaskConical, TriangleAlert} from 'lucide-react';
 import type {ChartBlock, ChatBlock, CohortDraftBlock, KpiBlock, TableBlock} from '@/src/chat/block-types';
@@ -110,6 +110,8 @@ function cell(c: ResultColumn, row: MetricRow): string {
 
 /** Rows per page in a chat table. Copy and Download CSV still take every row; only the screen pages. */
 export const TABLE_PAGE_ROWS = 10;
+/** The Same person button sits right after the Name column (# is 0, Name is 1), so it is seen without scrolling sideways. */
+const LINK_AFTER = 1;
 const PAGE_BTN = 'rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted motion-reduce:transition-none';
 
 /** Compact table: numbers right-aligned in tabular numerals, sticky first column, scrolls sideways inside its own box. Over
@@ -126,36 +128,42 @@ export function DataTable({columns, rows: all, total, label, linkable}: {columns
         <thead>
           <tr className="bg-muted text-muted-foreground">
             {columns.map((c, i) => (
-              <th key={c.key} scope="col" className={cn('whitespace-nowrap px-2.5 py-1.5 font-medium', isNumericColumn(c) ? 'text-right' : 'text-left', i === 0 && 'sticky left-0 bg-muted')}>
-                {c.label}
-              </th>
+              <Fragment key={c.key}>
+                <th scope="col" className={cn('whitespace-nowrap px-2.5 py-1.5 font-medium', isNumericColumn(c) ? 'text-right' : 'text-left', i === 0 && 'sticky left-0 bg-muted')}>
+                  {c.label}
+                </th>
+                {linkable && i === LINK_AFTER && <th scope="col" className="whitespace-nowrap px-2.5 py-1.5 text-left font-medium">Same person</th>}
+              </Fragment>
             ))}
-            {linkable && <th scope="col" className="whitespace-nowrap px-2.5 py-1.5 text-left font-medium">Same person</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, ri) => (
             <tr key={ri} className="border-t border-border">
               {columns.map((c, i) => (
-                <td key={c.key} className={cn('px-2.5 py-1.5', isNumericColumn(c) ? 'whitespace-nowrap text-right tabular-nums' : 'text-left', i === 0 && 'sticky left-0 bg-card font-medium text-foreground')}>
-                  {cell(c, r)}
-                </td>
+                <Fragment key={c.key}>
+                  <td className={cn('px-2.5 py-1.5', isNumericColumn(c) ? 'whitespace-nowrap text-right tabular-nums' : 'text-left', i === 0 && 'sticky left-0 bg-card font-medium text-foreground')}>
+                    {cell(c, r)}
+                  </td>
+                  {linkable && i === LINK_AFTER && (
+                    <td className="px-2.5 py-1.5 text-left">
+                      <SamePersonCell row={r} />
+                    </td>
+                  )}
+                </Fragment>
               ))}
-              {linkable && (
-                <td className="px-2.5 py-1.5 text-left">
-                  <SamePersonCell row={r} />
-                </td>
-              )}
             </tr>
           ))}
           {total && (
             <tr className="border-t-2 border-border bg-muted/60 font-semibold text-foreground">
               {columns.map((c, i) => (
-                <td key={c.key} className={cn('px-2.5 py-1.5', isNumericColumn(c) ? 'whitespace-nowrap text-right tabular-nums' : 'text-left', i === 0 && 'sticky left-0 bg-muted')}>
-                  {i === 0 && total[c.key] == null ? 'Total' : cell(c, total)}
-                </td>
+                <Fragment key={c.key}>
+                  <td className={cn('px-2.5 py-1.5', isNumericColumn(c) ? 'whitespace-nowrap text-right tabular-nums' : 'text-left', i === 0 && 'sticky left-0 bg-muted')}>
+                    {i === 0 && total[c.key] == null ? 'Total' : cell(c, total)}
+                  </td>
+                  {linkable && i === LINK_AFTER && <td />}
+                </Fragment>
               ))}
-              {linkable && <td />}
             </tr>
           )}
         </tbody>
