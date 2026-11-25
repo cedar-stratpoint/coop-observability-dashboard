@@ -63,6 +63,8 @@ export interface OverlapInput {
   mode: 'overlap';
   a: 'website' | 'booth' | 'lazada';
   b: 'website' | 'booth' | 'lazada';
+  /** RET-14: keep only website customers who used this discount code on any order (e.g. GRAND300); one side must be website. */
+  voucher?: string;
 }
 export const MATCH_SCOPES = ['person', 'event', 'sources'] as const;
 export const MATCH_TIERS = ['weak', 'possible', 'likely', 'confirmed'] as const;
@@ -79,6 +81,8 @@ export interface MatchInput {
   b?: OverlapInput['b'];
   /** Show links at this tier or better. */
   min_tier: MatchTier;
+  /** RET-14: keep only website customers who used this discount code on any order. */
+  voucher?: string;
   limit: (typeof LEAD_LIMITS)[number];
 }
 export type ContactsInput = ListInput | DraftInput | FindInput | OverlapInput | MatchInput;
@@ -93,7 +97,10 @@ export function readContactsInput(input: unknown): ContactsInput | {error: strin
   if (i.mode === 'overlap') {
     const ok = (v: unknown) => v === 'website' || v === 'booth' || v === 'lazada';
     if (!ok(i.a) || !ok(i.b) || i.a === i.b) return {error: 'a and b must be two different sources: website, booth or lazada.'};
-    return {mode: 'overlap', a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b']};
+    const v = typeof i.voucher === 'string' ? i.voucher.trim().toUpperCase() : '';
+    if (i.voucher !== undefined && (typeof i.voucher !== 'string' || v.length > 40)) return {error: 'voucher must be a discount code as text (up to 40 characters), or "" for none.'};
+    if (v && i.a !== 'website' && i.b !== 'website') return {error: 'voucher filters website customers, so one of a or b must be website.'};
+    return {mode: 'overlap', a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b'], ...(v ? {voucher: v} : {})};
   }
   if (i.mode === 'matches') {
     const minTier = i.min_tier ?? 'weak';
@@ -112,7 +119,10 @@ export function readContactsInput(input: unknown): ContactsInput | {error: strin
     }
     const ok = (v: unknown) => v === 'website' || v === 'booth' || v === 'lazada';
     if (!ok(i.a) || !ok(i.b) || (i.a === i.b && i.a !== 'booth')) return {error: 'scope sources needs a and b: two different sources (website, booth, lazada), or booth with booth.'};
-    return {...base, a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b']};
+    const v = typeof i.voucher === 'string' ? i.voucher.trim().toUpperCase() : '';
+    if (i.voucher !== undefined && (typeof i.voucher !== 'string' || v.length > 40)) return {error: 'voucher must be a discount code as text (up to 40 characters), or "" for none.'};
+    if (v && i.a !== 'website' && i.b !== 'website') return {error: 'voucher filters website customers, so one of a or b must be website.'};
+    return {...base, a: i.a as OverlapInput['a'], b: i.b as OverlapInput['b'], ...(v ? {voucher: v} : {})};
   }
   if (i.mode !== 'list_leads' && i.mode !== 'draft') return {error: 'mode must be "list_leads", "draft", "find", "overlap" or "matches".'};
   if (typeof i.event !== 'string' || i.event.trim() === '' || i.event.length > 120) return {error: 'event must be the event name the owner gave (1 to 120 characters).'};

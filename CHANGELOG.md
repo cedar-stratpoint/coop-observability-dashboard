@@ -10,6 +10,24 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Ask Coop matches: Instagram columns, and one piece of evidence scores once
+
+The matches table now shows **A: Instagram** and **B: Instagram** next to email and mobile. A name inside a handle is no longer added on top of the same handle match (Karla Sy / karlasy60@ / @karla.sy scored 40 + 30 for one fact; now 40, plus any other clue such as the same pet).
+
+
+## 2026-11-25 — Ask Coop matches people by name, email and IG patterns (RET-14)
+
+Owner: "match by name and IG words or letters, or in the email". `contacts` mode matches gains two pattern clues: **same letters in an email or IG handle** (40: `karlasy60@gmail.com` and `@karla.sy` both read `karlasy`) and **a name written inside the other's email or handle** (30: "Karla Sy" in `karlasy60@`). Booth leads now bring their typed **name** into matching (it was ignored). Rules kept: only same email or mobile is "confirmed"; a clue never counts twice with an exact email or IG; handles under 5 letters and one-word or 2-letter names never match; new blocks are capped like the others. `voucher` now also scopes matches (website side = that code's users). Weights are starting points (`WEIGHTS` in `src/chat/contacts/match.ts`) for the owner to tune on labelled pairs. Tests `test/chat-contacts-match-handles.test.ts`.
+
+
+## 2026-11-25 · v1.26.3 Ask Coop: code users who are also booth leads, with their Instagram (prod release)
+Ships only #729 (staging #730), cherry-picked onto `main`.
+
+## 2026-11-25 — Ask Coop: which code users are also booth leads, with their Instagram (RET-14)
+
+Owner asked "are the GRAND300 customers also in the event leads, and can we merge their IG?". Ask Coop answered with the overlap of ALL website customers and booth leads (10 people) and could not show any Instagram: the `contacts` overlap had no code filter and its table had no Instagram column. Now `contacts` mode overlap takes `voucher` (website side = customers who used that code on any order, the same `voucherMatch` as the Website CRM page), and the people table carries **Instagram (booth)**, the handle the lead typed (`UnifiedContact.instagram`, booth only). "Merge" stays read-only: the handle shows next to the website record; nothing is written. Also confirmed: GRAND300 orders total ₱0.00 (the ₱300 covers the whole order), so "Spent ₱0" on those buyers is right, not a gap. Tests `test/chat-contacts-voucher-overlap.test.ts`.
+
+
 ## 2026-11-25 — Ask Coop tables page 10 rows at a time
 
 Owner: 67 GRAND300 customers in one chat table is too much to read. A chat table over 10 rows now shows 10 per page with **Prev / Next** and "11–20 of 67" (`TABLE_PAGE_ROWS` in `components/analyst/chat-blocks.tsx`). Copy emails, Copy mobiles and Download CSV still take every row; the total row stays on every page because it sums all rows. Saved reports render tables the same way.
