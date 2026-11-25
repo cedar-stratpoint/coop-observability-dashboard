@@ -10,6 +10,9 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.8 Event lead contacts: Collected from–to range (prod release)
+Ships only #746 (staging #747), cherry-picked onto `main`.
+
 ## 2026-11-25 — Event lead contacts: "Collected" is a From–To range
 
 Owner: the Collected filter picked one day only. It is now **Collected from … to …** (PH days, inclusive), with the same day list (only days that have leads); "First day" / "Last day" leave a side open, and the "to" list only offers days on or after "from". Pure `inDayRange` in `src/spin-leads-types.ts`, tested in `test/spin-leads-search.test.ts`.
