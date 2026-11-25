@@ -35,7 +35,8 @@ function done(r: ContactResult): ContactResult {
   return r;
 }
 
-export async function logContact(input: {email: string | null; channel: string; note: string}): Promise<ContactResult> {
+/** Logs a contact against an email, an Instagram handle or a mobile (at least one; RET-17), optionally "they replied". */
+export async function logContact(input: {email?: string | null; instagram?: string | null; mobile?: string | null; channel: string; note: string; replied?: boolean}): Promise<ContactResult> {
   if (usingPosMock()) return {ok: false, error: 'The contact log is not connected in this environment.'};
   return done(await logContactWith(deps(), input));
 }
