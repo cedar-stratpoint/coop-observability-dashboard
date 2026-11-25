@@ -387,9 +387,7 @@ export function firstOrderCode(codes: readonly string[]): string {
 
 /** RET-12: every code key with buyers (any counted order), most buyers first, ties by name: the builder's "Used code (any order)" suggestions. */
 export function codesUsedList(rows: readonly Pick<EnrichedCustomer, 'orderCount' | 'codesUsed'>[]): string[] {
-  const acc = new Map<string, number>();
-  for (const c of rows) if (c.orderCount >= 1) for (const k of c.codesUsed ?? []) acc.set(k, (acc.get(k) ?? 0) + 1);
-  return [...acc.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([k]) => k);
+  return voucherOptions(rows).map((o) => o.code);
 }
 
 export type CodeCohort = {group: string; buyers: number; repeat: number; ratePct: number; small: boolean};
@@ -998,11 +996,12 @@ export function checkoutStage(
 
 export type CartFilter = {stage: string; status: string; winback: string};
 export type OrderFilter = {payment: string; fulfillment: string; reviewed: string};
-export type CustomerFilter = {tier: string; buyers: string};
+/** `voucher` (optional, Customers tab only): 'all' · 'any' (a buyer who used any code) · 'none' (a buyer who used no code on any order) · a code key such as GRAND300. */
+export type CustomerFilter = {tier: string; buyers: string; voucher?: string};
 
 export const EMPTY_CART_FILTER: CartFilter = {stage: 'all', status: 'all', winback: 'all'};
 export const EMPTY_ORDER_FILTER: OrderFilter = {payment: 'all', fulfillment: 'all', reviewed: 'all'};
-export const EMPTY_CUSTOMER_FILTER: CustomerFilter = {tier: 'all', buyers: 'all'};
+export const EMPTY_CUSTOMER_FILTER: CustomerFilter = {tier: 'all', buyers: 'all', voucher: 'all'};
 
 /** True when any of a filter set's fields is narrowed — drives "Clear". */
 export function filterActive(f: Record<string, string>): boolean {
@@ -1038,8 +1037,27 @@ export function filterCustomers<T extends EnrichedCustomer>(
 ): T[] {
   return rows.filter(
     (c) =>
-      textMatch(needle, [c.email, c.firstName, c.lastName, c.phone, c.petName, c.membershipTier]) &&
+      textMatch(needle, [c.email, c.firstName, c.lastName, c.phone, c.petName, c.membershipTier, ...(c.codesUsed ?? [])]) &&
       (f.tier === 'all' || (f.tier === 'guest' ? !c.membershipTier : c.membershipTier === f.tier)) &&
-      (f.buyers === 'all' || (f.buyers === 'buyers' ? c.orderCount > 0 : c.orderCount === 0)),
+      (f.buyers === 'all' || (f.buyers === 'buyers' ? c.orderCount > 0 : c.orderCount === 0)) &&
+      voucherMatch(c, f.voucher ?? 'all'),
   );
+}
+
+/** The Customers tab's Voucher filter over the per-customer code keys (RET-12 `codesUsed`). Only buyers whose orders were read can match
+ * 'any', 'none' or a code: a customer with no orders, or whose orders are unknown, is never "used no code" (unknown is never "never"). */
+export function voucherMatch(c: Pick<EnrichedCustomer, 'orderCount' | 'codesUsed'>, voucher: string): boolean {
+  if (voucher === 'all') return true;
+  if (c.orderCount < 1 || c.codesUsed === null) return false;
+  if (voucher === 'any') return c.codesUsed.length > 0;
+  if (voucher === 'none') return c.codesUsed.length === 0;
+  const want = voucher.toUpperCase();
+  return c.codesUsed.some((k) => k.toUpperCase() === want);
+}
+
+/** The Voucher filter's code options: each code key with its buyer count, most buyers first, ties by name. */
+export function voucherOptions(rows: readonly Pick<EnrichedCustomer, 'orderCount' | 'codesUsed'>[]): Array<{code: string; buyers: number}> {
+  const n = new Map<string, number>();
+  for (const c of rows) if (c.orderCount >= 1) for (const k of c.codesUsed ?? []) n.set(k, (n.get(k) ?? 0) + 1);
+  return [...n.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([code, buyers]) => ({code, buyers}));
 }
