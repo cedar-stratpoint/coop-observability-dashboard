@@ -8,6 +8,9 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Restock run: decisions on the right edge, roomier numbers
+
+Review: the run table had empty space right of the Approve / Edit / Reject buttons while the data columns felt cramped. The Decision column now hugs its content and sits flush right (actions right-aligned), and the spare width goes to the product name and the gaps between the number columns. The "Warehouse short" chip on lines still to decide moved out of the Decision cell: a warning icon now sits before the Send number it explains (tooltip: Coop's number before the cap), so every row has the same compact actions. Covered lines keep a single chip ("Covered" or "Warehouse short"), with the detail in its tooltip. "Check data first" reasons still wrap, capped at 18rem. Checked at 1440px (longest product names fit except the very longest) and 390px.
 ## 2026-11-25 — Ask Coop matches people by name, email and IG patterns (RET-14)
 
 Owner: "match by name and IG words or letters, or in the email". `contacts` mode matches gains two pattern clues: **same letters in an email or IG handle** (40: `karlasy60@gmail.com` and `@karla.sy` both read `karlasy`) and **a name written inside the other's email or handle** (30: "Karla Sy" in `karlasy60@`). Booth leads now bring their typed **name** into matching (it was ignored). Rules kept: only same email or mobile is "confirmed"; a clue never counts twice with an exact email or IG; handles under 5 letters and one-word or 2-letter names never match; new blocks are capped like the others. `voucher` now also scopes matches (website side = that code's users). Weights are starting points (`WEIGHTS` in `src/chat/contacts/match.ts`) for the owner to tune on labelled pairs. Tests `test/chat-contacts-match-handles.test.ts`.
