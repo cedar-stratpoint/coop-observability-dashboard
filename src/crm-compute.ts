@@ -1051,8 +1051,14 @@ export function voucherMatch(c: Pick<EnrichedCustomer, 'orderCount' | 'codesUsed
   if (c.orderCount < 1 || c.codesUsed === null) return false;
   if (voucher === 'any') return c.codesUsed.length > 0;
   if (voucher === 'none') return c.codesUsed.length === 0;
-  const want = voucher.toUpperCase();
-  return c.codesUsed.some((k) => k.toUpperCase() === want);
+  // A list ("GRAND300,WEB300") matches any of its codes; a "*" makes a code a pattern ("*300" = every code ending in 300, "WEB*", "*300*").
+  const wants = voucher.toUpperCase().split(',').map((w) => w.trim()).filter(Boolean);
+  const hit = (k: string, w: string): boolean => {
+    if (!w.includes('*')) return k === w;
+    const parts = w.split('*');
+    return new RegExp(`^${parts.map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(k);
+  };
+  return c.codesUsed.some((k) => wants.some((w) => hit(k.toUpperCase(), w)));
 }
 
 /** The Voucher filter's code options: each code key with its buyer count, most buyers first, ties by name. */
