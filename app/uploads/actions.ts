@@ -18,6 +18,8 @@ import {isoPeriod} from '@/src/period-date';
 import {knownStoreCodes} from '@/src/goldline-store-registry';
 import {duplicateCodeMessage, withProductCodes} from '@/src/accessory-codes';
 import {
+  fileFormPages,
+  setAsidePages,
   batchFamily,
   BatchConflictError,
   BatchStateError,
@@ -463,6 +465,75 @@ async function planBulk(companyId: string, batchIds: string[], dropId?: string |
     });
   }
   return out;
+}
+
+const FILE_ERROR: Record<string, string> = {
+  page_not_found: 'A page of this form is gone. Reload and try again.',
+  page_not_to_review: 'A page of this form was already committed or set aside.',
+  pages_in_several_batches: 'This form’s pages are mixed with another form. Sort it on the board.',
+  batch_not_open: 'This form was already committed.',
+};
+
+/**
+ * Commit all (Nov 25): file one form under a store and period so it can commit: a store
+ * picked in the confirm, or a stray form whose store was read but whose pages never became a
+ * store form (a lone page, or a misread year the board corrects). See fileFormPages.
+ */
+export async function fileFormAction(input: {
+  company: string | null;
+  uploadIds: string[];
+  storeCode: string;
+  periodStart: string;
+  periodEnd: string;
+  /** The person picked this store (the pages' read store is replaced), vs. a store read off the form. */
+  picked: boolean;
+}): Promise<{ok: true; batchId: string} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot commit reviews.'};
+  const store = (input.storeCode ?? '').trim();
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string' && UUID.test(x));
+  if (!store || !ids.length) return {ok: false, error: 'Pick a store first.'};
+  if (!validIsoDate(input.periodStart) || !validIsoDate(input.periodEnd) || input.periodStart > input.periodEnd) {
+    return {ok: false, error: 'No usable date on this form. Open it to set the period.'};
+  }
+  if (outOfScopeStores(ctx.storeScope, [store]).length) return {ok: false, error: `Store ${store} is outside your access.`};
+  try {
+    const stores = await listStores(ctx.companyId);
+    const known = stores.find((s) => s.code === store);
+    if (!known) return {ok: false, error: `Store ${store} isn’t in the store list.`};
+    const batchId = await fileFormPages(
+      ctx.companyId,
+      ids,
+      {storeCode: store, storeName: known.name, periodStart: input.periodStart, periodEnd: input.periodEnd, picked: input.picked},
+      (await auth())?.user?.email ?? null,
+    );
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    await logReadEvent({companyId: ctx.companyId, event: 'assign_store', status: 'ok', storeCode: store, detail: {uploadIds: ids, batchId, via: 'commit_all'}});
+    return {ok: true, batchId};
+  } catch (e) {
+    const code = e instanceof Error ? e.message : '';
+    if (!FILE_ERROR[code]) console.error('fileFormAction', e);
+    return {ok: false, error: FILE_ERROR[code] ?? 'Couldn’t file this form. Try again, or open it from the board.'};
+  }
+}
+
+/** Commit all (Nov 25): set pages aside that have no store to file them under. */
+export async function setAsideAction(input: {company: string | null; uploadIds: string[]}): Promise<{ok: true; count: number} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized for this company.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot change uploads.'};
+  const ids = (Array.isArray(input.uploadIds) ? input.uploadIds : []).filter((x) => typeof x === 'string' && UUID.test(x));
+  if (!ids.length) return {ok: false, error: 'No pages to set aside.'};
+  try {
+    const count = await setAsidePages(ctx.companyId, ids, 'Set aside in Commit all: no store to file it under.');
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads');
+    return {ok: true, count};
+  } catch (e) {
+    console.error('setAsideAction', e);
+    return {ok: false, error: 'Couldn’t set these pages aside. Try again.'};
+  }
 }
 
 /** What "Commit all" would do, for its confirm. Read-only. */

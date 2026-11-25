@@ -10,6 +10,20 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.18 Commit all asks only for what Coop can't know (prod release)
+Ships #797, cherry-picked onto `main`: stray forms (store read, date read or year corrected) are filed and committed automatically, picked stores commit one-page forms too, Set aside for nearly blank pages, a Needs a date list, and tiles that say "N need a store · M need a date".
+
+## 2026-11-25 — Commit all asks only for what Coop can't know
+
+QA: after Commit all, "Nov 24 Test Run" still had 24 pages and the tile said they "need a store". Checked on Staging: most had a store, but either a misread year or no store form to commit through. Sorting only peels off forms of two or more pages, so a lone page (including one whose store was just picked in Commit all) stayed in the upload's leftover pile and never committed.
+
+- **Strays are filed automatically.** A form whose registry store was read and that has a date (the board's year correction applied, as on the cards) but isn't in a store form gets one of its own on commit (`fileFormPages` / `fileFormAction`), then commits with the rest. The confirm lists them under "Sorted into store forms on commit", noting a corrected year.
+- **Picked stores use the same path,** so a one-page form with a picked store now commits too (before, it stayed in the leftover pile).
+- **Set aside** on each Needs a store row, for a page with nothing to file (a nearly blank sheet): it leaves the review queue (`setAsidePages`). A row with no date read offers only Set aside.
+- **Needs a date** lists forms with a store but no date, to set from the board.
+- **Tiles say what is missing:** "15 pages need a store · 2 need a date" (`pageNeed`: no registry store to snap to, or no date; a page Commit all can file needs nothing).
+
+On "Nov 24 Test Run" (Staging, 24 pages left): 6 filed automatically, 15 need a store, 2 need a date, 1 mixed with another form.
 ## 2026-11-25 · v1.26.17 Commit all means all (prod release)
 Ships #793, cherry-picked onto `main`: pick stores inside Commit all, a whole-upload plan, unchecked rows included by default, and tiles that say how many pages need a store.
 
