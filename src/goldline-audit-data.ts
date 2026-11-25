@@ -46,7 +46,8 @@ export type AuditCoverage = {loaded: boolean; storesSold: number; storesCounted:
 export type AuditResult = {
   configured: boolean;
   mock: boolean;
-  stores: Array<{code: string; name: string | null}>;
+  /** `counted`: the store has a committed form this month (sorted first in the picker). */
+  stores: Array<{code: string; name: string | null; counted: boolean}>;
   months: AuditMonth[];
   /** code is ALL_STORES for the every-store view. */
   selected: {code: string; name: string | null; month: string} | null;
@@ -142,8 +143,8 @@ async function readMonth(companyId: string, month: string, loaded: boolean, coun
   ]);
   const sold = new Map(Object.entries(history).filter(([code]) => !scope || scope.has(code)));
   const stores = [...new Set([...countedIn, ...sold.keys()])].sort(byCode);
-  const firstCounted = stores.find((s) => countedIn.includes(s)) ?? stores[0] ?? null;
-  const only = asked === ALL_STORES ? null : asked && stores.includes(asked) ? asked : firstCounted;
+  // Every store unless one in scope is asked for (Nov 25: All stores is the default).
+  const only = asked && asked !== ALL_STORES && stores.includes(asked) ? asked : null;
   const pick = only ? [only] : stores;
 
   const counts = new Map<string, Map<string, FormCount>>();
@@ -194,7 +195,7 @@ async function readMonth(companyId: string, month: string, loaded: boolean, coun
   return {stores, only, pick, cells, names, coverage, poLeg};
 }
 
-type Loaded = {months: AuditMonth[]; month: string; code: string; stores: string[]; storeName: Map<string, string | null>; rows: AuditRow[]; summary: AuditSummary; coverage: AuditCoverage; poLeg: PoLeg};
+type Loaded = {months: AuditMonth[]; month: string; code: string; stores: string[]; counted: Set<string>; storeName: Map<string, string | null>; rows: AuditRow[]; summary: AuditSummary; coverage: AuditCoverage; poLeg: PoLeg};
 
 /** Every row for one store, or for every store in scope. No `rows` when there is no data yet. */
 async function loadRows(companyId: string, p: AuditParams, storeScope: string[] | null): Promise<Loaded | {months: AuditMonth[]}> {
@@ -213,7 +214,7 @@ async function loadRows(companyId: string, p: AuditParams, storeScope: string[] 
       return {...c, store, storeName: storeName.get(store) ?? null, product: n?.product ?? null, shade: n?.shade ?? null, line: n?.line ?? null, retired: n?.retired ?? false};
     }),
   );
-  return {months, month, code: m.only ?? ALL_STORES, stores: m.stores, storeName, rows, summary: auditSummary(rows), coverage: m.coverage, poLeg: m.poLeg};
+  return {months, month, code: m.only ?? ALL_STORES, stores: m.stores, counted: new Set(countedIn.get(month) ?? []), storeName, rows, summary: auditSummary(rows), coverage: m.coverage, poLeg: m.poLeg};
 }
 
 const NO_COVERAGE: AuditCoverage = {loaded: false, storesSold: 0, storesCounted: 0, unlinkedUnits: 0};
@@ -230,7 +231,7 @@ export async function auditData(companyId: string, p: AuditParams = {}, storeSco
   const base = {
     configured: true,
     mock: false,
-    stores: d.stores.map((code) => ({code, name: d.storeName.get(code) ?? null})),
+    stores: d.stores.map((code) => ({code, name: d.storeName.get(code) ?? null, counted: d.counted.has(code)})),
     months: d.months,
     selected: {code: d.code, name: d.code === ALL_STORES ? null : (d.storeName.get(d.code) ?? null), month: d.month},
     summary: d.summary,
@@ -283,8 +284,8 @@ const MOCK_ITEMS: MockItem[] = [
   {item_code: 'CPFB', product: 'Cream to Powder Foundation Biscuit', line: 'Cream to Powder Foundation', po: true, watsons: 2, inventory: 'blank', onForm: true},
 ];
 const MOCK_STORES = [
-  {code: '473', name: 'Watsons SM San Pablo'},
-  {code: '5300', name: 'SM Sta Rosa'},
+  {code: '473', name: 'Watsons SM San Pablo', counted: true},
+  {code: '5300', name: 'SM Sta Rosa', counted: true},
 ];
 const MOCK_PO: PoLeg = {source: 'form', fileName: 'PO FILE PAGE 1-2.xlsx', activatedAt: '2026-11-23T08:00:00Z', onPo: 242};
 const MOCK_MONTHS: AuditMonth[] = [
@@ -303,9 +304,9 @@ function mockRows(codes: string[]): AuditRow[] {
 }
 
 function mockAudit(p: AuditParams): AuditResult {
-  const all = p.store === ALL_STORES;
-  const store = MOCK_STORES.find((s) => s.code === p.store) ?? MOCK_STORES[0];
-  const rows = mockRows(all ? MOCK_STORES.map((s) => s.code) : [store.code]);
+  const store = MOCK_STORES.find((s) => s.code === p.store);
+  const all = !store;
+  const rows = mockRows(store ? [store.code] : MOCK_STORES.map((s) => s.code));
   const summary = auditSummary(rows);
   const query = parseAuditQuery(p, summary);
   const hits = all ? auditRows(rows, query) : rows;
@@ -314,7 +315,7 @@ function mockAudit(p: AuditParams): AuditResult {
     mock: true,
     stores: MOCK_STORES,
     months: MOCK_MONTHS,
-    selected: {code: all ? ALL_STORES : store.code, name: all ? null : store.name, month: p.month === '2026-08' ? '2026-08' : '2026-09'},
+    selected: {code: store?.code ?? ALL_STORES, name: store?.name ?? null, month: p.month === '2026-08' ? '2026-08' : '2026-09'},
     rows: all ? hits.slice(query.page * ALL_PAGE, query.page * ALL_PAGE + ALL_PAGE) : hits,
     total: hits.length,
     query,
