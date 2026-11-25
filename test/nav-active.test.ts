@@ -26,8 +26,8 @@ describe('leafActive', () => {
     expect(leafActive('/offline-sales', '/offline-sales/orders', null)).toBe(false);
     expect(leafActive('/offline-sales/orders', '/offline-sales/orders/x', null)).toBe(true);
     expect(leafActive('/offline-sales/events', '/offline-sales/events', null)).toBe(true);
-    expect(leafActive('/stock', '/stock/skus', null)).toBe(false);
-    expect(leafActive('/stock/skus', '/stock/skus', null)).toBe(true);
+    expect(leafActive('/stock', '/stock/orders', null)).toBe(false);
+    expect(leafActive('/stock/orders', '/stock/orders', null)).toBe(true);
     expect(leafActive('/customers', '/customers/leads', null)).toBe(true);
     expect(leafActive('/inventory', '/inventory/ABC', null)).toBe(true);
   });

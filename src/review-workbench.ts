@@ -6,6 +6,46 @@ import {onHandOf, type InventoryRowIn} from './goldline-inventory';
 
 export type CatalogLite = {productLine: string | null; unitPrice: number | null};
 
+/** Case-, space- and punctuation-insensitive key for comparing product names, so
+ *  "BB 03  Beige", "bb03 beige" and "BB-03-BEIGE" all match. */
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Word-level normalisation: parenthetical tags dropped (a "(Bestseller)" is not part of the
+ *  name), lowercased, punctuation collapsed to single spaces, trimmed. Keeps word boundaries
+ *  so a whole-word prefix/suffix can be compared. */
+function normWords(s: string): string {
+  return s
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** True when the name printed on the paper for a row disagrees with the catalog/manifest
+ *  name for its (matched) code — a soft signal the code may have been misread, or the
+ *  printed form is out of date. Both must be present; a blank on either side never
+ *  conflicts, so old scans with no printed_name stay quiet.
+ *
+ *  A pure prefix/suffix difference is NOT a conflict: the paper routinely prints just the
+ *  variant and drops the family/type prefix the catalog name carries (catalog "Lip Stain
+ *  Caramel Swirl" vs paper "Caramel Swirl"), and may add a "(Bestseller)" tag. Only a genuine
+ *  mismatch (e.g. "BB 03 Beige" vs "BB 04 Beige") still flags. */
+export function printedNameConflict(printed: string | null | undefined, catalog: string | null | undefined): boolean {
+  if (!printed || !catalog) return false;
+  const a = normName(printed);
+  const b = normName(catalog);
+  if (!a || !b) return false;
+  if (a === b) return false;
+  // One name is the other with a leading family/type prefix dropped or added (on a word
+  // boundary) — same product, so stay quiet. Tags like "(Bestseller)" are already stripped.
+  const wa = normWords(printed);
+  const wb = normWords(catalog);
+  if (wa && wb && (wa === wb || wa.endsWith(` ${wb}`) || wb.endsWith(` ${wa}`))) return false;
+  return true;
+}
+
 export type FamilyGroup<T> = {family: string; price: number | null; items: T[]};
 
 /**

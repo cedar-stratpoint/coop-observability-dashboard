@@ -15,7 +15,9 @@ import {Metric} from '@/components/analyst/metric';
 import {Card, CardContent} from '@/components/ui/card';
 import {fmtDay, MOVEMENT_STATUS, peso, StorePicker, ToneChip} from '@/components/analyst/goldline-ops-shared';
 import {cn} from '@/lib/utils';
+import {ReturnLink} from '@/components/analyst/back-nav';
 import {GL_TILES_MOBILE} from '@/src/goldline-ui';
+import {restockItemHref} from '@/src/goldline-restock-item';
 
 type Status = ItemMovement['status'];
 
@@ -42,9 +44,9 @@ export function GoldlineProductView({data}: {data: ProductViewData}) {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
       <header className="flex flex-col gap-3">
-        <Link href={backHref} className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
+        <ReturnLink listKey="stock" fallback={backHref} className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="size-3.5" aria-hidden /> Inventory
-        </Link>
+        </ReturnLink>
         <div className="flex flex-col gap-2">
           <h1 className="flex flex-wrap items-center gap-2 font-heading text-2xl font-semibold tracking-tight text-balance">
             {title}
@@ -59,6 +61,9 @@ export function GoldlineProductView({data}: {data: ProductViewData}) {
               {item.price != null ? ` · ${peso(item.price)}` : ''}
               {single?.latestEnd ? ` · counted ${fmtDay(single.latestEnd)}` : ''}
             </span>
+            <Link href={restockItemHref(item.itemCode, data.store)} className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Restock view
+            </Link>
           </div>
         </div>
         <div className="h-0.5 w-24 rounded-full bg-gradient-to-r from-primary to-transparent" aria-hidden />

@@ -1,15 +1,22 @@
 'use client';
 
 import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
+import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, FileText, Loader2, Maximize2, X} from 'lucide-react';
+import {AlertDialog} from '@base-ui/react/alert-dialog';
+import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
+import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
+import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
+import {estimateRowBoxes} from '@/src/row-box-fill';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
-import {batchCoverage, batchReadiness, FORM_PAGES} from '@/src/upload-batch';
+import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
+import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
+import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
@@ -30,7 +37,9 @@ export type BatchReviewPage = {
   upload: UploadRow;
   extraction: ExtractionRecord | null;
   productNames: Record<string, string>;
+  rowNames: (string | null)[];
   scanUrl: string | null;
+  detectedStore: string | null;
 };
 
 type PageState = {
@@ -113,10 +122,16 @@ export function BatchReview({
   const [ba, setBa] = useState(defaults.consultant ?? '');
   const storeBa = bas?.byStore[storeCode] ?? null;
   const [tabId, setTabId] = useState<string | null>((pages.find((p) => p.upload.id === initialPageId) ?? pages[0])?.upload.id ?? null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  // The enlarged scan. `highlight` (set by the per-row "Show in scan" locate button)
+  // is an approximate row band — top/height as fractions of the page — computed from
+  // the item's printed position in the page's fixed template.
+  const [lightbox, setLightbox] = useState<{url: string; highlight?: {top: number; height: number; label: string; approximate?: boolean}} | null>(null);
+  // Which page-number groups have their copies expanded (tab strip, grouped view).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
   const [committing, startCommit] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Flags per page come from the reader (editing a value doesn't change its confidence).
   const flaggedById = useMemo(() => Object.fromEntries(pages.map((p) => [p.upload.id, flagsOf(p)])), [pages]);
@@ -149,9 +164,19 @@ export function BatchReview({
       flagged: flags.length,
       resolved: flags.filter((i) => state[p.upload.id]?.resolved.has(i)).length,
       status: p.upload.status,
+      detectedStore: p.detectedStore,
     };
   });
   const readiness = batchReadiness({storeCode, periodStart, periodEnd, pages: pageInfo});
+  // Store-change guard: which pages read which store, so a mixed-store batch is flagged.
+  const storeGuard = storeConflict(pageInfo.filter((p) => p.status === 'needs_review'));
+  // This batch isn't one store's form when several stores were read, or when most form
+  // pages carry more than one sheet (a shuffled pile the splitter couldn't separate). Then
+  // the screen stops calling it "this store's form" and points at sorting, not committing.
+  const notOneForm = !committed && (storeGuard.conflict || coverage.duplicates.length >= 3);
+
+  // Rows the commit will actually write, for the confirm summary.
+  const reviewableRows = reviewable.reduce((n, p) => n + (state[p.upload.id]?.rows.length ?? p.extraction?.data?.rows?.length ?? 0), 0);
 
   const tab = Math.max(0, pages.findIndex((p) => p.upload.id === tabId));
   const setTab = (k: number) => {
@@ -215,7 +240,22 @@ export function BatchReview({
     }
   }, [hydrated, state, pages, editable, committed, batch.id]);
   const cur = pages[tab];
+  // Upside-down scans show upright; the reviewer can flip any page the detection got wrong.
+  const rot = useScanRotation(cur?.upload.id, cur?.upload.orientation);
+  // The row the reviewer points at (hover or focus): boxed on the scan beside the rows when the read
+  // located it. Cleared when the page changes.
+  const [pointRow, setPointRow] = useState<number | null>(null);
+  useEffect(() => setPointRow(null), [cur?.upload.id]);
   const curState = cur ? state[cur.upload.id] : null;
+  // Jumping to a flag (the navigator) points the scan at that row too.
+  useEffect(() => {
+    if (curState?.active != null) setPointRow(curState.active);
+  }, [curState?.active]);
+  const boxEstimates = useMemo(
+    () => estimateRowBoxes(cur?.extraction?.data?.rows ?? [], (c) => catalog[c]?.productLine, (c) => cur?.productNames[c]),
+    [cur?.extraction, cur?.productNames, catalog],
+  );
+  const pointBox = scanPointBox(pointRow != null ? curState?.rows[pointRow] : null, cur?.extraction?.data?.slant, rot.flipped, pointRow != null ? boxEstimates[pointRow] : null);
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));
@@ -277,22 +317,64 @@ export function BatchReview({
   const inventoryHref =
     storeCode && periodStart && periodEnd ? `/stock?store=${encodeURIComponent(storeCode)}&period=${periodStart}_${periodEnd}` : '/stock';
   const openFlags = pageInfo.reduce((n, p) => n + Math.max(0, p.flagged - p.resolved), 0);
+  // Confidence framing: lead with what was read cleanly, not with the flag count.
+  const totalRows = pages.reduce((n, p) => n + (state[p.upload.id]?.rows.length ?? 0), 0);
+  const confident = Math.max(0, totalRows - openFlags);
+  // Where this form came from: the scan drop and which of its pages is open now, so Back
+  // returns to the scan (not the default Uploads screen) and the context is visible.
+  const scanSource = uploadSource(pages[0]?.upload.filename ?? '');
+  const curPageLabel = cur ? scanPageLabel(cur.upload.filename).title : null;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 pt-6 pb-6">
-      <div className="flex flex-col gap-1">
-        <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-3.5" /> Back to uploads
-        </Link>
+    <div className="mx-auto flex w-full max-w-[140rem] flex-col gap-5 px-4 pt-6 pb-6 xl:px-6">
+      <div className="flex flex-col gap-1.5">
+        <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
+          {/* A breadcrumb to the scan, so it links straight there. (Not history.back(): the
+              scan board is filter-heavy, and stepping back through history just retraced the
+              view tabs / version cards / store chips the reviewer had clicked.) */}
+          <Link
+            href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
+            className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
+          </Link>
+          {curPageLabel && (
+            <span
+              className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums"
+              style={{color: toneText('var(--primary)'), background: 'color-mix(in oklab, var(--primary) 14%, transparent)', borderColor: 'color-mix(in oklab, var(--primary) 30%, transparent)'}}
+            >
+              {curPageLabel}
+            </span>
+          )}
+        </nav>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-xl font-semibold tracking-tight">Review this store&apos;s form</h1>
+          <h1 className="font-heading text-xl font-semibold tracking-tight">{notOneForm ? 'This batch is not one store’s form' : 'Review this store’s form'}</h1>
           {committed ? (
             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium" style={{color: toneText('var(--status-good)'), background: 'color-mix(in oklab, var(--status-good) 14%, transparent)'}}>
               <CheckCircle2 className="size-3.5" /> Committed
             </span>
+          ) : notOneForm ? (
+            <span className="text-sm text-muted-foreground">
+              {storeGuard.conflict
+                ? 'Several stores are mixed here. Sort it into one form per store in Uploads before committing.'
+                : 'Most pages have more than one sheet, so this is not one form yet. Sort them in Uploads before committing.'}
+            </span>
+          ) : totalRows > 0 ? (
+            <span className="text-sm text-muted-foreground">
+              Read <span className="font-semibold text-foreground tabular-nums">{confident}</span> of{' '}
+              <span className="font-semibold text-foreground tabular-nums">{totalRows}</span> rows confidently
+              {openFlags > 0 ? (
+                <>
+                  {' · '}
+                  <span className="font-medium text-[color:var(--status-warn)]">{openFlags} to glance at</span>
+                </>
+              ) : (
+                ' · nothing left to check'
+              )}
+            </span>
           ) : (
             <span className="text-xs text-muted-foreground">
-              {pages.length} {pages.length === 1 ? 'page' : 'pages'} · {openFlags ? `${openFlags} flagged ${openFlags === 1 ? 'row' : 'rows'} to check` : 'nothing left to check'}
+              {pages.length} {pages.length === 1 ? 'sheet' : 'sheets'}
             </span>
           )}
         </div>
@@ -302,7 +384,7 @@ export function BatchReview({
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm" style={{color: toneText('var(--status-good)'), background: 'color-mix(in oklab, var(--status-good) 12%, transparent)'}}>
           <span className="inline-flex items-center gap-2">
             <CheckCircle2 className="size-4" />
-            {done != null ? `Committed ${done} counts from ${reviewable.length} ${reviewable.length === 1 ? 'page' : 'pages'}.` : 'This form is committed.'}
+            {done != null ? `Committed ${done} counts from ${reviewable.length} ${reviewable.length === 1 ? 'sheet' : 'sheets'}.` : 'This form is committed.'}
           </span>
           <Link href={inventoryHref} className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
             View in Inventory <ArrowRight className="size-3.5" />
@@ -374,7 +456,7 @@ export function BatchReview({
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               {coverage.duplicates.length > 0 && (
                 <span className="inline-flex items-center gap-1" style={{color: toneText('var(--status-warn)')}}>
-                  <AlertTriangle className="size-3.5" aria-hidden /> Page {coverage.duplicates.join(', ')} is here twice. Remove the extra copy from Uploads.
+                  <AlertTriangle className="size-3.5" aria-hidden /> Page {coverage.duplicates.join(', ')} has more than one sheet here. A form commits one sheet per page, so split this batch by store, or remove extras from Uploads, before you commit.
                 </span>
               )}
               {coverage.missing.length > 0 && (
@@ -384,58 +466,152 @@ export function BatchReview({
               )}
             </p>
           ) : null}
+          {storeGuard.conflict && (
+            <div
+              className="flex flex-col gap-1.5 rounded-lg px-3 py-2.5 text-xs"
+              style={{color: toneText('var(--status-crit)'), background: 'color-mix(in oklab, var(--status-crit) 10%, transparent)'}}
+            >
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <AlertTriangle className="size-3.5" aria-hidden /> {storeGuard.stores.length} different stores read across these pages.
+              </span>
+              <span className="text-muted-foreground">
+                A batch is one store&apos;s form. Split it into one form per store from Uploads, or remove the pages that don&apos;t belong, before you commit.
+              </span>
+              {/* Hick's Law: show the store SET first (short), hide the long per-page list behind a disclosure. */}
+              <div className="mt-0.5 flex flex-wrap gap-1.5">
+                {storeGuard.stores.map((s) => (
+                  <span key={s} className="rounded-full px-2 py-0.5 font-mono tabular-nums" style={{background: 'color-mix(in oklab, var(--status-crit) 14%, transparent)'}}>{s}</span>
+                ))}
+              </div>
+              <details className="mt-0.5">
+                <summary className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground">Which page read which store</summary>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {pages.filter((p) => p.detectedStore).map((p) => (
+                    <span key={p.upload.id} className="text-muted-foreground tabular-nums">
+                      Page {p.page ?? '?'}: <span className="text-foreground">{p.detectedStore}</span>
+                    </span>
+                  ))}
+                </div>
+              </details>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {pages.length === 0 ? (
         <Card>
-          <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">No scanned pages in this batch yet.</CardContent>
+          <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">No scanned sheets in this batch yet.</CardContent>
         </Card>
       ) : (
         <>
-          {/* Page tabs */}
-          <div role="tablist" aria-label="Pages" className="flex flex-wrap gap-1.5">
-            {pages.map((p, k) => {
+          {/* Pages, grouped by page number so a big pile (many stores, unknown pages)
+              reads as a few labelled rows instead of a wall of identical pills (Hick's
+              Law). A copy chip shows only its status; the group header carries the
+              number. Unknown pages collapse behind a disclosure. */}
+          {(() => {
+            // index-keyed sheets per form-page number (1-5), plus the 'unknown' bucket.
+            const byPage = new Map<string, number[]>();
+            pages.forEach((p, k) => {
+              const key = p.page ? String(p.page) : 'unknown';
+              (byPage.get(key) ?? byPage.set(key, []).get(key)!).push(k);
+            });
+            // Each chip is one scanned sheet. It leads with the sheet's real page in the scan
+            // ("P.52") so every sheet stays identifiable — they are not interchangeable copies.
+            const chip = (k: number) => {
+              const p = pages[k];
               const info = pageInfo[k];
               const open = Math.max(0, info.flagged - info.resolved);
-              const dup = p.page != null && coverage.duplicates.includes(p.page);
+              const multi = p.page != null && coverage.duplicates.includes(p.page);
+              const sheetNo = scanPageNumber(p.upload.filename);
+              const committed = p.upload.status === 'committed';
+              const selected = tab === k;
               return (
                 <button
                   key={p.upload.id}
                   role="tab"
                   type="button"
-                  aria-selected={tab === k}
+                  aria-selected={selected}
+                  aria-label={`${sheetNo ? `Scan page ${sheetNo}` : p.upload.filename}, form page ${p.page ?? 'unknown'}`}
                   onClick={() => setTab(k)}
                   className={cn(
-                    'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.97]',
-                    tab === k ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/30',
+                    'inline-flex h-9 items-center gap-2.5 rounded-xl border px-3 text-sm transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.975]',
+                    selected
+                      ? 'border-primary/60 bg-primary/10 ring-1 ring-inset ring-primary/30'
+                      : 'border-border bg-card hover:border-foreground/25 hover:bg-muted/40',
                   )}
                 >
-                  {p.page ? `Page ${p.page}` : 'Unknown page'}
-                  {p.upload.status === 'committed' ? (
-                    <CheckCircle2 className="size-3.5" style={{color: 'var(--status-good)'}} aria-label="committed" />
+                  <span className="font-mono text-[13px] font-semibold tabular-nums">{sheetNo ? `P.${sheetNo}` : '—'}</span>
+                  {committed ? (
+                    <CheckCircle2 className="size-4" style={{color: 'var(--status-good)'}} aria-label="committed" />
                   ) : open ? (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums" style={{color: toneText('var(--status-crit)'), background: 'color-mix(in oklab, var(--status-crit) 14%, transparent)'}}>
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[11px] font-bold tabular-nums" style={{color: toneText('var(--status-warn)'), background: 'color-mix(in oklab, var(--status-warn) 16%, transparent)'}}>
                       {open}
                     </span>
                   ) : (
-                    <CheckCircle2 className="size-3.5 text-muted-foreground" aria-label="nothing to check" />
+                    <CheckCircle2 className="size-4 text-muted-foreground/70" aria-label="nothing to check" />
                   )}
-                  {dup && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="duplicate page" />}
+                  {multi && <AlertTriangle className="size-3.5" style={{color: 'var(--status-warn)'}} aria-label="more than one sheet for this page" />}
                 </button>
               );
-            })}
-            {FORM_PAGES.filter((n) => coverage.missing.includes(n) && coverage.missing.length < 5).map((n) => (
-              <span key={`m${n}`} title="Not in this batch" className="inline-flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground/70">
-                Page {n}
-              </span>
-            ))}
-          </div>
+            };
+            const unknown = byPage.get('unknown') ?? [];
+            return (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Form pages</span>
+                  <span className="text-[11px] text-muted-foreground/70">
+                    each chip is a scanned sheet <span className="text-muted-foreground/50">·</span> <span className="font-mono">P.</span> = its page in the scan
+                  </span>
+                </div>
+                <div role="tablist" aria-label="Form pages" className="flex flex-col gap-2">
+                  {FORM_PAGES.map((n) => {
+                    const copies = byPage.get(String(n)) ?? [];
+                    const present = copies.length > 0;
+                    // A page with no sheet here still gets a quiet row (when only a few are
+                    // missing) so the five form pages read as one consistent column.
+                    if (!present && !(coverage.missing.includes(n) && coverage.missing.length < 5)) return null;
+                    return (
+                      <div key={n} className="flex min-h-9 flex-wrap items-center gap-3">
+                        <span
+                          className={cn(
+                            'grid size-7 shrink-0 place-items-center rounded-lg border font-mono text-xs font-semibold tabular-nums',
+                            present ? 'border-border bg-muted text-foreground' : 'border-border/70 text-muted-foreground/60',
+                          )}
+                        >
+                          {n}
+                        </span>
+                        <span className={cn('w-12 shrink-0 text-[13px]', present ? 'font-medium text-foreground' : 'text-muted-foreground')}>Page {n}</span>
+                        {present ? (
+                          <div className="flex flex-wrap items-center gap-2">{copies.map((k) => chip(k))}</div>
+                        ) : (
+                          <span className="rounded-[10px] border border-dashed border-border px-3 py-1.5 text-xs text-muted-foreground/60">Not in this batch</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {unknown.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setOpenGroups((g) => ({...g, unknown: !g.unknown}))}
+                        aria-expanded={Boolean(openGroups.unknown)}
+                        className="inline-flex h-9 shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <ChevronDown className={cn('size-4 transition-transform duration-150', openGroups.unknown && 'rotate-180')} />
+                        No page number ({unknown.length})
+                      </button>
+                      {openGroups.unknown && <div className="flex flex-wrap items-center gap-2">{unknown.map((k) => chip(k))}</div>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {cur && curState && (
             <div role="tabpanel" className="flex flex-col gap-5 lg:flex-row lg:items-start">
               {cur.scanUrl && (
-                <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[28%] lg:shrink-0">
+                <div className="lg:sticky lg:top-[calc(3.5rem+1rem)] lg:w-[40%] lg:shrink-0 2xl:w-[45%]">
                   <Card>
                     <CardContent className="flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
@@ -446,33 +622,19 @@ export function BatchReview({
                           <ExternalLink className="size-3.5" /> Open
                         </a>
                       </div>
-{/* Phones can't show a PDF inside the page — open it in the phone's viewer instead. */}
-                <a
-                  href={cur.scanUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm transition-colors active:bg-muted md:hidden"
-                >
-                  <FileText aria-hidden className="size-5 shrink-0 text-muted-foreground" />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="font-medium">View the scan</span>
-                    <span className="text-xs text-muted-foreground">Opens the PDF to compare with the rows below</span>
-                  </span>
-                  <ExternalLink aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                </a>
-                <button
-                        type="button"
-                        onClick={() => setLightbox(cur.scanUrl)}
-                        aria-label="Enlarge scan"
-                        className="group relative block w-full overflow-hidden rounded-md border border-border bg-muted max-md:hidden"
-                      >
-                        <iframe src={cur.scanUrl} title={`Scan of ${cur.upload.filename}`} tabIndex={-1} className="pointer-events-none h-[360px] w-full lg:h-[min(640px,calc(100dvh-12rem))]" />
-                        <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/40 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-                          <span className="inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-xs font-medium">
-                            <Maximize2 className="size-3" /> Click to enlarge
-                          </span>
-                        </span>
-                      </button>
+                      {/* The scan beside the numbers: pinch or the buttons to zoom, drag to pan, click to enlarge
+                          (centered, fit to the screen). Upside-down pages show upright; Rotate fixes a wrong guess.
+                          Phones get the same pane stacked above the rows. */}
+                      <ScanPageViewer
+                        key={cur.upload.id}
+                        url={cur.scanUrl}
+                        rotation={rot.deg}
+                        onRotate={rot.toggle}
+                        onEnlarge={() => setLightbox({url: cur.scanUrl!})}
+                        pointBox={pointBox}
+                        tilt={cur.extraction?.data?.slant?.angle}
+                        className="h-[45dvh] rounded-md border border-border lg:h-[calc(100dvh-11rem)]"
+                      />
                       <span className="truncate text-[11px] text-muted-foreground" title={cur.upload.filename}>
                         {cur.upload.filename}
                       </span>
@@ -491,13 +653,17 @@ export function BatchReview({
                   </CardContent>
                 </Card>
                 <ReviewRows
+                  onPoint={cur.scanUrl ? setPointRow : undefined}
+                  pointed={pointRow}
                   rows={curState.rows}
                   productNames={cur.productNames}
+                  rowNames={cur.rowNames}
                   catalog={catalog}
                   flagged={curFlags}
                   resolved={curState.resolved}
                   active={curState.active}
                   view={curState.view}
+                  version={cur.upload.form_version}
                   query={curState.query}
                   onQuery={(q) => setCur({query: q})}
                   editable={editable && cur.upload.status === 'needs_review'}
@@ -556,27 +722,64 @@ export function BatchReview({
                   Go to next flag
                 </Button>
               )}
-              <Button onClick={commitAll} disabled={!readiness.ready || committing}>
-                {committing ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                Commit all {reviewable.length} {reviewable.length === 1 ? 'page' : 'pages'}
-              </Button>
+              <AlertDialog.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
+                <AlertDialog.Trigger render={<Button disabled={!readiness.ready || committing} />}>
+                  {committing ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                  Commit all {reviewable.length} {reviewable.length === 1 ? 'page' : 'pages'}
+                </AlertDialog.Trigger>
+                <AlertDialog.Portal>
+                  <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/45 transition-opacity duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+                  <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+                    <div className="flex flex-col gap-1.5">
+                      <AlertDialog.Title className="font-heading text-base font-semibold">Commit this form?</AlertDialog.Title>
+                      <AlertDialog.Description className="text-sm text-muted-foreground">
+                        This writes {reviewableRows} {reviewableRows === 1 ? 'count' : 'counts'} from {reviewable.length} {reviewable.length === 1 ? 'page' : 'pages'} into one Inventory count for{' '}
+                        {storeCode ? <span className="font-medium text-foreground">Store {storeCode}</span> : 'this store'}, {fmtTriagePeriod(periodStart, periodEnd)}. You can&apos;t undo it in one step.
+                      </AlertDialog.Description>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <AlertDialog.Close render={<Button variant="outline" size="sm" />}>Keep reviewing</AlertDialog.Close>
+                      <Button size="sm" onClick={() => {setConfirmOpen(false); commitAll();}}>
+                        <CheckCircle2 className="size-4" /> Commit
+                      </Button>
+                    </div>
+                  </AlertDialog.Popup>
+                </AlertDialog.Portal>
+              </AlertDialog.Root>
             </div>
           </div>
         </div>
       )}
 
-      {lightbox && (
+      {lightbox && createPortal(
         <div className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 transition-opacity duration-150 ease-out starting:opacity-0 sm:p-8" role="dialog" aria-modal="true" aria-label="Scanned page" onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}>
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <a href={lightbox} target="_blank" rel="noopener noreferrer" className={buttonVariants({variant: 'secondary', size: 'sm'})}>
-              <ExternalLink className="size-3.5" /> Open in new tab
-            </a>
-            <Button variant="secondary" size="sm" autoFocus onClick={() => setLightbox(null)}>
-              <X className="size-4" /> Close
-            </Button>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {lightbox.highlight ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-background/90 px-2.5 py-1 text-xs font-medium">
+                <Crosshair className="size-3.5" style={{color: 'var(--primary)'}} /> {lightbox.highlight.label}
+                <span className="text-muted-foreground">· approximate</span>
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
+              <a href={lightbox.url} target="_blank" rel="noopener noreferrer" className={buttonVariants({variant: 'secondary', size: 'sm'})}>
+                <ExternalLink className="size-3.5" /> Open in new tab
+              </a>
+              <Button variant="secondary" size="sm" autoFocus onClick={() => setLightbox(null)}>
+                <X className="size-4" /> Close
+              </Button>
+            </div>
           </div>
-          <iframe src={lightbox} title="Scanned page (enlarged)" className="min-h-0 w-full flex-1 rounded-md bg-white" />
-        </div>
+          {/* The page rendered to a canvas, with the approximate row band drawn in the
+              page's own coordinate space, so zooming/panning keeps it locked on (the old
+              iframe overlay drifted). Falls back to the browser PDF viewer if it can't
+              render. The band is approximate — see the "Show in scan" button. */}
+          <div className="min-h-0 w-full flex-1">
+            <ScanPageViewer url={lightbox.url} highlight={lightbox.highlight} tilt={cur?.extraction?.data?.slant?.angle} rotation={rot.deg} onRotate={rot.toggle} fit="page" className="h-full" />
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

@@ -9,7 +9,25 @@ export const FORM_PAGES = [1, 2, 3, 4, 5] as const;
 export const MAX_BATCH_FILES = 250;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-export type BatchPageInfo = {uploadId: string; page: number | null; flagged: number; resolved: number; status: string};
+export type BatchPageInfo = {uploadId: string; page: number | null; flagged: number; resolved: number; status: string; detectedStore?: string | null};
+
+/**
+ * Store-change guard (Phase 2): a batch is ONE store's form, so its pages should all
+ * read the same store. Returns the distinct detected store codes and whether they
+ * conflict (more than one distinct non-null code). Pages with no detected store don't
+ * count against agreement — only a genuine second store is a conflict. A misread that
+ * Phase 0 couldn't snap shows as its own code here, which is exactly what should be
+ * surfaced before it commits to the wrong store.
+ */
+export function storeConflict(pages: Array<{detectedStore?: string | null}>): {stores: string[]; conflict: boolean} {
+  const seen = new Set<string>();
+  for (const p of pages) {
+    const s = p.detectedStore?.trim();
+    if (s) seen.add(s);
+  }
+  const stores = [...seen].sort();
+  return {stores, conflict: stores.length > 1};
+}
 
 /** Pages in form order (unknown page last), then by upload order. */
 export function orderPages<T extends {page: number | null}>(pages: T[]): T[] {
@@ -46,6 +64,11 @@ export function batchReadiness(input: {
   if (pages.some((p) => p.status === 'processing')) return {ready: false, reason: 'Wait for every page to finish reading.'};
   const dup = batchCoverage(reviewable).duplicates;
   if (dup.length) return {ready: false, reason: `Page ${dup.join(', ')} was uploaded twice. Remove the extra copy.`};
+  // Store-change guard: pages that read different stores shouldn't commit together.
+  const conflict = storeConflict(reviewable);
+  if (conflict.conflict) {
+    return {ready: false, reason: `These pages read different stores (${conflict.stores.join(', ')}). Split them into one form per store, or remove the stray page.`};
+  }
   if (!input.storeCode.trim()) return {ready: false, reason: 'Enter the store code.'};
   if (!ISO.test(input.periodStart) || !ISO.test(input.periodEnd)) return {ready: false, reason: 'Enter the period this count covers.'};
   if (input.periodStart > input.periodEnd) return {ready: false, reason: 'The period end must be on or after its start.'};
@@ -66,6 +89,39 @@ export function splitName(original: string, index: number, total: number): strin
 export function scanPosition(filename: string): {source: string; index: number} | null {
   const m = /^(.*) \(page (\d+) of \d+\)\.pdf$/i.exec(filename);
   return m ? {source: m[1], index: Number(m[2])} : null;
+}
+
+/** A human label for a file: a page split from a scan reads "Page 10 of 98" (with the raw
+ *  filename kept as a sub-line); a whole form or sales export keeps its own already-human
+ *  name and has no sub-line. Named "Page" (not "Sheet"): reviewers think of the scan as
+ *  pages, and the form's template page is shown separately ("Inventory form · page 2 of 5").
+ *  `index` is the position for sorting (0 when not a split page, so whole files sort first). */
+export function scanPageLabel(filename: string): {title: string; sub: string | null; index: number} {
+  const m = /^(.*) \(page (\d+) of (\d+)\)\.pdf$/i.exec(filename);
+  return m ? {title: `Page ${m[2]} of ${m[3]}`, sub: filename, index: Number(m[2])} : {title: filename, sub: null, index: 0};
+}
+
+/** The scanned sheet's position in its source scan ("… (page 52 of 98).pdf" → 52), or null
+ *  for a whole-file upload. Lets a chip name the physical page it is (e.g. "P.52") so every
+ *  sheet stays identifiable back to the scan, not reduced to a local 1/2/3 ordinal. */
+export function scanPageNumber(filename: string): number | null {
+  const n = scanPageLabel(filename).index;
+  return n > 0 ? n : null;
+}
+
+/** A single page's read finishes in well under this; a page still 'processing' past it is an
+ *  orphaned extraction (its reader died without writing back), not a live one. Measured from
+ *  the upload's creation, the closest "processing since" signal the row carries. */
+export const STALE_PROCESSING_MS = 30 * 60 * 1000;
+
+/** Whether a page is still being actively read: 'processing' and recent. A page stuck in
+ *  'processing' past STALE_PROCESSING_MS is treated as orphaned so it no longer gates the
+ *  batch, letting a scan split (and later commit) instead of one dead read freezing it all.
+ *  An unparseable timestamp is treated as live, so an ambiguous case never relaxes the gate. */
+export function isLiveProcessing(p: {status: string; created_at: string}, now: number = Date.now()): boolean {
+  if (p.status !== 'processing') return false;
+  const started = Date.parse(p.created_at);
+  return Number.isFinite(started) ? now - started < STALE_PROCESSING_MS : true;
 }
 
 /**
@@ -94,6 +150,19 @@ export function scanOrder<T extends {filename: string; created_at: string}>(page
  * the review asks to remove the copy. Pages the reader couldn't number stay with the
  * form they sit in.
  */
+/** One store's form is 5 printed pages; scanned two-sided with blank backs, 10. */
+export const MAX_SINGLE_FORM_PAGES = 10;
+
+/**
+ * Whether the Form pages (1 to 5) strip applies: only to an upload that can be ONE store's
+ * form. Decided from what is known up front (pages in the upload, files dropped), so a big
+ * scan never shows the strip while its pages are still being read out of order; a page
+ * number restarting (several forms) hides it too.
+ */
+export function isSingleFormUpload(u: {totalPages: number; scans: number; forms: number}): boolean {
+  return u.scans <= 1 && u.totalPages <= MAX_SINGLE_FORM_PAGES && u.forms <= 1;
+}
+
 export function groupForms<T extends {page: number | null}>(ordered: T[]): T[][] {
   const forms: T[][] = [];
   let last: number | null = null;

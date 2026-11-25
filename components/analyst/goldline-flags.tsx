@@ -1,6 +1,7 @@
 'use client';
 
 import {Fragment, useEffect, useMemo, useRef, useState, useTransition} from 'react';
+import {keptId, useDrillIn} from '@/components/analyst/back-nav';
 import {useRouter} from 'next/navigation';
 import {ArrowLeft, ArrowRight, Calculator, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, OctagonAlert, PenLine, RefreshCw, TriangleAlert, Trash2} from 'lucide-react';
 import type {AdjustmentReason, AdjustmentRow, BaTile, FlagRow, FlagsData, FormCell, FormCycle, FormRow} from '@/src/goldline-flags-data';
@@ -120,7 +121,6 @@ export function GoldlineFlags({
   company,
   data,
   canEdit,
-  initialOpen = null,
   initialMonth = null,
 }: {
   company: string;
@@ -139,7 +139,11 @@ export function GoldlineFlags({
   const [tagFilter, setTagFilter] = useState<BaTag | 'all'>('all');
   const [store, setStore] = useState('all');
   const [page, setPage] = useState(1);
-  const [openKey, setOpenKey] = useState<string | null>(initialOpen);
+  // A BA's form is a drill-in, not a new route: it is a Back step (`?open=`), so the browser's
+  // Back returns to the tiles, scroll kept and the tile marked. (The server validated a deep
+  // link's ?open= as initialOpen; the same param is read here, so an unknown key just shows the tiles.)
+  const [openParam, openTile, closeTile] = useDrillIn('open');
+  const openKey = openParam;
 
   function act(fn: () => Promise<FlagActionResult>, okText: string, after?: () => void) {
     setNotice(null);
@@ -188,7 +192,7 @@ export function GoldlineFlags({
       )}
 
       {opened ? (
-        <FormView key={opened.key} tile={opened} company={company} flags={data.flags} canEdit={canEdit} pending={pending} act={act} onBack={() => setOpenKey(null)} />
+        <FormView key={opened.key} tile={opened} company={company} flags={data.flags} canEdit={canEdit} pending={pending} act={act} onBack={closeTile} />
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -318,8 +322,8 @@ export function GoldlineFlags({
               ) : (
                 <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                   {rows.map((t) => (
-                    <li key={t.key}>
-                      <Tile t={t} onOpen={() => setOpenKey(t.key)} />
+                    <li key={t.key} data-kept-id={keptId(t.key)} data-kept-tile className="rounded-xl">
+                      <Tile t={t} onOpen={() => openTile(t.key)} />
                     </li>
                   ))}
                 </ul>

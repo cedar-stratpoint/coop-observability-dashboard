@@ -38,6 +38,7 @@ export function Pagination({
   className,
   label = 'Pagination',
   alwaysShow = false,
+  variant = 'boxed',
 }: {
   page: number;
   pageCount: number;
@@ -49,12 +50,23 @@ export function Pagination({
   /** Render even for a single page (disabled arrows + "1"), for layouts that
    *  keep a persistent pager bar. Default hides it. */
   alwaysShow?: boolean;
+  /** 'boxed' (default): separate bordered squares. 'segmented': one tray with the current page
+   *  raised inside it, matching the scan page's view tabs and per-page switch. */
+  variant?: 'boxed' | 'segmented';
 }) {
   if (pageCount <= 1 && !alwaysShow) return null;
   const items = pageItems(page, pageCount, siblings);
   return (
-    <nav aria-label={label} className={cn('flex flex-wrap items-center justify-center gap-1', className)}>
-      <Ctl to={page - 1} disabled={page <= 1} onPage={onPage} hrefFor={hrefFor} ariaLabel="Previous page">
+    <nav
+      aria-label={label}
+      className={cn(
+        variant === 'segmented'
+          ? 'inline-flex flex-wrap items-center gap-0.5 rounded-xl bg-muted/70 p-1 ring-1 ring-border/70 ring-inset'
+          : 'flex flex-wrap items-center justify-center gap-1',
+        className,
+      )}
+    >
+      <Ctl variant={variant} to={page - 1} disabled={page <= 1} onPage={onPage} hrefFor={hrefFor} ariaLabel="Previous page">
         <ChevronLeft className="size-4" />
       </Ctl>
       {items.map((it) =>
@@ -65,6 +77,7 @@ export function Pagination({
         ) : (
           <Ctl
             key={it.n}
+            variant={variant}
             to={it.n}
             active={it.n === page}
             onPage={onPage}
@@ -76,7 +89,7 @@ export function Pagination({
           </Ctl>
         ),
       )}
-      <Ctl to={page + 1} disabled={page >= pageCount} onPage={onPage} hrefFor={hrefFor} ariaLabel="Next page">
+      <Ctl variant={variant} to={page + 1} disabled={page >= pageCount} onPage={onPage} hrefFor={hrefFor} ariaLabel="Next page">
         <ChevronRight className="size-4" />
       </Ctl>
     </nav>
@@ -84,6 +97,7 @@ export function Pagination({
 }
 
 function Ctl({
+  variant = 'boxed',
   to,
   disabled,
   active,
@@ -93,6 +107,7 @@ function Ctl({
   ariaLabel,
   children,
 }: {
+  variant?: 'boxed' | 'segmented';
   to: number;
   disabled?: boolean;
   active?: boolean;
@@ -102,14 +117,24 @@ function Ctl({
   ariaLabel: string;
   children: React.ReactNode;
 }) {
-  const cls = cn(
-    'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-medium tabular-nums transition-colors',
-    active
-      ? 'border-primary bg-primary text-primary-foreground'
-      : disabled
-        ? 'cursor-not-allowed border-border/60 text-muted-foreground/40'
-        : 'border-border text-foreground hover:border-primary hover:text-primary',
-  );
+  const cls =
+    variant === 'segmented'
+      ? cn(
+          'inline-flex h-7 min-w-7 items-center justify-center rounded-lg px-2 text-xs font-medium tabular-nums transition-[color,background-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none',
+          active
+            ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60'
+            : disabled
+              ? 'cursor-not-allowed text-muted-foreground/35'
+              : 'text-muted-foreground hover:bg-background/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.97]',
+        )
+      : cn(
+          'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-medium tabular-nums transition-colors',
+          active
+            ? 'border-primary bg-primary text-primary-foreground'
+            : disabled
+              ? 'cursor-not-allowed border-border/60 text-muted-foreground/40'
+              : 'border-border text-foreground hover:border-primary hover:text-primary',
+        );
   const aria = current ? ('page' as const) : undefined;
   if (disabled) {
     return (

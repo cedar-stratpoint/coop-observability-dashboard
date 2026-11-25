@@ -2,11 +2,13 @@
 
 import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {createBatchAction, splitFormsAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {createBatchAction, serverBatchProgressAction, splitFormsAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import type {SplitForm} from '@/src/goldline-data';
 import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progress';
-import {groupForms, MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
-import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
+import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
+import {sendReread, sendUpload, signAndIngestScan, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
+import {serverPageState, type ServerPageProgress} from '@/src/server-upload-progress';
+import {planServerScans} from '@/components/analyst/server-scan-plan';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
 // in-app navigation), so uploads keep running while the user moves between pages and
@@ -17,6 +19,12 @@ import {sendUpload, splitPdfPages, type UploadResult, type WatsonsResult} from '
 // Data .xlsx carries its own month and goes straight away (it never joins the batch).
 
 export const CONCURRENCY = 2;
+
+// Auto-retry transient page failures (a cut stream, a timeout, an overload) a couple
+// of times with backoff before ever showing the page as failed — a big scan hits these
+// and nothing else recovers them. Permanent outcomes (set aside, out of scope) don't retry.
+const AUTO_RETRY_MAX = 2;
+const AUTO_BACKOFF_MS = [2500, 7000];
 
 export type ItemState = 'queued' | 'waiting_period' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -35,7 +43,11 @@ export type QueueItem = {
   // results
   uploadId?: string;
   serverStatus?: string; // needs_review | committed | rejected | failed
+  // When not a readable inventory page: 'sales' (page 6), 'blank', or 'unknown' —
+  // lets the row show a calm pill ("Sales report", "Blank page") instead of an error.
+  pageKind?: string;
   page?: number;
+  formVersion?: string; // inventory form layout detected (legacy/v1/v2), once read
   rows?: number;
   flagged?: number;
   rowsCommitted?: number;
@@ -52,6 +64,25 @@ export type BatchInfo = {
   prefilled: boolean; // store/period came from page 1's printed header
 };
 
+// Server-driven upload (P2): one whole scan uploaded once, then read by the server. This
+// tracks the upload + the server batch so the uploader can show "uploading → splitting →
+// reading N of M" in place; the per-page rows come from polling, synthesized into `items`.
+export type ServerScanPhase = 'uploading' | 'ingesting' | 'reading' | 'done';
+export type ServerBatchState = {
+  id: string; // '' until ingest returns the batch
+  totalPages: number;
+  totalBytes: number;
+  phase: ServerScanPhase;
+  uploadFrac: number; // real bytes PUT to storage, 0–1
+  part?: {index: number; total: number}; // when several PDFs were dropped: this is scan `index` of `total`
+};
+
+// How often the browser polls the server batch's page progress while it's reading.
+const SERVER_POLL_MS = 3000;
+// A stand-in File for a server-driven page row: in server mode the client never reads the
+// bytes (the per-page read runs on the server), so run() is gated off and this is never sent.
+const SERVER_PLACEHOLDER_FILE = typeof File !== 'undefined' ? new File([], 'scan.pdf', {type: 'application/pdf'}) : (undefined as unknown as File);
+
 type QueueApi = {
   company: string | null;
   batch: BatchInfo;
@@ -61,12 +92,24 @@ type QueueApi = {
   /** Set when the drop held more than one store's form: each is its own batch to review. */
   forms: SplitForm[] | null;
   splitting: boolean;
+  /** Server-driven path (P2): the whole scan is uploaded once and read server-side. Null on
+   *  the client-driven path. When set, `items` are a live reflection of DB state (polled). */
+  serverMode: boolean;
+  /** True when this company is on the server-driven upload path (a single whole-PDF drop is
+   *  uploaded once and read server-side). Lets the UI offer the optional upload name. */
+  serverUpload: boolean;
+  serverBatch: ServerBatchState | null;
+  /** The PDFs in the current server-driven run, in upload order (one entry for a single scan). */
+  serverRun: {name: string; size: number}[] | null;
   active: number; // queued + running + waiting
   addFiles: (files: File[]) => Promise<void>;
   retry: (id: string) => void;
   cancel: (id: string) => void;
   remove: (id: string) => void;
   setBatchInfo: (patch: Partial<Pick<BatchInfo, 'storeCode' | 'periodStart' | 'periodEnd'>>) => void;
+  /** Optional name for a server-driven group upload, shown instead of the filename. */
+  uploadName: string;
+  setUploadName: (v: string) => void;
   reset: () => void;
   dismissNotice: () => void;
 };
@@ -81,7 +124,7 @@ export function useUploadQueue(): QueueApi | null {
 let seq = 0;
 const newId = () => `q${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-export function UploadQueueProvider({company, children}: {company: string | null; children: React.ReactNode}) {
+export function UploadQueueProvider({company, serverUpload = false, children}: {company: string | null; serverUpload?: boolean; children: React.ReactNode}) {
   const router = useRouter();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [batch, setBatch] = useState<BatchInfo>(EMPTY_BATCH);
@@ -89,12 +132,33 @@ export function UploadQueueProvider({company, children}: {company: string | null
   const [notice, setNotice] = useState<string | null>(null);
   const [forms, setForms] = useState<SplitForm[] | null>(null);
   const [splitting, setSplitting] = useState(false);
+  // Optional name the user types for a server-driven group upload (shown instead of the
+  // filename on the scan tile/header). A ref mirrors it so the stable startServerScan
+  // callback can read the latest value without being re-created.
+  const [uploadName, setUploadNameState] = useState('');
+  const uploadNameRef = useRef('');
+  const setUploadName = useCallback((v: string) => {
+    uploadNameRef.current = v;
+    setUploadNameState(v);
+  }, []);
+  // Server-driven path (P2), only when the company is on the flag. While a server batch is
+  // active the client-driven machinery (scheduler, split, beforeunload) stands down; the
+  // ref lets those effects bail synchronously.
+  const [serverBatch, setServerBatch] = useState<ServerBatchState | null>(null);
+  const [serverRun, setServerRun] = useState<{name: string; size: number}[] | null>(null);
+  const serverBatchRef = useRef<ServerBatchState | null>(null);
+  serverBatchRef.current = serverBatch;
+  // Stamp when each server page first went 'running', so its progress band eases instead of
+  // restarting on every poll.
+  const serverStartedAt = useRef(new Map<string, number>());
   const splitFor = useRef<string | null>(null); // batch id already split
   const aborts = useRef(new Map<string, () => void>());
   const batchPromise = useRef<Promise<string | null> | null>(null);
   // Run attempt per item: cancelling (before the request goes out) or retrying bumps
   // it, so a superseded run stops at the gate and never overwrites a newer one.
   const attempt = useRef(new Map<string, number>());
+  // How many times each item has been auto-retried after a transient failure.
+  const autoTries = useRef(new Map<string, number>());
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchRef = useRef(batch);
   batchRef.current = batch;
@@ -153,6 +217,31 @@ export function UploadQueueProvider({company, children}: {company: string | null
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
   }, []);
 
+  // A transient failure gets AUTO_RETRY_MAX automatic re-tries (with backoff) before it's
+  // shown as failed; a permanent one is marked failed straight away. Re-queuing lets the
+  // scheduler pick it up again like a manual retry.
+  const failOrRetry = useCallback(
+    (id: string, info: {error: string; transient: boolean; serverStatus?: string; pageKind?: string}) => {
+      const tries = autoTries.current.get(id) ?? 0;
+      if (info.transient && tries < AUTO_RETRY_MAX) {
+        autoTries.current.set(id, tries + 1);
+        patch(id, {state: 'failed', serverStatus: info.serverStatus, pageKind: info.pageKind, error: 'Didn’t go through, retrying…'});
+        setTimeout(() => {
+          setItems((all) =>
+            all.map((i) =>
+              i.id === id && i.state === 'failed'
+                ? {...i, state: 'queued', error: undefined, phase: 'uploading', uploadFrac: 0, uploadId: undefined, serverStatus: undefined, pageKind: undefined}
+                : i,
+            ),
+          );
+        }, AUTO_BACKOFF_MS[Math.min(tries, AUTO_BACKOFF_MS.length - 1)]);
+        return;
+      }
+      patch(id, {state: 'failed', serverStatus: info.serverStatus, pageKind: info.pageKind, error: info.error});
+    },
+    [patch],
+  );
+
   const run = useCallback(
     async (item: QueueItem) => {
       const token = (attempt.current.get(item.id) ?? 0) + 1;
@@ -179,11 +268,13 @@ export function UploadQueueProvider({company, children}: {company: string | null
         periodEnd: item.kind === 'csv' ? b.periodEnd : undefined,
         onUploadProgress: (f) => patch(item.id, {uploadFrac: f}),
         onStage: (ev) =>
-          patch(item.id, {
+          // A heartbeat re-emits the current stage; don't reset phaseAt then, or the
+          // progress band restarts every 12s. Only reset when the phase truly changes.
+          patch(item.id, (i) => ({
             phase: ev.stage,
-            phaseAt: Date.now(),
+            phaseAt: i.phase === ev.stage ? i.phaseAt : Date.now(),
             ...(ev.stage === 'reading' ? {reading: {page: ev.page, items: ev.items}} : {}),
-          }),
+          })),
       });
       aborts.current.set(item.id, abort);
       let res: UploadResult;
@@ -192,16 +283,19 @@ export function UploadQueueProvider({company, children}: {company: string | null
       } catch (e) {
         aborts.current.delete(item.id);
         if (e instanceof DOMException && e.name === 'AbortError') return patch(item.id, {state: 'cancelled'});
-        return patch(item.id, {state: 'failed', error: e instanceof Error ? e.message : 'Upload failed.'});
+        // A cut stream / network blip / timeout — transient, so auto-retry before failing.
+        return failOrRetry(item.id, {transient: true, error: e instanceof Error ? e.message : 'Upload failed.'});
       }
       aborts.current.delete(item.id);
       if (res.status === 'needs_review' || res.status === 'committed') {
+        autoTries.current.delete(item.id); // read through — clear the retry counter
         patch(item.id, {
           state: 'done',
           phase: 'done',
           uploadId: res.uploadId,
           serverStatus: res.status,
           page: res.page,
+          formVersion: res.formVersion,
           rows: res.rows,
           flagged: res.flagged,
           rowsCommitted: res.rowsCommitted,
@@ -221,19 +315,24 @@ export function UploadQueueProvider({company, children}: {company: string | null
         }
         refreshSoon(); // the Files list picks up the new rows
       } else {
-        patch(item.id, {
-          state: 'failed',
-          uploadId: res.uploadId,
+        if (res.uploadId) patch(item.id, {uploadId: res.uploadId});
+        // A genuine processing error ('failed') is transient and worth a retry; a page
+        // set aside ('rejected': sales / blank / not-an-inventory-page) is permanent.
+        failOrRetry(item.id, {
+          transient: res.status === 'failed',
           serverStatus: res.status,
-          error: res.error ?? res.errors?.[0] ?? `Upload failed (${res.httpStatus}).`,
+          pageKind: res.pageKind,
+          // No raw HTTP status in front of the user — a plain, non-technical line.
+          error: res.error ?? res.errors?.[0] ?? 'We couldn’t read this page. Please try again.',
         });
       }
     },
-    [ensureBatch, patch, refreshSoon],
+    [ensureBatch, patch, refreshSoon, failOrRetry],
   );
 
   // Scheduler: keep CONCURRENCY uploads going; CSVs wait for the batch period.
   useEffect(() => {
+    if (serverBatchRef.current) return; // server-driven: the server reads the pages, not this queue
     const hasPeriod = Boolean(batch.periodStart && batch.periodEnd);
     const waiting = items.filter((i) => i.state === 'waiting_period');
     if (hasPeriod && waiting.length) {
@@ -253,12 +352,14 @@ export function UploadQueueProvider({company, children}: {company: string | null
 
   const active = items.filter((i) => i.state === 'queued' || i.state === 'running' || i.state === 'waiting_period').length;
 
-  // Many stores in one scan (Q25): once every page is read, if the page numbers restart
-  // (…5, 1…) the drop held several forms. Split them into one batch each, once.
+  // Many stores in one scan (Q25): once every page is read, split the drop into one
+  // batch per FORM. The server groups by the Phase 0 classification (store · period ·
+  // version), which separates a shuffled multi-store scan the old page-number heuristic
+  // couldn't. Runs once per batch; a single-form drop is a cheap no-op.
   useEffect(() => {
+    if (serverBatchRef.current) return; // server-driven: the batch page splits forms server-side
     if (active > 0 || !batch.id || splitting || splitFor.current === batch.id) return;
-    const pdfs = items.filter((i) => i.kind === 'pdf' && i.state === 'done');
-    if (groupForms(pdfs.map((i) => ({page: i.page ?? null}))).length < 2) return;
+    if (!items.some((i) => i.kind === 'pdf' && i.state === 'done')) return;
     splitFor.current = batch.id;
     setSplitting(true);
     void splitFormsAction({company: queueCompany.current, batchId: batch.id})
@@ -273,20 +374,141 @@ export function UploadQueueProvider({company, children}: {company: string | null
       .finally(() => setSplitting(false));
   }, [active, batch.id, items, splitting, router]);
 
-  // Leaving the app (reload / close) would kill in-flight uploads — warn first.
+  // Leaving the app (reload / close) would kill in-flight CLIENT uploads — warn first. The
+  // server-driven path is refresh-safe once its file is up (the work lives in the DB), but the
+  // PDF itself still uploads from this browser, and several PDFs go up one after another:
+  // warn while any of them is still uploading.
+  const serverUploadsLeft = Boolean(serverBatch && (serverBatch.phase === 'uploading' || (serverBatch.part && serverBatch.part.index < serverBatch.part.total)));
   useEffect(() => {
-    if (!items.some((i) => i.state === 'queued' || i.state === 'running')) return;
+    if (serverBatch && !serverUploadsLeft) return;
+    if (!serverUploadsLeft && !items.some((i) => i.state === 'queued' || i.state === 'running')) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [items]);
+  }, [items, serverBatch, serverUploadsLeft]);
+
+  // Server-driven path: start one whole-scan upload, then let the poll effect watch it.
+  // Returns false when it failed, so a run of several scans stops there.
+  const startServerScan = useCallback(async (file: File, opts?: {name?: string; part?: {index: number; total: number}}): Promise<boolean> => {
+    const company = queueCompany.current;
+    if (!company) {
+      setNotice('No company in view.');
+      return false;
+    }
+    const part = opts?.part;
+    setForms(null);
+    setItems([]); // a server batch replaces any prior list
+    serverStartedAt.current.clear();
+    setServerBatch({id: '', totalPages: 0, totalBytes: file.size, phase: 'uploading', uploadFrac: 0, part});
+    try {
+      const {batchId, pages} = await signAndIngestScan({
+        company,
+        file,
+        name: opts ? opts.name : uploadNameRef.current.trim() || undefined,
+        onProgress: (f) => setServerBatch((b) => (b ? {...b, uploadFrac: f} : b)),
+        onPhase: (p) => setServerBatch((b) => (b ? {...b, phase: p} : b)),
+      });
+      setBatch((b) => ({...b, id: batchId}));
+      batchRef.current = {...batchRef.current, id: batchId};
+      setServerBatch({id: batchId, totalPages: pages, totalBytes: file.size, phase: 'reading', uploadFrac: 1, part});
+      return true;
+    } catch (e) {
+      setServerBatch(null);
+      const why = e instanceof Error ? e.message : 'Upload failed. Please try again.';
+      setNotice(part && part.total > 1 ? `Scan ${part.index} of ${part.total} (${file.name}): ${why}` : why);
+      return false;
+    }
+  }, []);
+
+  // Build the item list from a progress poll, so the existing uploader rows render a
+  // server-driven scan exactly like a client-driven one (progress bands, pills, review link).
+  const synthServerItems = useCallback((pages: ServerPageProgress[], perPageSize: number): QueueItem[] => {
+    const now = Date.now();
+    return pages.map((p) => {
+      const state = serverPageState(p.status);
+      let started = serverStartedAt.current.get(p.uploadId) ?? null;
+      if (state === 'running' && started == null) {
+        started = now;
+        serverStartedAt.current.set(p.uploadId, started);
+      }
+      return {
+        id: p.uploadId,
+        file: SERVER_PLACEHOLDER_FILE,
+        name: p.filename,
+        size: perPageSize,
+        kind: 'pdf',
+        state,
+        phase: state === 'running' ? 'reading' : state === 'done' ? 'done' : 'uploading',
+        uploadFrac: 1,
+        phaseAt: started ?? 0,
+        startedAt: started,
+        reading: state === 'running' && p.page ? {page: p.page, items: 0} : null,
+        uploadId: p.uploadId,
+        serverStatus: p.status,
+        pageKind: p.pageKind ?? undefined,
+        page: p.page ?? undefined,
+        formVersion: p.formVersion ?? undefined,
+        rows: p.rows ?? undefined,
+        flagged: p.flagged ?? undefined,
+      } satisfies QueueItem;
+    });
+  }, []);
+
+  // Poll the server batch's page progress while it reads; stop once every page has settled.
+  useEffect(() => {
+    if (!serverBatch?.id || serverBatch.phase === 'done') return;
+    const batchId = serverBatch.id;
+    const perPageSize = serverBatch.totalPages > 0 ? Math.round(serverBatch.totalBytes / serverBatch.totalPages) : serverBatch.totalBytes;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      const r = await serverBatchProgressAction({company: queueCompany.current, batchId});
+      if (cancelled) return;
+      if (r.ok) {
+        setItems(synthServerItems(r.progress.pages, perPageSize));
+        if (r.progress.pages.length > 0 && r.progress.settled) {
+          setServerBatch((b) => (b ? {...b, phase: 'done'} : b));
+          router.refresh(); // the Files list + review picks up the final rows
+          return;
+        }
+      }
+      timer = setTimeout(poll, SERVER_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [serverBatch?.id, serverBatch?.phase, serverBatch?.totalPages, serverBatch?.totalBytes, synthServerItems, router]);
 
   const addFiles = useCallback(
     async (files: File[]) => {
       setNotice(null);
+      // Server-driven path (flagged companies): each whole scan PDF is uploaded once and read
+      // server-side. Several PDFs go up one after another, each as its own scan (a typed name
+      // gets " · part N"). A drop with a CSV/XLSX in it stays on the client-driven path below.
+      const plan = planServerScans(files, serverUpload, uploadNameRef.current);
+      if (plan.kind === 'server') {
+        const empty = files.filter((f) => f.size === 0);
+        if (empty.length) {
+          setNotice(`${empty.map((f) => `“${f.name}”`).join(', ')} ${empty.length === 1 ? 'is' : 'are'} empty.`);
+          return;
+        }
+        setServerRun(files.map((f) => ({name: f.name, size: f.size})));
+        if (files.length === 1) {
+          await startServerScan(files[0]);
+          return;
+        }
+        for (const [i, f] of files.entries()) {
+          const scan = plan.scans[i];
+          const ok = await startServerScan(f, {name: scan.name, part: {index: scan.index, total: scan.total}});
+          if (!ok) return;
+        }
+        return;
+      }
       const problems: string[] = [];
       const accepted: File[] = [];
       setPreparing(true);
@@ -301,17 +523,29 @@ export function UploadQueueProvider({company, children}: {company: string | null
             problems.push(`“${f.name}” is empty.`);
             continue;
           }
-          if (f.size > MAX_FILE_BYTES) {
-            problems.push(`“${f.name}” is over 25 MB.`);
-            continue;
-          }
           if (k === 'pdf') {
+            // A multi-store scan can be a big PDF (the September scan is ~114 MB). Split
+            // it into single pages FIRST, then apply the 25 MB limit per page — a whole
+            // handwritten scan is large, but each page is ~1 MB. Only a genuinely huge
+            // single page is refused, and the rest of the scan still goes through.
             try {
-              accepted.push(...(await splitPdfPages(f, (i, n) => splitName(f.name, i, n))));
+              const pages = await splitPdfPages(f, (i, n) => splitName(f.name, i, n));
+              const big = pages.filter((p) => p.size > MAX_FILE_BYTES);
+              if (big.length) {
+                problems.push(`${big.length} ${big.length === 1 ? 'page is' : 'pages are'} over 25 MB and ${big.length === 1 ? 'was' : 'were'} skipped. Re-scan at a lower resolution.`);
+              }
+              accepted.push(...pages.filter((p) => p.size <= MAX_FILE_BYTES));
             } catch (e) {
               problems.push(e instanceof Error ? e.message : `“${f.name}” couldn’t be opened.`);
             }
-          } else accepted.push(f);
+          } else {
+            // CSV / XLSX are not split, so the 25 MB limit applies to the whole file.
+            if (f.size > MAX_FILE_BYTES) {
+              problems.push(`“${f.name}” is over 25 MB.`);
+              continue;
+            }
+            accepted.push(f);
+          }
         }
       } finally {
         setPreparing(false);
@@ -336,7 +570,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
       });
       if (problems.length) setNotice(problems.join(' '));
     },
-    [],
+    [serverUpload, startServerScan],
   );
 
   const api = useMemo<QueueApi>(
@@ -348,15 +582,30 @@ export function UploadQueueProvider({company, children}: {company: string | null
       notice,
       forms,
       splitting,
+      serverMode: Boolean(serverBatch),
+      serverUpload,
+      serverBatch,
+      serverRun,
       active,
       addFiles,
-      retry: (id) =>
+      retry: (id) => {
+        // Server-driven: re-read the stored page on the server; polling reflects the outcome.
+        if (serverBatchRef.current) {
+          const now = Date.now();
+          serverStartedAt.current.set(id, now);
+          patch(id, {state: 'running', phase: 'reading', error: undefined, serverStatus: 'processing', startedAt: now, phaseAt: now});
+          void sendReread({company: queueCompany.current!, uploadId: id}).promise.catch(() => {});
+          return;
+        }
+        autoTries.current.delete(id); // a manual retry earns a fresh set of auto-retries
         patch(id, (i) =>
           i.state === 'failed' || i.state === 'cancelled'
             ? {state: 'queued', error: undefined, phase: 'uploading', uploadFrac: 0, uploadId: undefined, serverStatus: undefined}
             : {},
-        ),
+        );
+      },
       cancel: (id) => {
+        if (serverBatchRef.current) return; // the server owns the read; nothing to cancel client-side
         const abort = aborts.current.get(id);
         if (abort) return abort();
         const item = items.find((i) => i.id === id);
@@ -364,13 +613,22 @@ export function UploadQueueProvider({company, children}: {company: string | null
         if (item?.state === 'running') attempt.current.set(id, (attempt.current.get(id) ?? 0) + 1);
         patch(id, (i) => (i.state === 'queued' || i.state === 'waiting_period' || i.state === 'running' ? {state: 'cancelled'} : {}));
       },
-      remove: (id) => setItems((all) => all.filter((i) => i.id !== id || i.state === 'running')),
+      remove: (id) => {
+        if (serverBatchRef.current) return; // the list mirrors server state; there's nothing local to drop
+        setItems((all) => all.filter((i) => i.id !== id || i.state === 'running'));
+      },
       setBatchInfo: (p) => setBatch((cur) => ({...cur, ...p, prefilled: false})),
+      uploadName,
+      setUploadName,
       reset: () => {
-        if (items.some((i) => i.state === 'running')) return;
+        if (!serverBatchRef.current && items.some((i) => i.state === 'running')) return;
         setItems([]);
         setBatch(EMPTY_BATCH);
         setForms(null);
+        setServerBatch(null);
+        setServerRun(null);
+        setUploadName('');
+        serverStartedAt.current.clear();
         splitFor.current = null;
         batchPromise.current = null;
         attempt.current.clear();
@@ -379,7 +637,7 @@ export function UploadQueueProvider({company, children}: {company: string | null
       dismissNotice: () => setNotice(null),
     }),
     // company: queueCompany.current follows it whenever the queue is empty.
-    [batch, items, preparing, notice, forms, splitting, active, addFiles, patch, company],
+    [batch, items, preparing, notice, forms, splitting, serverBatch, serverRun, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

@@ -1,0 +1,446 @@
+'use client';
+
+// Shared pieces of the reconciliation pages (NICH-17): the ✓/✗ leg marks, the state
+// chip, the 8-tile matrix legend (Justin's notebook, made clickable), and the section
+// tabs (By store · By product · PO form).
+
+import {useId, type ReactNode} from 'react';
+import Link from 'next/link';
+import {usePathname} from 'next/navigation';
+import {Check, ChevronLeft, ChevronRight, FileSpreadsheet, HelpCircle, X} from 'lucide-react';
+import {cn} from '@/lib/utils';
+import {AUDIT_META, MATRIX_STATES, rankedSteps, type AuditState, type AuditSummary, type Leg} from '@/src/goldline-audit';
+import type {AuditCoverage, PoLeg} from '@/src/goldline-audit-data';
+
+export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> = {
+  good: 'var(--status-good)',
+  warn: 'var(--status-warn)',
+  crit: 'var(--status-crit)',
+  neutral: 'var(--cat-4)',
+  out: 'var(--muted-foreground)',
+  unknown: 'var(--chart-5)',
+};
+
+export const toneOf = (s: AuditState) => TONE_VAR[AUDIT_META[s].tone];
+export const tint = (color: string, pct = 14) => `color-mix(in oklab, ${color} ${pct}%, transparent)`;
+export const ink = (color: string) => `color-mix(in oklab, ${color} 78%, var(--foreground))`;
+
+export function monthLabel(m: string): string {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', {month: 'short', year: 'numeric', timeZone: 'UTC'});
+}
+
+const LEG_WORD: Record<Leg, string> = {yes: 'yes', no: 'no', unknown: 'not known'};
+
+/** A leg's check, x or ?. `size` sm for the legend, md for the table. */
+export function Mark({leg, size = 'md', label}: {leg: Leg; size?: 'xs' | 'sm' | 'md'; label?: string}) {
+  const box = size === 'xs' ? 'size-3.5' : size === 'sm' ? 'size-4' : 'size-6';
+  const icon = size === 'xs' ? 'size-2' : size === 'sm' ? 'size-2.5' : 'size-3.5';
+  return (
+    <span
+      role="img"
+      aria-label={`${label ? `${label}: ` : ''}${LEG_WORD[leg]}`}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-full',
+        box,
+        leg === 'no' && 'bg-muted text-muted-foreground/70',
+        leg === 'unknown' && 'border border-dashed border-muted-foreground/45 text-[0.6em] leading-none font-semibold text-muted-foreground',
+        leg === 'unknown' && (size === 'md' ? 'text-xs' : 'text-[9px]'),
+      )}
+      style={leg === 'yes' ? {background: tint('var(--status-good)', 16), color: ink('var(--status-good)')} : undefined}
+    >
+      {leg === 'yes' ? <Check className={icon} strokeWidth={3} /> : leg === 'no' ? <X className={icon} strokeWidth={2.5} /> : <span aria-hidden>?</span>}
+    </span>
+  );
+}
+
+export function StateChip({state, label}: {state: AuditState; label?: string}) {
+  const c = toneOf(state);
+  return (
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap" style={{color: ink(c), background: tint(c)}}>
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: c}} />
+      {label ?? AUDIT_META[state].label}
+    </span>
+  );
+}
+
+/**
+ * The matrix as ranked choices (Hick's law, Nov 24). Every state stays one click away, but
+ * not every state asks for the same attention:
+ *   • primary: a tile only for states that need a step AND have products, most urgent
+ *     first; these are the decisions the page exists for;
+ *   • secondary: every other state (no-action states, and anything at 0) as a small chip in
+ *     one row, Active then Inactive, so the full notebook matrix is still there to filter.
+ * Tone shows as a dot and, when picked, a soft ring and tint; no side stripes.
+ */
+export function MatrixLegend({
+  summary,
+  active,
+  onPick,
+  unit,
+}: {
+  summary: AuditSummary;
+  active: AuditState | null;
+  onPick: (s: AuditState) => void;
+  unit: string;
+}) {
+  const steps = rankedSteps(summary);
+  // "Can't tell yet" is missing data, not a step: its own tile, always last.
+  const tiles: AuditState[] = summary.unknown > 0 ? [...steps, 'unknown'] : steps;
+  const rest = MATRIX_STATES.filter((s) => !steps.includes(s));
+  const restActive = rest.filter((s) => AUDIT_META[s].legs.po === 'yes');
+  const restInactive = rest.filter((s) => AUDIT_META[s].legs.po === 'no');
+  // The tiles are the page's only filter, and one is always selected (no toggling off).
+  const pick = (s: AuditState) => onPick(s);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {tiles.length === 0 ? (
+        <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5">
+          <Mark leg="yes" />
+          <p className="text-sm">
+            <span className="font-medium">Nothing needs a step.</span> <span className="text-muted-foreground">Every product here lines up.</span>
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3" style={{gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 14rem), 1fr))`}}>
+          {tiles.map((s) => (
+            <StateTile key={s} state={s} n={summary[s]} on={active === s} onClick={() => pick(s)} unit={unit} />
+          ))}
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+          <span className="mr-1 text-xs text-muted-foreground">{tiles.length ? 'Everything else' : 'All states'}</span>
+          {[restActive, restInactive].map((group, gi) =>
+            group.length ? (
+              <span key={gi} className="flex flex-wrap items-center gap-1.5">
+                <span className={cn('text-[10px] font-medium tracking-[0.08em] text-muted-foreground/80 uppercase', gi === 1 && restActive.length > 0 && 'ml-2')}>{gi === 0 ? 'Active' : 'Inactive'}</span>
+                {group.map((s) => (
+                  <StateChipButton key={s} state={s} n={summary[s]} on={active === s} onClick={() => pick(s)} />
+                ))}
+              </span>
+            ) : null,
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A primary choice: the count leads, the state reads under it with its tone dot. */
+function StateTile({state, n, on, onClick, unit}: {state: AuditState; n: number; on: boolean; onClick: () => void; unit: string}) {
+  const m = AUDIT_META[state];
+  const c = toneOf(state);
+  const tip = useId();
+  return (
+    <div className="group/tip relative">
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-describedby={tip}
+      onClick={onClick}
+      className={cn(
+        'group flex w-full flex-col gap-4 rounded-2xl border bg-card p-4 text-left',
+        'transition-[transform,border-color,background-color,box-shadow] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]',
+        'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
+        on ? 'shadow-sm' : 'border-border [@media(hover:hover)]:hover:border-foreground/20 [@media(hover:hover)]:hover:shadow-sm',
+      )}
+      style={on ? {borderColor: `color-mix(in oklab, ${c} 55%, transparent)`, background: tint(c, 6), boxShadow: `0 0 0 3px ${tint(c, 12)}`} : undefined}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1" >
+          <Mark size="sm" leg={m.legs.watsons} label="Watsons" />
+          <Mark size="sm" leg={m.legs.inventory} label="Inventory" />
+          <Mark size="sm" leg={m.legs.po} label="PO" />
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {state === 'unknown' ? (
+            'Missing data'
+          ) : (
+            <>
+              {m.legs.po === 'yes' ? 'Active' : 'Inactive'} · <span className="font-medium text-foreground/80">{m.owner === 'Admin' ? 'You' : m.owner}</span>
+            </>
+          )}
+        </span>
+      </span>
+      <span className="flex flex-col gap-1.5">
+        <span className="font-heading text-[2rem] leading-none font-semibold tracking-tight tabular-nums">{n.toLocaleString('en-US')}</span>
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <span aria-hidden className="relative flex size-2">
+            <span className="absolute inset-0 rounded-full opacity-30" style={{background: c, transform: 'scale(2)'}} />
+            <span className="relative size-2 rounded-full" style={{background: c}} />
+          </span>
+          {m.label}
+        </span>
+      </span>
+      <span className="sr-only">
+        {n} {unit}
+      </span>
+    </button>
+    <StateTip id={tip} state={state} fit />
+    </div>
+  );
+}
+
+/** A secondary choice: small, still clickable, still shows its count (0 included). */
+function StateChipButton({state, n, on, onClick}: {state: AuditState; n: number; on: boolean; onClick: () => void}) {
+  const c = toneOf(state);
+  const m = AUDIT_META[state];
+  const tip = useId();
+  return (
+    <span className="group/tip relative inline-flex">
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-describedby={tip}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-8 items-center gap-2 rounded-full border pr-2.5 pl-1.5 text-xs font-medium',
+        'transition-[transform,border-color,background-color,color] duration-150 ease-out active:scale-[0.97]',
+        'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
+        on ? 'text-foreground' : 'border-border bg-card text-muted-foreground [@media(hover:hover)]:hover:border-foreground/20 [@media(hover:hover)]:hover:text-foreground',
+      )}
+      style={on ? {borderColor: `color-mix(in oklab, ${c} 55%, transparent)`, background: tint(c, 10)} : undefined}
+    >
+      {/* The same Watsons · Inventory · PO pattern as the tiles, so all eight combos read as one matrix. */}
+      <span className="flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5">
+        <Mark size="xs" leg={m.legs.watsons} label="Watsons" />
+        <Mark size="xs" leg={m.legs.inventory} label="Inventory" />
+        <Mark size="xs" leg={m.legs.po} label="PO" />
+      </span>
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: c, opacity: n ? 1 : 0.4}} />
+      {m.label}
+      <span className={cn('tabular-nums', n ? 'text-foreground' : 'text-muted-foreground/70')}>{n.toLocaleString('en-US')}</span>
+    </button>
+    <StateTip id={tip} state={state} />
+    </span>
+  );
+}
+
+const LEG_TEXT: Record<'watsons' | 'inventory' | 'po', Record<Leg, string>> = {
+  watsons: {yes: 'Sold at Watsons this month', no: 'No Watsons sale this month', unknown: 'Sales not loaded, or no SKU link'},
+  inventory: {yes: 'Counted, with stock', no: 'Not on the form, or counted zero', unknown: 'No count, blank, or page not uploaded'},
+  po: {yes: 'On the PO form, so still delivered', no: 'Not on the PO form, being phased out', unknown: 'No PO form in use'},
+};
+
+/**
+ * What a state means, on hover (after a short delay, so passing over the tiles doesn't
+ * flash cards) or on keyboard focus (at once). Reads the three marks out in words, then
+ * the step and who takes it. Scales in from its top-left corner, next to the trigger.
+ */
+function StateTip({id, state, fit}: {id: string; state: AuditState; fit?: boolean}) {
+  const m = AUDIT_META[state];
+  const c = toneOf(state);
+  return (
+    <span
+      role="tooltip"
+      id={id}
+      className={cn(
+        'pointer-events-none absolute top-[calc(100%+8px)] left-0 z-40 flex origin-top-left flex-col gap-2.5 rounded-xl border border-border bg-popover p-3.5 text-left text-popover-foreground shadow-lg',
+        'invisible translate-y-[-2px] scale-[0.97] opacity-0 transition-[opacity,transform,visibility] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+        'group-hover/tip:visible group-hover/tip:translate-y-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 group-hover/tip:delay-300',
+        'group-has-[:focus-visible]/tip:visible group-has-[:focus-visible]/tip:translate-y-0 group-has-[:focus-visible]/tip:scale-100 group-has-[:focus-visible]/tip:opacity-100 group-has-[:focus-visible]/tip:delay-0',
+        'motion-reduce:translate-y-0 motion-reduce:scale-100',
+        fit ? 'right-0' : 'w-72 max-w-[calc(100vw-2rem)]',
+      )}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        <span aria-hidden className="size-2 rounded-full" style={{background: c}} />
+        {m.label}
+        <span className="ml-auto text-[11px] font-normal text-muted-foreground">{state === 'unknown' ? 'Any of these' : m.legs.po === 'yes' ? 'Active' : 'Inactive'}</span>
+      </span>
+      <span className="flex flex-col gap-1.5">
+        {(['watsons', 'inventory', 'po'] as const).map((leg) => (
+          <span key={leg} className="flex items-center gap-2 text-xs">
+            <Mark size="xs" leg={m.legs[leg]} />
+            <span className={m.legs[leg] === 'yes' ? 'text-foreground' : 'text-muted-foreground'}>{LEG_TEXT[leg][m.legs[leg]]}</span>
+          </span>
+        ))}
+      </span>
+      <span className="border-t border-border pt-2.5 text-xs leading-relaxed text-muted-foreground">
+        {m.owner !== 'None' && (
+          <span className="font-medium" style={{color: ink(c)}}>
+            {m.owner === 'Admin' ? 'You' : m.owner}:{' '}
+          </span>
+        )}
+        {m.action}
+      </span>
+    </span>
+  );
+}
+
+/** W · I · P key, shown once above the choices so the dots read. */
+export function LegKey() {
+  return (
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span>
+        Dots read <strong className="font-medium text-foreground">Watsons · Inventory · PO</strong>
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Mark size="sm" leg="yes" /> yes
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Mark size="sm" leg="no" /> no
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Mark size="sm" leg="unknown" /> not known
+      </span>
+      <span>
+        Type a pattern like <span className="font-mono font-medium text-foreground">YYX</span> in search to open it
+      </span>
+    </p>
+  );
+}
+
+const TABS = [
+  {href: '/stock/audit', label: 'By store'},
+  {href: '/stock/audit/products', label: 'By product'},
+  {href: '/stock/po-form', label: 'PO form'},
+];
+
+/** Section tabs shared by the three reconciliation pages. */
+export function ReconTabs({query}: {query?: string}) {
+  const path = usePathname();
+  return (
+    <nav aria-label="Reconciliation views" className="inline-flex w-fit rounded-lg bg-muted p-1">
+      {TABS.map((t) => {
+        const on = path === t.href;
+        return (
+          <Link
+            key={t.href}
+            href={`${t.href}${query && t.href !== '/stock/po-form' ? `?${query}` : ''}`}
+            aria-current={on ? 'page' : undefined}
+            className={cn(
+              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150',
+              on ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground [@media(hover:hover)]:hover:text-foreground',
+            )}
+          >
+            {t.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** Where the PO leg comes from: the active PO form, or a nudge to upload one. */
+export function PoSourceBar({po}: {po: PoLeg}) {
+  if (po.source === 'none') {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3" style={{borderColor: tint('var(--status-warn)', 60), background: tint('var(--status-warn)', 6)}}>
+        <p className="text-sm">
+          <span className="font-medium">No PO form yet.</span> <span className="text-muted-foreground">Until one is in use, nothing can be recommended.</span>
+        </p>
+        <Link href="/stock/po-form" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-transform duration-150 ease-out active:scale-[0.97]">
+          Upload the PO form
+        </Link>
+      </div>
+    );
+  }
+  const when = po.activatedAt ? new Date(po.activatedAt).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'}) : null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <FileSpreadsheet className="size-4" aria-hidden />
+        PO leg from <span className="font-medium text-foreground">{po.fileName}</span>
+      </span>
+      <span aria-hidden>·</span>
+      <span>
+        <span className="font-medium text-foreground tabular-nums">{po.onPo}</span> active products
+      </span>
+      {when && (
+        <>
+          <span aria-hidden>·</span>
+          <span>since {when}</span>
+        </>
+      )}
+      <Link href="/stock/po-form" className="font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
+        Update
+      </Link>
+    </div>
+  );
+}
+
+/** Compact pager: ‹ 11 to 20 of 236 ›, plus page numbers when there are a few. */
+export function Pager({page, pages, total, size, onPage, label}: {page: number; pages: number; total: number; size: number; onPage: (p: number) => void; label: string}) {
+  const from = page * size + 1;
+  const to = Math.min(total, from + size - 1);
+  const btn =
+    'inline-flex size-7 items-center justify-center rounded-md text-xs font-medium tabular-nums transition-[transform,background-color,color] duration-150 ease-out active:scale-[0.94] disabled:pointer-events-none disabled:opacity-35 focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none';
+  // Up to 7 page buttons: first, last, and the pages around the current one.
+  const nums = [...new Set([0, pages - 1, page - 1, page, page + 1].filter((n) => n >= 0 && n < pages))].sort((a, b) => a - b);
+  return (
+    <nav aria-label={`${label} pages`} className="flex items-center gap-1">
+      <button type="button" className={cn(btn, 'text-muted-foreground [@media(hover:hover)]:hover:bg-muted')} disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page">
+        <ChevronLeft className="size-4" />
+      </button>
+      {nums.map((n, i) => (
+        <span key={n} className="flex items-center gap-1">
+          {i > 0 && n - nums[i - 1] > 1 && <span className="px-0.5 text-xs text-muted-foreground">…</span>}
+          <button
+            type="button"
+            aria-current={n === page ? 'page' : undefined}
+            onClick={() => onPage(n)}
+            className={cn(btn, n === page ? 'bg-foreground text-background' : 'text-muted-foreground [@media(hover:hover)]:hover:bg-muted [@media(hover:hover)]:hover:text-foreground')}
+          >
+            {n + 1}
+          </button>
+        </span>
+      ))}
+      <button type="button" className={cn(btn, 'text-muted-foreground [@media(hover:hover)]:hover:bg-muted')} disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="Next page">
+        <ChevronRight className="size-4" />
+      </button>
+      <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+        {from.toLocaleString('en-US')} to {to.toLocaleString('en-US')} of {total.toLocaleString('en-US')}
+      </span>
+    </nav>
+  );
+}
+
+/** What this month's data can't answer yet, said once above the tiles. */
+export function CoverageNote({month, coverage, all}: {month: string; coverage: AuditCoverage; all: boolean}) {
+  const notes: ReactNode[] = [];
+  if (!coverage.loaded)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground">{monthLabel(month)} Watsons sales aren&apos;t loaded.</span> Nothing can be recommended for this month until they are.
+      </>,
+    );
+  else if (coverage.storesCounted === 0)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground">No inventory form for {monthLabel(month)}.</span> Only products that sold are listed, and their stock isn&apos;t known.
+      </>,
+    );
+  else if (all && coverage.storesCounted < coverage.storesSold)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground tabular-nums">
+          {coverage.storesCounted} of {coverage.storesSold} stores
+        </span>{' '}
+        have a form. At the others only products that sold are listed, and their stock isn&apos;t known.
+      </>,
+    );
+  if (coverage.unlinkedUnits > 0)
+    notes.push(
+      <>
+        <span className="font-medium text-foreground tabular-nums">{coverage.unlinkedUnits.toLocaleString('en-US')} units</span> sold on Watsons SKUs with no product link, so they can&apos;t show here.{' '}
+        <Link href="/stock/skus" className="font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
+          Link SKUs
+        </Link>
+      </>,
+    );
+  if (!notes.length) return null;
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+      <HelpCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <ul className="flex flex-col gap-1">
+        {notes.map((n, i) => (
+          <li key={i}>{n}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}

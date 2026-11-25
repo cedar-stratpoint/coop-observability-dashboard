@@ -1,9 +1,16 @@
 import 'server-only';
+import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
-import {groupForms, scanOrder} from './upload-batch';
+import type {FormVersion} from './goldline-extract';
+import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle} from './goldline-segment';
+import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
+import {knownStoreCodes} from './goldline-store-registry';
+import {uploadSource, distinctPages, pagesByStatus} from './goldline-upload-groups';
+import {splitName} from './upload-batch';
+import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
 // project (src/nichido-client.ts): service-role key, never exposed to the browser.
@@ -38,7 +45,15 @@ export function safeObjectName(filename: string): string {
 export type UploadKind = 'pos_csv' | 'pos_xlsx' | 'inventory_pdf';
 
 const SALES_CHUNK = 2000;
-export type UploadStatus = 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
+// 'queued' is the server-driven path's pre-read state: the page is split + stored, waiting for
+// the pump to read it. The pump claims it (→ 'processing') before calling the reader, so a
+// 'queued' row is never mid-read (and the stale-processing reaper only ever sees 'processing').
+// 'queued_batch' (L7 batch mode, flag-gated) is set after classify+locate run but the expensive
+// anchored read was submitted to the Anthropic Message Batches API instead of read inline; the
+// batch poller (goldline-batch-read.ts) later ingests the result and advances it to needs_review /
+// rejected / failed. Like 'queued', it is NOT mid-read, so the stale-'processing' reaper ignores it;
+// the poller owns its lifecycle.
+export type UploadStatus = 'queued' | 'queued_batch' | 'processing' | 'needs_review' | 'committed' | 'failed' | 'rejected';
 export type Period = {start: string; end: string}; // ISO dates
 
 export type UploadRow = {
@@ -53,9 +68,25 @@ export type UploadRow = {
   created_at: string;
   storage_path: string | null;
   batch_id?: string | null; // set when uploaded as part of a store's form (multi-file upload)
+  batch_name?: string | null; // optional name the user gave this upload at drop time (else filename)
+  form_version?: string | null; // detected inventory-form layout (legacy/v1/v2), when classified
+  page_kind?: string | null; // inventory | sales | blank | unknown, once classified
+  orientation?: number | null; // 180 when the classifier found the page upside down (the stored file is never turned)
 };
 
-/** Store the raw file, then open a uploads row. Returns the new upload id. */
+/**
+ * Store the raw file, then open an uploads row. Returns the row id and whether an
+ * existing row was reused.
+ *
+ * Idempotent within a batch: the uploader splits a scan into per-page files named
+ * "(page N of M)", and a retry re-POSTs the identical file. When a page's first request
+ * times out at the edge the server often still finishes and inserts the row, so the
+ * naive insert produced a *second* row on retry (the 98-page scan that became 109 rows).
+ * So when this upload belongs to a batch, reuse any existing non-failed row with the same
+ * (company, batch, filename) instead of inserting again — and short-circuit before the
+ * storage write so a reused page leaves no orphan object. A *failed* first attempt is
+ * excluded, so a genuine retry-after-failure still creates the authoritative row.
+ */
 export async function createUpload(input: {
   companyId: string;
   kind: UploadKind;
@@ -64,8 +95,28 @@ export async function createUpload(input: {
   contentType: string;
   uploadedBy: string | null;
   batchId?: string | null;
-}): Promise<string> {
+  /** Optional name the user typed for this group upload; stored on the row so source-grouped
+   *  views can show it instead of the filename. Null when the user named nothing. */
+  batchName?: string | null;
+  /** The row's starting status. Default 'processing' (the client path reads synchronously);
+   *  the server-driven ingest passes 'queued' so the pump reads it later. */
+  status?: UploadStatus;
+}): Promise<{id: string; reused: boolean}> {
   const supa = db();
+  if (input.batchId) {
+    const existing = await supa
+      .from('uploads')
+      .select('id')
+      .eq('company_id', input.companyId)
+      .eq('batch_id', input.batchId)
+      .eq('filename', input.filename)
+      .neq('status', 'failed')
+      .order('created_at', {ascending: true})
+      .limit(1)
+      .maybeSingle();
+    if (existing.error) throw new Error(`uploads dedup check failed: ${existing.error.message}`);
+    if (existing.data) return {id: (existing.data as {id: string}).id, reused: true};
+  }
   // Original name kept for display in the row; the storage KEY uses the sanitized
   // basename so a crafted filename can't escape the company prefix.
   const path = `${input.companyId}/${Date.now()}-${safeObjectName(input.filename)}`;
@@ -81,20 +132,21 @@ export async function createUpload(input: {
       kind: input.kind,
       filename: input.filename,
       storage_path: path,
-      status: 'processing' satisfies UploadStatus,
+      status: input.status ?? ('processing' satisfies UploadStatus),
       uploaded_by: input.uploadedBy,
       batch_id: input.batchId ?? null,
+      batch_name: input.batchName?.trim() || null,
     })
     .select('id')
     .single();
   if (ins.error) throw new Error(`uploads insert failed: ${ins.error.message}`);
-  return (ins.data as {id: string}).id;
+  return {id: (ins.data as {id: string}).id, reused: false};
 }
 
 export async function setUploadStatus(
   id: string,
   status: UploadStatus,
-  extra?: {rejectReason?: string; pageCount?: number; errorDetail?: string | null},
+  extra?: {rejectReason?: string; pageCount?: number; errorDetail?: string | null; anthropicBatchId?: string | null},
 ): Promise<void> {
   const supa = db();
   const patch: Record<string, unknown> = {status};
@@ -102,8 +154,204 @@ export async function setUploadStatus(
   if (extra?.pageCount !== undefined) patch.page_count = extra.pageCount;
   // Scrubbed technical detail for diagnosis (never shown prominently in the UI).
   if (extra?.errorDetail !== undefined) patch.error_detail = extra.errorDetail?.slice(0, 500) ?? null;
+  // L7 batch mode: the Anthropic Message Batch id this page's anchored read was submitted in, so
+  // the poller can find and ingest it. Cleared (null) once the page leaves 'queued_batch'.
+  if (extra?.anthropicBatchId !== undefined) patch.anthropic_batch_id = extra.anthropicBatchId;
   const res = await supa.from('uploads').update(patch).eq('id', id);
   if (res.error) throw new Error(`uploads update failed: ${res.error.message}`);
+}
+
+/**
+ * L7 batch mode: the pages waiting on a Message Batch to return. One row per 'queued_batch' upload
+ * with the batch id and the (version, page) the poller needs to rebuild the template and map the
+ * result. Oldest first, bounded, so one poll cycle ingests a steady slice. `submittedAt` =
+ * claimed_at (when the batch was submitted) for the stale-batch fallback.
+ */
+export type QueuedBatchUpload = {
+  uploadId: string;
+  companyId: string;
+  filename: string;
+  anthropicBatchId: string;
+  version: FormVersion | null;
+  page: number | null;
+  submittedAt: string | null;
+};
+export async function listQueuedBatchUploads(limit = 200): Promise<QueuedBatchUpload[]> {
+  if (!goldlineConfigured()) return [];
+  const res = await db()
+    .from('uploads')
+    .select('id, company_id, filename, anthropic_batch_id, form_version, page_no, claimed_at')
+    .eq('status', 'queued_batch')
+    .eq('kind', 'inventory_pdf')
+    .not('anthropic_batch_id', 'is', null)
+    .order('claimed_at', {ascending: true, nullsFirst: true})
+    .limit(limit);
+  if (res.error) {
+    console.error('listQueuedBatchUploads', res.error.message);
+    return [];
+  }
+  return (res.data ?? []).map((r) => {
+    const row = r as {id: string; company_id: string; filename: string; anthropic_batch_id: string; form_version: string | null; page_no: number | null; claimed_at: string | null};
+    return {
+      uploadId: row.id,
+      companyId: row.company_id,
+      filename: row.filename,
+      anthropicBatchId: row.anthropic_batch_id,
+      version: (row.form_version as FormVersion | null) ?? null,
+      page: row.page_no,
+      submittedAt: row.claimed_at,
+    };
+  });
+}
+
+// A read cannot outlive the read-page route's maxDuration (600s), so an inventory page still
+// 'processing' well past that is an orphan: its function was hard-killed (a deploy mid-read,
+// or a platform timeout) before it could mark itself, and a dead function never will. 15 min
+// is comfortably past the 600s (10m) window, so this backstop never catches a live read.
+const STALE_READ_MIN = 15;
+
+/**
+ * Flip orphaned reads (stuck 'processing' past STALE_READ_MIN) to 'failed' with a re-read
+ * reason, so a page is never frozen and the reviewer can retry it. Scoped to one batch or one
+ * scan, so it is a cheap bounded write run when that page is opened (no background job needed).
+ * Returns how many it reset. Best-effort: a failure here never blocks the page load.
+ */
+export async function reconcileStaleReads(companyId: string, scope: {batchId: string} | {source: string}): Promise<number> {
+  if (!goldlineConfigured()) return 0;
+  const cutoff = new Date(Date.now() - STALE_READ_MIN * 60_000).toISOString();
+  let q = db()
+    .from('uploads')
+    .update({
+      status: 'failed' satisfies UploadStatus,
+      reject_reason: 'The read stalled and did not finish. Re-read this page to try again.',
+      error_detail: 'auto-reset: stuck in processing past the read window',
+    })
+    .eq('company_id', companyId)
+    .eq('kind', 'inventory_pdf')
+    .eq('status', 'processing')
+    // The staleness clock starts when the READ started: claimed_at for a server-driven (pumped)
+    // page, else created_at for a client-driven one. A page enqueued long ago but only just
+    // claimed is not stale; a 'queued' page (never 'processing') is never matched here, so a
+    // page waiting in the pump queue is left alone instead of being failed.
+    .or(`claimed_at.lt.${cutoff},and(claimed_at.is.null,created_at.lt.${cutoff})`);
+  if ('batchId' in scope) {
+    q = q.eq('batch_id', scope.batchId);
+  } else {
+    // LIKE metacharacters in the scan name are escaped so the prefix matches literally.
+    q = q.like('filename', `${scope.source.replace(/[\\%_]/g, (c) => `\\${c}`)} (page%`);
+  }
+  const res = await q.select('id');
+  if (res.error) {
+    console.error('reconcileStaleReads', res.error.message);
+    return 0;
+  }
+  return res.data?.length ?? 0;
+}
+
+/**
+ * Phase 0 — persist a page's classifier output on its upload row (additive columns),
+ * plus the semantic `page_key` used for duplicate / re-upload detection. Best-effort:
+ * callers should not fail the upload if this write errors (classification is metadata,
+ * not the extracted counts).
+ */
+/**
+ * Stamp a confirmed store onto a form's pages — the guided "which store?" step for a
+ * form the OCR couldn't read. Merges the store into each page's classification JSONB
+ * (store_code + store_snap {code, status:'confirmed'}, keeping everything else) so the
+ * forms view regroups it under the real store and it leaves "needs a store". Does not
+ * touch committed inventory. Returns the distinct batch ids the pages belong to, so the
+ * caller can make those batches commit-ready under the store.
+ */
+export async function setUploadsStore(companyId: string, uploadIds: string[], storeCode: string, storeName: string | null): Promise<string[]> {
+  const ids = uploadIds.filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return [];
+  const supa = db();
+  // Paginated so the read is never silently capped at PostgREST's db.max_rows (1000);
+  // stable .order('id') keeps pages from overlapping or skipping.
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,batch_id,classification').eq('company_id', companyId).in('id', ids).order('id').range(from, to),
+  )) as Array<{id: string; batch_id: string | null; classification: Record<string, unknown> | null}>;
+  const batches = new Set<string>();
+  for (const row of rows) {
+    if (row.batch_id) batches.add(row.batch_id);
+    const c = {...(row.classification ?? {})};
+    c.store_code = storeCode;
+    if (storeName) c.store_name = storeName;
+    c.store_snap = {code: storeCode, status: 'confirmed'};
+    const up = await supa.from('uploads').update({classification: c}).eq('company_id', companyId).eq('id', row.id);
+    if (up.error) throw new Error(`uploads store update failed: ${up.error.message}`);
+  }
+  return [...batches];
+}
+
+/** Stamp a BA (consultant) onto the given pages' classification, so a scan's forms regroup
+ *  under the chosen person. Mirrors setUploadsStore: paginated read, writes the name plus a
+ *  confirmed `ba_snap` marker. BA doesn't drive batch splitting, so no re-split is needed. */
+export async function setUploadsBa(companyId: string, uploadIds: string[], baName: string): Promise<void> {
+  const ids = uploadIds.filter((x) => typeof x === 'string').slice(0, 50);
+  if (!ids.length) return;
+  const name = baName.trim();
+  if (!name) return;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,classification').eq('company_id', companyId).in('id', ids).order('id').range(from, to),
+  )) as Array<{id: string; classification: Record<string, unknown> | null}>;
+  for (const row of rows) {
+    const c = {...(row.classification ?? {})};
+    c.consultant = name;
+    c.ba_snap = {name, status: 'confirmed'};
+    const up = await supa.from('uploads').update({classification: c}).eq('company_id', companyId).eq('id', row.id);
+    if (up.error) throw new Error(`uploads BA update failed: ${up.error.message}`);
+  }
+}
+
+export async function saveClassification(input: {
+  uploadId: string;
+  pageNo: number;
+  pageKind: string;
+  orientation: 0 | 180;
+  formVersion: string;
+  pageKey: string | null;
+  classification: unknown;
+}): Promise<void> {
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .update({
+      page_no: input.pageNo,
+      page_kind: input.pageKind,
+      orientation: input.orientation,
+      form_version: input.formVersion,
+      page_key: input.pageKey,
+      classification: input.classification,
+      classified_at: new Date().toISOString(),
+    })
+    .eq('id', input.uploadId);
+  if (res.error) throw new Error(`uploads classification update failed: ${res.error.message}`);
+}
+
+/**
+ * Phase 0 — prior uploads for this company sharing the same semantic `page_key`
+ * (a duplicate within the bundle or a re-upload of a page seen before). Newest first,
+ * excluding the current upload. The caller FLAGS these; it never auto-drops.
+ */
+export async function findDuplicatePageKey(
+  companyId: string,
+  pageKey: string,
+  excludeUploadId: string,
+): Promise<Array<{id: string; status: string; created_at: string}>> {
+  if (!pageKey) return [];
+  const supa = db();
+  const res = await supa
+    .from('uploads')
+    .select('id,status,created_at')
+    .eq('company_id', companyId)
+    .eq('page_key', pageKey)
+    .neq('id', excludeUploadId)
+    .order('created_at', {ascending: false})
+    .limit(10);
+  if (res.error) throw new Error(`uploads duplicate check failed: ${res.error.message}`);
+  return (res.data ?? []) as Array<{id: string; status: string; created_at: string}>;
 }
 
 /** What deleting an upload will take with it — shown in the confirmation before the
@@ -204,10 +452,124 @@ export async function deleteUpload(companyId: string, id: string): Promise<boole
   return true;
 }
 
+export type ScanGroupSummary = {files: number; pages: number; committed: number; needsReview: number; issues: number; stores: string[]; bas: string[]};
+
+/** What deleting a whole scan drop will take with it — shown in the confirmation before
+ *  the user commits to it. A scan = every upload whose filename shares this source. */
+export async function scanGroupSummary(companyId: string, source: string): Promise<ScanGroupSummary> {
+  if (!goldlineConfigured()) return {files: 0, pages: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
+  const scoped = rows.filter((r) => uploadSource(r.filename) === source);
+  const stores = new Set<string>();
+  const bas = new Set<string>();
+  // Counts are per page, not per row: a page re-fed after a failed read counts once, at its
+  // best outcome, so retries don't inflate "issues" (or any other count).
+  const byStatus = pagesByStatus(scoped);
+  const committed = byStatus.committed ?? 0;
+  const needsReview = byStatus.needs_review ?? 0;
+  const issues = (byStatus.failed ?? 0) + (byStatus.rejected ?? 0);
+  for (const r of scoped) {
+    const c = (r.classification ?? {}) as Record<string, unknown>;
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const store = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    if (store) stores.add(store);
+    if (typeof c.consultant === 'string' && c.consultant.trim()) bas.add(c.consultant.trim());
+  }
+  return {files: scoped.length, pages: distinctPages(scoped.map((r) => r.filename)), committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
+}
+
+/** Delete a whole scan drop: every upload whose filename shares this source, with its
+ *  committed counts, sales, extractions and stored files. Chunked so a 100-page drop
+ *  deletes in a few bulk statements. Returns how many uploads were removed. */
+export async function deleteScanGroup(companyId: string, source: string): Promise<number> {
+  if (!goldlineConfigured()) return 0;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,filename,storage_path').eq('company_id', companyId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; storage_path: string | null}>;
+  const scoped = rows.filter((r) => uploadSource(r.filename) === source);
+  if (!scoped.length) return 0;
+  const pathById = new Map(scoped.map((r) => [r.id, r.storage_path]));
+  for (let i = 0; i < scoped.length; i += 100) {
+    const ids = scoped.slice(i, i + 100).map((r) => r.id);
+    // Committed data first (fail loud), then extractions, then stored files, then rows.
+    const inv = await supa.from('inventory').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (inv.error) throw new Error(`inventory delete failed: ${inv.error.message}`);
+    const sales = await supa.from('sales').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (sales.error) throw new Error(`sales delete failed: ${sales.error.message}`);
+    const ext = await supa.from('extractions').delete().eq('company_id', companyId).in('upload_id', ids);
+    if (ext.error) throw new Error(`extractions delete failed: ${ext.error.message}`);
+    const paths = ids.map((id) => pathById.get(id)).filter((p): p is string => typeof p === 'string');
+    if (paths.length) {
+      const rm = await supa.storage.from(GOLDLINE_BUCKET).remove(paths);
+      if (rm.error) console.error('deleteScanGroup: storage remove failed', rm.error.message);
+    }
+    const del = await supa.from('uploads').delete().eq('company_id', companyId).in('id', ids);
+    if (del.error) throw new Error(`uploads delete failed: ${del.error.message}`);
+  }
+  return scoped.length;
+}
+
+/** Delete ONE upload batch (a single drop), not the whole scan source. Used by a duplicate
+ *  tile so removing a re-upload leaves the original drop (and any other re-uploads) intact.
+ *  Same irreversible cascade as deleteScanGroup: committed data first (fail loud), then
+ *  extractions, then stored files, then the rows. Company-scoped. */
+export async function deleteBatch(companyId: string, batchId: string): Promise<number> {
+  if (!goldlineConfigured() || !batchId) return 0;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) =>
+    supa.from('uploads').select('id,batch_id,storage_path').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; batch_id: string | null; storage_path: string | null}>;
+  if (!rows.length) return 0;
+  const pathById = new Map(rows.map((r) => [r.id, r.storage_path]));
+  for (let i = 0; i < rows.length; i += 100) {
+    const ids = rows.slice(i, i + 100).map((r) => r.id);
+    const inv = await supa.from('inventory').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (inv.error) throw new Error(`inventory delete failed: ${inv.error.message}`);
+    const sales = await supa.from('sales').delete().eq('company_id', companyId).in('source_upload_id', ids);
+    if (sales.error) throw new Error(`sales delete failed: ${sales.error.message}`);
+    const ext = await supa.from('extractions').delete().eq('company_id', companyId).in('upload_id', ids);
+    if (ext.error) throw new Error(`extractions delete failed: ${ext.error.message}`);
+    const paths = ids.map((id) => pathById.get(id)).filter((p): p is string => typeof p === 'string');
+    if (paths.length) {
+      const rm = await supa.storage.from(GOLDLINE_BUCKET).remove(paths);
+      if (rm.error) console.error('deleteBatch: storage remove failed', rm.error.message);
+    }
+    const del = await supa.from('uploads').delete().eq('company_id', companyId).in('id', ids);
+    if (del.error) throw new Error(`uploads delete failed: ${del.error.message}`);
+  }
+  return rows.length;
+}
+
+/** What deleting ONE batch (a single drop) will take with it — shown in the duplicate tile's
+ *  delete confirmation, scoped to the batch instead of the whole scan source. */
+export async function scanBatchSummary(companyId: string, batchId: string): Promise<ScanGroupSummary> {
+  if (!goldlineConfigured() || !batchId) return {files: 0, pages: 0, committed: 0, needsReview: 0, issues: 0, stores: [], bas: []};
+  const scoped = (await fetchAllRows('uploads', (from, to) =>
+    db().from('uploads').select('id,filename,status,classification').eq('company_id', companyId).eq('batch_id', batchId).order('created_at', {ascending: false}).range(from, to),
+  )) as unknown as Array<{id: string; filename: string; status: string; classification: Record<string, unknown> | null}>;
+  const stores = new Set<string>();
+  const bas = new Set<string>();
+  const byStatus = pagesByStatus(scoped);
+  const committed = byStatus.committed ?? 0;
+  const needsReview = byStatus.needs_review ?? 0;
+  const issues = (byStatus.failed ?? 0) + (byStatus.rejected ?? 0);
+  for (const r of scoped) {
+    const c = (r.classification ?? {}) as Record<string, unknown>;
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const store = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    if (store) stores.add(store);
+    if (typeof c.consultant === 'string' && c.consultant.trim()) bas.add(c.consultant.trim());
+  }
+  return {files: scoped.length, pages: distinctPages(scoped.map((r) => r.filename)), committed, needsReview, issues, stores: [...stores].sort(), bas: [...bas].sort()};
+}
+
 /** Idempotent upsert of POS sale rows for one company + period (keyed on the natural key).
- *  Goes through the upsert_sales RPC, which encrypts the peso figures into
- *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql);
- *  the plain gross_retail / net_of_vat never reach the table. */
+ *  Goes through the upsert_sales RPC, which encrypts the peso figures and units into
+ *  sales.amounts_enc with the Vault key (supabase/nichido/s1_sales_encryption.sql,
+ *  s3_sales_units_encryption.sql); none of the three reach the table in plain. */
 export async function upsertSales(
   companyId: string,
   rows: PosSaleRow[],
@@ -265,7 +627,7 @@ export async function getUpload(companyId: string, id: string): Promise<UploadRo
   const supa = db();
   const res = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,orientation')
     .eq('company_id', companyId)
     .eq('id', id)
     .maybeSingle();
@@ -290,6 +652,87 @@ export async function signedUploadUrl(companyId: string, uploadId: string, expir
     return null;
   }
   return res.data?.signedUrl ?? null;
+}
+
+/**
+ * Server-driven upload (plan 2026-11-09): a one-time signed URL the browser uses to PUT the
+ * WHOLE scan PDF straight to the private bucket, bypassing the Next.js request-body limit.
+ * Returns the storage path (handed back to the ingest route) + the token/url the client gives
+ * `uploadToSignedUrl`. The path is under the company prefix so one tenant can't write elsewhere.
+ */
+export async function createScanUploadUrl(companyId: string, filename: string): Promise<{path: string; token: string; signedUrl: string} | null> {
+  if (!goldlineConfigured()) return null;
+  const path = `${companyId}/incoming/${Date.now()}-${safeObjectName(filename)}`;
+  const res = await db().storage.from(GOLDLINE_BUCKET).createSignedUploadUrl(path);
+  if (res.error || !res.data) {
+    console.error('createScanUploadUrl failed', res.error?.message);
+    return null;
+  }
+  return {path, token: res.data.token, signedUrl: res.data.signedUrl};
+}
+
+/**
+ * Server-driven ingest: given a whole scan PDF already in the bucket (from createScanUploadUrl),
+ * split it into one PDF per page on the SERVER (pdf-lib), store each page, and open a `queued`
+ * uploads row per page under one new batch — then the pump reads them. Mirrors the client
+ * splitter's `(page N of M)` naming so everything downstream (grouping, dedup, the scan views)
+ * is unchanged. Removes the temporary whole-PDF object once the per-page files exist. Returns
+ * the new batch id and page count. maxDuration on the caller must cover the split + N stores.
+ */
+export async function ingestScanPdf(input: {companyId: string; storagePath: string; filename: string; uploadedBy: string | null; name?: string | null}): Promise<{batchId: string; pages: number}> {
+  const supa = db();
+  const dl = await supa.storage.from(GOLDLINE_BUCKET).download(input.storagePath);
+  if (dl.error || !dl.data) throw new Error(`ingest download failed: ${dl.error?.message ?? 'no data'}`);
+  const srcBytes = await dl.data.arrayBuffer();
+  const {PDFDocument} = await import('pdf-lib');
+  const src = await PDFDocument.load(srcBytes, {ignoreEncryption: true, updateMetadata: false});
+  const total = src.getPageCount();
+  if (total < 1) throw new Error('ingest: the PDF has no pages');
+  const batchId = await createBatch(input.companyId, input.uploadedBy, {kind: 'scan'});
+  for (let i = 0; i < total; i++) {
+    const doc = await PDFDocument.create();
+    const [pg] = await doc.copyPages(src, [i]);
+    doc.addPage(pg);
+    const u8 = await doc.save();
+    await createUpload({
+      companyId: input.companyId,
+      kind: 'inventory_pdf',
+      filename: splitName(input.filename, i, total),
+      // A fresh, exactly-sized ArrayBuffer so no unrelated bytes ride along with the page.
+      bytes: u8.slice().buffer,
+      contentType: 'application/pdf',
+      uploadedBy: input.uploadedBy,
+      batchId,
+      batchName: input.name,
+      status: 'queued',
+    });
+  }
+  // The per-page files are the source of truth now; drop the temporary whole-PDF object.
+  const rm = await supa.storage.from(GOLDLINE_BUCKET).remove([input.storagePath]);
+  if (rm.error) console.error('ingestScanPdf: temp PDF remove failed', rm.error.message);
+  return {batchId, pages: total};
+}
+
+/**
+ * The stored bytes for an upload (company-scoped), for re-reading a page without a fresh
+ * upload. Returns the file plus the batch it belongs to; null if it isn't this company's
+ * upload, has no stored file, or the download fails.
+ */
+export async function downloadUpload(
+  companyId: string,
+  uploadId: string,
+): Promise<{bytes: ArrayBuffer; filename: string; fileSize: number; batchId: string | null} | null> {
+  if (!goldlineConfigured()) return null;
+  const upload = await getUpload(companyId, uploadId); // company-scoped ownership check
+  if (!upload?.storage_path) return null;
+  const supa = db();
+  const res = await supa.storage.from(GOLDLINE_BUCKET).download(upload.storage_path);
+  if (res.error || !res.data) {
+    console.error('downloadUpload failed', res.error?.message);
+    return null;
+  }
+  const bytes = await res.data.arrayBuffer();
+  return {bytes, filename: upload.filename, fileSize: bytes.byteLength, batchId: upload.batch_id ?? null};
 }
 
 export type ExtractionRecord = {
@@ -326,6 +769,9 @@ export type ReviewedInventoryRow = {
   selling_area: number | null;
   delivery: number | null;
   ending_on_hand: number | null;
+  // Phase 1 · Legacy-only sidecar (beginning / begin_plus_delivery / deducted_pcs),
+  // carried verbatim into inventory.extra. Absent/null for v1/v2 rows.
+  extra?: Record<string, number | null> | null;
 };
 
 /**
@@ -378,37 +824,66 @@ export async function commitInventory(input: {
   return payload.length;
 }
 
-/** List a company's uploads, newest first (paginated — never silently capped). */
-export async function listUploads(companyId: string): Promise<UploadRow[]> {
-  if (!goldlineConfigured()) return [];
+/** What Coop read about ONE page, to prefill its review: the store (the registry-snapped
+ *  code the classifier settled on), period and BA from that page's own classification.
+ *  Null fields when the page didn't show them (pages 2 to 5 rarely print a store). */
+export type PageSuggestion = {storeCode: string | null; storeName: string | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+
+export async function getPageSuggestion(companyId: string, uploadId: string): Promise<PageSuggestion> {
+  const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null};
+  if (!goldlineConfigured()) return none;
+  const res = await db().from('uploads').select('classification').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
+  const c = ((res.data as {classification?: Record<string, unknown> | null} | null)?.classification ?? {}) as Record<string, unknown>;
+  const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  const iso = (v: unknown): string | null => {
+    const t = str(v);
+    return t && /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+  };
+  return {
+    storeCode: str(snap.code) ?? str(c.store_code),
+    storeName: str(c.store_name),
+    periodStart: iso(c.period_start),
+    periodEnd: iso(c.period_end),
+    consultant: str(c.consultant),
+  };
+}
+
+/** List a company's uploads, newest first (paginated — never silently capped). Cached
+ *  across requests (the /uploads home re-reads the whole table on every load); the
+ *  upload / commit / reject writes expire gl-uploads so a change shows on the next load. */
+export function listUploads(companyId: string): Promise<UploadRow[]> {
+  if (!goldlineConfigured()) return Promise.resolve([]);
   const supa = db();
-  const rows = await fetchAllRows('uploads', (from, to) =>
-    supa
-      .from('uploads')
-      .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
-      .eq('company_id', companyId)
-      .order('created_at', {ascending: false})
-      .order('id', {ascending: true})
-      .range(from, to),
-  );
-  return rows as unknown as UploadRow[];
+  return unstable_cache(
+    async () =>
+      (await fetchAllRows('uploads', (from, to) =>
+        supa
+          .from('uploads')
+          .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation')
+          .eq('company_id', companyId)
+          .order('created_at', {ascending: false})
+          .order('id', {ascending: true})
+          .range(from, to),
+      )) as unknown as UploadRow[],
+    ['gl-uploads', companyId],
+    {tags: [glTags.uploads(companyId)], revalidate: 30},
+  )();
 }
 
 /** Catalog line + printed price for the given item codes (the review page's family
- *  grouping and totals check). Company-scoped. */
+ *  grouping and totals check). Served from the cached full catalog (gl-catalog) so the
+ *  review page no longer queries products on every load. Company-scoped. */
 export async function catalogForCodes(
   companyId: string,
   codes: string[],
 ): Promise<Record<string, {productLine: string | null; unitPrice: number | null}>> {
   if (!goldlineConfigured() || !codes.length) return {};
-  const res = await db()
-    .from('products')
-    .select('item_code,product_line,unit_price')
-    .eq('company_id', companyId)
-    .in('item_code', codes.slice(0, 500)); // pagination-ok: one form page's codes (≤ ~70)
-  if (res.error) throw new Error(`products read failed: ${res.error.message}`);
+  const want = new Set(codes);
   const out: Record<string, {productLine: string | null; unitPrice: number | null}> = {};
-  for (const p of (res.data ?? []) as Array<{item_code: string; product_line: string | null; unit_price: string | number | null}>) {
+  for (const p of await getGlCatalog(companyId)) {
+    if (!want.has(p.item_code)) continue;
     out[p.item_code] = {productLine: p.product_line, unitPrice: p.unit_price == null ? null : Number(p.unit_price)};
   }
   return out;
@@ -545,15 +1020,30 @@ export type BatchRow = {
   period_start: string | null;
   period_end: string | null;
   status: 'open' | 'committed';
+  // 'form' = one store's multi-page form (manual upload), reviewed + committed together in
+  // batch-review. 'scan' = a server-ingested whole-scan batch (many pages / stores); its
+  // pages are reviewed one at a time in the per-file review + worked from the triage board,
+  // never routed into batch-review.
+  kind: 'form' | 'scan';
   created_by: string | null;
   created_at: string;
   committed_at: string | null;
 };
 
-const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,created_by,created_at,committed_at';
+const BATCH_COLS = 'id,company_id,store_code,period_start,period_end,status,kind,created_by,created_at,committed_at';
 
-export async function createBatch(companyId: string, createdBy: string | null): Promise<string> {
-  const res = await db().from('upload_batches').insert({company_id: companyId, created_by: createdBy}).select('id').single();
+export async function createBatch(
+  companyId: string,
+  createdBy: string | null,
+  // 'scan' for a server-ingested whole-scan batch; defaults to 'form' (one store's form) so
+  // the manual upload / split paths are unchanged.
+  opts?: {kind?: 'form' | 'scan'},
+): Promise<string> {
+  const res = await db()
+    .from('upload_batches')
+    .insert({company_id: companyId, created_by: createdBy, kind: opts?.kind ?? 'form'})
+    .select('id')
+    .single();
   if (res.error) throw new Error(`upload_batches insert failed: ${res.error.message}`);
   return (res.data as {id: string}).id;
 }
@@ -590,95 +1080,180 @@ export type SplitForm = {
   periodStart: string | null;
   periodEnd: string | null;
   consultant: string | null;
+  /** The origin batch kept as the "needs sorting" lane (fragments + sales/blanks), not a real
+   *  form. The UI counts and renders real forms only; this entry just signals a split ran. */
+  unsorted?: boolean;
 };
 
 /**
- * Many stores in one scan (Q25): after every page of a drop is read, split the batch
- * into one batch per form. Pages are put in scan order and a new form starts whenever
- * the page number drops (…5, 1…). The first form keeps this batch; each other form
- * gets a new open batch. Store and period come from each form's page 1 header at
- * review, as for any batch. Returns every form; one form means nothing moved.
+ * Many stores in one scan (Q25): after every page of a drop is read, split the batch into
+ * one batch per FORM. Grouping uses the Phase 0 classification (store · period · version,
+ * store code snapped to the registry, year reconciled) via the same `segmentBundle` the
+ * triage board uses, so a shuffled multi-store scan separates where the old page-number
+ * heuristic lumped it into one pile.
+ *
+ * Only a REAL form is peeled off (see isRealForm: a registry-matched store with at least
+ * two of its pages). Fragments (a lone page, or a page whose printed store couldn't be read)
+ * plus sales / blanks / unplaceable all stay together in the original batch — the "needs
+ * sorting" lane — instead of each spawning its own one-page batch. Each peeled form's new
+ * batch is pre-filled with its store and period so review opens ready. Returns the batches
+ * touched (origin first); length <= 1 means nothing moved.
  */
 export async function splitBatchIntoForms(companyId: string, batchId: string, createdBy: string | null): Promise<SplitForm[]> {
   const batch = await getBatch(companyId, batchId);
   if (!batch || batch.status !== 'open') return [];
   const supa = db();
   const uploads = (await fetchAllRows('uploads', (from, to) =>
-    supa.from('uploads').select('id,filename,created_at').eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
-  )) as unknown as Array<{id: string; filename: string; created_at: string}>;
+    supa.from('uploads').select(UPLOAD_CLS_COLS).eq('company_id', companyId).eq('batch_id', batchId).eq('kind', 'inventory_pdf').order('created_at').order('id').range(from, to),
+  )) as unknown as UploadClsRow[];
   if (!uploads.length) return [];
-  const heads = new Map<string, {page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>();
-  for (let i = 0; i < uploads.length; i += 100) {
-    const res = await supa
-      .from('extractions')
-      .select('upload_id,page,store:rows->>store_code,ps:rows->>period_start,pe:rows->>period_end,ba:rows->>consultant')
-      .eq('company_id', companyId)
-      .in('upload_id', uploads.slice(i, i + 100).map((u) => u.id)); // pagination-ok: ≤100 ids, one row each
-    if (res.error) throw new Error(`extractions read failed: ${res.error.message}`);
-    for (const e of (res.data ?? []) as Array<{upload_id: string; page: number | null; store: string | null; ps: string | null; pe: string | null; ba: string | null}>) {
-      heads.set(e.upload_id, {page: e.page ?? null, store: e.store?.trim() || null, ps: e.ps || null, pe: e.pe || null, ba: e.ba?.trim() || null});
-    }
-  }
-  const ordered = scanOrder(uploads).map((u) => ({...u, ...(heads.get(u.id) ?? {page: null, store: null, ps: null, pe: null, ba: null})}));
-  const forms = groupForms(ordered);
+
+  const byId = new Map(uploads.map((u) => [u.id, u]));
+  // Re-snap store codes against the current registry before grouping, so drift the
+  // classifier left raw ("DS 5300", "5360", a misread "472") collapses into the real
+  // store's form instead of each variant spinning off its own. snapStoreCode trusts a
+  // code that is itself a registered store, so genuinely different stores stay apart.
+  // Then cut store-less pages into per-scan runs (uploads already read oldest-first) so a
+  // blank-store form stays one physical form instead of merging several unreadable stores.
+  const known = await knownStoreCodes(companyId);
+  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(applyStoreRegistry(uploads.map(toClassifiedPage), known))));
+  const realForms = forms.filter(isRealForm);
+  if (realForms.length === 0) return []; // nothing confidently a form — leave the pile to sort
+
+  // The origin hosts the "needs sorting" remainder (fragments + sales + blanks + unplaceable)
+  // when there is one; otherwise the first real form keeps it, so the origin is never empty.
+  const inRealForm = new Set(realForms.flatMap((g) => g.slots.flatMap((s) => s.ids)));
+  const originIsRemainder = uploads.some((u) => !inRealForm.has(u.id));
+
+  const toSplit = realForms.map((g, i) => ({g, ownBatch: originIsRemainder || i > 0}));
+
   const out: SplitForm[] = [];
-  for (let f = 0; f < forms.length; f++) {
-    const group = forms[f];
+  if (originIsRemainder) {
+    const remainder = uploads.filter((u) => !inRealForm.has(u.id));
+    out.push({batchId, pages: [], files: remainder.length, storeCode: null, periodStart: null, periodEnd: null, consultant: null, unsorted: true});
+  }
+  for (const {g, ownBatch} of toSplit) {
+    const ids = g.slots.flatMap((s) => s.ids);
     let id = batchId;
-    if (f > 0) {
+    if (ownBatch) {
       id = await createBatch(companyId, createdBy);
-      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', group.map((g) => g.id));
+      const moved = await supa.from('uploads').update({batch_id: id}).eq('company_id', companyId).eq('batch_id', batchId).in('id', ids);
       if (moved.error) throw new Error(`move pages failed: ${moved.error.message}`);
+      // Pre-fill each peeled form with its grouped store + period (the reviewer can still
+      // edit). The origin is never re-stamped, so a reviewer's own correction is never lost.
+      await updateBatchInfo(companyId, id, {storeCode: g.store_code ?? null, periodStart: g.period_start ?? null, periodEnd: g.period_end ?? null});
     }
-    const head = group.find((g) => g.page === 1);
     out.push({
       batchId: id,
-      pages: group.map((g) => g.page).filter((n): n is number => n != null),
-      files: group.length,
-      storeCode: head?.store ?? null,
-      periodStart: head?.ps ?? null,
-      periodEnd: head?.pe ?? null,
-      consultant: head?.ba ?? null,
+      pages: g.present,
+      files: ids.length,
+      storeCode: g.store_code,
+      periodStart: g.period_start,
+      periodEnd: g.period_end,
+      consultant: consultantOf(byId.get(ids[0]) ?? uploads[0]),
     });
   }
-  // The first form keeps this batch; whatever store or period was typed for the whole
-  // drop belongs to it only when the scan held one form.
-  if (forms.length > 1) await updateBatchInfo(companyId, batchId, {storeCode: null, periodStart: null, periodEnd: null});
   return out;
 }
 
 export type BatchPage = {
   upload: UploadRow;
   extraction: ExtractionRecord | null;
+  /** Phase 0 detected/snapped store for this page, for the store-change guard. */
+  detectedStore: string | null;
 };
 
 /** The batch's uploads with their staged readings, oldest first. Company-scoped. */
+/**
+ * The company's most recent scan still being read server-side (any inventory page still
+ * queued or processing), with every page's status. Feeds the refresh-surviving "reading"
+ * indicator (floating dock + Uploads card): it reads straight from the DB, so it is correct
+ * on any page and after a refresh, unlike the browser's in-memory upload queue. Returns null
+ * when nothing is in flight. A lighter, status-only read than getBatchPages (no extraction
+ * join), and it reads every page of the batch (up to 250) so progress never undercounts.
+ */
+export async function latestActiveScan(
+  companyId: string,
+): Promise<{batchId: string; filename: string | null; statuses: string[]} | null> {
+  if (!goldlineConfigured()) return null;
+  const supa = db();
+  // The newest batch with at least one page still waiting or being read (queued_batch = its read
+  // is out in a Message Batch under L7, still in flight until the poller ingests it).
+  const head = await supa
+    .from('uploads')
+    .select('batch_id')
+    .eq('company_id', companyId)
+    .eq('kind', 'inventory_pdf')
+    .in('status', ['queued', 'queued_batch', 'processing'])
+    .not('batch_id', 'is', null)
+    .order('created_at', {ascending: false})
+    .limit(1)
+    .maybeSingle();
+  if (head.error) throw new Error(`active scan head read failed: ${head.error.message}`);
+  const batchId = head.data?.batch_id ?? null;
+  if (!batchId) return null;
+  // Every page of that batch — the whole denominator, not just the in-flight ones.
+  const res = await supa
+    .from('uploads')
+    .select('status,filename,created_at')
+    .eq('company_id', companyId)
+    .eq('batch_id', batchId)
+    .eq('kind', 'inventory_pdf')
+    .order('created_at', {ascending: true})
+    .limit(300); // ingest caps a whole-scan batch at 250 pages; 300 stays under the 1000 row cap
+  if (res.error) throw new Error(`active scan rows read failed: ${res.error.message}`);
+  const data = (res.data ?? []) as Array<{status: string; filename: string | null}>;
+  if (!data.length) return null;
+  return {batchId, filename: data[0]?.filename ?? null, statuses: data.map((r) => r.status)};
+}
+
 export async function getBatchPages(companyId: string, batchId: string): Promise<BatchPage[]> {
   if (!goldlineConfigured()) return [];
   const supa = db();
   const ups = await supa
     .from('uploads')
-    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path')
+    .select('id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,classification,form_version,orientation')
     .eq('company_id', companyId)
     .eq('batch_id', batchId)
     .order('created_at', {ascending: true})
-    .limit(50); // pagination-ok: a batch is capped at 20 files (UI) — 50 is a hard ceiling
+    // A client store-form batch is ≤20 files, but a server-driven whole-scan batch can hold
+    // up to 250 pages — cap above that so its progress/commit never silently undercounts.
+    // 300 stays under PostgREST's 1000-row ceiling.
+    .limit(300);
   if (ups.error) throw new Error(`uploads read failed: ${ups.error.message}`);
-  const uploads = (ups.data ?? []) as UploadRow[];
-  if (!uploads.length) return [];
-  const ext = await supa
-    .from('extractions')
-    .select('upload_id,page,status,doc_confidence,rows')
-    .eq('company_id', companyId)
-    .in('upload_id', uploads.map((u) => u.id)); // pagination-ok: ≤ 50 ids, one row each
-  if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
+  const rawUploads = (ups.data ?? []) as Array<UploadRow & {classification?: Record<string, unknown> | null}>;
+  if (!rawUploads.length) return [];
+  // Phase 0 store the page's detected/snapped store in classification; carry it so the
+  // review can flag a batch whose pages read different stores (store-change guard).
+  const detectedStore = new Map<string, string | null>();
+  for (const u of rawUploads) {
+    const c = u.classification ?? {};
+    const snap = (c.store_snap ?? {}) as Record<string, unknown>;
+    const code = (typeof snap.code === 'string' ? snap.code : typeof c.store_code === 'string' ? c.store_code : null) || null;
+    detectedStore.set(u.id, code);
+  }
+  const uploads = rawUploads.map(({classification: _c, ...u}) => u) as UploadRow[];
+  // Chunk the id list (a whole-scan batch can be up to 250 pages) so the `.in(...)` request
+  // URL stays bounded; one chunk for an ordinary batch, same as before.
+  const ids = uploads.map((u) => u.id);
+  type ExtRow = {upload_id: string; page: number; status: string; doc_confidence: number | null; rows: ExtractedPage};
+  const extRows: ExtRow[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const ext = await supa
+      .from('extractions')
+      .select('upload_id,page,status,doc_confidence,rows')
+      .eq('company_id', companyId)
+      .in('upload_id', ids.slice(i, i + 100)); // pagination-ok: ≤100 ids per chunk, one extraction row each
+    if (ext.error) throw new Error(`extractions read failed: ${ext.error.message}`);
+    extRows.push(...((ext.data ?? []) as ExtRow[]));
+  }
   const byUpload = new Map(
-    ((ext.data ?? []) as Array<{upload_id: string; page: number; status: string; doc_confidence: number | null; rows: ExtractedPage}>).map((e) => [
+    extRows.map((e) => [
       e.upload_id,
       {page: e.page, status: e.status, docConfidence: e.doc_confidence, data: e.rows} as ExtractionRecord,
     ]),
   );
-  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null}));
+  return uploads.map((upload) => ({upload, extraction: byUpload.get(upload.id) ?? null, detectedStore: detectedStore.get(upload.id) ?? null}));
 }
 
 /**
@@ -721,6 +1296,8 @@ export async function commitBatch(input: {
         selling_area: r.selling_area,
         delivery: r.delivery,
         ending_on_hand: r.ending_on_hand,
+        // Legacy sidecar (null for v1/v2); commit_batch writes it to inventory.extra.
+        extra: r.extra ?? null,
       })),
     })),
   });
@@ -750,13 +1327,12 @@ export class BatchConflictError extends Error {
 
 export type StoreOption = {code: string; name: string};
 
-/** The company's stores (for the store-code pickers), by code. Company-scoped. */
+/** The company's stores (for the store-code pickers), by code. Served from the cached
+ *  store list (gl-stores) so the pickers don't re-read the stores table every load.
+ *  Company-scoped. */
 export async function listStores(companyId: string): Promise<StoreOption[]> {
   if (!goldlineConfigured()) return [];
-  const supa = db();
-  const rows = (await fetchAllRows('stores', (from, to) =>
-    supa.from('stores').select('store_code,name,status').eq('company_id', companyId).order('store_code').range(from, to),
-  )) as unknown as Array<{store_code: string; name: string; status: string}>;
+  const rows = await getGlStores(companyId);
   return rows
     .filter((r) => r.status !== 'closed')
     .map((r) => ({code: r.store_code, name: r.name}))

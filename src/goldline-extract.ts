@@ -1,12 +1,17 @@
 // Goldline inventory-form extraction (P2) — the template-aware prompt the Claude
 // API gets for each scanned page, plus the JSON schema it must return.
 //
-// Strategy: the six Nichido pages are a FIXED template, so extraction is
-// slot-filling against a known per-page manifest, not open reading. That removes
-// the row-skips and column-drift a free read produces. This module is PURE (no
-// network, no SDK) so it unit-tests; the live call that sends `buildSystemPrompt()`
-// + `buildManifestPrompt(page)` + the schema with the PDF lives in the server
-// route and is smoke-tested on Staging with GOLDLINE_ANTHROPIC_API_KEY in the env.
+// Strategy (NICH-36): the PAGE is the source of truth. The reader transcribes the
+// rows actually printed on the scanned page, in printed order, and the per-page
+// manifest is a DICTIONARY of known codes/names used only to recognise and correct
+// a printed code — never a checklist of rows to emit. (The earlier slot-filling
+// rule — "emit one object for every manifest code" — invented rows for items a
+// store didn't print and dropped printed items the manifest was missing; see the
+// Nov 5 QA.) A printed item not in the manifest is still emitted, flagged
+// off_manifest, so it is reviewed rather than lost. This module is PURE (no network,
+// no SDK) so it unit-tests; the live call that sends `buildSystemPrompt()` +
+// `buildManifestPrompt(page)` + the schema with the PDF lives in the server route
+// and is smoke-tested on Staging with GOLDLINE_ANTHROPIC_API_KEY in the env.
 
 // Matches the model the Coop chat uses (src/chat/config.ts), so one tier serves
 // both. Sonnet is the plan's default for extraction (accuracy on messy handwriting
@@ -16,6 +21,21 @@ export const EXTRACT_MODEL = 'claude-sonnet-5-5';
 /** The five handwritten count columns on the form, left→right (col6 is derived). */
 export const COLUMN_KEYS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 export type ColumnKey = (typeof COLUMN_KEYS)[number];
+
+// ── Phase 0: form layout versions and page kinds ───────────────────────────────
+// The Nichido form has evolved. Three layouts show up in real scans; two more
+// (v3, v4) are expected but not yet sampled, so anything off-template is 'unknown'
+// and gets flagged for a human rather than guessed. Detection reads the PRINTED
+// column headers (never the handwriting) — see buildPageClassifyPrompt. The
+// extractor is still V1/V2-shaped; version-aware extraction is Phase 1.
+export const FORM_VERSIONS = ['legacy', 'v1', 'v2', 'unknown'] as const;
+export type FormVersion = (typeof FORM_VERSIONS)[number];
+
+/** What a scanned page structurally is. Only 'inventory' carries item-count rows;
+ *  'sales' is the page-6 report (parked, out of scope); 'blank' is a bleed-through
+ *  back side to drop. */
+export const PAGE_KINDS = ['inventory', 'sales', 'blank', 'unknown'] as const;
+export type PageKind = (typeof PAGE_KINDS)[number];
 
 export type ManifestItem = {code: string; product: string};
 
@@ -71,10 +91,11 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'CDSBLB03', product: 'Liquid Blush Poppy Pink'}, {code: 'CDSBLB04', product: 'Liquid Blush Tease Me'},
     {code: 'CDSBLB05', product: 'Liquid Blush Hush Blush'}, {code: 'CDSBLB06', product: 'Liquid Blush Love Cake'},
     {code: 'MS09113', product: 'Bare Basic Palette'}, {code: 'MS099717', product: 'Naturally Beautiful Palette'},
-    {code: 'MUIS09', product: 'TCC In Style Make-up Palette'}, {code: 'MUMBS02', product: 'Bombshell Eyeshadow Palette'},
-    {code: 'MUO03', product: 'Obsession Eyeshadow Palette'}, {code: 'MUBBEP', product: 'Berry Blossom Eyeshadow Palette'},
-    {code: 'MUSEP', product: 'Sakura Eyeshadow Palette'}, {code: 'BESP', product: 'Bejeweled Eyeshadow Palette'},
-    {code: 'LSESP', product: 'Love Spells Eyeshadow Palette'}, {code: 'CPC001', product: 'Contour Palette'},
+    {code: 'MUIS09', product: 'TCC In Style Make-up Palette'}, {code: 'MUSE', product: 'Sweet Escape Eyeshadow Palette'},
+    {code: 'MUMBS02', product: 'Bombshell Eyeshadow Palette'}, {code: 'MUO03', product: 'Obsession Eyeshadow Palette'},
+    {code: 'MUBBEP', product: 'Berry Blossom Eyeshadow Palette'}, {code: 'MUSEP', product: 'Sakura Eyeshadow Palette'},
+    {code: 'BESP', product: 'Bejeweled Eyeshadow Palette'}, {code: 'LSESP', product: 'Love Spells Eyeshadow Palette'},
+    {code: 'CPC001', product: 'Contour Palette'}, {code: 'NGFEP', product: 'Nichido Glam Face & Eye Palette 317-A'},
     {code: 'USMLLC01', product: 'Matte Lip Color O So Spice'}, {code: 'USMLLC02', product: 'Matte Lip Color Fast Play'},
     {code: 'USMLLC03', product: 'Matte Lip Color Simply Nude'}, {code: 'USMLLC04', product: 'Matte Lip Color Bespoke'},
     {code: 'USMLLC05', product: 'Matte Lip Color Dirty Talk'}, {code: 'USMLLC06', product: 'Matte Lip Color Chic Cafe'},
@@ -82,7 +103,8 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'USMLLC09', product: 'Matte Lip Color Catwalk'}, {code: 'USMLLC10', product: 'Matte Lip Color Smitten'},
     {code: 'MPMLSCB01', product: 'Matte Lipstick Goddess'}, {code: 'MPMLSCB02', product: 'Matte Lipstick Kiss Of An Angel'},
     {code: 'MPMLSCB03', product: 'Matte Lipstick Heart to Heart'}, {code: 'MPMLSCB04', product: 'Matte Lipstick Adore You'},
-    {code: 'MPMLSCB05', product: 'Matte Lipstick Love On Fire'}, {code: 'MPMLSCB08', product: 'Matte Lipstick Euphoria'},
+    {code: 'MPMLSCB05', product: 'Matte Lipstick Love On Fire'}, {code: 'MPMLSCB06', product: 'Matte Lipstick Sugar Rush'},
+    {code: 'MPMLSCB07', product: 'Matte Lipstick Georgia'}, {code: 'MPMLSCB08', product: 'Matte Lipstick Euphoria'},
     {code: 'MPMLSCB09', product: 'Matte Lipstick Hot Red'}, {code: 'MPMLSCB10', product: 'Matte Lipstick High Spirits'},
     {code: 'MPMLSCB11', product: 'Matte Lipstick Sweet Marsala'}, {code: 'MPMLSCB12', product: 'Matte Lipstick Wine Soiree'},
     {code: 'MPMLSCB13', product: 'Matte Lipstick Malibu'},
@@ -176,6 +198,7 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
     {code: 'EDNH7464', product: 'Elise Diva Lashes DW7464'}, {code: 'EDNH7927', product: 'Elise Diva Lashes C7927'},
     {code: 'ELN4455', product: 'Elise Lashes N4455'}, {code: 'ELCX1313', product: 'Elise Lashes CX1313'},
     {code: 'ELI8089', product: 'Elise Lashes I8089'}, {code: 'ELF8058', product: 'Elise Lashes F8058'},
+    {code: 'ELIF3125B', product: 'Individual Flare 3125 Black'},
     {code: 'EFLLF11', product: 'Elise Feather Lite Lashes F11'}, {code: 'EFLLF12', product: 'Elise Feather Lite Lashes F12'},
     {code: 'EFLLF13', product: 'Elise Feather Lite Lashes F13'}, {code: 'EFLLF14', product: 'Elise Feather Lite Lashes F14'},
     {code: 'JLLS04', product: 'Juicy Lips Lipstick Pink Champagne'},
@@ -188,6 +211,32 @@ export const MANIFESTS: Record<number, ManifestItem[]> = {
 export const PAGE_COUNT = 6;
 export const INVENTORY_PAGES = [1, 2, 3, 4, 5];
 
+/**
+ * Approximate vertical band (top + height as fractions of the page, 0–1) for an item
+ * row on its printed page. The form is a fixed template and `MANIFESTS[page]` lists
+ * the items in printed order, so a SKU's position is its index within the manifest,
+ * mapped into the grid's content area. This is an APPROXIMATION — the printed grid
+ * also has family-header rows we don't model, so the band is a few rows tall to cover
+ * the drift, not a pixel-exact box. Returns null when the item isn't on the page.
+ */
+export function rowBandFor(itemCode: string, page: number): {top: number; height: number} | null {
+  const items = MANIFESTS[page];
+  if (!items) return null;
+  const idx = items.findIndex((i) => i.code === itemCode);
+  if (idx < 0) return null;
+  // The item grid occupies roughly the middle of the page: ~14% header/title at the
+  // top, ~6% total row + note at the bottom. Spread the manifest across that area.
+  const GRID_TOP = 0.14;
+  const GRID_BOTTOM = 0.94;
+  const span = GRID_BOTTOM - GRID_TOP;
+  const center = GRID_TOP + (span * (idx + 0.5)) / items.length;
+  // A band a few manifest-rows tall, so the real row (shifted by unmodeled family
+  // headers) falls inside it. Clamped to the page.
+  const height = Math.min(0.12, Math.max(0.05, (span / items.length) * 4));
+  const top = Math.max(0, Math.min(1 - height, center - height / 2));
+  return {top, height};
+}
+
 /** The fixed system role + global guardrails (same every call — prompt-cached). */
 export function buildSystemPrompt(): string {
   return [
@@ -195,12 +244,36 @@ export function buildSystemPrompt(): string {
     'You receive ONE scanned page as image + text. Transcribe only what is written —',
     'never infer, estimate, average, or fill a blank.',
     '',
+    'THE PAGE IS THE SOURCE OF TRUTH, NOT THE REFERENCE LIST.',
+    'Output one row for each item ROW actually printed on this page, reading the page from',
+    'top to bottom in the order the rows are printed (keep the printed group/family order;',
+    'do NOT sort by item code). The reference list you are given is a dictionary of known',
+    'codes and names for this page — use it ONLY to recognise and correct a printed code,',
+    'never as the list of rows to output.',
+    '',
     'Rules:',
-    '- Emit one object for every item code in the provided manifest, in order. Never add',
-    '  a code that is not on the page; never skip one. Use null for an empty count cell.',
+    '- Emit a row only for an item that is physically printed on this page. Do NOT add an',
+    '  item just because it is in the reference list; if it is not printed here, it is not a',
+    '  row. Never skip a row that IS printed. Use null for an empty count cell.',
+    '- Never drop a printed row because it has no counts. A row whose only mark is "O/S"',
+    '  (out of stock), or whose count cells are all blank, is still a real printed row:',
+    '  keep it, read null for the empty cells, and note "O/S" in "alt" when that is the mark.',
+    '- If a row is printed on the page but its code or name is NOT in the reference list,',
+    '  still emit it: use the code and name exactly as printed, set "off_manifest": true,',
+    '  set confidence below 0.6, and say so in "alt". Never silently drop it.',
+    '- Match a printed code to the reference list when it clearly is the same item (a misread',
+    '  character); keep the reference code then. When unsure, keep what is printed.',
+    '- In "printed_name", transcribe the product name exactly as printed beside the code on',
+    '  that row, even when it disagrees with the reference list (e.g. an older printed label).',
+    '  This is only a cross-check for the code; never change the code or counts because of it.',
     '- Counts are whole numbers. An empty cell is null; only a written "0" is zero.',
     '- A mark belongs to the column it sits under; if it straddles two, pick the nearer,',
     '  lower the confidence, and add a "straddle" mark for that cell.',
+    '- "alt" is shown to the person reviewing the page exactly as you write it. Write it',
+    '  for them in plain words, naming columns as printed or as the page uses them',
+    '  (Stockroom, Drawer, Selling area, Delivery, Ending): e.g. "Drawer could be 1" or',
+    '  "O/S written, no counts". Never write column numbers ("col3"), field names, or terms',
+    '  like "off_manifest" or "reference list".',
     '- Do not compute total_value; leave it null (derived downstream as ending × price).',
     '- Ignore pre-printed marks ("(Bestseller)", stars, the printed price) and the dark',
     '  family-header bars; read only handwriting in the count columns.',
@@ -220,26 +293,41 @@ export function buildSystemPrompt(): string {
     '  "unclear" mark for that cell.',
     '- "marks" lists only those cells (field = the column key); leave it empty when every',
     '  cell in the row reads cleanly. Never mark a cell just because it is blank.',
-    '- Confirm the footer page number matches the manifest page; if it does not, return',
+    '- Confirm the footer page number matches the reference page number; if it does not, return',
     '  { "error": "page_mismatch" } instead of mapping rows.',
     '- Skip the bottom TOTAL row. If the page is not a Nichido inventory page or is',
     '  unreadable, return { "error": "..." }. Return JSON only.',
   ].join('\n');
 }
 
-/** The per-page manifest text (item codes + column meanings). Cached per page. */
-export function buildManifestPrompt(page: number): string {
+/** The per-page manifest text (item codes + column meanings) for the THREE-LOCATION
+ *  layouts (V1, V2). They share the same five fields and row-math (ending = stockroom
+ *  + drawer + selling); only the printed Delivery-column POSITION differs — col 4
+ *  (after the three counts) on V1, first (before them) on V2 — so the prompt states
+ *  the right order while the returned field names stay identical. Cached per page. */
+export function buildManifestPrompt(page: number, version: 'v1' | 'v2' = 'v1'): string {
   const items = MANIFESTS[page];
   if (!items || items.length === 0) {
     throw new Error(`No extraction manifest for page ${page} (generate it from the blank template first)`);
   }
   const list = items.map((i) => `${i.code} ${i.product}`).join(' · ');
+  const order = version === 'v2'
+    ? '  delivery (col1, FIRST) · stockroom (col2) · drawer (col3) · selling_area (col4) · ending_on_hand (col5)'
+    : '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)';
   return [
-    `PAGE ${page} of ${PAGE_COUNT}. Columns, left to right (handwritten int or null):`,
-    '  stockroom (col1) · drawer (col2) · selling_area (col3) · delivery (col4) · ending_on_hand (col5)',
-    '  total_value (col6) is DERIVED — leave null.',
+    `PAGE ${page} of ${PAGE_COUNT}. Form version ${version.toUpperCase()}. Columns, left to right (handwritten int or null):`,
+    order,
+    '  total_value (last col) is DERIVED — leave null.',
+    'ending_on_hand = stockroom + drawer + selling_area; delivery is separate (not part of it).',
+    'Map each cell by its PRINTED column meaning above, not by any handwritten sub-label.',
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
-    'Item rows on this page, in printed order — read a value or null for each:',
+    'For each row, also return box = {y_top, y_bottom}: the fraction (0 at the page top,',
+    "1 at the bottom) of where that printed item row begins and ends on THIS scan's",
+    'actual layout. This only points the reviewer at the row; it must not change any count.',
+    'REFERENCE — known codes and names for this page (a dictionary to recognise and correct',
+    'printed codes, NOT a checklist). Output a row only for an item printed on the page, in',
+    'the page\'s printed order; a printed item missing from this list is still a row',
+    '(off_manifest: true). Do not output a listed item that is not printed on the page:',
     `  ${list}`,
   ].join('\n');
 }
@@ -266,6 +354,79 @@ export const PAGE_DETECT_SCHEMA = {
   // (400 that failed every PDF). detectPage clamps the value to 0–6 instead.
   properties: {page: {type: 'integer'}},
   required: ['page'],
+} as const;
+
+/**
+ * Phase 0 classifier prompt. A superset of page-detect: for one shuffled scan it
+ * returns page number, kind, orientation, form version, and the per-page handwritten
+ * header (store / period / consultant) — WITHOUT transcribing item counts. This is
+ * what lets a 98-page multi-store, multi-version, rotated bundle be sorted into
+ * `{store · period · version · page}` form groups before any extraction runs.
+ */
+export function buildPageClassifyPrompt(): string {
+  return [
+    'This is ONE scanned page from a NICHIDO COSMETICS "Semi-Monthly Inventory" packet.',
+    'Scans arrive shuffled, rotated, and mixed across stores, periods, and form versions.',
+    'Classify this single page only. Do NOT transcribe item counts.',
+    '',
+    'Return JSON only (match the schema):',
+    '- page: the printed "PAGE # N" number (1–6), or 0 if none is visible.',
+    '- kind: what is PRINTED on the page —',
+    '    "inventory" — the ITEM# / PRODUCT count grid (pages 1–5).',
+    '    "sales" — the page-6 Sales Report (a 31-day logbook, no item-count columns).',
+    '    "blank" — effectively empty: no printed form grid and no handwriting. These forms',
+    '      are scanned duplex (auto-flip), so a blank back side follows many pages — blanks',
+    '      are common and EXPECTED. Faint scanner noise, a smudge, a crease, specks, or',
+    '      light bleed-through from the other side still counts as blank. On a near-empty',
+    '      page, choose "blank", not "unknown".',
+    '    "unknown" — has real content that is none of the above, or you truly cannot tell.',
+    '      Do not use "unknown" for an empty page (that is "blank").',
+    '- orientation: 0 if upright, 180 if upside-down. Judge from the printed headings and',
+    '  the handwritten header line reading the right way up.',
+    '- version: which column layout the PRINTED template uses. Read the COLUMN HEADERS,',
+    '  never the handwriting:',
+    '    "legacy" — seven numbered columns including two "Deducted" columns (Beginning',
+    '      Inventory, Delivery, Beginning+Delivery, Total PCS Deducted, Total Amount',
+    '      Deducted, Ending Inventory, Total Amount of Ending Inventory).',
+    '    "v1" — three Tagalog "Bilang sa" location counts THEN Delivery: Stockroom,',
+    '      Drawer, Selling Area, Delivery, Ending Inventory, Total (Delivery is the 4th',
+    '      data column, after the three counts).',
+    '    "v2" — Delivery FIRST, then the three counts: Delivery, Stockroom, Drawer,',
+    '      Selling Area, Ending Inventory, Total (Delivery precedes the three counts).',
+    '    DECIDE v1 vs v2 BY ONE THING ONLY: the printed position of the "Delivery" column.',
+    '      Read the column headers left to right. If "Delivery" is the FIRST data column it is',
+    '      v2; if "Delivery" comes AFTER Stockroom, Drawer and Selling Area (the 4th data',
+    '      column) it is v1. Do not infer the version from anything else. If the Delivery',
+    '      position is unclear or you cannot read the headers, lower the confidence.',
+    '    "unknown" — none of the above, or you cannot tell.',
+    '- store_code, store_name, period_start, period_end, consultant: from the handwritten',
+    '  header line at the TOP of the page. EVERY page has this header, not just page 1.',
+    '  Give period_start and period_end as YYYY-MM-DD using your best reading of the',
+    '  written dates (do not "fix" an impossible day — report it as written). Use null for',
+    '  any field that is absent or illegible.',
+    '- confidence: 0–1 for the overall classification.',
+  ].join('\n');
+}
+
+/** Schema for the classifier call. `page` and `orientation` are plain integers
+ *  (no enum/bounds — structured outputs reject numeric bounds; the caller clamps
+ *  page→0–6 and orientation→{0,180}). `kind` and `version` are string enums. */
+export const PAGE_CLASSIFY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    page: {type: 'integer'},
+    kind: {type: 'string', enum: ['inventory', 'sales', 'blank', 'unknown']},
+    orientation: {type: 'integer'},
+    version: {type: 'string', enum: ['legacy', 'v1', 'v2', 'unknown']},
+    store_code: {type: ['string', 'null']},
+    store_name: {type: ['string', 'null']},
+    period_start: {type: ['string', 'null']},
+    period_end: {type: ['string', 'null']},
+    consultant: {type: ['string', 'null']},
+    confidence: {type: 'number'},
+  },
+  required: ['page', 'kind', 'orientation', 'version', 'confidence'],
 } as const;
 
 /**
@@ -309,6 +470,14 @@ export function humanizeExtractError(raw: unknown): string {
   return 'We couldn’t process this scan. It’s been saved. Please try again, or review it manually.';
 }
 
+/** A 200 with an empty or non-JSON text block — a transient model hiccup, not a real
+ *  failure (the same page reads fine on a re-try). The reader retries only these; key,
+ *  content, timeout and shape errors fail fast so they don't burn the time budget. */
+export function isTransientJsonMiss(e: unknown): boolean {
+  const s = e instanceof Error ? e.message : String(e);
+  return s.includes('returned no text content') || s.includes('did not return valid JSON');
+}
+
 /** The JSON schema the model must return (header + one object per item). */
 export const EXTRACTION_SCHEMA = {
   type: 'object',
@@ -328,6 +497,9 @@ export const EXTRACTION_SCHEMA = {
         additionalProperties: false,
         properties: {
           item_code: {type: 'string'},
+          // The product name printed on the row, transcribed verbatim for cross-checking
+          // the code — never used to change the code or counts.
+          printed_name: {type: ['string', 'null']},
           stockroom: {type: ['integer', 'null']},
           drawer: {type: ['integer', 'null']},
           selling_area: {type: ['integer', 'null']},
@@ -348,6 +520,21 @@ export const EXTRACTION_SCHEMA = {
               required: ['field', 'mark'],
             },
           },
+          // Where this printed item row sits on THIS scan, as fractions (0 = page top,
+          // 1 = page bottom). Used only to point the reviewer at the row in the enlarged
+          // scan; null/absent falls back to the template band. Never affects the counts.
+          box: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            properties: {
+              y_top: {type: 'number'},
+              y_bottom: {type: 'number'},
+            },
+            required: ['y_top', 'y_bottom'],
+          },
+          // True when this row is printed on the page but its code/name is not in the
+          // reference list — kept (never dropped) and surfaced for review, not silently lost.
+          off_manifest: {type: ['boolean', 'null']},
         },
         required: ['item_code', 'ending_on_hand', 'confidence'],
       },

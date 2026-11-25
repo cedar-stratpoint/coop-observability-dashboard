@@ -21,7 +21,10 @@
 //   gap       = form_sold − POS sold;  flag when |gap| > max(min units, pct × POS sold)
 // On hand is the written ending, else stockroom + drawer + selling area (onHandOf).
 // A store's first count is the baseline only (Q11); a month with no POS file waits.
+// Delivered is what the store received on purchase orders that month (F12), else the
+// form's Delivery column.
 import {onHandOf} from './goldline-inventory';
+import {deliveredFrom} from './goldline-po';
 
 export type FlagKind = 'sales_gap' | 'zero_or_below' | 'row_math' | 'unreadable';
 export type FlagCause = 'messy_handwriting' | 'incorrect_total' | 'padding';
@@ -46,6 +49,11 @@ export type CountRow = {
   ending_on_hand: number | null;
   consultant: string | null;
   source_upload_id: string | null;
+  // Phase 1/3 · the form layout the row was read from, and the Legacy-only deducted
+  // values (beginning / begin_plus_delivery / deducted_pcs) that have no three-location
+  // column. Absent for older rows (treated as v1 / three-location).
+  form_version?: string | null;
+  extra?: Record<string, number | null> | null;
 };
 export type Adjustment = {store_code: string; item_code: string; period_end: string; qty: number};
 export type CellMark = {field: string; mark: 'overwritten' | 'unclear' | 'straddle'; written?: string | null};
@@ -72,7 +80,9 @@ export type MonthCheck = {
   month: string; // YYYY-MM
   state: MonthState;
   start: number | null;
-  delivered: number;
+  delivered: number; // the PO receipt when there is one, else the form's Delivery column (F12)
+  formDelivered: number; // the form's Delivery column
+  received: number | null; // units received on POs this month (null = no receipt)
   adjusted: number;
   ending: number | null;
   formSold: number | null;
@@ -97,13 +107,38 @@ export function allowedGap(posSold: number, s: CheckSettings = DEFAULT_SETTINGS)
   return Math.max(s.gapMinUnits, s.gapPct * Math.abs(posSold));
 }
 
+/** A numeric field from the Legacy `extra` sidecar, or null. */
+function extraNum(r: CountRow, key: string): number | null {
+  const v = r.extra?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 /**
- * Row math, only when an ending is written and at least one part is. The ending
- * (column 5) is stockroom + drawer + selling area; the delivery column (4) is not
- * part of it (Justin, Q23, answered Oct 27).
+ * Row math, only when an ending is written and the inputs are. Version-aware:
+ * - V1 / V2 (and older rows): ending (col 5) = stockroom + drawer + selling area; the
+ *   delivery column is not part of it (Justin, Q23, answered Oct 27).
+ * - Legacy filed as stockroom / drawer / selling: the same three-location sum as V1/V2.
+ * - Legacy on the printed model (7-column deducted, counts live in `extra`): ending = beginning + delivery
+ *   − deducted (using the written "beginning + delivery" when present, else computing
+ *   it), so Legacy forms are validated even though they have no three-location split.
+ * Returns the written ending vs the expected one, or null when consistent / not enough
+ * inputs to check.
  */
 export function rowMathOff(r: CountRow): {written: number; counted: number} | null {
   if (r.ending_on_hand == null) return null;
+  // A Legacy row filed as stockroom / drawer / selling (the way consultants fill it) is checked
+  // like V1/V2 below; only a Legacy row on the printed deducted model uses the deducted math.
+  const located = r.stockroom != null || r.drawer != null || r.selling_area != null;
+  if (r.form_version === 'legacy' && !located) {
+    const bd = extraNum(r, 'begin_plus_delivery');
+    const dp = extraNum(r, 'deducted_pcs');
+    const b = extraNum(r, 'beginning');
+    let expected: number | null = null;
+    if (bd != null && dp != null) expected = bd - dp;
+    else if (b != null && r.delivery != null && dp != null) expected = b + r.delivery - dp;
+    if (expected == null) return null; // not enough of the deducted inputs to check
+    return r.ending_on_hand === expected ? null : {written: r.ending_on_hand, counted: expected};
+  }
   const parts = [r.stockroom, r.drawer, r.selling_area];
   if (parts.every((p) => p == null)) return null;
   const counted = parts.reduce<number>((a, p) => a + (p ?? 0), 0);
@@ -160,6 +195,7 @@ export function monthlyChecks(input: {
   salesMonths: ReadonlySet<string>;
   linked: ReadonlySet<string>;
   settings?: CheckSettings;
+  receipts?: ReadonlyMap<string, number>; // store|item|YYYY-MM → units received on POs (receiptsByMonth)
 }): {months: MonthCheck[]; findings: Finding[]} {
   const s = input.settings ?? DEFAULT_SETTINGS;
   const series = new Map<string, CountRow[]>(); // store|item → counts by date
@@ -185,10 +221,12 @@ export function monthlyChecks(input: {
       // Final on hand before this month: the latest earlier count that has one.
       const before = rows.filter((r) => r.period_end < `${month}-01` && onHandOf(r).onHand != null).at(-1);
       const last = [...inMonth].reverse().find((r) => onHandOf(r).onHand != null);
-      const delivered = inMonth.reduce((a, r) => a + (r.delivery ?? 0), 0);
+      const formDelivered = inMonth.reduce((a, r) => a + (r.delivery ?? 0), 0);
+      const received = input.receipts?.get(`${store}|${item}|${month}`);
+      const delivered = deliveredFrom(formDelivered, received);
       const adjusted = adjBy.get(`${store}|${item}|${month}`) ?? 0;
       const ending = last ? (onHandOf(last).onHand as number) : null;
-      const row: MonthCheck = {store_code: store, item_code: item, month, state: 'baseline', start: null, delivered, adjusted, ending, formSold: null, posSold: null, gap: null, allowed: null};
+      const row: MonthCheck = {store_code: store, item_code: item, month, state: 'baseline', start: null, delivered, formDelivered, received: received ?? null, adjusted, ending, formSold: null, posSold: null, gap: null, allowed: null};
       if (ending == null) {
         months.push({...row, state: 'not_counted'}); // left blank on the form this month
         continue;
@@ -230,6 +268,8 @@ export function monthlyChecks(input: {
             opening: onHandOf(before).onHand,
             opening_period_end: before.period_end,
             delivered,
+            // Only with a PO receipt, so flags raised before F12 keep their stored details.
+            ...(received !== undefined ? {form_delivered: formDelivered, received} : {}),
             adjusted,
             ending,
             form_sold: row.formSold,
