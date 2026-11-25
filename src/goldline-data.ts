@@ -1,3 +1,4 @@
+import {storableDate} from './period-date';
 import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
@@ -1064,7 +1065,9 @@ export async function updateBatchInfo(
 ): Promise<void> {
   const res = await db()
     .from('upload_batches')
-    .update({store_code: info.storeCode, period_start: info.periodStart, period_end: info.periodEnd})
+    // A read period can hold an impossible date (2026-09-31); the database refuses it, which used to
+    // fail the whole store assignment. Store the month's last day for an end, or nothing.
+    .update({store_code: info.storeCode, period_start: storableDate(info.periodStart), period_end: storableDate(info.periodEnd, true)})
     .eq('company_id', companyId)
     .eq('id', id)
     .eq('status', 'open');
