@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.15 Commit all in the upload's header (prod release)
+Ships #776, cherry-picked onto `main`: Commit all sits beside Delete scan on every view of a grouped upload.
+
+## 2026-11-25 — Commit all moves to the upload's header
+
+Feedback: Commit all should sit in the header, beside Delete scan, whatever the view. It was only on the Per store view. It now shows on Per file, Per store and Per BA, and always covers the whole upload: it reads the unfiltered board, so a BA or form-version filter never changes what it commits. The board's own summary is back to just the counts.
+
 ## 2026-11-25 · v1.26.14 Per store board: the page row says what it is (prod release)
 Ships only #758 (staging), cherry-picked onto `main`.
 

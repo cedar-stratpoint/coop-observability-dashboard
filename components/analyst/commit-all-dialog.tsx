@@ -46,7 +46,7 @@ export function CommitAllDialog({
   company: string;
   forms: TriageForm[];
   /** The registry's name per store code, so a form reads by its real store name. */
-  storeNames: Map<string, string | null>;
+  storeNames: Record<string, string | null>;
   /** Forms with pages to commit that this can't take (no store yet, or pages shared with another form). */
   notListed: number;
 }) {
@@ -58,7 +58,7 @@ export function CommitAllDialog({
   const [results, setResults] = useState<Result[]>([]);
 
   const labels = useMemo(
-    () => new Map(forms.map((f) => [f.batchId ?? '', (f.storeCode && storeNames.get(f.storeCode)) || f.storeName || (f.storeCode ? `Store ${f.storeCode}` : 'No store')])),
+    () => new Map(forms.map((f) => [f.batchId ?? '', (f.storeCode && storeNames[f.storeCode]) || f.storeName || (f.storeCode ? `Store ${f.storeCode}` : 'No store')])),
     [forms, storeNames],
   );
   const ids = useMemo(() => forms.map((f) => f.batchId).filter((x): x is string => Boolean(x)), [forms]);
