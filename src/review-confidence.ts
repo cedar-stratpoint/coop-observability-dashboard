@@ -23,17 +23,21 @@ export type ConfidenceSummary = {
   band: Band | null;
   counts: Record<Band, number>;
   total: number;
+  /** Rows the review flags (the Needs review count). */
+  flagged: number;
   verdict: string; // short label
   guidance: string; // what the reviewer should do
 };
 
-export function summarizeConfidence(docConfidence: number | null, rowConfidences: Array<number | null | undefined>): ConfidenceSummary {
+/** `flagged`: the rows the review actually flags, when more than the low-confidence ones (O/S,
+ *  band prices, history notes); defaults to the low-confidence count. */
+export function summarizeConfidence(docConfidence: number | null, rowConfidences: Array<number | null | undefined>, flaggedRows?: number): ConfidenceSummary {
   const counts: Record<Band, number> = {high: 0, medium: 0, low: 0};
   for (const c of rowConfidences) counts[bandOf(rowConfidence(c))]++;
   const total = rowConfidences.length;
   const score = typeof docConfidence === 'number' && Number.isFinite(docConfidence) ? Math.min(1, Math.max(0, docConfidence)) : null;
   const band = score == null ? null : bandOf(score);
-  const flagged = counts.low;
+  const flagged = typeof flaggedRows === 'number' && flaggedRows >= 0 ? flaggedRows : counts.low;
   const rowsWord = (n: number) => `${n} ${n === 1 ? 'row' : 'rows'}`;
 
   let verdict = 'Not scored';
@@ -52,5 +56,5 @@ export function summarizeConfidence(docConfidence: number | null, rowConfidences
     verdict = 'Low confidence';
     guidance = 'Check every row against the scan. A clearer, flat, full-page scan usually reads much better.';
   }
-  return {score, band, counts, total, verdict, guidance};
+  return {score, band, counts, total, flagged, verdict, guidance};
 }

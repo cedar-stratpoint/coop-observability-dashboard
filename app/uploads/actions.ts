@@ -1,5 +1,6 @@
 'use server';
 import {allowedPrices, cleanBands, flaggedRowIndexes, stampPickedPrices, type PaperBand} from '@/src/band-prices';
+import {stampOutOfStock} from '@/src/out-of-stock';
 
 import {revalidatePath, revalidateTag} from 'next/cache';
 import {expireSalesTotals, glTags} from '@/src/goldline-ref-data';
@@ -193,7 +194,8 @@ export async function commitReview(input: {
   // Accessories are printed under shared price codes; save each under its own product code.
   const extraction = await getExtraction(ctx.companyId, input.uploadId);
   // A band whose written price the reviewer picked keeps that price on its committed rows.
-  const rows = withProductCodes(stampPickedPrices(coerced, cleanBands(extraction?.data?.bands)), upload.form_version, extraction?.page);
+  // Rows the read found "O/S" on keep that tag while their O/S cells are still 0.
+  const rows = withProductCodes(stampOutOfStock(stampPickedPrices(coerced, cleanBands(extraction?.data?.bands)), extraction?.data?.rows), upload.form_version, extraction?.page);
   const dup = duplicateCodeMessage(rows);
   if (dup) return {ok: false, error: dup};
 
@@ -383,7 +385,7 @@ export async function commitBatchAction(input: {
     sent.add(p.uploadId);
     const clean = cleanRows(p.rows);
     if (!clean.ok) return clean;
-    pages.push({uploadId: p.uploadId, rows: withProductCodes(stampPickedPrices(clean.rows, cleanBands(mine.extraction?.data?.bands)), mine.upload.form_version, mine.extraction?.page)});
+    pages.push({uploadId: p.uploadId, rows: withProductCodes(stampOutOfStock(stampPickedPrices(clean.rows, cleanBands(mine.extraction?.data?.bands)), mine.extraction?.data?.rows), mine.upload.form_version, mine.extraction?.page)});
   }
   // Every page awaiting review commits together — none left behind in an emptied batch.
   if (awaiting.length !== sent.size || awaiting.some((p) => !sent.has(p.upload.id))) {

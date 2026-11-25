@@ -673,6 +673,7 @@ export function BatchReview({
                     <DocumentConfidence
                       docConfidence={cur.extraction?.docConfidence ?? null}
                       rowConfidences={curState.rows.map((r) => r.confidence)}
+                      flagged={curFlags.length}
                       onReviewFlagged={() => goToFlag(unresolvedFlags(curFlags, curState.resolved)[0] ?? curFlags[0] ?? null)}
                     />
                   </CardContent>
