@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 · v1.26.9 Per store board: one store picker at a time; confirmations stay on screen (prod release)
+Ships only #749 (staging), cherry-picked onto `main`.
+
+## 2026-11-25 — Per store board: one store picker at a time; confirmations stay on screen
+
+QA (Nov 25): opening "Confirm store" on a second card left the first card's picker open too, so two search boxes showed at once. The board now keeps one open picker; opening another closes the first. Also, the store-confirm confirmation landed at the very bottom of a long scan board instead of on screen: an animated (transformed) page wrapper turns `position: fixed` into "bottom of the page". `ToastStack` now renders into `<body>` through a portal, so it stays at the bottom right of the visible screen however far down the reviewer is. The Uploads page had its own copy of the same stack and now uses the shared one, so its confirmations get the same fix.
+
 ## 2026-11-25 · v1.26.8 Event lead contacts: Collected from–to range (prod release)
 Ships only #746 (staging #747), cherry-picked onto `main`.
 
