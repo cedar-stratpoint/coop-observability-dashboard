@@ -36,6 +36,16 @@ export function readUnsureEnabled(): boolean {
   return (process.env.GOLDLINE_READ_UNSURE ?? '').trim() === '1';
 }
 
+/**
+ * Reader review flags (NICH-36, plan knowledge/tasks/2026-11-25-review-marks-and-reco-reports.md): the
+ * P1 anchored read and the Legacy read also return a per-row `flags` list (a BA note or revision,
+ * "Damage" in a count) and the printed headers the BA wrote over; the pipeline writes them as
+ * review flags. Process-wide `GOLDLINE_READ_MARKS=1`; off (unset) is byte-identical to the current read.
+ */
+export function readMarksEnabled(): boolean {
+  return (process.env.GOLDLINE_READ_MARKS ?? '').trim() === '1';
+}
+
 export function readP1Enabled(): boolean {
   return (process.env.GOLDLINE_READ_P1 ?? '').trim() === '1';
 }

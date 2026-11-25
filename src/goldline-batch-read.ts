@@ -16,6 +16,7 @@ import {avgConfidence, runInventoryRead} from './goldline-read-pipeline';
 import {logReadEvent} from './goldline-read-log';
 import {uploadSource} from './goldline-upload-groups';
 import {glTags} from './goldline-ref-data';
+import {syncReaderMarks} from './goldline-review-marks-data';
 
 // L7 batch mode — the ingest half of the deferred anchored read (plan:
 // knowledge/tasks/2026-11-18-l7-batch-mode-scope.md). The pump's read-page ran classify + locate
@@ -144,6 +145,7 @@ export async function pollQueuedBatches(opts?: {limit?: number; staleHours?: num
       }
       const docConfidence = avgConfidence(extracted);
       await saveExtraction({companyId: p.companyId, uploadId: p.uploadId, page: p.page, extracted, docConfidence});
+      await syncReaderMarks(p.companyId, p.uploadId, extracted);
       await setUploadStatus(p.uploadId, 'needs_review', {pageCount: p.page, anthropicBatchId: null});
       await logReadEvent({
         companyId: p.companyId,

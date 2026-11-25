@@ -15,6 +15,7 @@ import {getWriterProfile} from './goldline-writer-data';
 import {humanizeExtractError, MANIFESTS} from './goldline-extract';
 import {uploadSource} from './goldline-upload-groups';
 import {logReadEvent, type ReadLogInput} from './goldline-read-log';
+import {syncReaderMarks} from './goldline-review-marks-data';
 
 // The per-page inventory read, shared by the upload route (a fresh scan) and the
 // re-read action (a stored page read again). ONE pipeline so the two can never drift:
@@ -337,6 +338,8 @@ export async function runInventoryRead(args: {
     }
     emit?.({type: 'stage', stage: 'saving'});
     await saveExtraction({companyId, uploadId, page, extracted, docConfidence: avgConfidence(extracted)});
+    // Reader review flags (NICH-36, GOLDLINE_READ_MARKS): notes, Damage, relabelled columns, written-in rows.
+    await syncReaderMarks(companyId, uploadId, extracted);
     await stampFingerprint(uploadId, {readerSig});
     await setUploadStatus(uploadId, 'needs_review', {pageCount: page});
     await logReadEvent({

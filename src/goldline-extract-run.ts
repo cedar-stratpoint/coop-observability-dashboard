@@ -1,3 +1,4 @@
+import type {ReaderFlag} from './goldline-reader-marks';
 import 'server-only';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import Anthropic from '@anthropic-ai/sdk';
@@ -16,6 +17,7 @@ import {sanitizeClassification, type PageClassification} from './goldline-segmen
 import {
   buildLegacyManifestPrompt,
   LEGACY_EXTRACTION_SCHEMA,
+  withLegacyMarksSchema,
   legacyBandCheck,
   legacyPageToCore,
   type LegacyExtractedRow,
@@ -32,6 +34,7 @@ import {
   buildAnchoredSystemPrompt,
   buildAnchoredPromptP1,
   withUnsureSchema,
+  withMarksSchema,
   buildAnchoredSystemPromptP1,
   buildDeliveryLocatorPrompt,
   anchoredSchemaFor,
@@ -43,7 +46,7 @@ import {
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
 import type {PageBlock} from './goldline-page-bands';
-import {readP1Enabled, readUnsureEnabled} from './goldline-anchored-flag';
+import {readMarksEnabled, readP1Enabled, readUnsureEnabled} from './goldline-anchored-flag';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
 // GOLDLINE_ANTHROPIC_API_KEY from the env (never the browser). Goldline has its own
@@ -68,6 +71,9 @@ export type ExtractedRow = {
   ending_on_hand: number | null;
   confidence: number;
   alt?: string | null;
+  // NICH-36 · what the reader saw besides the counts (GOLDLINE_READ_MARKS): a BA note or revision
+  // on the row, or "Damage" written in a count. Written as review flags; never the note's text.
+  reader_flags?: ReaderFlag[] | null;
   // NICH-42 · a product the reviewer added on the review screen (hand-written by the BA, not
   // printed or not read). Browser-only: never set by the reader, commits like any row.
   added?: boolean;
@@ -106,6 +112,8 @@ export type ExtractedPage = {
   /** The page's slant (degrees, and the pivot as a fraction of the width), stored with the row boxes
    *  so review tilts the box with the paper. Absent on pages read without boxes. Cosmetic only. */
   slant?: {angle: number; px: number} | null;
+  /** NICH-36 · printed column headers the BA wrote their own names over (GOLDLINE_READ_MARKS). */
+  headers_written_over?: string[] | null;
 };
 
 /** True when extraction is configured (a primary OR fallback key is set). */
@@ -443,8 +451,10 @@ export function buildInventoryReadParams(
   const isLegacy = version === 'legacy';
   const system = buildSystemPrompt();
   // Unknown version falls back to v1 (the current default three-location layout).
+  // Reader review flags (NICH-36) ride on the Legacy read; the free V1/V2 read is unchanged.
+  const marks = isLegacy && readMarksEnabled();
   const manifest = isLegacy
-    ? buildLegacyManifestPrompt(page)
+    ? buildLegacyManifestPrompt(page, {marks})
     : buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1');
 
   // L1 cost lever (flagged, default off): lower effort / thinking off to cut output tokens.
@@ -469,7 +479,7 @@ export function buildInventoryReadParams(
     // output_config.effort is added only when GOLDLINE_READ_EFFORT is set (L1); otherwise
     // the model's default effort (high) stands, i.e. today's behavior.
     output_config: {
-      format: {type: 'json_schema', schema: isLegacy ? LEGACY_EXTRACTION_SCHEMA : EXTRACTION_SCHEMA},
+      format: {type: 'json_schema', schema: isLegacy ? (marks ? withLegacyMarksSchema(LEGACY_EXTRACTION_SCHEMA) : LEGACY_EXTRACTION_SCHEMA) : EXTRACTION_SCHEMA},
       ...(effort ? {effort} : {}),
     },
     // No `thinking` param by default. Sonnet 5.5 rejects `{type:'disabled'}` with a 400
@@ -570,6 +580,9 @@ export async function extractInventoryPageAnchored(
 export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, profile?: WriterProfile, pageBlocks?: PageBlock[] | null) {
   const p1 = readP1Enabled();
   const unsure = p1 && readUnsureEnabled();
+  // Reader review flags (NICH-36) ride on the P1 read only.
+  const marks = p1 && readMarksEnabled();
+  const p1Schema = unsure ? withUnsureSchema(ANCHORED_EXTRACTION_SCHEMA_P1) : ANCHORED_EXTRACTION_SCHEMA_P1;
   return {
     model: EXTRACT_MODEL,
     // Numbers-only output is far smaller than the free-read schema, but the densest pages (form
@@ -577,11 +590,11 @@ export function buildAnchoredParams(pdfBase64: string, template: FormTemplate, p
     // the live 98-page run at 8000. Same high cap as the free read; billed on actual output.
     max_tokens: 64000,
     system: [{type: 'text', text: p1 ? buildAnchoredSystemPromptP1() : buildAnchoredSystemPrompt(), cache_control: {type: 'ephemeral'}}],
-    output_config: {format: {type: 'json_schema', schema: anchoredSchemaFor(p1 ? (unsure ? withUnsureSchema(ANCHORED_EXTRACTION_SCHEMA_P1) : ANCHORED_EXTRACTION_SCHEMA_P1) : ANCHORED_EXTRACTION_SCHEMA, template.version)}},
+    output_config: {format: {type: 'json_schema', schema: anchoredSchemaFor(p1 ? (marks ? withMarksSchema(p1Schema) : p1Schema) : ANCHORED_EXTRACTION_SCHEMA, template.version)}},
     messages: [
       {
         role: 'user',
-        content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: p1 ? buildAnchoredPromptP1(template, {unsure}) : buildAnchoredPrompt(template)}],
+        content: [...referenceBlocks(profile), ...(pageBlocks?.length ? pageBlocks : [pdfDoc(pdfBase64)]), {type: 'text', text: p1 ? buildAnchoredPromptP1(template, {unsure, marks}) : buildAnchoredPrompt(template)}],
       },
     ],
   };
