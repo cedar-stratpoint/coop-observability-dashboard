@@ -2,9 +2,11 @@
 #
 # GitHub stays the source of truth: .github/workflows/mirror-gitlab.yml pushes every branch here,
 # and that push starts this pipeline. Only two branches deploy:
-#   staging -> Preview build, aliased to https://coop-cedar-staging.vercel.app
+#   staging -> Vercel custom environment "staging", which owns https://coop-cedar-staging.vercel.app
 #   main    -> Production build, served at https://coop-cedar.vercel.app
 # Vercel's own GitHub auto-deploys are off (vercel.json "git.deploymentEnabled": false).
+# Staging env vars live in the "staging" custom environment, not in branch-scoped Preview vars:
+# Vercel does not apply branch-scoped vars to CLI deploys (sign-in broke with MissingSecret).
 #
 # Setup (GitLab project, Settings > CI/CD > Variables): COOP_VERCEL_TOKEN (masked, protected),
 # VERCEL_ORG_ID, VERCEL_PROJECT_ID, GCHAT_WEBHOOK_URL (masked, optional). Protect the staging and main
@@ -31,22 +33,18 @@ stages:
         echo "COOP_VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not set (or the branch is not protected)"; exit 1
       fi
     - npm install -g --no-fund --no-audit "vercel@${VERCEL_CLI_VERSION}"
-    # The runner checks out a detached HEAD. Vercel reads the branch from git, and many Preview env vars
-    # are scoped to the staging branch, so the deploy must see a real branch name.
+    # The runner checks out a detached HEAD; give the deploy a real branch name for its git metadata.
     - git checkout -B "$CI_COMMIT_BRANCH"
     # Drop the runner's credential-bearing remote so it never lands in the deployment's git metadata.
     - git remote set-url origin "${CI_PROJECT_URL}.git"
   script:
     - |
       set -eu
-      if [ "$DEPLOY_TARGET" = "production" ]; then
-        URL=$(vercel deploy --prod --yes --token "$COOP_VERCEL_TOKEN")
-      else
-        URL=$(vercel deploy --yes --token "$COOP_VERCEL_TOKEN")
-        vercel alias set "$URL" "${SITE_URL#https://}" --token "$COOP_VERCEL_TOKEN"
-      fi
-      echo "Deployment: $URL"
-      echo "DEPLOY_URL=$URL" >> deploy.env
+      # VERCEL_GIT_* stay empty on CLI deploys, so pass the commit for /api/health to report.
+      # The domain follows the target: --prod gets coop-cedar.vercel.app, --environment=staging gets
+      # coop-cedar-staging.vercel.app (attached to the custom environment). No alias step needed.
+      vercel deploy $DEPLOY_ARGS --yes --token "$COOP_VERCEL_TOKEN" \
+        --env DEPLOY_COMMIT_SHA="$CI_COMMIT_SHA" --env DEPLOY_COMMIT_REF="$CI_COMMIT_BRANCH"
     # Smoke check: the public domain answers, is on this branch, and its database is reachable.
     - |
       set -eu
@@ -57,11 +55,10 @@ stages:
             console.log(JSON.stringify(h));
             const e = process.env;
             // env comes from the database the site is connected to (src/coop-env.ts), so it proves the right keys.
-            // branch/commit come from Vercel git metadata; check them only when Vercel filled them in.
+            // commit/branch must match this job, which also proves the domain moved to the new build.
             const ok = h.ok && h.dbOk && h.env === e.EXPECT_ENV
-              && (h.branch == null || h.branch === e.CI_COMMIT_BRANCH)
-              && (h.commit == null || e.CI_COMMIT_SHA.startsWith(h.commit));
-            if (h.branch == null || h.commit == null) console.log("note: branch/commit not reported by Vercel");
+              && h.branch === e.CI_COMMIT_BRANCH
+              && !!h.commit && e.CI_COMMIT_SHA.startsWith(h.commit);
             process.exit(ok ? 0 : 1);
           '; then exit 0; fi
         fi
@@ -86,7 +83,7 @@ deploy:staging:
   rules:
     - if: '$CI_COMMIT_BRANCH == "staging"'
   variables:
-    DEPLOY_TARGET: preview
+    DEPLOY_ARGS: --environment=staging
     ENV_LABEL: Staging
     EXPECT_ENV: staging
     SITE_URL: https://coop-cedar-staging.vercel.app
@@ -99,7 +96,7 @@ deploy:production:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   variables:
-    DEPLOY_TARGET: production
+    DEPLOY_ARGS: --prod
     ENV_LABEL: Production
     EXPECT_ENV: production
     SITE_URL: https://coop-cedar.vercel.app
