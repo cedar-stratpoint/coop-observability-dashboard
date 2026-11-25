@@ -10,7 +10,7 @@
 #
 # Setup (GitLab project, Settings > CI/CD > Variables): COOP_VERCEL_TOKEN (masked, protected),
 # VERCEL_ORG_ID, VERCEL_PROJECT_ID, GCHAT_WEBHOOK_URL (masked, optional). Protect the staging and main
-# branches so the protected token reaches them. Re-run a missed deploy with Build > Pipelines > Run pipeline.
+# branches so the protected token reaches them. Jobs need a runner with the tag "coop". Re-run a missed deploy with Build > Pipelines > Run pipeline.
 
 workflow:
   rules:
@@ -22,6 +22,8 @@ stages:
 .vercel_deploy:
   stage: deploy
   image: node:24
+  tags:
+    - coop # runs only on runners tagged coop
   resource_group: vercel-$CI_COMMIT_BRANCH # one deploy per branch at a time; newer pushes wait
   timeout: 30 minutes
   variables:
