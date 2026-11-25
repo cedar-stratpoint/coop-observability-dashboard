@@ -89,3 +89,42 @@ describe('contactStatus', () => {
     expect(contactStatus(P({}), [C({instagram: 'karla.sy'})], [])).toEqual({state: 'unknown', lastAt: null, lastChannel: null});
   });
 });
+
+describe('review fixes', () => {
+  it('a contact keyed only by mobile does not join a person with an email (Trishia), but joins a mobile-only lead', () => {
+    const mobileOnly = C({mobile: '9171488749', channel: 'sms'});
+    expect(contactsOf(TRISHIA, [mobileOnly], [])).toEqual([]);
+    expect(contactsOf(TRIXIE, [mobileOnly], [])).toEqual([]);
+    expect(contactStatus(TRISHIA, [mobileOnly], []).state).toBe('not_contacted');
+    expect(contactsOf(P({mobile: '0917 148 8749'}), [mobileOnly], [])).toEqual([mobileOnly]);
+    expect(contactStatus(P({mobile: '09171488749'}), [mobileOnly], []).state).toBe('contacted');
+  });
+  it('person-vs-person matching is unchanged: Trishia and a mobile-only lead are the same person', () => {
+    expect(samePerson(TRISHIA, P({mobile: '9171488749'}), [])).toBe(true);
+  });
+  it('a mobile-only contact still joins the customer a Same person link ties that mobile to', () => {
+    const mobileOnly = C({mobile: '9171488749', channel: 'sms'});
+    const links = [L({customerEmail: 'miyaamgo@gmail.com', leadMobile: '9171488749'})];
+    expect(contactsOf(TRISHIA, [mobileOnly], links)).toEqual([mobileOnly]);
+    expect(contactsOf(TRIXIE, [mobileOnly], links)).toEqual([]);
+  });
+  it('the legacy log (no Instagram / mobile / replied columns): a person without an email is unknown', () => {
+    const log = [C({email: 'mia@example.com'})];
+    expect(contactStatus(P({instagram: '@Karla.Sy'}), log, [], {legacy: true})).toEqual({state: 'unknown', lastAt: null, lastChannel: null});
+    expect(contactStatus(P({mobile: '09171488749'}), log, [], {legacy: true}).state).toBe('unknown');
+    expect(contactsOf(P({instagram: 'karla.sy'}), log, [], {legacy: true})).toBeNull();
+  });
+  it('the legacy log: a person with an email keeps contacted / not contacted', () => {
+    const log = [C({email: 'mia@example.com', channel: 'sms', contactedAt: '2026-11-10T02:00:00Z'})];
+    expect(contactStatus(P({email: 'mia@example.com', instagram: 'karla.sy'}), log, [], {legacy: true})).toEqual({state: 'contacted', lastAt: '2026-11-10T02:00:00Z', lastChannel: 'sms'});
+    expect(contactStatus(P({email: 'leo@example.com'}), log, [], {legacy: true}).state).toBe('not_contacted');
+  });
+  it('a contact whose contactedAt does not parse is ignored when picking the last contact', () => {
+    const s = contactStatus(P({email: 'mia@example.com'}), [
+      C({email: 'mia@example.com', contactedAt: 'not a date', channel: 'call'}),
+      C({email: 'mia@example.com', contactedAt: '2026-11-12T02:00:00Z', channel: 'sms'}),
+    ], []);
+    expect(s).toEqual({state: 'contacted', lastAt: '2026-11-12T02:00:00Z', lastChannel: 'sms'});
+    expect(contactStatus(P({email: 'mia@example.com'}), [C({email: 'mia@example.com', contactedAt: 'x'})], [])).toEqual({state: 'contacted', lastAt: null, lastChannel: null});
+  });
+});
