@@ -21,6 +21,7 @@ import {sendReread} from '@/src/upload-transport';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
 import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
 import type {ReviewMark} from '@/src/goldline-review-marks';
+import type {AddableItem} from '@/src/review-add-row';
 import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
@@ -100,7 +101,10 @@ export function UploadReview({
   rowNotes = {},
   bas,
   marks = [],
+  addable = [],
 }: {
+  /** Catalog products the reviewer can add as rows (NICH-42 Add product row). */
+  addable?: AddableItem[];
   company: string;
   canEdit: boolean;
   upload: UploadRow;
@@ -716,6 +720,10 @@ export function UploadReview({
           <ReviewFlagsProvider company={company} initial={marks} canFlag={canEdit && upload.kind === 'inventory_pdf'}>
           <ReviewRows
             uploadId={upload.id}
+            addable={upload.kind === 'inventory_pdf' ? addable : undefined}
+            page={extraction?.page ?? null}
+            onAddRow={(row) => setRows((rs) => [...rs, row])}
+            onRemoveRow={(i) => setRows((rs) => (rs[i]?.added ? rs.filter((_, k) => k !== i) : rs))}
             rows={rows}
             onPoint={scanUrl ? setPointRow : undefined}
             pointed={pointRow}

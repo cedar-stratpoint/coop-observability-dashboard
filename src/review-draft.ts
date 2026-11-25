@@ -7,9 +7,11 @@
 
 export const DRAFT_COLS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 type Col = (typeof DRAFT_COLS)[number];
-type Row = {item_code: string} & Partial<Record<Col, number | null>>;
+type Row = {item_code: string; printed_name?: string | null; added?: boolean} & Partial<Record<Col, number | null>>;
 
-export type DraftPage = {reading: string; values: (number | null)[][]; resolved: number[]};
+/** `added`: products the reviewer added (Add product row), after the read's rows, in order; their
+ *  counts are the last entries of `values`. */
+export type DraftPage = {reading: string; values: (number | null)[][]; resolved: number[]; added?: Array<{code: string; name: string | null}>};
 export type Draft = {v: 1; savedAt: number; pages: Record<string, DraftPage>};
 
 export const draftKey = (batchId: string) => `gl-review-draft:${batchId}`;
@@ -27,20 +29,30 @@ const val = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 /** The draft for one page, or null when nothing differs from the reading (nothing to keep). */
 export function packPage(original: Row[], edited: Row[], resolved: Iterable<number>): DraftPage | null {
   const res = [...resolved].sort((a, b) => a - b);
-  const changed = edited.length === original.length && edited.some((r, i) => DRAFT_COLS.some((c) => val(r[c]) !== val(original[i][c])));
-  if (!changed && !res.length) return null;
-  return {reading: readingId(original), values: edited.map((r) => DRAFT_COLS.map((c) => val(r[c]))), resolved: res};
+  const extra = edited.slice(original.length).filter((r) => r.added);
+  const base = edited.slice(0, original.length);
+  if (base.length !== original.length) return null;
+  const changed = base.some((r, i) => DRAFT_COLS.some((c) => val(r[c]) !== val(original[i][c])));
+  if (!changed && !res.length && !extra.length) return null;
+  const page: DraftPage = {reading: readingId(original), values: [...base, ...extra].map((r) => DRAFT_COLS.map((c) => val(r[c]))), resolved: res};
+  if (extra.length) page.added = extra.map((r) => ({code: r.item_code, name: r.printed_name ?? null}));
+  return page;
 }
 
 /** Apply a saved page draft onto the reading's rows. Null if it was made on a different
  *  reading (re-read, other page) or is malformed: the caller then keeps the fresh rows. */
 export function unpackPage<R extends Row>(original: R[], draft: DraftPage | undefined | null): {rows: R[]; resolved: Set<number>} | null {
   if (!draft || draft.reading !== readingId(original)) return null;
-  if (!Array.isArray(draft.values) || draft.values.length !== original.length) return null;
-  const rows = original.map((r, i) => {
+  const added = (Array.isArray(draft.added) ? draft.added : []).filter((a) => a && typeof a.code === 'string' && a.code.trim());
+  if (!Array.isArray(draft.values) || draft.values.length !== original.length + added.length) return null;
+  const counts = (i: number) => {
     const v = draft.values[i];
-    if (!Array.isArray(v) || v.length !== DRAFT_COLS.length) return {...r};
-    return {...r, ...Object.fromEntries(DRAFT_COLS.map((c, k) => [c, val(v[k])]))} as R;
+    return Array.isArray(v) && v.length === DRAFT_COLS.length ? Object.fromEntries(DRAFT_COLS.map((c, k) => [c, val(v[k])])) : null;
+  };
+  const rows = original.map((r, i) => ({...r, ...(counts(i) ?? {})}) as R);
+  added.forEach((a, k) => {
+    const blank = Object.fromEntries(DRAFT_COLS.map((c) => [c, null]));
+    rows.push({item_code: a.code, printed_name: typeof a.name === 'string' ? a.name : null, ...blank, ...(counts(original.length + k) ?? {}), confidence: 1, added: true} as unknown as R);
   });
   const resolved = new Set((Array.isArray(draft.resolved) ? draft.resolved : []).filter((i) => Number.isInteger(i) && i >= 0 && i < original.length));
   return {rows, resolved};

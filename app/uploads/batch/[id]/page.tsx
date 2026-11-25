@@ -11,6 +11,7 @@ import {getCurrentBas} from '@/src/goldline-ba-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
 import {marksForUploads} from '@/src/goldline-review-marks-data';
+import {addableProducts} from '@/src/goldline-add-row-data';
 import {isoPeriod} from '@/src/period-date';
 
 export const dynamic = 'force-dynamic';
@@ -57,12 +58,16 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     if (forms.length > 1) redirect(`/uploads/batch/${id}`);
   }
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
-  const [catalogRaw, stores, bas, marks] = await Promise.all([
+  const [catalogRaw, stores, bas, marks, addable] = await Promise.all([
     catalogForCodes(ctx.companyId, codes),
     listStores(ctx.companyId),
     getCurrentBas(ctx.companyId),
     // Review flags (NICH-42); a database without p6_review_marks.sql just shows none.
     marksForUploads(ctx.companyId, pdfPages.map((p) => p.upload.id)).catch((e) => (console.error('review marks', e), [])),
+    // Add product row (NICH-42), for an open form the role can edit.
+    batch.status === 'open' && canEditData(ctx.role)
+      ? addableProducts(ctx.companyId, pdfPages[0]?.upload.form_version).catch((e) => (console.error('addable products', e), []))
+      : Promise.resolve([]),
   ]);
   // Headings and prices as printed on each page's form version, so the grid matches the paper.
   const catalog = withPrintedHeadings(catalogRaw, pdfPages.flatMap((p) => printedPageItems(p.upload.form_version, p.extraction?.page ?? null)));
@@ -100,6 +105,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       }}
       pages={pages}
       marks={marks}
+      addable={addable}
       catalog={catalog}
       stores={stores}
       bas={bas}
