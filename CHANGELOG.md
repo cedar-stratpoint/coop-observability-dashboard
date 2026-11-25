@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-26 — Uploads filters: themed dropdowns, one date-range pill, a Filters button that animates
+
+Ask: the Uploads filter dropdowns looked dated (the OS-drawn select menu and two mm/dd/yyyy boxes), and the Filters button just snapped the row in and out.
+
+- **`components/ui/filter-select.tsx`** (new, Base UI Select): a pill trigger that tints when it holds anything but "All …", a popup that scales in from the trigger, a check on the picked option, colored dots for status (needs review amber, committed green, failed red…). Reusable for other list filters.
+- **`components/analyst/date-range-filter.tsx`** (new): one "Any date" pill in place of From/To boxes. Opens the existing range calendar with Today, Last 7 days, Last 30 days and This month; picking the last day applies it, "Just Nov 25" applies a single day; an × clears it. Reads as "Nov 20 to Nov 25, 2026".
+- **Filters button**: pressed look while open, the icon turns and goes green, a count badge pops in when filters are on, press scales slightly. The row slides open to its real height (grid rows 0fr to 1fr) and the controls rise in one after another; it stays mounted but inert when shut. Before, any active filter kept the row stuck open; now the button always toggles it and the badge shows what's on. "Clear all" resets every filter. Reduced motion drops the movement.
+- **Phone fix** (already broken on staging): the Files toolbar didn't wrap, so the Grouped / All files switch sat off-screen at 390px; the card header's grid column also stretched to its widest row. Both wrap now.
+
 ## 2026-11-25 — Overview trend: each month is its own link, Stores gets a month filter
 
 Ask: the Units sold bars should react one at a time on hover, and each bar should open Stores already filtered to that month. Before, the whole card was one link to all-time Stores, and Stores had no month filter at all (its "current period" was every month on file).
