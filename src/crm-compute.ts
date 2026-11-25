@@ -4,8 +4,9 @@
  * dashboards read the same API and must not disagree about what "Recovered" or
  * "Platinum" means.
  */
-import {phDay, phDayStart} from './custom-range';
+import {parseLineItems, phDay, phDayStart} from './custom-range';
 import type {CheckoutStage, CrmCheckout, CrmCustomer, CrmOrder} from './crm-types';
+import {CHANNEL_LABEL, CONTACT_CHANNELS, type ContactChannel} from './customer-contacts';
 
 export type CartStatus = 'Active' | 'Recovered' | 'Converted';
 
@@ -42,9 +43,11 @@ export type EnrichedCustomer = CrmCustomer & {
   lastOrderAt: string | null;
   /** RET-06: the cohort key of the first counted order's discount code (firstOrderCode); null when there is no counted order. */
   firstOrderCode: string | null;
+  /** RET-12: every code key (firstOrderCode's keys) used on any counted order, deduped; null when there is no counted order (unknown, never "none"). */
+  codesUsed: string[] | null;
 };
 
-type Stats = {count: number; spent: number; spentYtd: number; first: string | null; last: string | null; firstCodes: readonly string[]};
+type Stats = {count: number; spent: number; spentYtd: number; first: string | null; last: string | null; firstCodes: readonly string[]; codes: Set<string>};
 const ms = (iso: string | null): number => Date.parse(String(iso ?? ''));
 
 /**
@@ -64,8 +67,12 @@ export function enrichCustomers(
     if (o.test === true) continue;
     const key = o.shopifyCustomerId || (o.email ?? '').toLowerCase();
     if (!key) continue;
-    const s = stats.get(key) ?? {count: 0, spent: 0, spentYtd: 0, first: null, last: null, firstCodes: []};
+    const s = stats.get(key) ?? {count: 0, spent: 0, spentYtd: 0, first: null, last: null, firstCodes: [], codes: new Set()};
     s.count += 1;
+    for (const code of o.discountCodes ?? []) {
+      const k = firstOrderCode([code]);
+      if (k !== NO_CODE) s.codes.add(k);
+    }
     if (o.financialStatus === 'paid') {
       const amt = Number(o.totalPrice) || 0;
       s.spent += amt;
@@ -83,49 +90,226 @@ export function enrichCustomers(
   }
   return customers.map((c) => {
     const s = stats.get(c.shopifyCustomerId) ?? stats.get((c.email ?? '').toLowerCase());
-    if (!s) return {...c, orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null};
-    return {...c, orderCount: s.count, spent: s.spent, spendYtd: s.spentYtd, firstOrderAt: s.first, lastOrderAt: s.last, firstOrderCode: s.count > 0 ? firstOrderCode(s.firstCodes) : null};
+    if (!s) return {...c, orderCount: 0, spent: 0, spendYtd: 0, firstOrderAt: null, lastOrderAt: null, firstOrderCode: null, codesUsed: null};
+    return {...c, orderCount: s.count, spent: s.spent, spendYtd: s.spentYtd, firstOrderAt: s.first, lastOrderAt: s.last, firstOrderCode: s.count > 0 ? firstOrderCode(s.firstCodes) : null, codesUsed: s.count > 0 ? [...s.codes] : null};
   });
 }
 
 /**
- * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The four automated CRM emails,
+ * How often one address was contacted (RET-03, RET-05; shared by the Customers tab and Ask Coop). The five automated CRM emails (7C added membership),
  * `automated` = their sum, `manual` = contacts the team logged by hand (customer_contacts), `total` = automated + manual.
+ * RET-07: `lastAt` / `lastKind` = the newest dated contact of any kind (null when none of its contacts carries a readable date).
  */
-export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; automated: number; manual: number; total: number};
-type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers';
-const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
+export type ContactTally = {reminders: number; winback: number; reviewRequests: number; birthdayVouchers: number; membership: number; automated: number; manual: number; total: number; lastAt: string | null; lastKind: ContactKind | null};
+type AutomatedKey = 'reminders' | 'winback' | 'reviewRequests' | 'birthdayVouchers' | 'membership';
+/** RET-07: what the last contact was. An automated CRM email kind, or the manual log's own channel (the two sets never overlap). */
+export type ContactKind = 'reminder' | 'winback' | 'review_request' | 'birthday_voucher' | 'membership' | ContactChannel;
+export const CONTACT_KIND_LABEL: Readonly<Record<ContactKind, string>> = Object.freeze({
+  reminder: 'Cart reminder',
+  winback: 'Win-back email',
+  review_request: 'Review request',
+  birthday_voucher: 'Birthday voucher',
+  membership: 'Membership email',
+  ...CHANNEL_LABEL,
+});
+export const emailKey = (e: string | null | undefined): string => (e ?? '').trim().toLowerCase();
+const channelKind = (c: string | null | undefined): ContactChannel => ((CONTACT_CHANNELS as readonly unknown[]).includes(c) ? (c as ContactChannel) : 'other');
 
 /**
  * The per-email contact tally, keyed by trimmed lower-cased email. Owner rules (2026-11-10): cart reminders = checkouts.remindersSent
  * summed; win-back = 1 per checkout with winbackSentAt; review requests = 1 per order with reviewRequestSentAt, test orders excluded;
  * birthday vouchers = 1 per voucher row; manual = 1 per logged contact. Rows without an email are skipped. Only addresses with at
- * least one contact are present.
+ * least one contact are present. RET-07 (2026-11-11): the newest timestamp of a counted contact wins (lastReminderAt, winbackSentAt,
+ * reviewRequestSentAt, voucher sentAt, contactedAt); an unparseable date still counts but never dates the contact. RET-07 7C: membership
+ * emails = 1 per /api/membership-events row (sentAt). `membershipEvents` is empty when that route is not live yet (excluded, not unknown).
  */
 export function contactTally(src: {
-  checkouts: readonly Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'>[];
+  checkouts: readonly (Pick<CrmCheckout, 'email' | 'remindersSent' | 'winbackSentAt'> & Partial<Pick<CrmCheckout, 'lastReminderAt'>>)[];
   orders: readonly Pick<CrmOrder, 'email' | 'reviewRequestSentAt' | 'test'>[];
-  birthdayVouchers: readonly {email: string | null}[];
-  manualContacts?: readonly {email: string | null}[];
+  birthdayVouchers: readonly {email: string | null; sentAt?: string | null}[];
+  membershipEvents?: readonly {email: string | null; sentAt?: string | null}[];
+  manualContacts?: readonly {email: string | null; channel?: string | null; contactedAt?: string | null}[];
 }): Map<string, ContactTally> {
   const out = new Map<string, ContactTally>();
-  const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number) => {
+  const add = (email: string | null | undefined, k: AutomatedKey | 'manual', n: number, at: string | null | undefined, kind: ContactKind) => {
     const key = emailKey(email);
     if (!key || !(n > 0)) return;
-    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, automated: 0, manual: 0, total: 0};
+    const t = out.get(key) ?? {reminders: 0, winback: 0, reviewRequests: 0, birthdayVouchers: 0, membership: 0, automated: 0, manual: 0, total: 0, lastAt: null, lastKind: null};
     t[k] += n;
     if (k !== 'manual') t.automated += n;
     t.total += n;
+    const when = ms(at ?? null);
+    if (Number.isFinite(when) && (t.lastAt === null || when > ms(t.lastAt))) {
+      t.lastAt = at as string;
+      t.lastKind = kind;
+    }
     out.set(key, t);
   };
   for (const c of src.checkouts) {
-    add(c.email, 'reminders', Number(c.remindersSent) || 0);
-    if (c.winbackSentAt) add(c.email, 'winback', 1);
+    add(c.email, 'reminders', Number(c.remindersSent) || 0, c.lastReminderAt, 'reminder');
+    if (c.winbackSentAt) add(c.email, 'winback', 1, c.winbackSentAt, 'winback');
   }
-  for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1);
-  for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1);
-  for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1);
+  for (const o of src.orders) if (o.test !== true && o.reviewRequestSentAt) add(o.email, 'reviewRequests', 1, o.reviewRequestSentAt, 'review_request');
+  for (const v of src.birthdayVouchers) add(v.email, 'birthdayVouchers', 1, v.sentAt, 'birthday_voucher');
+  for (const e of src.membershipEvents ?? []) add(e.email, 'membership', 1, e.sentAt, 'membership');
+  for (const m of src.manualContacts ?? []) add(m.email, 'manual', 1, m.contactedAt, channelKind(m.channel));
   return out;
+}
+
+/* ---------- RET-08: one customer's profile (8B) and communication timeline (8C), from the lists the page already reads ---------- */
+
+/**
+ * The orders that belong to one customer, newest first, test orders kept (the profile tags them). The same match as
+ * enrichCustomers: orders carrying this customer id, else (only when none of those counts) orders with no customer id and this email.
+ */
+export function customerOrders<T extends Pick<CrmOrder, 'shopifyCustomerId' | 'email' | 'createdAt' | 'test'>>(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly T[]): T[] {
+  const byId = orders.filter((o) => o.shopifyCustomerId === c.shopifyCustomerId);
+  const key = emailKey(c.email);
+  const byEmail = key ? orders.filter((o) => !o.shopifyCustomerId && emailKey(o.email) === key) : [];
+  const counted = (l: T[]) => l.some((o) => o.test !== true);
+  const mine = counted(byId) ? byId : counted(byEmail) ? byEmail : [...byId, ...byEmail];
+  return [...mine].sort((a, b) => (ms(b.createdAt) || 0) - (ms(a.createdAt) || 0));
+}
+
+/** Filter-chip groups. `account` (account created) shows only under All. */
+export type TimelineGroup = 'orders' | 'checkouts' | 'emails' | 'manual' | 'account';
+/** A contact event's kind is 7A's ContactKind, so the timeline and Last contacted name the same thing. */
+export type TimelineKind = 'account_created' | 'order_placed' | 'order_fulfilled' | 'review_submitted' | 'checkout_abandoned' | ContactKind;
+export type TimelineEvent = {
+  /** Stable React key. */
+  id: string;
+  kind: TimelineKind;
+  group: TimelineGroup;
+  /** Null when the source has no readable date: still listed, after the dated events. */
+  at: string | null;
+  /** Counts toward times contacted (exactly the events contactTally counts); `count` = how many contacts it stands for. */
+  contact: boolean;
+  count: number;
+  /** A Shopify test order's event: shown, tagged, counted nowhere. */
+  test: boolean;
+  orderId?: string;
+  orderNumber?: string | null;
+  total?: string | null;
+  currency?: string | null;
+  items?: {title: string; quantity: number; unitPrice: number}[];
+  codes?: string[];
+  turnaround?: string;
+  checkoutId?: string;
+  stage?: CheckoutStage;
+  status?: CartStatus;
+  /** Only on an open (unconverted) checkout, and only when the page read it. Never in Ask Coop or a CSV. */
+  recoveryUrl?: string | null;
+  /** Cart reminders: the CRM keeps only the last reminder's date, so `at` is that date and the count is the total. */
+  lastDateOnly?: boolean;
+  year?: number;
+  /** Membership email (7C): the tier and the CRM's event name. */
+  tier?: string;
+  membershipEvent?: string;
+  note?: string | null;
+  by?: string;
+};
+
+export const TIMELINE_GROUP_LABEL: Readonly<Record<Exclude<TimelineGroup, 'account'>, string>> = Object.freeze({
+  orders: 'Orders',
+  checkouts: 'Abandoned checkouts',
+  emails: 'Emails',
+  manual: 'Manual',
+});
+
+/**
+ * Everything that happened with one customer, newest first (RET-08 / 8C). Orders, fulfilment and reviews come from customerOrders;
+ * the contacts follow contactTally exactly (matched by email, test-order review requests not counted, reminders = one event ×N), so
+ * the newest contact event is customerRows' last contacted and the contact counts sum to times contacted.
+ */
+export function customerTimeline(
+  c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email' | 'createdAt'>,
+  src: {
+    orders: readonly CrmOrder[];
+    checkouts: readonly (Omit<CrmCheckout, 'abandonedCheckoutUrl'> & Partial<Pick<CrmCheckout, 'abandonedCheckoutUrl'>>)[];
+    birthdayVouchers: readonly {email: string | null; year?: number; sentAt?: string | null}[];
+    membershipEvents?: readonly {email: string | null; tier?: string; event?: string; sentAt?: string | null}[];
+    manualContacts: readonly {id: string; email: string | null; channel?: string | null; note?: string | null; contactedAt?: string | null; createdBy?: string}[];
+  },
+): TimelineEvent[] {
+  const key = emailKey(c.email);
+  const mailOf = (e: string | null | undefined) => key !== '' && emailKey(e) === key;
+  const ev: TimelineEvent[] = [];
+  const push = (e: Omit<TimelineEvent, 'contact' | 'count' | 'test'> & Partial<Pick<TimelineEvent, 'contact' | 'count' | 'test'>>) =>
+    ev.push({contact: false, count: 0, test: false, ...e});
+  if (c.createdAt) push({id: 'account', kind: 'account_created', group: 'account', at: c.createdAt});
+  for (const o of customerOrders(c, src.orders)) {
+    const base = {orderId: o.shopifyOrderId, orderNumber: o.orderNumber, test: o.test === true};
+    const items = parseLineItems(o.lineItems).map(({title, quantity, unitPrice}) => ({title, quantity, unitPrice}));
+    push({...base, id: `order:${o.shopifyOrderId}`, kind: 'order_placed', group: 'orders', at: o.createdAt, total: o.totalPrice, currency: o.currency, items, codes: o.discountCodes ?? []});
+    if (o.fulfilledAt) push({...base, id: `fulfilled:${o.shopifyOrderId}`, kind: 'order_fulfilled', group: 'orders', at: o.fulfilledAt, turnaround: turnaround(o.createdAt, o.fulfilledAt)});
+    if (o.reviewSubmittedAt) push({...base, id: `reviewed:${o.shopifyOrderId}`, kind: 'review_submitted', group: 'orders', at: o.reviewSubmittedAt});
+  }
+  // Review requests are matched by the order's email, as contactTally counts them.
+  for (const o of src.orders) {
+    if (!o.reviewRequestSentAt || !mailOf(o.email)) continue;
+    const test = o.test === true;
+    push({id: `review:${o.shopifyOrderId}`, kind: 'review_request', group: 'emails', at: o.reviewRequestSentAt, orderId: o.shopifyOrderId, orderNumber: o.orderNumber, test, contact: !test, count: test ? 0 : 1});
+  }
+  for (const k of src.checkouts) {
+    if (!mailOf(k.email)) continue;
+    const status = cartStatus(k);
+    push({
+      id: `checkout:${k.shopifyCheckoutId}`, kind: 'checkout_abandoned', group: 'checkouts', at: k.createdAt ?? k.updatedAt, checkoutId: k.shopifyCheckoutId,
+      total: k.totalPrice, currency: k.currency, stage: k.stage, status, recoveryUrl: status === 'Active' ? (k.abandonedCheckoutUrl ?? null) : null,
+    });
+    const n = Number(k.remindersSent) || 0;
+    if (n > 0) push({id: `reminder:${k.shopifyCheckoutId}`, kind: 'reminder', group: 'emails', at: k.lastReminderAt ?? null, checkoutId: k.shopifyCheckoutId, lastDateOnly: true, contact: true, count: n});
+    if (k.winbackSentAt) push({id: `winback:${k.shopifyCheckoutId}`, kind: 'winback', group: 'emails', at: k.winbackSentAt, checkoutId: k.shopifyCheckoutId, contact: true, count: 1});
+  }
+  src.birthdayVouchers.forEach((v, i) => {
+    if (mailOf(v.email)) push({id: `voucher:${v.year ?? ''}:${i}`, kind: 'birthday_voucher', group: 'emails', at: v.sentAt || null, year: v.year, contact: true, count: 1});
+  });
+  src.membershipEvents?.forEach((e, i) => {
+    if (mailOf(e.email)) push({id: `membership:${i}`, kind: 'membership', group: 'emails', at: e.sentAt || null, tier: e.tier, membershipEvent: e.event, contact: true, count: 1});
+  });
+  for (const m of src.manualContacts) {
+    if (mailOf(m.email)) push({id: `manual:${m.id}`, kind: channelKind(m.channel), group: 'manual', at: m.contactedAt ?? null, note: m.note ?? null, by: m.createdBy, contact: true, count: 1});
+  }
+  // Newest first; undated last (stable, so their source order is kept).
+  return ev.sort((a, b) => {
+    const x = ms(a.at);
+    const y = ms(b.at);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return Number(!Number.isFinite(x)) - Number(!Number.isFinite(y));
+    return y - x;
+  });
+}
+
+/** The To Platinum bar: share of the threshold reached this membership year (0–100) and the pesos still to go. */
+export function toPlatinum(spendYtd: number, threshold: number): {pct: number; left: number} {
+  if (!(threshold > 0)) return {pct: 100, left: 0};
+  return {pct: Math.min(100, Math.round((spendYtd / threshold) * 100)), left: Math.max(0, threshold - spendYtd)};
+}
+
+export type PetBirthdayStatus = 'Sent' | 'Upcoming' | 'Passed';
+/** This year's birthday voucher: Sent when the ledger has one for this email and PH year; else Upcoming / Passed by the PH day. */
+export function petBirthdayStatus(
+  c: Pick<CrmCustomer, 'email' | 'petBirthday'>,
+  vouchers: readonly {email: string | null; year?: number}[],
+  now: Date,
+): PetBirthdayStatus | null {
+  const md = /(\d{2})-(\d{2})$/.exec(String(c.petBirthday ?? '').trim().slice(0, 10));
+  if (!md) return null;
+  const today = phDay(now.getTime());
+  const key = emailKey(c.email);
+  if (key && vouchers.some((v) => v.year === Number(today.slice(0, 4)) && emailKey(v.email) === key)) return 'Sent';
+  return `${md[1]}-${md[2]}` < today.slice(5) ? 'Passed' : 'Upcoming';
+}
+
+/** PH days until the pet's next birthday (0 = today, a day already passed this PH year rolls to next year); null when it is no date. */
+export function daysToPetBirthday(birthday: string | null | undefined, now: Date): number | null {
+  const md = /(\d{2})-(\d{2})$/.exec(String(birthday ?? '').trim().slice(0, 10));
+  if (!md) return null;
+  const today = phDay(now.getTime());
+  const year = Number(today.slice(0, 4));
+  const at = (y: number) => Date.parse(`${y}-${md[1]}-${md[2]}T00:00:00Z`);
+  const t0 = Date.parse(`${today}T00:00:00Z`);
+  const next = at(year) >= t0 ? at(year) : at(year + 1);
+  return Number.isFinite(next) ? Math.round((next - t0) / 86_400_000) : null;
 }
 
 /* ---------- retention rules (RET-02/03/04): ONE implementation for the Customers tab and Ask Coop ---------- */
@@ -201,6 +385,13 @@ export function firstOrderCode(codes: readonly string[]): string {
   return code;
 }
 
+/** RET-12: every code key with buyers (any counted order), most buyers first, ties by name: the builder's "Used code (any order)" suggestions. */
+export function codesUsedList(rows: readonly Pick<EnrichedCustomer, 'orderCount' | 'codesUsed'>[]): string[] {
+  const acc = new Map<string, number>();
+  for (const c of rows) if (c.orderCount >= 1) for (const k of c.codesUsed ?? []) acc.set(k, (acc.get(k) ?? 0) + 1);
+  return [...acc.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([k]) => k);
+}
+
 export type CodeCohort = {group: string; buyers: number; repeat: number; ratePct: number; small: boolean};
 
 /** Buyers per first-order code, with repeat buyers (2+ counted orders) and the repeat rate (repeatRate), biggest first, ties by name. Non-buyers are in no cohort. */
@@ -218,6 +409,114 @@ export function codeCohorts(rows: readonly Pick<EnrichedCustomer, 'orderCount' |
     .sort((x, y) => y.buyers - x.buyers || x.group.localeCompare(y.group));
 }
 
+/* ---------- RET-11 (8D): vouchers used ---------- */
+
+/** One discount code on one counted order. `label` is the code as the page says it (BDAY- reads "Birthday voucher"); amount = pesos off, null when unknown. */
+export type VoucherUse = {label: string; orderNumber: string | null; orderId: string; at: string | null; amount: number | null};
+
+/** The words for a code: firstOrderCode's key (BUNDLE- collapses, a BDAY- code never shows), the birthday key capitalised for display. */
+export const voucherLabel = (code: string): string => {
+  const k = firstOrderCode([code]);
+  return k === BIRTHDAY_COHORT ? 'Birthday voucher' : k;
+};
+
+/** The order fields the voucher helpers read (a CrmOrder, or the chat's CrmOrderChat). */
+export type VoucherOrder = Pick<CrmOrder, 'shopifyCustomerId' | 'email' | 'createdAt' | 'test' | 'orderNumber' | 'shopifyOrderId' | 'discountCodes' | 'discountAmounts'>;
+
+/**
+ * Every discount code this customer redeemed, one entry per code per order, newest order first (customerOrders' match and order; a
+ * code keeps its place within its order). Test orders count nowhere. `orders` null (not read) → null: the page says "unknown", never 0.
+ */
+export function customerVouchers(c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>, orders: readonly VoucherOrder[] | null): VoucherUse[] | null {
+  if (orders === null) return null;
+  return customerOrders(c, orders)
+    .filter((o) => o.test !== true)
+    .flatMap((o) =>
+      (o.discountCodes ?? []).map((code, i) => ({label: voucherLabel(code), orderNumber: o.orderNumber, orderId: o.shopifyOrderId, at: o.createdAt, amount: o.discountAmounts?.[i] ?? null})),
+    );
+}
+
+/** One use as a line: "RETURN30 · order #1140 · Jul 19, 2026 · ₱30.00 saved" (no date when unreadable, no amount when unknown). */
+export function voucherUseText(u: VoucherUse): string {
+  const no = u.orderNumber ?? u.orderId;
+  const date = fmtPhDate(u.at);
+  return [u.label, `order ${no.startsWith('#') ? no : `#${no}`}`, date === '—' ? null : date, u.amount === null ? null : `${peso(u.amount)} saved`].filter(Boolean).join(' · ');
+}
+
+/** The distinct labels, most used first (ties: first seen, i.e. newest), with how many times each was used. */
+export function voucherLabels(uses: readonly VoucherUse[]): {label: string; uses: VoucherUse[]}[] {
+  const m = new Map<string, VoucherUse[]>();
+  for (const u of uses) m.set(u.label, [...(m.get(u.label) ?? []), u]);
+  return [...m.entries()].map(([label, list]) => ({label, uses: list})).sort((a, b) => b.uses.length - a.uses.length);
+}
+
+/* ---------- RET-13A (Stage 9D): birthday voucher sent, not used ---------- */
+
+export type BdayState = 'unused' | 'expired' | 'used' | 'none';
+/** The birthday ledger fields the state reads (CrmBirthdayVoucherSafe): never the code. */
+export type BdayLedgerRow = {email: string | null; year?: number; sentAt?: string; expiresAt?: string | null};
+/** One customer's birthday voucher this PH year; `expiresAt` is the ledger's (not secret), null when unknown. */
+export type BdayVoucher = {state: BdayState; expiresAt: string | null};
+
+const DAY_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Expired = the expiry is behind us. A date with no time ends at the end of that PH day; an instant is compared as is. */
+function expiredAt(expiresAt: string | null | undefined, now: Date): boolean {
+  const e = String(expiresAt ?? '').trim();
+  if (e === '') return false;
+  if (DAY_ONLY_RE.test(e)) return e < phDay(now.getTime());
+  const t = Date.parse(e);
+  return Number.isFinite(t) && t < now.getTime();
+}
+
+/**
+ * This customer's birthday voucher for the current PH year (the newest sent): "used" = a counted (non-test) order of theirs with a
+ * BDAY- code at or after the send; "expired" = not used and past its expiry; else "unused" (no expiry known counts as unused); no
+ * voucher this year (or no email) = "none". Null (unknown, never "none") when the ledger or the orders list was not read.
+ */
+export function birthdayVoucherState(
+  c: Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>,
+  vouchers: readonly BdayLedgerRow[] | null,
+  orders: readonly VoucherOrder[] | null,
+  now: Date,
+): BdayVoucher | null {
+  if (vouchers === null || orders === null) return null;
+  const key = emailKey(c.email);
+  const year = Number(phDay(now.getTime()).slice(0, 4));
+  const mine = key ? vouchers.filter((v) => v.year === year && emailKey(v.email) === key) : [];
+  if (mine.length === 0) return {state: 'none', expiresAt: null};
+  // Only a ledger row with a parseable send time can be judged; if none has one the state is unknown, never "not used".
+  const dated = mine.filter((v) => Number.isFinite(Date.parse(v.sentAt ?? '')));
+  const newest = dated.reduce<BdayLedgerRow | null>((a, v) => (a === null || Date.parse(v.sentAt ?? '') > Date.parse(a.sentAt ?? '') ? v : a), null);
+  if (newest === null) return null;
+  const sent = Date.parse(newest.sentAt ?? '');
+  const expiresAt = newest.expiresAt ?? null;
+  const used = customerOrders(c, orders).some((o) => o.test !== true && Date.parse(o.createdAt ?? '') >= sent && (o.discountCodes ?? []).some((code) => firstOrderCode([code]) === BIRTHDAY_COHORT));
+  return {state: used ? 'used' : expiredAt(expiresAt, now) ? 'expired' : 'unused', expiresAt};
+}
+
+/**
+ * The voucher facts every row carries: the codes redeemed (RET-11) and this year's birthday voucher (RET-13A). ONE helper for the
+ * Website CRM page and Ask Coop, so the cohort evaluator reads the same values in both. A source unread = null on every row.
+ */
+export function withVoucherFacts<T extends Pick<CrmCustomer, 'shopifyCustomerId' | 'email'>>(
+  rows: readonly T[],
+  orders: readonly VoucherOrder[] | null,
+  vouchers: readonly BdayLedgerRow[] | null,
+  now: Date,
+): Array<T & {vouchers: VoucherUse[] | null; bdayVoucher: BdayVoucher | null}> {
+  return rows.map((r) => ({...r, vouchers: customerVouchers(r, orders), bdayVoucher: birthdayVoucherState(r, vouchers, orders, now)}));
+}
+
+/** The Birthday voucher column / CSV cell: "Sent, not used · expires Dec 3", "Expired", "Used", "—"; "unknown" when a source was unread. */
+export function bdayVoucherText(b: BdayVoucher | null | undefined): string {
+  if (!b) return 'unknown';
+  if (b.state === 'none') return '—';
+  if (b.state === 'used') return 'Used';
+  if (b.state === 'expired') return 'Expired';
+  const d = b.expiresAt ? fmtPhDate(DAY_ONLY_RE.test(b.expiresAt) ? `${b.expiresAt}T00:00:00+08:00` : b.expiresAt).replace(/,\s*\d{4}$/, '') : null;
+  return d && d !== '—' ? `Sent, not used · expires ${d}` : 'Sent, not used';
+}
+
 /** The orders bucket a customer falls in: 0, 1, 2, 3 or 4+. */
 export const ordersBucket = (n: number): string => (n >= 4 ? '4+' : String(n));
 
@@ -225,8 +524,25 @@ export const ordersBucket = (n: number): string => (n >= 4 ? '4+' : String(n));
  * The Customers tab row: the enriched customer plus days since last order, consent and how often they were contacted.
  * Null = a source unread: emails sent (automated) when a CRM list did not answer, manual contacts when the log is not applied,
  * times contacted (their sum) when either is unknown. Never 0 for unknown.
+ * RET-07 last contacted: `lastContactKnown` is false when any source is unread (R3: unknown, never "never"); known with a null
+ * `lastContactedAt` = never contacted (R2).
  */
-export type CustomerRow = EnrichedCustomer & {daysSinceLastOrder: number | null; emailsSent: number | null; manualContacts: number | null; timesContacted: number | null; consent: string};
+export type CustomerRow = EnrichedCustomer & {
+  daysSinceLastOrder: number | null;
+  emailsSent: number | null;
+  manualContacts: number | null;
+  timesContacted: number | null;
+  lastContactedAt: string | null;
+  lastContactKind: ContactKind | null;
+  lastContactKnown: boolean;
+  /** RET-10: PH days since lastContactedAt; null when never contacted or unknown (lastContactKnown tells them apart). */
+  daysSinceLastContact: number | null;
+  consent: string;
+  /** RET-11: customerVouchers for this row, set by the Website CRM page; absent / null = not read (shown "unknown"). */
+  vouchers?: VoucherUse[] | null;
+  /** RET-13A: this PH year's birthday voucher (withVoucherFacts); absent / null = ledger or orders not read (unknown). */
+  bdayVoucher?: BdayVoucher | null;
+};
 
 /** `known` says which parts of `tally` were read; by default the automated part is known when a tally is given and the manual part is not. */
 export function customerRows(
@@ -245,15 +561,330 @@ export function customerRows(
       emailsSent: auto ? (t?.automated ?? 0) : null,
       manualContacts: manual ? (t?.manual ?? 0) : null,
       timesContacted: auto && manual ? (t?.total ?? 0) : null,
+      lastContactedAt: auto && manual ? (t?.lastAt ?? null) : null,
+      lastContactKind: auto && manual ? (t?.lastKind ?? null) : null,
+      lastContactKnown: auto && manual,
+      daysSinceLastContact: auto && manual ? phDaysSince(t?.lastAt ?? null, now) : null,
       consent: c.emailMarketingState?.trim() || 'unknown',
     };
   });
+}
+
+type LastContact = Pick<CustomerRow, 'lastContactedAt' | 'lastContactKnown'>;
+/** RET-07 display: the PH date of the last contact, "never" (known, none) or "unknown" (a source unread). */
+export function lastContactLabel(r: LastContact): string {
+  if (!r.lastContactKnown) return 'unknown';
+  return r.lastContactedAt === null ? 'never' : fmtPhDate(r.lastContactedAt);
+}
+/** R5 "haven't talked to longest": never contacted first, then the oldest last contact; unknown rows last (their order is kept). */
+export function compareLastContacted(a: LastContact, b: LastContact): number {
+  const rank = (r: LastContact): number => (!r.lastContactKnown ? 2 : r.lastContactedAt === null ? 0 : 1);
+  return rank(a) - rank(b) || (rank(a) === 1 ? ms(a.lastContactedAt) - ms(b.lastContactedAt) : 0);
+}
+/** Most contacted first (times contacted desc); unknown (null) last. */
+export function compareTimesContacted(a: Pick<CustomerRow, 'timesContacted'>, b: Pick<CustomerRow, 'timesContacted'>): number {
+  if (a.timesContacted === null || b.timesContacted === null) return Number(a.timesContacted === null) - Number(b.timesContacted === null);
+  return b.timesContacted - a.timesContacted;
 }
 
 /** An audience preset's rows, longest-lapsed first (the chat's audience order); "all" returns the rows unchanged. */
 export function audienceRows<T extends Pick<EnrichedCustomer, 'orderCount' | 'lastOrderAt'>>(rows: readonly T[], audience: CustomerAudience, now: Date): T[] {
   if (audience === 'all') return [...rows];
   return rows.filter((c) => inAudience(c, audience, now)).sort(compareLastOrder(1));
+}
+
+/* ---------- RET-10 (Stage 9A): rule-based cohorts. ONE evaluator for the Website CRM page and Ask Coop (9B) ---------- */
+
+/**
+ * The closed field list a cohort rule may use (owner, 2026-11-12). The codes stay under the hood: the page shows `label`, and a
+ * rule is always read back as sentences (condText / ruleText). Adding a field = a new entry here, a case in cohortValue and in
+ * condText, and a test; 9B's tool schema enumerates the same list.
+ */
+export const COHORT_FIELDS = ['code', 'anycode', 'bday', 'first', 'orders', 'days', 'life', 'ytd', 'tier', 'lcdays', 'times', 'consent'] as const;
+export type CohortField = (typeof COHORT_FIELDS)[number];
+export const COHORT_OPS = ['is', 'is_not', 'on_or_after', 'on_or_before', 'gte', 'lte', 'eq'] as const;
+export type CohortOp = (typeof COHORT_OPS)[number];
+/** One condition: field, operator, value. A number for the numeric fields, a string otherwise (readCohortRule normalises it). */
+export type CohortCond = {f: CohortField; op: CohortOp; v: string | number};
+/** AND of every condition. An object (not a bare array) so OR groups can be added later without rewriting stored rows. */
+export type CohortRule = {all: CohortCond[]};
+export const COHORT_RULE_MAX_CONDS = 10;
+const COHORT_NUM_MAX = 100_000_000;
+const COHORT_CODE_MAX = 64;
+
+type FieldSpec = {
+  label: string;
+  type: 'text' | 'date' | 'num' | 'enum';
+  ops: readonly CohortOp[];
+  /** num: whole numbers only (counts and days); spend may carry centavos. */
+  integer?: boolean;
+  /** enum: the closed values, with their plain labels. */
+  values?: Readonly<Record<string, string>>;
+};
+const TIER_VALUES = Object.freeze({platinum: 'Platinum', gold: 'Gold', guest: 'Guest'});
+const BDAY_VALUES = Object.freeze({unused: 'Sent, not used', expired: 'Sent, expired unused', used: 'Sent and used', none: 'Not sent this year'});
+const CONSENT_VALUES = Object.freeze({subscribed: 'Subscribed', not_subscribed: 'Not subscribed'});
+export const COHORT_FIELD_SPEC: Readonly<Record<CohortField, FieldSpec>> = Object.freeze({
+  code: {label: 'First-order code', type: 'text', ops: ['is', 'is_not']},
+  anycode: {label: 'Used code (any order)', type: 'text', ops: ['is', 'is_not']},
+  bday: {label: 'Birthday voucher (this year)', type: 'enum', values: BDAY_VALUES, ops: ['is', 'is_not']},
+  first: {label: 'First order date', type: 'date', ops: ['on_or_after', 'on_or_before']},
+  orders: {label: 'Orders', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
+  days: {label: 'Days since last order', type: 'num', integer: true, ops: ['gte', 'lte']},
+  life: {label: 'Lifetime spend (₱)', type: 'num', ops: ['gte', 'lte']},
+  ytd: {label: 'Spend this membership year (₱)', type: 'num', ops: ['gte', 'lte']},
+  tier: {label: 'Tier', type: 'enum', values: TIER_VALUES, ops: ['is', 'is_not']},
+  lcdays: {label: 'Days since last contacted', type: 'num', integer: true, ops: ['gte', 'lte']},
+  times: {label: 'Times contacted', type: 'num', integer: true, ops: ['gte', 'lte', 'eq']},
+  consent: {label: 'Email consent', type: 'enum', values: CONSENT_VALUES, ops: ['is', 'is_not']},
+});
+/** The operators as the builder's select shows them. */
+export const COHORT_OP_LABEL: Readonly<Record<CohortOp, string>> = Object.freeze({
+  is: 'is',
+  is_not: 'is not',
+  on_or_after: 'on or after',
+  on_or_before: 'on or before',
+  gte: 'at least',
+  lte: 'at most',
+  eq: 'exactly',
+});
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validDay = (v: string): boolean => {
+  const t = Date.parse(`${v}T00:00:00Z`);
+  return DATE_RE.test(v) && Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+};
+const isObj = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x);
+
+function readCond(x: unknown, n: number): CohortCond | {error: string} {
+  const at = `Condition ${n}`;
+  if (!isObj(x)) return {error: `${at} is not a condition.`};
+  const f = x.f as CohortField;
+  if (!(COHORT_FIELDS as readonly unknown[]).includes(f)) {
+    return {error: `${at} uses a field Coop does not know. Use one of: ${COHORT_FIELDS.map((k) => COHORT_FIELD_SPEC[k].label).join(', ')}.`};
+  }
+  const spec = COHORT_FIELD_SPEC[f];
+  const op = x.op as CohortOp;
+  if (!spec.ops.includes(op)) return {error: `${at}: ${spec.label} takes the operator ${spec.ops.map((o) => `"${COHORT_OP_LABEL[o]}"`).join(' or ')}.`};
+  const raw = x.v;
+  switch (spec.type) {
+    case 'num': {
+      const v = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+      if (!Number.isFinite(v) || v < 0 || v > COHORT_NUM_MAX) return {error: `${at}: ${spec.label} needs a number of 0 or more.`};
+      if (spec.integer && !Number.isInteger(v)) return {error: `${at}: ${spec.label} needs a whole number.`};
+      return {f, op, v: spec.integer ? v : Math.round(v * 100) / 100};
+    }
+    case 'date': {
+      const v = typeof raw === 'string' ? raw.trim() : '';
+      return validDay(v) ? {f, op, v} : {error: `${at}: ${spec.label} needs a date (YYYY-MM-DD).`};
+    }
+    case 'enum': {
+      const v = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/\s+/g, '_') : '';
+      const values = spec.values ?? {};
+      return v in values ? {f, op, v} : {error: `${at}: ${spec.label} is ${Object.values(values).join(', ').replace(/, ([^,]*)$/, ' or $1')}.`};
+    }
+    default: {
+      const v = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+      return v && v.length <= COHORT_CODE_MAX ? {f, op, v} : {error: `${at}: type the discount code (up to ${COHORT_CODE_MAX} characters).`};
+    }
+  }
+}
+
+/**
+ * THE rule validator: the builder (live), the server actions (again, trusting nothing from the browser), the stored-row read and
+ * 9B's Ask Coop draft all run this. Returns the normalised rule (code upper-cased, numbers as numbers, enums lower-cased, unknown
+ * keys dropped) or a plain-language error.
+ */
+export function readCohortRule(input: unknown): {rule: CohortRule} | {error: string} {
+  if (!isObj(input)) return {error: 'The rule is missing.'};
+  const list = input.all;
+  if (!Array.isArray(list) || list.length === 0) return {error: 'A cohort needs at least one condition.'};
+  if (list.length > COHORT_RULE_MAX_CONDS) return {error: `A cohort can have at most ${COHORT_RULE_MAX_CONDS} conditions.`};
+  const all: CohortCond[] = [];
+  for (const [i, x] of list.entries()) {
+    const c = readCond(x, i + 1);
+    if ('error' in c) return c;
+    all.push(c);
+  }
+  return {rule: {all}};
+}
+
+/** What the evaluator reads from a Customers tab row (customerRows), so the page and Ask Coop evaluate the very same numbers. */
+export type CohortRow = Pick<
+  CustomerRow,
+  | 'orderCount'
+  | 'firstOrderCode'
+  | 'codesUsed'
+  | 'bdayVoucher'
+  | 'firstOrderAt'
+  | 'daysSinceLastOrder'
+  | 'spent'
+  | 'spendYtd'
+  | 'membershipTier'
+  | 'lastContactKnown'
+  | 'lastContactedAt'
+  | 'daysSinceLastContact'
+  | 'timesContacted'
+  | 'consent'
+>;
+
+const tierOf = (t: string | null | undefined): string => (t === 'platinum' || t === 'gold' ? t : 'guest');
+
+/**
+ * A field's value for one row; null = unknown or not applicable, and then NO condition on it holds. Never ordered: code, first
+ * order and days since are null (both "is" and "is not" fail: there is no first order to compare). Last contacted: a source unread
+ * is null; known and never contacted is +Infinity, so it counts as "not contacted in N+ days" for any N, never as "in the last N".
+ */
+function cohortValue(r: CohortRow, f: CohortField): string | number | ReadonlySet<string> | null {
+  switch (f) {
+    case 'code':
+      return r.orderCount >= 1 && r.firstOrderCode !== null ? r.firstOrderCode.toUpperCase() : null;
+    case 'anycode':
+      return r.orderCount >= 1 && r.codesUsed !== null ? new Set(r.codesUsed.map((k) => k.toUpperCase())) : null;
+    case 'bday':
+      return r.bdayVoucher?.state ?? null;
+    case 'first':
+      return r.orderCount >= 1 ? phDayOf(r.firstOrderAt) : null;
+    case 'orders':
+      return r.orderCount;
+    case 'days':
+      return r.daysSinceLastOrder;
+    case 'life':
+      return r.spent;
+    case 'ytd':
+      return r.spendYtd;
+    case 'tier':
+      return tierOf(r.membershipTier);
+    case 'lcdays':
+      return !r.lastContactKnown ? null : r.lastContactedAt === null ? Number.POSITIVE_INFINITY : r.daysSinceLastContact;
+    case 'times':
+      return r.timesContacted;
+    case 'consent':
+      return r.consent.trim().toLowerCase() === 'subscribed' ? 'subscribed' : 'not_subscribed';
+  }
+}
+
+function condHolds(r: CohortRow, c: CohortCond): boolean {
+  const x = cohortValue(r, c.f);
+  if (x === null) return false;
+  if (typeof x === 'object') {
+    // anycode: the set of code keys on any counted order. "no code" = the set is empty (NO_CODE is never a member: it is the absence).
+    const has = String(c.v) === NO_CODE.toUpperCase() ? x.size === 0 : x.has(String(c.v));
+    return c.op === 'is' ? has : !has;
+  }
+  switch (c.op) {
+    case 'is':
+      return x === c.v;
+    case 'is_not':
+      return x !== c.v;
+    case 'on_or_after':
+      return String(x) >= String(c.v);
+    case 'on_or_before':
+      return String(x) <= String(c.v);
+    case 'gte':
+      return Number(x) >= Number(c.v);
+    case 'lte':
+      return Number(x) <= Number(c.v);
+    case 'eq':
+      return Number(x) === Number(c.v);
+  }
+}
+
+/**
+ * THE cohort evaluator (RET-10): true when every condition holds (AND). The rule is re-checked first, so a malformed rule (a stored
+ * row edited by hand, a bad draft) matches nobody, never everybody. Members are never stored: this runs on every render.
+ */
+export function matchesCohort(row: CohortRow, rule: CohortRule): boolean {
+  const ok = readCohortRule(rule);
+  return 'rule' in ok && ok.rule.all.every((c) => condHolds(row, c));
+}
+
+/**
+ * The built-in audiences as rules, built from AUDIENCE_RULES, so the cohort bar can say them as sentences and a test can pin that
+ * they pick exactly inAudience's list. The page still LISTS the built-ins through inAudience / audienceRows (owner: today's lists).
+ */
+export const BUILTIN_COHORT_RULES: Readonly<Record<Exclude<CustomerAudience, 'all'>, CohortRule>> = Object.freeze(
+  Object.fromEntries(
+    (Object.keys(AUDIENCE_RULES) as Array<Exclude<CustomerAudience, 'all'>>).map((a) => {
+      const r = AUDIENCE_RULES[a];
+      const orders: CohortCond[] =
+        r.maxOrders === r.minOrders
+          ? [{f: 'orders', op: 'eq', v: r.minOrders}]
+          : [{f: 'orders', op: 'gte', v: r.minOrders}, ...(r.maxOrders === null ? [] : [{f: 'orders', op: 'lte', v: r.maxOrders} as CohortCond])];
+      return [a, {all: [...orders, {f: 'days', op: 'gte', v: r.minDays}]}];
+    }),
+  ) as Record<Exclude<CustomerAudience, 'all'>, CohortRule>,
+);
+
+/**
+ * RET-13A: built-in cohorts that are a rule on a cohort field (not an audience). Listed through matchesCohort, one evaluator.
+ * "Sent, expired unused" is left out on purpose: those vouchers can no longer be used, so there is nothing to bump.
+ */
+export const BUILTIN_RULE_COHORTS: readonly {key: 'bday_unused'; label: string; rule: CohortRule}[] = Object.freeze([
+  {key: 'bday_unused', label: 'Birthday voucher not used', rule: {all: [{f: 'bday', op: 'is', v: 'unused'}]}},
+]);
+
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+const pesoWhole = (n: number): string => `₱${n.toLocaleString('en-PH', {minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2})}`;
+/** The special first-order keys firstOrderCode() produces, said in words. */
+const CODE_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  [NO_CODE.toUpperCase()]: 'no code',
+  [BIRTHDAY_COHORT.toUpperCase()]: 'a birthday voucher',
+  [BUNDLE_COHORT.toUpperCase()]: 'a bundle code',
+});
+
+/** One condition as a plain sentence. Never a field or operator code (owner, 2026-11-12: "too cody for an end user"). */
+export function condText(c: CohortCond): string {
+  const n = Number(c.v);
+  const v = String(c.v);
+  switch (c.f) {
+    case 'code': {
+      const words = CODE_WORDS[v.toUpperCase()];
+      if (words) return c.op === 'is' ? `First order used ${words}` : `First order did not use ${words}`;
+      return c.op === 'is' ? `First order used code ${v}` : `First order did not use code ${v}`;
+    }
+    case 'anycode': {
+      const words = CODE_WORDS[v.toUpperCase()];
+      if (v.toUpperCase() === NO_CODE.toUpperCase()) return c.op === 'is' ? 'Never used any code' : 'Used a code on some order';
+      if (words) return c.op === 'is' ? `Used ${words} on some order` : `Never used ${words}`;
+      return c.op === 'is' ? `Used code ${v} on any order` : `Never used code ${v}`;
+    }
+    case 'bday': {
+      const said: Record<string, string> = {
+        unused: 'Got a birthday voucher this year and has not used it',
+        expired: "This year's birthday voucher expired unused",
+        used: "Used this year's birthday voucher",
+        none: 'No birthday voucher this year',
+      };
+      return c.op === 'is' ? (said[v] ?? v) : `Birthday voucher this year is not ${BDAY_VALUES[v as keyof typeof BDAY_VALUES] ?? v}`;
+    }
+    case 'first':
+      return `First order ${c.op === 'on_or_after' ? 'on or after' : 'on or before'} ${fmtPhDate(`${v}T00:00:00+08:00`)}`;
+    case 'orders':
+      return c.op === 'eq' ? `Has exactly ${plural(n, 'order')}` : c.op === 'gte' ? `Has ${n} or more orders` : `Has at most ${plural(n, 'order')}`;
+    case 'days':
+      return c.op === 'gte' ? `Last order was ${n} or more days ago` : `Ordered in the last ${plural(n, 'day')}`;
+    case 'life':
+      return c.op === 'gte' ? `Spent ${pesoWhole(n)} or more in total` : `Spent at most ${pesoWhole(n)} in total`;
+    case 'ytd':
+      return c.op === 'gte' ? `Spent ${pesoWhole(n)} or more this membership year` : `Spent at most ${pesoWhole(n)} this membership year`;
+    case 'tier':
+      return `Tier is ${c.op === 'is_not' ? 'not ' : ''}${TIER_VALUES[v as keyof typeof TIER_VALUES] ?? v}`;
+    case 'lcdays':
+      return c.op === 'gte' ? `Not contacted in the last ${plural(n, 'day')}` : `Contacted in the last ${plural(n, 'day')}`;
+    case 'times':
+      if (c.op === 'eq') return n === 0 ? 'Never contacted' : `Contacted exactly ${plural(n, 'time')}`;
+      return c.op === 'gte' ? `Contacted ${n} or more times` : `Contacted at most ${plural(n, 'time')}`;
+    case 'consent': {
+      const subscribed = (v === 'subscribed') === (c.op === 'is');
+      return subscribed ? 'Subscribed to email' : 'Not subscribed to email';
+    }
+  }
+}
+
+/** A whole rule as one sentence: "First order used code CIRCUIT10, and has exactly 1 order". */
+export function ruleText(rule: CohortRule): string {
+  return rule.all.map((c, i) => (i === 0 ? condText(c) : condText(c).charAt(0).toLowerCase() + condText(c).slice(1))).join(', and ');
 }
 
 const countBy = (keys: string[]): {group: string; customers: number}[] => {
@@ -323,6 +954,13 @@ export function fmtPh(iso: string | null | undefined): string {
     minute: '2-digit',
   });
 }
+
+const pesoDigits = {minimumFractionDigits: 2, maximumFractionDigits: 2} as const;
+/** Pesos with centavos ("₱1,234.50"). */
+export const peso = (n: number): string => `₱${Number(n || 0).toLocaleString('en-PH', pesoDigits)}`;
+/** A money string straight off the API, which may carry its own currency. */
+export const money = (amount: string | null | undefined, currency?: string | null): string =>
+  `${!currency || currency === 'PHP' ? '₱' : `${currency} `}${Number(amount ?? 0).toLocaleString('en-PH', pesoDigits)}`;
 
 /** A PH calendar date ("Oct 11, 2026") for day-level columns; '—' when absent. */
 export function fmtPhDate(iso: string | null | undefined): string {

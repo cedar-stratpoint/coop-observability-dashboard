@@ -86,7 +86,8 @@ describe('the list tools are not strict, so a missing key takes its default', ()
 describe('list_crm_customers', () => {
   it('orders and spend come from captured orders (paid only), never Shopify counters; contacts are present (owner decision)', async () => {
     const r = await crmCustomersResult(req(readCustomersInput(CUS)), get(), NOW);
-    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, first_order: '2026-09-28', last_order: '2026-09-30', days_since_last_order: 7, pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
+    expect(r.rows[0]).toEqual({name: 'Ana Cruz', email: 'ana@example.com', phone: '+639170000001', tier: 'gold', orders: 2, spent: 1300, spend_ytd: 1300, first_order: '2026-09-28', last_order: '2026-09-30', days_since_last_order: 7, // RET-07: contact columns on every list; this fixture has no voucher ledger and no log, so they are unknown (null), never 0 or never
+      emails_sent: null, manual_contacts: null, times_contacted: null, last_contacted: null, last_contact_kind: 'unknown', pet: 'Mochi', pet_birthday: '2020-05-01', email_marketing: 'subscribed', joined: '2026-07-02'});
     expect(r.rows.find((x) => x.name === 'Ben')).toMatchObject({tier: 'guest', orders: 1, spent: 0});
     expect(JSON.stringify(r)).not.toMatch(/SECRET|apiKey|99999/);
     expect(checks(r)).toMatch(/membership year starts 2026-07-01/);
@@ -215,11 +216,11 @@ describe('createCrmExecutors', () => {
 describe('wiring', () => {
   const data = (): MetricData => ({source: 'live', orders: [], events: [], prices: [], priceChanges: [], bulkReads: []});
 
-  it('createExecutors adds the five CRM tools only with a client, and stores results as r1, r2', async () => {
+  it('createExecutors adds the CRM tools (RET-10 9B: propose_crm_cohort too) only with a client, and stores results as r1, r2', async () => {
     const without = createExecutors({data: async () => data(), now: NOW, user: null});
     expect(Object.keys(without).filter((k) => k.includes('crm'))).toEqual([]);
     const ex = createExecutors({data: async () => data(), now: NOW, user: null, crm: fakeCrmClient().client});
-    expect(Object.keys(ex).filter((k) => k.includes('crm')).sort()).toEqual(['crm_query', 'get_crm_metrics', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders']);
+    expect(Object.keys(ex).filter((k) => k.includes('crm')).sort()).toEqual(['crm_query', 'get_crm_metrics', 'list_crm_checkouts', 'list_crm_customers', 'list_crm_orders', 'propose_crm_cohort']);
     const r = (await ex.list_crm_orders?.(ORD)) as {id: string; rows: unknown[]};
     expect(r.id).toBe('r1');
     expect(r.rows).toHaveLength(2);
@@ -229,7 +230,7 @@ describe('wiring', () => {
   it('chatTools: CRM tools after get_channel_report, run_query after query_metric, set_report_title last, at most 20, all strict with no optionals', () => {
     const t = chatTools({explore: true, crm: true});
     const names = t.map((x) => x.name);
-    expect(names.slice(names.indexOf('get_channel_report'), names.indexOf('get_channel_report') + 6)).toEqual(['get_channel_report', 'get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'crm_query']);
+    expect(names.slice(names.indexOf('get_channel_report'), names.indexOf('get_channel_report') + 7)).toEqual(['get_channel_report', 'get_crm_metrics', 'list_crm_orders', 'list_crm_customers', 'list_crm_checkouts', 'propose_crm_cohort', 'crm_query']);
     expect(names[names.indexOf('query_metric') + 1]).toBe('run_query');
     expect(names[names.length - 1]).toBe('set_report_title');
     expect(t.filter((x) => x.strict).length).toBeLessThanOrEqual(20); // the limit is on strict tools

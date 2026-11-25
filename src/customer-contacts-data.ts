@@ -2,7 +2,7 @@ import 'server-only';
 import {cache} from 'react';
 import {unstable_cache} from 'next/cache';
 import {CRM_CACHE_REVALIDATE, CRM_TAG} from './crm-cache';
-import {loadContactRows, type CustomerContact} from './customer-contacts';
+import {loadContactRows, type ContactChannel, type CustomerContact} from './customer-contacts';
 import {posClient, usingPosMock} from './pos-data';
 
 /**
@@ -30,8 +30,8 @@ const contactsCached = unstable_cache(async (): Promise<CustomerContact[] | null
       .range(from, to));
 }, ['customer-contacts'], {revalidate: CRM_CACHE_REVALIDATE, tags: [CUSTOMER_CONTACTS_TAG, CRM_TAG]});
 
-/** Ask Coop's view of the log: one entry per logged contact, the email only (no note, no author). Null = unavailable. */
-export async function getManualContactEmails(): Promise<{email: string}[] | null> {
+/** Ask Coop's view of the log: one entry per logged contact, its email, channel and time (RET-07 last contacted); never the note or the author. Null = unavailable. */
+export async function getManualContactEmails(): Promise<{email: string; channel: ContactChannel; contactedAt: string}[] | null> {
   const rows = await getCustomerContacts();
-  return rows ? rows.map((r) => ({email: r.email})) : null;
+  return rows ? rows.map((r) => ({email: r.email, channel: r.channel, contactedAt: r.contactedAt})) : null;
 }

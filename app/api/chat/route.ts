@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import {anthropicClientOptions} from '@/src/chat/anthropic-client';
 import {getDigests} from '@/src/data';
 import {buildDigestBlock, buildLiveContextBlock, buildStaticSystem} from '@/src/chat/context';
 import {CHAT_EFFORT, COOP_CHAT} from '@/src/chat/config';
@@ -52,8 +53,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return new Response('Coop chat is not configured (missing API key).', {status: 503});
+  const claude = anthropicClientOptions(process.env);
+  if (!claude) return new Response('Coop chat is not configured (missing API key).', {status: 503});
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
   if (rateLimited(ip, Date.now())) return new Response('Too many requests — give Coop a moment.', {status: 429});
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
     {type: 'text' as const, text: live.ok ? buildLiveContextBlock({explore: explore !== null, crm: crmTools, website}) : buildDigestBlock(rows, body.week, {home: body.home === true}), cache_control: {type: 'ephemeral' as const}},
   ];
 
-  const anthropic = new Anthropic({apiKey: key});
+  const anthropic = new Anthropic(claude);
   const coverage = explore ? await explore.coverageLine() : null;
   return ndjson((emit) =>
     runChatLoop({
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
       preamble: live.ok && report ? buildPreamble(live.data, now, report.outline(), coverage, {explore: explore !== null, page: pageLine, digests: digestLine, flags: {website, crm: crmTools}}) : buildDegradedPreamble(now),
       executors:
         live.ok && report
-          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined, manualContacts: crmTools && crm ? async () => (await import('./contacts-log-seam')).loadManualContacts() : undefined, identity: explore !== null, sku: {aliases: async () => (await import('./sku-seam')).skuSource.aliases(), shopee: async (from, to) => (await import('./sku-seam')).skuSource.shopee(from, to)}})
+          ? createExecutors({data: async () => live.data, now, user, emitBlock: (block) => emit({t: 'block', block}), report, emitReport: (spec) => emit({t: 'report', spec}), digest: getChatDigest, daily: getChatDailyDigests, crmOrders: crm ? () => websiteOrdersForReport({client: crm, user}) : undefined, explore: explore?.executor, exploreSchema: explore?.schema, leads: explore ? async () => (await import('./leads-seam')).loadLeadsSource() : undefined, crm: crmTools && crm ? crm : undefined, manualContacts: crmTools && crm ? async () => (await import('./contacts-log-seam')).loadManualContacts() : undefined, cohorts: crmTools && crm ? async () => (await import('./cohorts-seam')).loadSavedCohorts() : undefined, identity: explore !== null, sku: {aliases: async () => (await import('./sku-seam')).skuSource.aliases(), shopee: async (from, to) => (await import('./sku-seam')).skuSource.shopee(from, to)}})
           : {},
       emit,
       user,

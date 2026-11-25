@@ -16,6 +16,16 @@ export type CrmMetrics = {
   reminded: number;
   revenueRecovered: number;
   recoveryRate: number;
+  // RET-09: the CRM engine's own email schedule settings (Vince's ⏱ lines). Optional: an older Worker does not send them, and the page
+  // then hides the line rather than inventing a schedule.
+  /** How many reminder emails one abandoned cart gets ("n of N"). */
+  reminderStepCount?: number;
+  /** Minutes after abandonment each reminder goes out. */
+  reminderSteps?: number[];
+  remindersEnabled?: boolean;
+  /** Minutes after fulfillment the review request goes out. */
+  reviewAfterMinutes?: number;
+  reviewEmailsEnabled?: boolean;
 };
 
 export type CrmCustomer = {
@@ -51,6 +61,8 @@ export type CrmOrder = {
   test?: boolean;
   // RET-06: the order's discount codes (raw.discount_codes), upper-cased, a BDAY- voucher cut to "BDAY-"; projectOrder always sets it, hand-built orders may leave it out (= no code).
   discountCodes?: string[];
+  // RET-11: the amount off per code (raw.discount_codes[].amount), index for index with discountCodes; null = not readable. Optional like discountCodes.
+  discountAmounts?: (number | null)[];
   // Shopify line items as the CRM sends them (a JSON string). Only the Overview's
   // custom date range reads it (units + top products) — see src/custom-range.ts.
   lineItems?: string | null;
@@ -80,6 +92,8 @@ export type CrmCheckout = {
    * crm-data.ts) so the browser gets the label without the raw blob's PII.
    */
   stage: CheckoutStage;
+  /** RET-09: how many line items the cart holds (a count only, from the Worker's lineItems); absent when the Worker sent no list. */
+  items?: number;
 };
 
 /**
@@ -98,6 +112,19 @@ export type CrmBirthdayVoucher = {
   code: string;
   amount: string;
   expiresAt: string | null;
+  sentAt: string;
+};
+
+/**
+ * A membership email the CRM sent (RET-07 7C): GET /api/membership-events, newest first, at most 2,000 rows. The dashboard keeps
+ * email, tier, event and sentAt only (projectMembershipEvent); `id` and `shopifyCustomerId` are not needed and are dropped.
+ */
+export type CrmMembershipEvent = {
+  id: number;
+  email: string;
+  shopifyCustomerId: string | null;
+  tier: string;
+  event: string;
   sentAt: string;
 };
 
