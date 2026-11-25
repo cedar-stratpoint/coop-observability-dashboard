@@ -10,6 +10,65 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-25 — Release v1.27.0: review flags, Add product row, Reco A to D (Nichido)
+
+Promotes the Nov 25 Nichido work from staging (#796, #799, #800, #801, #802, #803, #804), cherry-picked onto main; every file identical to staging. Needs `supabase/nichido/p6_review_marks.sql` on Nichido PROD (applied before the merge). The reader flags switch `GOLDLINE_READ_MARKS` stays OFF on Production until asked (staging test: +17% read cost).
+
+## 2026-11-25 — Scan page list and Reconcile: a condensed header and filters follow the scroll
+
+Owner QA on staging: deep in a scan's Per file list, the scan's name and the Type / Status / Version filters scroll away. Now, once the full filters pass under the app header, a slim bar pins below it with the scan's name, the page count, the same three filters as compact selects (with counts) and Top. It is zero height in the flow (nothing shifts when it appears), out of the tab order while hidden, fades in 150ms, and uses the same URL-backed filters as the chips, so both always agree. Per store and Per BA views unchanged.
+
+Same on **Reconcile** (owner ask): once the Reco tiles and grid pass under the header, the bar shows the store and month, the Reco A to D letters with counts (they filter like the tiles), what the table shows with its count, and Top. One shared component, `components/analyst/sticky-bar.tsx` (`StickyBar`, `useStuckSentinel`, `TopButton`).
+
+## 2026-11-25 — Review: the Flag button shows only when it can be wanted
+
+Owner QA on staging: a Flag button on every row of the review grid is noise (Hick's law). A row's Flag button now shows only on hover, keyboard focus in the row, the row pointed at on the scan, or a phone row being edited, and always on a row that already has a flag (tinted). Hidden buttons keep their space, so the count columns don't shift. Flag page in the header is unchanged.
+
+## 2026-11-25 — Every flag with its page and row, and a per-store flag CSV (NICH-43 §3, §4)
+
+Syl (Nov 25): "if there's a flag, can I see the page and row where it was flagged and why, which store, which BA", and "export all SKUs that need flagging per store". Built as one list for both kinds of flag: the BA scorecard's checks and the review flags (reader and reviewer, #799/#801).
+
+- **`/flags/review` "Every flag, page and row"**, linked from the Flags header. One line per flag: the scan page ("Page 11 of 98" and the scan's name), the row (product and item code, or Whole page), why, who raised it (Coop check, Reader, Reviewer) with the reviewer's note, store, BA and month, and a link to open the page. Filters: store, month, source, open or closed, and search; kept in the URL.
+- **CSV** with the same filters (`/api/goldline/flag-lines-export`): pick a store for that store's file, or every store sorted by store.
+- Store, period and BA are joined live from the page's form and read header (a page's store is often set after it was flagged). A store-limited role sees only its stores, and never a review flag whose store isn't known yet.
+- Staging: 166 flags listed (the existing checks), CSV matches.
+
+## 2026-11-25 — Reader sets review flags: notes, Damage, relabelled columns, written-in rows (NICH-36, flagged off)
+
+Syl (Nov 25): flag BA notes and revisions, "Damage" written in a count, and relabelled columns with the file, page and row, without capturing the note's text. Decided with the user: the reader detects them and reviewers can add or clear flags by hand (#799). Behind `GOLDLINE_READ_MARKS=1`; **off by default, byte-identical read when off**.
+
+- **P1 anchored read (V1/V2) and Legacy read:** one optional per-row `flags` list (`note`, `damage`). It is left out on a clean row, so it costs no output there. A Damage cell is left blank, never a guessed number. In the anchored schema, `flags` comes after the counts (the row is read, then judged). The anchored read also returns a required page-level `headers_written_over`. A flagged row goes to review (confidence capped at 0.6, or 0.5 for Damage) with a plain note ("“Damage” written in a count, left blank").
+- **After a read is saved** (inline, batch poller, or a reused earlier read), the page's reader flags are replaced: Note or revision and Damage per row; Product written in for each off-template hand-written row the read already returns as `extras`; Columns changed for the page when headers were written over. Reviewer flags are never touched. A failure only logs; it never fails the read.
+- **Not covered:** the original non-P1 anchored read and the free V1/V2 read (unresolved version) are unchanged. Legacy pages are not auto-flagged Columns changed: about 96% of Legacy rows are filled as Stockroom/Drawer/Selling and #685 already files them by arithmetic, so the flag would be on nearly every Legacy page.
+- Tests pin the switch (off = no field, no prompt lines) and the schema budget (24 optional / 16 union params) for P1 + unsure + marks and for Legacy + marks.
+
+## 2026-11-25 — Add product row on the inventory review (NICH-42)
+
+Syl (Nov 25): BAs hand-write products onto the form between the printed rows (e.g. "P.Glow" under Creamy Glow), and the review had no way to count them. Decided with the user: build Add product row now.
+
+- **"Add product"** beside the row search on both review screens (one page and the batch stepper), while the page can still be committed. A picker lists the catalog (visible, not retired), opening on the product lines already on the page; search by code or name. The new row joins the page with blank counts under its printed heading, the view switches to All and focuses its first cell.
+- **Guards:** a product already on the page can't be added twice. One printed on another page of the same form version shows "Printed on page N" and a warning, because inventory is one count per store, product and period, so committing both replaces one.
+- Each added row is flagged **"Product written in"** (a review flag, `added_row`), so the reports list it with its page and row. Removing an added row clears that flag. Added rows commit with the page like printed rows; Commit all from the scan board commits what the reader read, so an added row needs the page's own Commit.
+- The batch review's saved draft now keeps added rows (`added` on a draft page); older drafts restore as before.
+
+## 2026-11-25 — Review flags: flag a row or a page on the inventory review (NICH-42)
+
+Syl (Nov 25): BAs write notes and revisions on the form, write "Damage" in Ending, relabel the printed columns, and some numbers can't be read. "Flag" them with the file, page and row, never capture the note text, and for an unreadable number flag instead of guessing. Decided with the user: these are **review flags, separate from the BA scorecard** (public.flags); they never add BA points.
+
+- **New `review_marks` table** (Nichido, `supabase/nichido/p6_review_marks.sql`, applied on Staging): one mark per page (upload), row (item code, or none for the whole page), kind and source. Kinds: Can't read the number, Note or revision, Damage written, Columns changed (page), Product written in (for Add row, later), Other. Source is the reviewer now, the reader later (NICH-36). Clearing keeps who and when; flagging again reopens. Keyed by page, not batch or store, because batches re-split and stores are set after reading; reports join them live.
+- **Flag button on every row and "Flag page"** on both review screens (one page and the batch stepper), with the flags as amber pills under the row. One dialog: pick what to look at, optional note (required for Other), clear existing flags. A flag never changes a count, never blocks commit, and works on a committed page.
+- The batch review keeps every page's flags in one provider, so stepping between pages keeps them without a reload.
+- No new "rows flagged" count on the header: this screen already uses "flag" for low-confidence rows (the navigator), so the review flags show only as the button and the pills.
+
+## 2026-11-25 — Reconcile: Reco A to D tiles and a by-SKU Reco C report (NICH-43 §1, §2)
+
+Syl asked (Nov 25) to see how many lines need Reco A (retire, sell through), B (flag for accounting), C (Watsons to audit) and D (update the Nichido inventory form), and for a report of every SKU under Reco C. Decided with the user: A = Retire, sell through; B = Send to accounting; **C = both Watsons-owned boxes** (Watsons to audit + Report to Watsons, on the PO form or not); D = Add to form. Check delivery, Flag to retire and Keep stay as boxes only.
+
+- **Four Reco tiles above the notebook grid** (`RecoStrip`), each a filter like a box (`?reco=A..D`); picking C lights both Watsons boxes. A letter follows the line's own recommendation, so a sold-out line ("Restock", "Flag to retire") is in no letter (`recoLetterOf`, `summary.letters`).
+- **By SKU download** next to CSV on the every-store view: one line per product with its recommendations, store count, store codes and totals (`skuLines`, `?by=sku` on `/api/goldline/audit-export`). With Reco C picked, that is Syl's Reco C report.
+- Staging Sept 2026, every store: A 1 · B 2 · C 207 · D 0; the Reco C by-SKU file lists 114 SKUs.
+- Plan for the rest (review marks, manual flag, Add row, flag drill-down, per-store flag export): `knowledge/tasks/2026-11-25-review-marks-and-reco-reports.md`.
+
 ## 2026-11-25 · v1.26.18 Commit all asks only for what Coop can't know (prod release)
 Ships #797, cherry-picked onto `main`: stray forms (store read, date read or year corrected) are filed and committed automatically, picked stores commit one-page forms too, Set aside for nearly blank pages, a Needs a date list, and tiles that say "N need a store · M need a date".
 
