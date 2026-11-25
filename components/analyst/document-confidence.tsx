@@ -21,13 +21,16 @@ const BAND_LABEL: Record<Band, string> = {high: 'High', medium: 'Medium', low: '
 export function DocumentConfidence({
   docConfidence,
   rowConfidences,
+  flagged,
   onReviewFlagged,
 }: {
   docConfidence: number | null;
   rowConfidences: Array<number | null | undefined>;
+  /** The rows the review flags (Needs review), when more than the low-confidence ones. */
+  flagged?: number;
   onReviewFlagged: () => void;
 }) {
-  const s = summarizeConfidence(docConfidence, rowConfidences);
+  const s = summarizeConfidence(docConfidence, rowConfidences, flagged);
   const tone = s.band ? TONE[s.band] : undefined;
   const bands: Band[] = ['high', 'medium', 'low'];
 
@@ -55,10 +58,10 @@ export function DocumentConfidence({
           </span>
           <p className="text-sm text-foreground">{s.guidance}</p>
         </div>
-        {s.counts.low > 0 && (
+        {s.flagged > 0 && (
           <Button variant="outline" size="sm" onClick={onReviewFlagged}>
             <ArrowDown className="size-3.5" />
-            Review {s.counts.low} flagged {s.counts.low === 1 ? 'row' : 'rows'}
+            Review {s.flagged} flagged {s.flagged === 1 ? 'row' : 'rows'}
           </Button>
         )}
       </div>

@@ -25,6 +25,7 @@ import {
 } from './goldline-legacy-extract';
 import {printedPageItems} from './goldline-printed-page';
 import {checkBands, type PaperBand} from './band-prices';
+import {applyOutOfStockNote, type OutOfStock} from './out-of-stock';
 import type {FormVersion} from './goldline-extract';
 import type {WriterProfile} from './goldline-writer-data';
 import {
@@ -75,6 +76,9 @@ export type ExtractedRow = {
   // NICH-36 · what the reader saw besides the counts (GOLDLINE_READ_MARKS): a BA note or revision
   // on the row, or "Damage" written in a count. Written as review flags; never the note's text.
   reader_flags?: ReaderFlag[] | null;
+  // QA Nov 25 · "O/S" written on the row: the cells it set to 0 (tagged in review, kept as
+  // inventory.extra.out_of_stock), and whether the row wants a look.
+  oos?: OutOfStock | null;
   // NICH-42 · a product the reviewer added on the review screen (hand-written by the BA, not
   // printed or not read). Browser-only: never set by the reader, commits like any row.
   added?: boolean;
@@ -553,6 +557,8 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
   if (!isExtractedPage(parsed)) {
     throw new Error('Extraction JSON did not match the expected page shape');
   }
+  // "O/S" in the reader's note becomes 0 in that cell (QA Nov 25).
+  for (const r of parsed.rows) applyOutOfStockNote(r, version === 'v2' ? 'v2' : 'v1');
   // store_code is header-only (page 1); normalize a missing/null one to '' so the
   // rest of the pipeline (and the reviewer's editable field) has a string.
   return {

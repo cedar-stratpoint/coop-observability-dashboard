@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — "O/S" on the form is read as 0 in its cell, and an O/S-only row is flagged once
+
+QA (SM San Pablo, Legacy page 3): 24HRMESGDE, 24HRMESGM and LEL091 have "O/S" (out of stock) written in the Drawer column. Coop only said so in the reader's note, left the counts blank (so Reconcile said "Can't tell yet"), and the rows sat at 90%, out of Needs review. They were only flagged before by accident: the codes weren't on the reader's list for that page, so it marked them 50%.
+
+Decided Nov 25: O/S makes **that cell 0**, tagged O/S, and the row's other counts stand (Drawer O/S + Stockroom 5 ends at 5). A row with O/S and nothing else **ends at 0**. O/S and a number in one cell: the **number wins** and the row is flagged. A row whose only entry is O/S goes to **Needs review once**.
+
+- Where O/S was written comes from the reader's note on Legacy and free reads ("O/S written in Delivery", "delivery cell O/S", "O/S written, no counts"), mapped by the page's column use: on a Legacy page filled as Stockroom / Drawer / Selling, printed Delivery is Drawer. Template (V1/V2) reads get per-cell flags `os_stockroom` to `os_ending` in the reader's optional flags (with the reader-notes switch, on for staging). The Legacy prompt now asks for "O/S in <column>". Logic in `src/out-of-stock.ts`, tested on the notes the reader actually wrote.
+- The review shows **O/S** inside the cell while it holds that 0. At commit, rows still at 0 in their O/S cells keep `inventory.extra.out_of_stock = 1`.
+- O/S rows count wherever rows to check are counted. The confidence card now says the same number as Needs review (it counted low confidence only, so band, O/S and history flags were missing from "Review N flagged rows").
+- A test locks the five QA names to the printed Legacy page 3 (Double Espresso, Macchiato, TO1 - Black (Quick dry), LIQUID EYELINER SMALL (Black), EASY GLIDE LIQUID EYELINER 3ml (black)). Those were already fixed by #685, #686 and #694.
+- Older pages only get this when re-read.
+
 ## 2026-11-25 — A band priced differently on the paper gets one flag, and the reviewer picks the price
 
 QA (SM San Pablo, Legacy page 2): the ULTRA STAY MATTE LIQUID LIP COLOR band prints ₱225, the BA wrote 180 beside it and totalled the band at ₱6,480 (36 pcs x 180). Coop valued it at ₱8,100 and said nothing. The reader already returned the band totals and written prices, but the band check only spoke on a mismatch, and here the numbers agree at the written price (or, when the 180 wasn't read, 6,480 isn't whole pieces at ₱225, so the band was skipped). Band totals weren't saved, and V1/V2 written prices only reached the read log.
