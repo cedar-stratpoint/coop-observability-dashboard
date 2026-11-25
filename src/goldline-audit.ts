@@ -239,17 +239,22 @@ export function auditCell(i: AuditInput): AuditCell | null {
   };
 }
 
-export type AuditSummary = Record<AuditState, number> & {total: number; needsAction: number};
+export const WHY_ORDER: WhyUnknown[] = ['month_not_loaded', 'store_not_in_file', 'no_count', 'page_missing', 'blank', 'not_linked', 'no_po_form'];
 
-/** Tally of the states, for the tiles. */
-export function auditSummary(cells: Array<{state: AuditState}>): AuditSummary {
+/** `why`: how many "Can't tell yet" lines miss each kind of data (a line can miss two). */
+export type AuditSummary = Record<AuditState, number> & {total: number; needsAction: number; why: Record<WhyUnknown, number>};
+
+/** Tally of the states and of what the unknown lines are missing, for the grid. */
+export function auditSummary(cells: Array<{state: AuditState; why?: WhyUnknown[]}>): AuditSummary {
   const s = Object.fromEntries(AUDIT_STATES.map((k) => [k, 0])) as Record<AuditState, number>;
+  const why = Object.fromEntries(WHY_ORDER.map((k) => [k, 0])) as Record<WhyUnknown, number>;
   let needsAction = 0;
   for (const c of cells) {
     s[c.state]++;
     if (NEEDS_ACTION.has(c.state)) needsAction++;
+    if (c.state === 'unknown') for (const w of c.why ?? []) why[w]++;
   }
-  return {...s, total: cells.length, needsAction};
+  return {...s, total: cells.length, needsAction, why};
 }
 
 const TONE_RANK: Record<AuditMeta['tone'], number> = {crit: 0, warn: 1, neutral: 2, out: 3, good: 4, unknown: 5};
@@ -268,7 +273,9 @@ export const openingState = (summary: Record<AuditState, number>): AuditState =>
 
 export type AuditSort = 'reco' | 'product' | 'store' | 'units' | 'onHand';
 export const AUDIT_SORTS: AuditSort[] = ['reco', 'product', 'store', 'units', 'onHand'];
-export type AuditQuery = {state: AuditState; q: string; sort: AuditSort; dir: 'asc' | 'desc'; page: number};
+/** `why`: with state "Can't tell yet", only the lines missing this kind of data. */
+export type AuditQuery = {state: AuditState; why: WhyUnknown | null; q: string; sort: AuditSort; dir: 'asc' | 'desc'; page: number};
+export const isWhy = (s: unknown): s is WhyUnknown => WHY_ORDER.includes(s as WhyUnknown);
 
 /** "YYX", "yx?", "✓✓✗" → a Watsons · Inventory · PO pattern. X or N is no; ? is unknown. */
 export function parsePattern(q: string): {watsons: Leg; inventory: Leg; po: Leg} | null {
@@ -293,7 +300,7 @@ export type SearchableRow = AuditCell & {product: string | null; store: string; 
 const ORDER = new Map(AUDIT_STATES.map((s, i) => [s, i]));
 
 /** The rows a query shows, in order (every page; slice for one). Nulls always sort last. */
-export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQuery, 'state' | 'q' | 'sort' | 'dir'>): T[] {
+export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQuery, 'state' | 'q' | 'sort' | 'dir'> & {why?: WhyUnknown | null}): T[] {
   const needle = query.q.trim().toLowerCase();
   const p = needle ? parsePattern(needle) : null;
   const hit = (r: T) =>
@@ -301,7 +308,7 @@ export function auditRows<T extends SearchableRow>(rows: T[], query: Pick<AuditQ
       ? r.watsons === p.watsons && r.inventory === p.inventory && r.po === p.po
       : needle
         ? r.item_code.toLowerCase().includes(needle) || (r.product ?? '').toLowerCase().includes(needle) || (r.storeName ?? '').toLowerCase().includes(needle) || r.store.toLowerCase() === needle
-        : r.state === query.state;
+        : r.state === query.state && (query.state !== 'unknown' || !query.why || r.why.includes(query.why));
   const sign = query.dir === 'desc' ? -1 : 1;
   const name = (r: T) => (r.product ?? r.item_code).toLowerCase();
   const num = (a: number | null, b: number | null) => (a == null ? (b == null ? 0 : 1) : b == null ? -1 : sign * (a - b));
