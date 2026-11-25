@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Review flags: flag a row or a page on the inventory review (NICH-42)
+
+Syl (Nov 25): BAs write notes and revisions on the form, write "Damage" in Ending, relabel the printed columns, and some numbers can't be read. "Flag" them with the file, page and row, never capture the note text, and for an unreadable number flag instead of guessing. Decided with the user: these are **review flags, separate from the BA scorecard** (public.flags); they never add BA points.
+
+- **New `review_marks` table** (Nichido, `supabase/nichido/p6_review_marks.sql`, applied on Staging): one mark per page (upload), row (item code, or none for the whole page), kind and source. Kinds: Can't read the number, Note or revision, Damage written, Columns changed (page), Product written in (for Add row, later), Other. Source is the reviewer now, the reader later (NICH-36). Clearing keeps who and when; flagging again reopens. Keyed by page, not batch or store, because batches re-split and stores are set after reading; reports join them live.
+- **Flag button on every row and "Flag page"** on both review screens (one page and the batch stepper), with the flags as amber pills under the row. One dialog: pick what to look at, optional note (required for Other), clear existing flags. A flag never changes a count, never blocks commit, and works on a committed page.
+- The batch review keeps every page's flags in one provider, so stepping between pages keeps them without a reload.
+- No new "rows flagged" count on the header: this screen already uses "flag" for low-confidence rows (the navigator), so the review flags show only as the button and the pills.
+
 ## 2026-11-25 — Commit all asks only for what Coop can't know
 
 QA: after Commit all, "Nov 24 Test Run" still had 24 pages and the tile said they "need a store". Checked on Staging: most had a store, but either a misread year or no store form to commit through. Sorting only peels off forms of two or more pages, so a lone page (including one whose store was just picked in Commit all) stayed in the upload's leftover pile and never committed.

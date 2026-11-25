@@ -21,6 +21,8 @@ import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbenc
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
+import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
+import type {ReviewMark} from '@/src/goldline-review-marks';
 import {useUploadQueue} from '@/components/analyst/upload-queue';
 import {Card, CardContent} from '@/components/ui/card';
 import {Button, buttonVariants} from '@/components/ui/button';
@@ -95,7 +97,10 @@ export function BatchReview({
   bas,
   otherFiles,
   initialPageId = null,
+  marks = [],
 }: {
+  /** Every page's review flags (NICH-42). */
+  marks?: ReviewMark[];
   company: string;
   canEdit: boolean;
   batch: BatchRow;
@@ -326,6 +331,7 @@ export function BatchReview({
   const curPageLabel = cur ? scanPageLabel(cur.upload.filename).title : null;
 
   return (
+    <ReviewFlagsProvider company={company} initial={marks} canFlag={canEdit}>
     <div className="mx-auto flex w-full max-w-[140rem] flex-col gap-5 px-4 pt-6 pb-6 xl:px-6">
       <div className="flex flex-col gap-1.5">
         <nav className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
@@ -653,6 +659,7 @@ export function BatchReview({
                   </CardContent>
                 </Card>
                 <ReviewRows
+                  uploadId={cur.upload.id}
                   onPoint={cur.scanUrl ? setPointRow : undefined}
                   pointed={pointRow}
                   rows={curState.rows}
@@ -782,6 +789,7 @@ export function BatchReview({
         document.body,
       )}
     </div>
+    </ReviewFlagsProvider>
   );
 
   // Jump to the first open flag on page k (used after switching tabs).

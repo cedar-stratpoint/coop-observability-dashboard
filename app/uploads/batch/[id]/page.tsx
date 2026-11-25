@@ -10,6 +10,7 @@ import {isLiveProcessing, orderPages} from '@/src/upload-batch';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {BatchReview, type BatchReviewPage} from '@/components/analyst/batch-review';
+import {marksForUploads} from '@/src/goldline-review-marks-data';
 import {isoPeriod} from '@/src/period-date';
 
 export const dynamic = 'force-dynamic';
@@ -56,7 +57,13 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     if (forms.length > 1) redirect(`/uploads/batch/${id}`);
   }
   const codes = [...new Set(pdfPages.flatMap((p) => p.extraction?.data?.rows?.map((r) => r.item_code) ?? []))];
-  const [catalogRaw, stores, bas] = await Promise.all([catalogForCodes(ctx.companyId, codes), listStores(ctx.companyId), getCurrentBas(ctx.companyId)]);
+  const [catalogRaw, stores, bas, marks] = await Promise.all([
+    catalogForCodes(ctx.companyId, codes),
+    listStores(ctx.companyId),
+    getCurrentBas(ctx.companyId),
+    // Review flags (NICH-42); a database without p6_review_marks.sql just shows none.
+    marksForUploads(ctx.companyId, pdfPages.map((p) => p.upload.id)).catch((e) => (console.error('review marks', e), [])),
+  ]);
   // Headings and prices as printed on each page's form version, so the grid matches the paper.
   const catalog = withPrintedHeadings(catalogRaw, pdfPages.flatMap((p) => printedPageItems(p.upload.form_version, p.extraction?.page ?? null)));
 
@@ -92,6 +99,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
         consultant: header?.consultant ?? null,
       }}
       pages={pages}
+      marks={marks}
       catalog={catalog}
       stores={stores}
       bas={bas}
