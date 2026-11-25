@@ -14,6 +14,15 @@ export function isMissingTable(error: DbError | null | undefined): boolean {
 }
 
 /**
+ * True when a column the query names does not exist yet (Postgres undefined_column 42703, or PostgREST's schema-cache miss
+ * PGRST204 on a write): a newer supabase/*.sql has not been applied in this environment.
+ */
+export function isMissingColumn(error: DbError | null | undefined): boolean {
+  if (!error) return false;
+  return error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist|could not find the '.*' column/i.test(error.message);
+}
+
+/**
  * A write's error, with one PostgREST quirk folded in: an insert/delete on a table that does not exist can come back as HTTP
  * 404 with an EMPTY error body (seen on PostgREST 12.2), which isMissingTable cannot recognise. That case is reported as
  * PGRST205 so callers say "not set up" instead of "saving failed".

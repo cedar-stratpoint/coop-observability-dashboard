@@ -612,7 +612,7 @@ export function CrmView({
   // Each customer's logged contacts for the dialog, newest first (the read is already ordered that way).
   const contactsByEmail = useMemo(() => {
     const m = new Map<string, CustomerContact[]>();
-    for (const c of contacts ?? []) m.set(c.email, [...(m.get(c.email) ?? []), c]);
+    for (const c of contacts ?? []) if (c.email) m.set(c.email, [...(m.get(c.email) ?? []), c]); // RET-17: Instagram / mobile-only contacts have no email
     return m;
   }, [contacts]);
   // Who a cart or an order belongs to, the way enrichCustomers matches: the customer id first, else the email.
