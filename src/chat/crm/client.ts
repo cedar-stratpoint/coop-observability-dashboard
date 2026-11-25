@@ -43,7 +43,10 @@ export type CrmEndpointId = keyof typeof CRM_ENDPOINTS;
 
 export const CRM_LIMITS = Object.freeze({
   timeoutMs: 5000,
-  maxResponseBytes: 4_000_000,
+  // ponytail: one full read per endpoint. PROD /api/orders passed 4 MB on 2026-11-25 (every order carries its raw Shopify payload) and
+  // broke every website answer; 16 MB is ~4x headroom at ~1.2 s per read. Upgrade path when it nears this: page /api/orders with
+  // cursor + fields (src/crm-data.ts readOrdersForPlan already does) instead of raising the cap again.
+  maxResponseBytes: 16_000_000,
   maxGetsPerTurn: 8,
   /** GETs a crm_query "all" walk may add in one turn (its pages), counted apart from the normal cap. */
   maxPagedGets: 60,
