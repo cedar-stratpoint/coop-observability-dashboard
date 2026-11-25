@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Overview trend: each month is its own link, Stores gets a month filter
+
+Ask: the Units sold bars should react one at a time on hover, and each bar should open Stores already filtered to that month. Before, the whole card was one link to all-time Stores, and Stores had no month filter at all (its "current period" was every month on file).
+
+- **Trend bars** (`app/overview/page.tsx`): each loaded month is a link to `/stores?month=YYYY-MM&sort=units`. Hover or focus a bar and it fills in, its figure rises in, its month label lights up, and the other months fade back (pointer devices only, so touch never sticks). Press scales the bar a touch; reduced motion drops the movement. Months not loaded stay dashed and aren't links. The card itself is no longer one link (links can't nest); its footer keeps "Units by store, all months" and a "Pick a month to see its stores." hint.
+- **Stores month filter** (`app/stores/page.tsx`, `goldline-stores-view.tsx`): a Month picker (All months + each month with sales) in the header; `?month=` drives it. The subtitle names the month; the tiles and leaderboard show that month's totals. The restock rule's 3-month window still reads from the latest loaded month, not the picked one. An unknown month falls back to all months.
+- **SQL** `supabase/nichido/f2h_sales_by_store_month.sql` (additive, two read functions): `sales_by_store(company, start, end)` sums the s5 per-store totals (~300 rows decrypted, ~0.45 s, cached per sales version) with SKU counts from plain columns; `sales_store_months(company)` lists months with sales, nothing decrypted. **Applied to Nichido Staging; not on Prod yet.** Without it the picker hides and Stores shows all months, so the app is safe to ship ahead of the SQL. Checked: June 2026 totals 236,832 units, the same as the trend bar.
 ## 2026-11-25 — "O/S" printed on the form is a note, not a count; band price flags tuned; one click for every paper price on a page
 
 A full 98-page staging upload ("Oct scan · band prices + O/S") was audited against the scans after #808 and #809.
