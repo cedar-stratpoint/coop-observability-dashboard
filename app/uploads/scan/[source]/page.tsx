@@ -115,9 +115,15 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
   // unfiltered board, so a BA or version filter never changes what it commits.
   // Forms with no store (none read, or a code not in the store list) get a picker in it.
   const known = new Set(stores.map((s) => s.code));
-  const needsStore = rawBoard.forms.filter((f) => f.needsReview > 0 && (!f.storeCode || !known.has(f.storeCode) || f.flags.includes('store-unmatched')));
-  const bulkForms = rawBoard.forms.filter((f) => f.batchKind === 'form' && f.batchId && f.needsReview > 0 && !needsStore.includes(f));
-  const bulkNotListed = rawBoard.forms.filter((f) => f.needsReview > 0).length - bulkForms.length - needsStore.length;
+  const open = rawBoard.forms.filter((f) => f.needsReview > 0);
+  const needsStore = open.filter((f) => !f.storeCode || !known.has(f.storeCode) || f.flags.includes('store-unmatched'));
+  const bulkForms = open.filter((f) => f.batchKind === 'form' && f.batchId && !needsStore.includes(f));
+  // The rest have a store but sit outside a store form (a lone page, a misread year). With a
+  // date (the board's corrected one) and all pages in one batch, Commit all files them.
+  const rest = open.filter((f) => !needsStore.includes(f) && !bulkForms.includes(f));
+  const strays = rest.filter((f) => f.batchId && f.periodStart && f.periodEnd && f.needsReview === f.uploadIds.length);
+  const needsDate = rest.filter((f) => !f.periodStart || !f.periodEnd);
+  const bulkNotListed = rest.length - strays.length - needsDate.length;
   const storeNames = Object.fromEntries(stores.map((s) => [s.code, s.name]));
 
   return (
@@ -145,7 +151,17 @@ export default async function Page({params, searchParams}: {params: Promise<{sou
             </div>
             {/* Always mounted (it hides its own button when nothing is left), so the success screen
                 survives the refresh that follows the last commit. */}
-            <CommitAllDialog company={companyId} dropId={drop} forms={bulkForms} needsStore={needsStore} stores={stores} storeNames={storeNames} notListed={bulkNotListed} />
+            <CommitAllDialog
+              company={companyId}
+              dropId={drop}
+              forms={bulkForms}
+              needsStore={needsStore}
+              strays={strays}
+              needsDate={needsDate}
+              stores={stores}
+              storeNames={storeNames}
+              notListed={bulkNotListed}
+            />
           </div>
         )}
       </header>
