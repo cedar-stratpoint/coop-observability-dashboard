@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Scan viewer: zoom controls moved off the page
+
+Feedback: the floating zoom bar (enlarge, rotate, zoom out, %, zoom in) sat on the bottom-right of the scan and covered handwriting there (totals, the page number). It is now a slim strip above the page, inside the viewer's frame, so nothing on the paper is ever covered. Same controls, same pinch/drag/click behaviour; applies to the review side pane and the enlarged view (`components/analyst/scan-page-viewer.tsx`).
+
 ## 2026-11-25 · GitLab staging deploys use a Vercel "staging" environment
 
 The first GitLab deploy of `staging` built fine but failed at `vercel alias set` ("User not found": `COOP_VERCEL_TOKEN` is a team token and the alias command looks up a personal user). Testing that build showed a bigger problem: sign-in failed with `MissingSecret`. Vercel doesn't apply branch-scoped Preview vars to CLI deploys, even when the deploy records `gitCommitRef: staging`, so `AUTH_SECRET` and the other 20 `staging`-scoped vars were missing. The alias failure kept that build off the staging domain.
