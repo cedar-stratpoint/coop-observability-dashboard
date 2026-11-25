@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Instagram handles are clickable: open the profile to message them
+
+Owner: "walang contact in IG?" Every `@handle` in Ask Coop's tables (leads, overlap, matches) and in the Website CRM Instagram column now opens `instagram.com/<handle>` in a new tab, where the team messages them. Nothing is sent from Coop. `instagramUrl` (`src/instagram.ts`) only links a real handle (letters, digits, "." and "_", up to 30), so customer-typed text can never become another link.
+
 ## 2026-11-25 · GitLab staging deploys use a Vercel "staging" environment
 
 The first GitLab deploy of `staging` built fine but failed at `vercel alias set` ("User not found": `COOP_VERCEL_TOKEN` is a team token and the alias command looks up a personal user). Testing that build showed a bigger problem: sign-in failed with `MissingSecret`. Vercel doesn't apply branch-scoped Preview vars to CLI deploys, even when the deploy records `gitCommitRef: staging`, so `AUTH_SECRET` and the other 20 `staging`-scoped vars were missing. The alias failure kept that build off the staging domain.
