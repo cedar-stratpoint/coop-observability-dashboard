@@ -29,6 +29,7 @@ import {
   type PetBirthdayStatus,
 } from './crm-compute';
 import {phDay} from './custom-range';
+import {boothCell, boothText, type CustomerBooth} from './customer-links';
 import type {CheckoutStage, CrmCheckout, CrmCustomer, CrmMetrics, CrmOrder} from './crm-types';
 
 /* ---------- sorting ---------- */
@@ -312,8 +313,15 @@ export function orderCsv(rows: readonly CrmOrder[], asOf: string, note: string):
 const toPlatinumCell = (c: CustomerRow, threshold: number): string =>
   c.membershipTier === 'platinum' ? 'Qualified' : c.membershipTier === 'gold' ? toPlatinum(c.spendYtd, threshold).left.toFixed(2) : '';
 
+/** RET-15 Slice B: the customers' linked / exact booth metadata, and whether the leads and links were read (else "unknown"). */
+export type BoothLookup = {map: ReadonlyMap<string, CustomerBooth>; read: {leads: boolean; links: boolean}};
+const boothCsv = (c: CustomerRow, b: BoothLookup): [string, string] => {
+  const f = boothCell(b.map.get((c.email ?? '').trim().toLowerCase()), b.read);
+  return f === 'unknown' ? ['unknown', 'unknown'] : f === 'none' ? ['', ''] : [f.instagram ? `@${f.instagram}` : '', f.booth.map(boothText).join('; ')];
+};
+
 /** The Customers export (any audience preset; `title` names the file's audience). */
-export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: string, threshold: number, title: string, withBday = false): Csv {
+export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: string, threshold: number, title: string, withBday = false, booth?: BoothLookup): Csv {
   const tiers = tierCounts([...rows]);
   return [
     ...csvSummary(title, asOf, note, [
@@ -324,7 +332,7 @@ export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: st
       ['Guest', tiers.guest],
       ['Lifetime spend (paid, test orders excluded)', sum(rows.map((c) => c.spent))],
     ]),
-    ['Name', 'Email', 'Mobile', 'Member since (PH)', 'Tier', 'Orders', 'Vouchers used', ...(withBday ? ['Birthday voucher'] : []), 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Last contacted (PH)', 'Last contact kind', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'To Platinum', 'Pet'],
+    ['Name', 'Email', 'Mobile', 'Member since (PH)', 'Tier', 'Orders', 'Vouchers used', ...(booth ? ['Instagram', 'Booth'] : []), ...(withBday ? ['Birthday voucher'] : []), 'First order (PH)', 'Last order (PH)', 'Days since last order', 'Emails sent', 'Manual contacts', 'Times contacted', 'Last contacted (PH)', 'Last contact kind', 'Email consent', 'Lifetime spend', 'Spend this membership year', 'To Platinum', 'Pet'],
     ...rows.map((c) => [
       [c.firstName, c.lastName].filter(Boolean).join(' '),
       c.email ?? '',
@@ -333,6 +341,7 @@ export function customerCsv(rows: readonly CustomerRow[], asOf: string, note: st
       c.membershipTier ?? 'guest',
       String(c.orderCount),
       c.vouchers ? voucherLabels(c.vouchers).map((v) => v.label).join('; ') : 'unknown',
+      ...(booth ? boothCsv(c, booth) : []),
       ...(withBday ? [bdayVoucherText(c.bdayVoucher)] : []),
       c.firstOrderAt ? fmtPhDate(c.firstOrderAt) : '',
       c.lastOrderAt ? fmtPhDate(c.lastOrderAt) : '',
