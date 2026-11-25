@@ -8,6 +8,19 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 · Vercel deploys move from GitHub to GitLab CI
+
+Staging and production now deploy from a GitLab pipeline (`.gitlab-ci.yml`) instead of Vercel's GitHub integration. Same Vercel project (`coop-observability-dashboard`), same domains: `main` → **coop-cedar.vercel.app** (Production), `staging` → **coop-cedar-staging.vercel.app** (a Preview build, aliased on every deploy).
+
+- **GitHub stays the source of truth.** PRs and merges happen on GitHub. `mirror-gitlab.yml` pushes to `gitlab.stratpoint.dev`, and that push starts the pipeline. Don't commit on GitLab, because the mirror force-pushes over it.
+- **Vercel CLI, remote build.** Vercel's native GitLab integration doesn't cover self-managed GitLab outside Enterprise. The job checks out the real branch name before deploying, because many Preview env vars (AUTH_*, NICHIDO_URL, GOLDLINE_*) are scoped to the `staging` branch and depend on the deploy's git metadata.
+- **Only staging and main build.** Feature-branch and PR previews are gone. Every push used to build, and the last `main` deploy failed with `function_creation_throttled`. `vercel.json` sets `git.deploymentEnabled: false`, so the GitHub link stays but no longer builds.
+- **Smoke check.** After each deploy the job reads the domain's `/api/health` and fails unless it is up, its database answers, and it reports the expected environment (and the branch/commit when Vercel fills them in).
+- **Notifications.** The Google Chat "Deployed to Staging/Production" message moved into the GitLab job (it also posts on failure). `deploy-gchat-notify.yml` stays for now as a fallback. It fires on Vercel's GitHub deployment statuses, which should stop once GitHub builds are off. Remove it once the first GitLab deploy is checked; if both post, each deploy shows up twice in Chat until then. PR notices stay on GitHub.
+- **Setup (GitLab, by hand):** CI/CD variables `COOP_VERCEL_TOKEN` (masked, protected), `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `GCHAT_WEBHOOK_URL` (masked). Protect `staging` and `main`.
+- **Missed deploy:** GitLab skips push pipelines when one push moves more than 4 refs. Run the pipeline on the branch from Build > Pipelines.
+- **Rollback:** remove `git` from `vercel.json`, and GitHub auto-deploys resume on the next push.
+
 ## 2026-11-25 — "Same person" links: Instagram + Booth on the Website CRM table, not a merge (RET-15 Slice B)
 
 Owner: link a website customer to a booth lead from Ask Coop's matches table, and see the booth's Instagram and event beside the customer. **Decision: extra metadata, not a total merge.** The website row keeps its own name, email, orders, spend and vouchers (the CRM stays the source), so orders, spend, cohorts and repeat rate never change, and **Unlink** removes only the extra metadata. Only the person who linked can unlink (same delete-own rule as the contact log).
