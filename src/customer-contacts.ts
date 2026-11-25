@@ -179,15 +179,30 @@ export async function loadContactRows(makePage: MakePage): Promise<CustomerConta
  * database answers "column does not exist" (42703 / PGRST204), switch to `legacy` (the old select) for this and every later
  * page, so the page still loads and the new fields read null / false. Any other error passes through (the read is unknown).
  */
-export function withColumnFallback(primary: MakePage, legacy: MakePage): MakePage {
+export function withColumnFallback(primary: MakePage, legacy: MakePage, onFallback: () => void = () => {}): MakePage {
   let useLegacy = false;
   return async (from, to) => {
     if (useLegacy) return legacy(from, to);
     const r = await primary(from, to);
     if (r.error && isMissingColumn(r.error)) {
       useLegacy = true;
+      onFallback();
       return legacy(from, to);
     }
     return r;
   };
+}
+
+/**
+ * The log and how it was read. `legacy` = the RET-17 columns are not there yet (read with the old select): contacts keyed by
+ * Instagram or mobile cannot exist or be seen, so a person without an email has an UNKNOWN status, never "not contacted"
+ * (see contactStatus in src/person-identity.ts).
+ */
+export type ContactLog = {rows: CustomerContact[]; legacy: boolean};
+
+/** {@link loadContactRows} through {@link withColumnFallback}, saying whether the legacy select was used. Null = unreadable. */
+export async function loadContactLog(primary: MakePage, legacy: MakePage): Promise<ContactLog | null> {
+  let usedLegacy = false;
+  const rows = await loadContactRows(withColumnFallback(primary, legacy, () => (usedLegacy = true)));
+  return rows === null ? null : {rows, legacy: usedLegacy};
 }

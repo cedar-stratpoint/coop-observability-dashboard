@@ -35,10 +35,29 @@ export function samePerson(a: Person, b: Person, links: readonly CustomerLink[])
   return sameKeys(ka, kb) || links.some((l) => linkedBy(l, ka, kb) || linkedBy(l, kb, ka));
 }
 
-/** The logged contacts of this person, in the log's order (newest first); null when the log could not be read. */
-export function contactsOf(p: Person, contacts: readonly CustomerContact[] | null, links: readonly CustomerLink[]): CustomerContact[] | null {
+/**
+ * A logged contact belongs to this person: {@link samePerson}, except that a contact keyed ONLY by a mobile never joins a
+ * person who has an email by that mobile alone (one household phone: it would attach to every emailed person on it). It
+ * still joins a person without an email, or a customer a saved Same person link ties that mobile to.
+ */
+function isTheirs(p: Person, c: CustomerContact, links: readonly CustomerLink[]): boolean {
+  const kp = keysOf(p);
+  const kc = keysOf(c);
+  if (kc.mobile && !kc.email && !kc.instagram && kp.email) return links.some((l) => linkedBy(l, kp, kc));
+  return samePerson(p, c, links);
+}
+
+/** How the log was read: `legacy` = before supabase/customer_contacts_lead_keys.sql (no Instagram / mobile / replied columns). */
+export type LogRead = {legacy?: boolean};
+
+/**
+ * The logged contacts of this person, in the log's order (newest first). Null when the log could not be read, or when it was
+ * read without the Instagram / mobile columns (legacy) and the person has no email: their contacts cannot be seen.
+ */
+export function contactsOf(p: Person, contacts: readonly CustomerContact[] | null, links: readonly CustomerLink[], read: LogRead = {}): CustomerContact[] | null {
   if (contacts === null) return null;
-  return contacts.filter((c) => samePerson(p, c, links));
+  if (read.legacy && !keysOf(p).email) return null;
+  return contacts.filter((c) => isTheirs(p, c, links));
 }
 
 export type ContactState = 'not_contacted' | 'contacted' | 'replied' | 'unknown';
@@ -50,13 +69,14 @@ const UNKNOWN: ContactStatus = {state: 'unknown', lastAt: null, lastChannel: nul
  * Contacted = a contact the team logged (D1; automated CRM emails never count here). Replied = any of them has replied (D2).
  * Unknown is never "never": an unreadable log, or a person with no email, Instagram or mobile, is 'unknown', not 'not_contacted'.
  */
-export function contactStatus(p: Person, contacts: readonly CustomerContact[] | null, links: readonly CustomerLink[]): ContactStatus {
+export function contactStatus(p: Person, contacts: readonly CustomerContact[] | null, links: readonly CustomerLink[], read: LogRead = {}): ContactStatus {
   const k = keysOf(p);
   if (!k.email && !k.instagram && !k.mobile) return UNKNOWN;
-  const mine = contactsOf(p, contacts, links);
+  const mine = contactsOf(p, contacts, links, read);
   if (mine === null) return UNKNOWN;
   if (mine.length === 0) return {state: 'not_contacted', lastAt: null, lastChannel: null};
-  const at = (c: CustomerContact) => Date.parse(c.contactedAt);
-  const last = mine.reduce((best, c) => (at(c) > at(best) ? c : best));
-  return {state: mine.some((c) => c.replied) ? 'replied' : 'contacted', lastAt: last.contactedAt, lastChannel: last.channel};
+  // The newest contact with a readable time; an unparseable contactedAt still counts as a contact but never as "last".
+  let last: CustomerContact | null = null;
+  for (const c of mine) if (Number.isFinite(Date.parse(c.contactedAt)) && (!last || Date.parse(c.contactedAt) > Date.parse(last.contactedAt))) last = c;
+  return {state: mine.some((c) => c.replied) ? 'replied' : 'contacted', lastAt: last?.contactedAt ?? null, lastChannel: last?.channel ?? null};
 }

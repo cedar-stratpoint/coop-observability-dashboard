@@ -3,7 +3,7 @@
 // applied, reads fall back to the old columns and logging by Instagram / mobile says "not set up" (email logging keeps working).
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {loadContactRows, logContactWith, readContactInput, withColumnFallback, type ContactLogDeps, type NewContactRow} from '../src/customer-contacts';
+import {loadContactLog, loadContactRows, logContactWith, readContactInput, withColumnFallback, type ContactLogDeps, type NewContactRow} from '../src/customer-contacts';
 
 const ME = 'ana@zoomy.ph';
 const ID = '0b6f6a52-2f6e-4f5e-9d33-6f1b8a3c9e01';
@@ -111,6 +111,22 @@ describe('loadContactRows: the new columns, and their absence', () => {
     const other = async () => ({data: null, error: {code: '57014', message: 'timeout'}});
     const old = async () => ({data: [], error: null});
     expect(await loadContactRows(withColumnFallback(other, old))).toBeNull();
+  });
+});
+
+describe('loadContactLog: says when the read fell back to the legacy columns', () => {
+  const row = {id: ID, customer_email: 'mia@example.com', channel: 'sms', note: null, contacted_at: '2026-11-10T02:00:00Z', created_by: ME};
+  it('new columns present: legacy false', async () => {
+    const log = await loadContactLog(async () => ({data: [{...row, contact_instagram: null, contact_mobile: null, replied: false}], error: null}), async () => ({data: [], error: null}));
+    expect(log?.legacy).toBe(false);
+    expect(log?.rows).toHaveLength(1);
+  });
+  it('a 42703 on the new select: legacy true, rows from the old select', async () => {
+    const log = await loadContactLog(async () => ({data: null, error: MISSING_COLUMN}), async () => ({data: [row], error: null}));
+    expect(log).toEqual({legacy: true, rows: [{id: ID, email: 'mia@example.com', instagram: null, mobile: null, channel: 'sms', note: null, replied: false, contactedAt: '2026-11-10T02:00:00Z', createdBy: ME}]});
+  });
+  it('an unreadable log is null', async () => {
+    expect(await loadContactLog(async () => ({data: null, error: {code: '57014', message: 'timeout'}}), async () => ({data: [], error: null}))).toBeNull();
   });
 });
 
