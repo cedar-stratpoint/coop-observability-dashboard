@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
 import {useReturnTrip} from '@/components/analyst/back-nav';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
-import {AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
+import {AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, Trash2, UserPen} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {toneText} from '@/src/review-confidence';
 import {scanPageLabel, scanPosition} from '@/src/upload-batch';
@@ -20,6 +20,7 @@ import {assignFormBaAction} from '@/app/uploads/actions';
 import {sendReread} from '@/src/upload-transport';
 import {Button} from '@/components/ui/button';
 import {NativeSelect} from '@/components/ui/native-select';
+import {StickyBar, TopButton, useStuckSentinel} from '@/components/analyst/sticky-bar';
 import {Pagination} from '@/components/analyst/pagination';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
 import {DeleteUploadDialog} from '@/components/analyst/delete-upload-dialog';
@@ -62,24 +63,9 @@ export function ScanFileList({files, canEdit, company, version = null, title = n
   const params = useSearchParams();
   const [deleteTarget, setDeleteTarget] = useState<UploadRow | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
-  // Condensed bar (Nov 25, owner QA): once the full filters scroll under the app header, a slim
-  // bar pins below it with the scan's name and the same filters as compact selects, so a long
-  // list never loses its context. Driven by a sentinel placed after the full filters.
-  const filtersEnd = useRef<HTMLDivElement>(null);
-  const bar = useRef<HTMLDivElement>(null);
-  const [stuck, setStuck] = useState(false);
-  useEffect(() => {
-    const el = filtersEnd.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    // The app header is 3.5rem; past that line the full filters are gone.
-    const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting && e.boundingClientRect.top < 64), {rootMargin: '-60px 0px 0px 0px'});
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  // Hidden = out of the tab order and the accessibility tree too (React 18 has no `inert` prop).
-  useEffect(() => {
-    if (bar.current) bar.current.inert = !stuck;
-  }, [stuck]);
+  // Condensed bar (Nov 25, owner QA): the scan's name and the same filters, pinned once the full
+  // filters scroll under the app header (components/analyst/sticky-bar.tsx).
+  const {ref: filtersEnd, stuck} = useStuckSentinel();
   // The filters and list page live in the URL (type / status / fv / lp), so browser Back from
   // a page review lands on exactly the list the reviewer left, not a reset one.
   const filters = parseFileFilter({type: params.get('type'), status: params.get('status'), fv: params.get('fv')});
@@ -232,26 +218,13 @@ export function ScanFileList({files, canEdit, company, version = null, title = n
       return n;
     });
 
-  const toTop = () => {
-    const reduce = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    window.scrollTo({top: 0, behavior: reduce ? 'auto' : 'smooth'});
-  };
   const SEL = 'h-8 rounded-lg text-xs';
 
   return (
     <div className="flex flex-col gap-4">
       {/* The condensed bar: zero height in the flow (nothing shifts when it appears), pinned under
           the app header. Same URL-backed filters as the chips below, so the two always agree. */}
-      <div className="sticky top-[calc(3.5rem+0.4rem)] z-20 -mb-4 h-0">
-        <div
-          ref={bar}
-          aria-hidden={!stuck}
-          className={cn(
-            'absolute inset-x-0 top-0 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card/95 px-3 py-2 shadow-sm backdrop-blur-sm',
-            'transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
-            stuck ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0',
-          )}
-        >
+      <StickyBar stuck={stuck} gapClass="-mb-4">
           <span className="flex min-w-0 flex-1 items-baseline gap-2">
             {title && <span className="min-w-0 truncate font-heading text-sm font-semibold tracking-tight">{title}</span>}
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -290,17 +263,9 @@ export function ScanFileList({files, canEdit, company, version = null, title = n
                 ))}
               </NativeSelect>
             )}
-            <button
-              type="button"
-              onClick={toTop}
-              aria-label="Back to the top"
-              className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-[transform,border-color,color] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:text-foreground"
-            >
-              <ArrowUp aria-hidden className="size-3.5" /> Top
-            </button>
+            <TopButton />
           </span>
-        </div>
-      </div>
+      </StickyBar>
 
       {/* Scan outcome, the same way the uploader showed it — so this stays the one place to
           come back to a scan and see what read, what was set aside, and what failed. */}
