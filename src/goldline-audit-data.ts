@@ -9,6 +9,7 @@ import {
   auditRows,
   auditSummary,
   isAuditState,
+  isWhy,
   openingState,
   productRollup,
   type AuditCell,
@@ -73,7 +74,7 @@ export type ProductAuditResult = {
   po: PoLeg;
 };
 
-export type AuditParams = {store?: string | null; month?: string | null; state?: string | null; q?: string | null; sort?: string | null; dir?: string | null; page?: string | null};
+export type AuditParams = {store?: string | null; month?: string | null; state?: string | null; why?: string | null; q?: string | null; sort?: string | null; dir?: string | null; page?: string | null};
 
 const firstOf = (month: string) => `${month}-01`;
 const byCode = (a: string, b: string) => a.localeCompare(b, undefined, {numeric: true});
@@ -83,6 +84,7 @@ export function parseAuditQuery(p: AuditParams, summary: AuditSummary): AuditQue
   const page = Number(p.page);
   return {
     state: isAuditState(p.state) ? p.state : openingState(summary),
+    why: isWhy(p.why) ? p.why : null,
     q: (p.q ?? '').slice(0, 80),
     sort: AUDIT_SORTS.includes(p.sort as AuditSort) ? (p.sort as AuditSort) : 'reco',
     dir: p.dir === 'desc' ? 'desc' : 'asc',

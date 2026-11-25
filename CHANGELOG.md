@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Reconcile: the notebook grid, what's missing, and a notice for a month without sales
+
+Built from the mock the owner picked (`MobilePOS/Reconcile_Grid_Mock.html`). On By store and By product:
+- **The eight recommendations sit in Justin's notebook layout:** a 2 × 4 grid, rows On the PO / Not on the PO, columns Sold + counted · Sold, not counted · Counted, no sale · Neither. Each box shows its count, recommendation and who acts; boxes that need a step are tinted, empty ones fade but stay clickable, hover or focus explains a box. It replaces the tiles and chips and is the page's only filter.
+- **W I P letters** (green yes, struck grey no, dashed not known) label the columns, so no legend line is needed; the legend and the YYX tip moved into a "How to read this" (?) popover.
+- **"Can't tell yet" is broken down by what's missing** ("Blank on the form 12 · Open the scan", "Page not uploaded 6 · Upload the page", "No Watsons SKU linked · Link SKUs"). A reason filters the lines (`why=` in the URL and the CSV); on By product it opens those lines across All stores. Counts come from the summary over every line, so All stores' paging doesn't change them.
+- **A month without Watsons sales** shows "Nothing to recommend for Oct 2026 yet" with Upload POS sales and the nearest month that can be judged, instead of a grid of zeros.
+
 ## 2026-11-25 · Orders and Restock: shorter copy, more room to breathe
 
 Review: Orders opened with a four-line paragraph, the Restock run with a long sentence, and both felt cramped and dated. Goal: say less, space it out, lower eye strain (aesthetic-usability). Decisions:
