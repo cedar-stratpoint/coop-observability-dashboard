@@ -2,6 +2,7 @@
 
 import {Fragment, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {keptId, useDrillIn} from '@/components/analyst/back-nav';
+import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {ArrowLeft, ArrowRight, Calculator, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, OctagonAlert, PenLine, RefreshCw, TriangleAlert, Trash2} from 'lucide-react';
 import type {AdjustmentReason, AdjustmentRow, BaTile, FlagRow, FlagsData, FormCell, FormCycle, FormRow} from '@/src/goldline-flags-data';
@@ -178,11 +179,17 @@ export function GoldlineFlags({
             Every flag Coop raises counts against the BA on the form. One tile per store and BA; open it to see the form with each flagged cell boxed.
           </p>
         </div>
-        {canEdit && (
-          <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => runChecksAction({company}), 'Checks ran.')}>
-            <RefreshCw className={cn('size-3.5', pending && 'animate-spin motion-reduce:animate-none')} /> Run checks
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Every flag with its page and row, store and BA, and a per-store CSV (NICH-43). */}
+          <Link href="/flags/review" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-sm font-medium transition-[transform,border-color] duration-150 ease-out active:scale-[0.97] [@media(hover:hover)]:hover:border-foreground/25">
+            Every flag, page and row
+          </Link>
+          {canEdit && (
+            <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => runChecksAction({company}), 'Checks ran.')}>
+              <RefreshCw className={cn('size-3.5', pending && 'animate-spin motion-reduce:animate-none')} /> Run checks
+            </Button>
+          )}
+        </div>
       </header>
 
       {notice && (
