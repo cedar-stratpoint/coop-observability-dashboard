@@ -63,7 +63,7 @@ describe('matchPeople: sources', () => {
     expect(rows.map((r) => r.n)).toEqual(rows.map((_, i) => i + 1));
   });
   it('only returns pairs across the two named sources', () => {
-    expect(new Set(rows.flatMap((r) => [r.a_source, r.b_source]))).toEqual(new Set(['website', 'lazada']));
+    expect(new Set(rows.flatMap((r) => [r.a_source, r.b_source]))).toEqual(new Set(['website CRM', 'Lazada'])); // owner 2026-11-25: sources by name
   });
   it('min_tier narrows the list', () => {
     const likely = rowsOf(matchPeople(sources('website', 'lazada', {min_tier: 'likely'}), SRC));

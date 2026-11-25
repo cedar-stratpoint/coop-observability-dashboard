@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-25 — Ask Coop matches table: name first, sides named by source
+
+Owner: the matches table read "A: name … B: Instagram". It now leads with **Name** (the website or Lazada name first, then the booth's typed name, then the handle), then **Match**, **Score**, **Why**, and each side is labelled by where it came from: **Website CRM: name / email / mobile** and **Event leads: name / Instagram / email / mobile / event** (Lazada: name / mobile). The internal "Signals" and "seen in" columns are gone from the table (the model still gets the signals). Tables whose sides are not fixed (one person, one event) say "Record 1 / Record 2" with a "from" column.
+
 ## 2026-11-25 — Event lead contacts: "Collected" is a From–To range
 
 Owner: the Collected filter picked one day only. It is now **Collected from … to …** (PH days, inclusive), with the same day list (only days that have leads); "First day" / "Last day" leave a side open, and the "to" list only offers days on or after "from". Pure `inDayRange` in `src/spin-leads-types.ts`, tested in `test/spin-leads-search.test.ts`.

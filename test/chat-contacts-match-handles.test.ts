@@ -42,3 +42,17 @@ describe('matches: name, email and IG patterns', () => {
     expect(readContactsInput({mode: 'matches', scope: 'sources', a: 'website', b: 'booth', voucher: 'grand300'})).toMatchObject({voucher: 'GRAND300'});
   });
 });
+
+describe('matches table layout (owner 2026-11-25: name first, sides named by source)', () => {
+  it('leads with the name and labels Website CRM and Event leads columns, with the booth event', () => {
+    const r = run({website: [web({shopifyCustomerId: 'k', email: 'karlasy60@gmail.com', firstName: 'Karla', lastName: 'Sy'})], leads: [lead({instagram: '@karla.sy'})], lazada: []});
+    if (!('table' in r)) throw new Error(JSON.stringify(r));
+    const labels = r.table.columns.map((c) => c.label);
+    expect(labels.slice(0, 5)).toEqual(['#', 'Name', 'Match', 'Score', 'Why']);
+    expect(labels).toContain('Website CRM: email');
+    expect(labels).toContain('Event leads: Instagram');
+    expect(labels).toContain('Event leads: event');
+    expect(labels.some((l) => /^[AB]:/.test(l) || l === 'Signals')).toBe(false);
+    expect(r.table.rows[0]).toMatchObject({name: 'Karla Sy', b_instagram: '@karla.sy', b_event: 'modern-market-sept2026'});
+  });
+});
