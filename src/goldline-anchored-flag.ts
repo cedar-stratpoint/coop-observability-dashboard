@@ -68,6 +68,27 @@ export function batchLegacyEnabled(companyId: string): boolean {
   return companyInEnv(companyId, process.env.GOLDLINE_BATCH_LEGACY_COMPANIES);
 }
 
+/**
+ * Sharp header crops for the classify call (Nov 26): the handwritten header (store code, store name,
+ * period, BA) is read off a ~90 dpi page, so codes come back misread or blank (2414 as 2494, 481 as
+ * 81). With 300 dpi crops of the page's top and bottom edges the store code came back right on 24 of
+ * 55 pages against 15, at about 6.4k more input tokens per page. Per company via
+ * `GOLDLINE_HEADER_CROP_COMPANIES`; fail-closed, off = today's classify call unchanged.
+ */
+export function headerCropsEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_HEADER_CROP_COMPANIES);
+}
+
+/**
+ * Known BA names for the classify call (Nov 26): the roster Coop learns from committed forms is
+ * passed to the reader as a reference, so a handwritten Beauty Consultant name is matched against
+ * real names instead of guessed letter by letter. Per company via `GOLDLINE_BA_HINT_COMPANIES`;
+ * fail-closed, off = today's classify call unchanged.
+ */
+export function baHintEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_BA_HINT_COMPANIES);
+}
+
 function companyInEnv(companyId: string, raw: string | undefined): boolean {
   if (!companyId) return false;
   return (raw ?? '')

@@ -25,7 +25,7 @@
 import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
 import {generatedTemplateItems} from './goldline-form-templates.generated';
 import {printedNames, printedPageItems, type PrintedItem} from './goldline-printed-page';
-import {applyReaderFlags, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_LEGACY, type ReaderFlag} from './goldline-reader-marks';
+import {applyReaderFlags, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_LEGACY, withHeadersSchema, type ReaderFlag} from './goldline-reader-marks';
 import {type OutOfStock} from './out-of-stock';
 import {applyPageOutOfStock} from './printed-os';
 
@@ -284,13 +284,14 @@ export function buildLegacyManifestPrompt(page: number, opts: {marks?: boolean} 
   ].join('\n');
 }
 
-/** The Legacy schema + the reader's optional per-row `flags` (NICH-36). */
+/** The Legacy schema + the reader's optional per-row `flags` (NICH-36) and the page-level
+ *  `headers_written_over` (QA Nov 26: relabelled Legacy columns were never asked for). */
 export function withLegacyMarksSchema(schema: typeof LEGACY_EXTRACTION_SCHEMA): typeof LEGACY_EXTRACTION_SCHEMA {
   const items = schema.properties.rows.items;
-  return {
+  return withHeadersSchema({
     ...schema,
     properties: {...schema.properties, rows: {...schema.properties.rows, items: {...items, properties: {...items.properties, flags: FLAGS_PROPERTY}}}},
-  } as typeof LEGACY_EXTRACTION_SCHEMA;
+  } as typeof LEGACY_EXTRACTION_SCHEMA);
 }
 
 /** JSON schema for a Legacy page extraction (header + one object per item). */

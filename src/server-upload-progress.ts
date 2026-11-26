@@ -55,3 +55,17 @@ export function serverPageState(status: string): 'queued' | 'running' | 'done' |
       return 'queued';
   }
 }
+
+/** One scan's page counts for its compact row in a multi-scan upload: read (in review or
+ *  committed), set aside (sales / blank pages), failed, and still in flight. Pure. */
+export type ScanTally = {total: number; read: number; setAside: number; failed: number; inFlight: number};
+export function tallyServerPages(pages: Array<Pick<ServerPageProgress, 'status'>>): ScanTally {
+  const t: ScanTally = {total: pages.length, read: 0, setAside: 0, failed: 0, inFlight: 0};
+  for (const p of pages) {
+    if (p.status === 'needs_review' || p.status === 'committed') t.read++;
+    else if (p.status === 'rejected') t.setAside++;
+    else if (p.status === 'failed') t.failed++;
+    else t.inFlight++;
+  }
+  return t;
+}

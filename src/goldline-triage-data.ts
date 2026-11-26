@@ -2,13 +2,14 @@ import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
-import {knownStoreCodes} from './goldline-store-registry';
-import {reconcileBaNames} from './goldline-ba-reconcile';
+import {knownStores} from './goldline-store-registry';
+import {formConsultants, reconcileBaNames} from './goldline-ba-reconcile';
 import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
 import {familyOf, type BatchLink} from './upload-drops';
+import {scanPosition} from './upload-batch';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -105,7 +106,7 @@ export function toClassifiedPage(u: UploadClsRow): ClassifiedPage {
   };
 }
 
-function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds: Map<string, 'form' | 'scan'>): TriageForm {
+function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds: Map<string, 'form' | 'scan'>, baOf?: Map<string, string | null>): TriageForm {
   const ids = g.slots.flatMap((s) => s.ids);
   const rows = ids.map((id) => byId.get(id)).filter((r): r is UploadClsRow => Boolean(r));
   const first = rows[0]?.classification as Record<string, unknown> | undefined;
@@ -115,7 +116,8 @@ function toTriageForm(g: FormGroup, byId: Map<string, UploadClsRow>, batchKinds:
     key: g.key,
     storeCode: g.store_code,
     storeName: (first?.store_name as string) ?? null,
-    consultant: (first?.consultant as string) ?? null,
+    // The form's agreed BA (formConsultants) when known, else what its first page read.
+    consultant: (ids.map((id) => baOf?.get(id)).find((n): n is string => Boolean(n)) ?? (first?.consultant as string)) ?? null,
     periodStart: g.period_start,
     periodEnd: g.period_end,
     version: g.version,
@@ -233,10 +235,22 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
   // (the handwritten year is the noisiest field) to the bundle's dominant year before
   // grouping — so neither a drifted store code ("DS 5300") nor a misread year spins a
   // page off into its own fake form. Snapped pages are flagged on their form.
-  const known = await knownStoreCodes(companyId);
+  const known = await knownStores(companyId);
   // Scan order first (blank-store runs need it), snap stores, then cut blank runs into
   // forms, then reconcile years, then group.
-  const pages = assignBlankFormRuns(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known));
+  // Pages with no sure code take the one their own physical form read (QA Nov 26).
+  const posOf = (p: ClassifiedPage) => scanPosition(byId.get(p.id)?.filename ?? '');
+  const storeName = new Map(known.map((s) => [s.code, s.name]));
+  // Pages with no sure code take the one their own physical form read, and the pages of one form
+  // agree on one BA name (QA Nov 26).
+  const filed = formConsultants(
+    inheritFormStores(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known), posOf),
+    posOf,
+    [],
+    (c) => storeName.get(c) ?? null,
+  );
+  const baOf = new Map(filed.map((p) => [p.id, p.consultant]));
+  const pages = assignBlankFormRuns(filed);
   const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(pages));
 
   const parked: ParkedPage[] = [
@@ -252,7 +266,7 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
 
   return {
     configured: true,
-    forms: forms.map((g) => toTriageForm(g, byId, batchKinds)),
+    forms: forms.map((g) => toTriageForm(g, byId, batchKinds, baOf)),
     parked,
     totals: {forms: forms.length, inventoryPages, sales: sales.length, blank: blanks.length, unplaceable: unplaceable.length},
     mock: false,

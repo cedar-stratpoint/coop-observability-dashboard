@@ -5,7 +5,9 @@ import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter, useSearchParams} from 'next/navigation';
 import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
-import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
+import type {ExtractionRecord, FormPageStrip, StoreCheck, StoreOption, UploadRow} from '@/src/goldline-data';
+import {storeCheckNote} from '@/src/store-check-note';
+import {titleName} from '@/src/goldline-ui';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {commitReview, setBandPriceAction, setBandPricesAction} from '@/app/uploads/actions';
@@ -51,7 +53,21 @@ export type PageNav = {
   crumbs: PageCrumb[];
 };
 /** Coop's suggestion for this page's header. `storeFrom` says where the store came from. */
-export type PageSuggestionView = {storeCode: string | null; storeFrom: 'page' | 'batch' | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+export type PageSuggestionView = {
+  storeCode: string | null;
+  storeFrom: 'page' | 'batch' | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  consultant: string | null;
+  /** Doubt about the store read on the page (see StoreCheck in goldline-data). */
+  storeCheck?: StoreCheck | null;
+  /** The store name written on the page, as read. */
+  storeName?: string | null;
+  /** Nothing proved whether this page is V1 or V2 (the layout read was empty, the classifier unsure). */
+  versionUnsure?: boolean;
+  /** Set when `consultant` is the form's agreed BA: what this page itself read (null = none). */
+  consultantRead?: string | null;
+};
 
 // What the last committed page of a scan used, so the next page (pages 2 to 5 rarely print a
 // store) can start from it, plus a one-line "committed" note to show after moving on. Kept
@@ -345,6 +361,21 @@ export function UploadReview({
           ? `Coop read Store ${storeCode} on this page. Change it if that’s wrong.`
           : `Suggested from this scan’s batch (Store ${storeCode}). Check it against the page.`
         : 'Committed into this store and period. Pages with the same store and period add up to one Inventory count.';
+
+  // Doubt about the store Coop read (QA Nov 26): said in amber with a one-click fix, while the
+  // Store field still holds Coop's prefill. Changing the store yourself clears it.
+  const storeCheck: StoreCheck | null = suggestion?.storeCheck ?? null;
+  const checkApplies = storeCheck
+    ? storeCheck.status === 'missing'
+      ? !storeCode.trim()
+      : suggestion?.storeFrom === 'page' && storeCode === suggestion.storeCode
+    : false;
+  const storeNote = checkApplies
+    ? storeCheckNote(storeCheck, storeCode, (c) => {
+        const n = stores.find((x) => x.code === c)?.name;
+        return n ? titleName(n) : null;
+      }, suggestion?.storeName)
+    : null;
 
   // Two-column whenever there's a scan beside the content: the workbench when a page was
   // read, or the "set aside" explainer when it wasn't (a blank back or a sales sheet).
@@ -704,6 +735,13 @@ export function UploadReview({
                         disabled={committed || !canEdit}
                         className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
                       />
+                      {suggestion?.consultantRead !== undefined && ba === suggestion?.consultant && !committed && (
+                        <span className="text-xs text-muted-foreground">
+                          {suggestion.consultantRead
+                            ? `This page reads “${suggestion.consultantRead}”; the rest of the form agrees on this name.`
+                            : 'No BA name on this page; the rest of the form agrees on this name.'}
+                        </span>
+                      )}
                       <datalist id="ba-names">
                         {(bas?.names ?? []).map((n) => (
                           <option key={n} value={n} />
@@ -712,7 +750,25 @@ export function UploadReview({
                     </label>
                   )}
                 </div>
-                {nav && !committed && <p className="text-xs text-muted-foreground">{suggestionNote}</p>}
+                {nav && !committed && storeNote ? (
+                  <div
+                    role="status"
+                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg bg-[var(--amber-bg)] px-3.5 py-2.5 text-[13px] text-[var(--bhr-warn)]"
+                  >
+                    <span>{storeNote.text}</span>
+                    {storeNote.action && canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => setStoreCode(storeNote.action!.code)}
+                        className="shrink-0 rounded-md border border-[color-mix(in_oklab,var(--bhr-warn)_35%,transparent)] bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-transform duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+                      >
+                        {storeNote.action.label}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  nav && !committed && <p className="text-xs text-muted-foreground">{suggestionNote}</p>
+                )}
                 {!nav && (extraction.page ?? 1) > 1 && !committed && (
                   <p className="text-xs text-muted-foreground">
                     Pages 2 to 5 don&apos;t print the store or period. Use the same ones as this store&apos;s page 1 so all pages land in
@@ -757,6 +813,14 @@ export function UploadReview({
             </CardContent>
           </Card>
 
+          {suggestion?.versionUnsure && !committed && (upload.form_version === 'v1' || upload.form_version === 'v2' || upload.form_version === 'unknown') && (
+            <p role="status" className="rounded-lg bg-[var(--amber-bg)] px-3.5 py-2.5 text-[13px] text-[var(--bhr-warn)]">
+              {upload.form_version === 'unknown'
+                ? 'Coop couldn’t tell whether this page is V1 or V2.'
+                : `Coop read this page as ${upload.form_version.toUpperCase()}, but couldn’t confirm it from the printed layout.`}{' '}
+              Check the counts sit under the right columns: on V2 the Delivery column stands on its own before the numbered columns; on V1 Delivery is column 4.
+            </p>
+          )}
           <ReviewFlagsProvider company={company} initial={marks} canFlag={canEdit && upload.kind === 'inventory_pdf'}>
           <ReviewRows
             uploadId={upload.id}

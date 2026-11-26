@@ -10,6 +10,17 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.30.0: store codes and BA names read right (header crops, name and form checks), version check fixed, relabelled columns flagged (Nichido)
+
+PROD release (cherry-picked onto main after v1.29.1): QA findings of Nov 26 and the fixes measured on the Staging test runs that day. Owner decisions Nov 26: promote to prod for the owner's review there; turn on header crops, the BA roster for the reader, and reader flags in prod with the release. No SQL.
+
+- **Store code** (#831, #833, #836): a read code is checked against the written store name (2414 Pulilan read as 2944/2410/2494/2140 is auto-corrected and flagged, undoable); name matching tolerates cut registry names, abbreviations and slips ("Rob Malolos" → 1334); pages with no usable code take the code their own form read ("Lee Plaza Dipolog" pages 2 to 5 → 1325). Doubts show beside Store on the page review.
+- **Header crops** (#835, `GOLDLINE_HEADER_CROP_COMPANIES=goldline`): the reader gets 300 dpi crops of the header. Staging: store codes right 24 vs 15 of 55 pages, BA names missing 9 → 3; about +$0.35 per 98-page scan.
+- **BA names** (#837, #838, `GOLDLINE_BA_HINT_COMPANIES=goldline`): the pages of one form agree on one BA name; the roster no longer adds a BA per spelling; the roster (learned from committed forms) is passed to the reader as a dictionary.
+- **Form version** (#831, #832): the Delivery-column check no longer runs out of room (500 → 4000 tokens) and reads the printed column numbers (p30 V1/V2 flip fixed); a page nothing proves is flagged "Form version unsure"; no retry on Legacy pages.
+- **Reader flags** (#831, `GOLDLINE_READ_MARKS=1`, newly on in prod): "Columns changed" when a BA relabels the printed headers, now on Legacy too (FYI); BA notes and Damage; the store / version doubt as a "Take a look" mark. Review shows the printed Legacy header under each column.
+- **Uploads** (#834): a multi-scan upload keeps a row per scan in the panel.
+
 ## 2026-11-26 — Release v1.29.1: Uploads tiles say what the file is, Type filter in the same words
 
 PROD release (cherry-picked onto main after v1.29.0). Owner asked to promote it right after staging.

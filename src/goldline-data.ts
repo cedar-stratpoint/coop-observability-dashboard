@@ -8,11 +8,12 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
 import type {FormVersion} from './goldline-extract';
-import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, isRealForm, reconcileYears, segmentBundle, snapStoreWithName, type ClassifiedPage, type StoreRef} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
-import {knownStoreCodes} from './goldline-store-registry';
+import {formConsultants} from './goldline-ba-reconcile';
+import {knownStores} from './goldline-store-registry';
 import {uploadSource, distinctPages, pagesByStatus, pageNeed} from './goldline-upload-groups';
-import {splitName} from './upload-batch';
+import {scanPosition, splitName} from './upload-batch';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -867,26 +868,114 @@ export async function commitInventory(input: {
 /** What Coop read about ONE page, to prefill its review: the store (the registry-snapped
  *  code the classifier settled on), period and BA from that page's own classification.
  *  Null fields when the page didn't show them (pages 2 to 5 rarely print a store). */
-export type PageSuggestion = {storeCode: string | null; storeName: string | null; periodStart: string | null; periodEnd: string | null; consultant: string | null};
+/** How sure Coop is of the store it read on a page (QA Nov 26: "Coop read Store 2944" showed with
+ *  no warning although the read code isn't a known store). Null when the code read is a known store
+ *  that its written name agrees with, or a reviewer confirmed the store. */
+export type StoreCheck = {
+  status: 'corrected' | 'ambiguous' | 'unknown' | 'name_mismatch' | 'missing' | 'from_form';
+  /** Status 'from_form': the form page number whose code this page took. */
+  fromPage?: number | null;
+  /** The code as read, when Coop changed it. */
+  from: string | null;
+  by: 'name' | null;
+  /** Registry stores to offer, nearest first. */
+  candidates: string[];
+};
+
+export type PageSuggestion = {
+  storeCode: string | null;
+  storeName: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  consultant: string | null;
+  storeCheck: StoreCheck | null;
+  /** Nothing proved this V1/V2 page's version (QA Nov 26, p30): the review says so. */
+  versionUnsure: boolean;
+  /** Set when `consultant` is the form's agreed BA rather than this page's own read: what the page
+   *  read (null = none). */
+  consultantRead?: string | null;
+};
 
 export async function getPageSuggestion(companyId: string, uploadId: string): Promise<PageSuggestion> {
-  const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null};
+  const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null, storeCheck: null, versionUnsure: false};
   if (!goldlineConfigured()) return none;
-  const res = await db().from('uploads').select('classification').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  const res = await db().from('uploads').select('classification,batch_id').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
   if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
-  const c = ((res.data as {classification?: Record<string, unknown> | null} | null)?.classification ?? {}) as Record<string, unknown>;
+  const row = res.data as {classification?: Record<string, unknown> | null; batch_id?: string | null} | null;
+  const c = (row?.classification ?? {}) as Record<string, unknown>;
   const snap = (c.store_snap ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
   const iso = (v: unknown): string | null => {
     const t = str(v);
     return t && /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
   };
+  // Re-check the code read against today's registry and the written store name, so pages read
+  // before the name check (or before a store was added) get the same answer as a fresh read. A
+  // reviewer-confirmed store is final.
+  let storeCode = str(snap.code) ?? str(c.store_code);
+  let storeCheck: StoreCheck | null = null;
+  let consultant = str(c.consultant);
+  let consultantRead: string | null | undefined;
+  if (snap.status !== 'confirmed') {
+    const stores = await knownStores(companyId).catch(() => [] as StoreRef[]);
+    if (stores.length) {
+      const live = snapStoreWithName(str(c.store_code), str(c.store_name), stores);
+      storeCode = live.code ?? storeCode;
+      storeCheck = live.status === 'exact' || live.status === 'confirmed' || live.status === 'from_form'
+        ? null
+        : {status: live.status, from: live.from ?? null, by: live.by ?? null, candidates: live.candidates ?? []};
+      // The page's own form: a store when this page has no sure code (QA Nov 26, "Lee Plaza
+      // Dipolog": 1325 on page 1 only), and the BA name its pages agree on. Best-effort; any error
+      // keeps the page's own reads.
+      if (row?.batch_id) {
+        try {
+          const form = await formContextFor(companyId, row.batch_id, uploadId, stores);
+          if (form.store && live.status !== 'exact' && live.status !== 'corrected') {
+            storeCode = form.store.code;
+            storeCheck = {status: 'from_form', from: str(c.store_code), by: null, candidates: [], fromPage: form.store.fromPage};
+          }
+          if (form.ba) {
+            consultant = form.ba.name;
+            consultantRead = form.ba.read;
+          }
+        } catch (e) {
+          console.error('goldline: form store lookup failed', e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+  }
   return {
-    storeCode: str(snap.code) ?? str(c.store_code),
+    storeCode,
+    storeCheck,
+    versionUnsure: c.version_unsure === true,
     storeName: str(c.store_name),
     periodStart: iso(c.period_start),
     periodEnd: iso(c.period_end),
-    consultant: str(c.consultant),
+    consultant,
+    ...(consultantRead !== undefined ? {consultantRead} : {}),
+  };
+}
+
+/** What this page takes from its own physical form, over its batch's pages: the store
+ *  (inheritFormStores; null when the form has no single sure code) and the form's agreed BA
+ *  (formConsultants; null when the page keeps its own read). */
+async function formContextFor(
+  companyId: string,
+  batchId: string,
+  uploadId: string,
+  stores: StoreRef[],
+): Promise<{store: {code: string; fromPage: number | null} | null; ba: {name: string; read: string | null} | null}> {
+  const sib = await db().from('uploads').select(UPLOAD_CLS_COLS).eq('company_id', companyId).eq('batch_id', batchId).limit(300);
+  if (sib.error) throw new Error(sib.error.message);
+  const rows = (sib.data ?? []) as unknown as UploadClsRow[];
+  const fileOf = new Map(rows.map((r) => [r.id, r.filename]));
+  const posOf = (p: ClassifiedPage) => scanPosition(fileOf.get(p.id) ?? '');
+  const storeName = new Map(stores.map((s) => [s.code, s.name]));
+  const pages = formConsultants(inheritFormStores(applyStoreRegistry(rows.map(toClassifiedPage), stores), posOf), posOf, [], (c) => storeName.get(c) ?? null);
+  const me = pages.find((p) => p.id === uploadId);
+  return {
+    store: me?.store_snap?.status === 'from_form' && me.store_code ? {code: me.store_code, fromPage: me.store_snap.fromPage ?? null} : null,
+    ba: me && me.consultant_read !== undefined && me.consultant ? {name: me.consultant, read: me.consultant_read ?? null} : null,
   };
 }
 
@@ -899,26 +988,26 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
   return unstable_cache(
     async () => {
       // Which upload each batch was split from, so a sorted upload stays one tile.
-      const [links, known] = await Promise.all([batchLinks(companyId), knownStoreCodes(companyId)]);
+      const [links, known] = await Promise.all([batchLinks(companyId), knownStores(companyId)]);
       const drops = dropOf(links);
       const hasStore = new Set(links.filter((b) => b.store_code?.trim()).map((b) => b.id));
       const rows = (await fetchAllRows('uploads', (from, to) =>
         supa
           .from('uploads')
           .select(
-            'id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation,cls_store:classification->>store_code,cls_start:classification->>period_start',
+            'id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation,cls_store:classification->>store_code,cls_name:classification->>store_name,cls_start:classification->>period_start',
           )
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})
           .range(from, to),
-      )) as unknown as Array<UploadRow & {cls_store?: string | null; cls_start?: string | null}>;
-      return rows.map(({cls_store, cls_start, ...u}): UploadRow =>
+      )) as unknown as Array<UploadRow & {cls_store?: string | null; cls_name?: string | null; cls_start?: string | null}>;
+      return rows.map(({cls_store, cls_name, cls_start, ...u}): UploadRow =>
         u.batch_id
           ? {
               ...u,
               drop_id: drops.get(u.batch_id) ?? u.batch_id,
-              needs: pageNeed({status: u.status, batchHasStore: hasStore.has(u.batch_id), readStore: cls_store, readStart: cls_start}, known),
+              needs: pageNeed({status: u.status, batchHasStore: hasStore.has(u.batch_id), readStore: cls_store, readName: cls_name, readStart: cls_start}, known),
             }
           : u,
       );
@@ -1240,8 +1329,15 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
   // code that is itself a registered store, so genuinely different stores stay apart.
   // Then cut store-less pages into per-scan runs (uploads already read oldest-first) so a
   // blank-store form stays one physical form instead of merging several unreadable stores.
-  const known = await knownStoreCodes(companyId);
-  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(applyStoreRegistry(uploads.map(toClassifiedPage), known))));
+  const known = await knownStores(companyId);
+  // Pages with no sure code take the one their own physical form read (QA Nov 26), so a form splits
+  // out whole under its store instead of leaving pages 2 to 5 in a "needs a store" form.
+  const posOf = (p: ClassifiedPage) => scanPosition(byId.get(p.id)?.filename ?? '');
+  const storeName = new Map(known.map((s) => [s.code, s.name]));
+  // ...and the pages of one form agree on one BA name (QA Nov 26).
+  const filed = formConsultants(inheritFormStores(applyStoreRegistry(uploads.map(toClassifiedPage), known), posOf), posOf, [], (c) => storeName.get(c) ?? null);
+  const baOf = new Map(filed.map((p) => [p.id, p.consultant]));
+  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(filed)));
   const realForms = forms.filter(isRealForm);
   if (realForms.length === 0) return []; // nothing confidently a form — leave the pile to sort
 
@@ -1276,7 +1372,7 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
       storeCode: g.store_code,
       periodStart: g.period_start,
       periodEnd: g.period_end,
-      consultant: consultantOf(byId.get(ids[0]) ?? uploads[0]),
+      consultant: ids.map((id) => baOf.get(id)).find((n): n is string => Boolean(n)) ?? consultantOf(byId.get(ids[0]) ?? uploads[0]),
     });
   }
   return out;

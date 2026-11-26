@@ -363,6 +363,29 @@ export const PAGE_DETECT_SCHEMA = {
  * what lets a 98-page multi-store, multi-version, rotated bundle be sorted into
  * `{store · period · version · page}` form groups before any extraction runs.
  */
+/** Most BA names sent to the reader (a few hundred tokens at most). */
+export const BA_HINT_MAX = 200;
+
+/**
+ * The known-BA reference for the classify call: the roster's names, de-duplicated, capped. Wording
+ * keeps it a dictionary, not a choice list: a different person's name is transcribed as written.
+ * Empty roster = no text. Pure.
+ */
+export function buildBaHint(names: string[]): string {
+  const seen = new Set<string>();
+  const list = names
+    .map((n) => n.replace(/\s+/g, ' ').trim())
+    .filter((n) => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()))
+    .slice(0, BA_HINT_MAX);
+  if (!list.length) return '';
+  return [
+    'REFERENCE, known Beauty Consultants (BAs) from earlier forms, as a dictionary for reading the handwritten',
+    '"Beauty Consultant" name, NOT a list to choose from: when the handwriting is clearly one of these people, return',
+    'that exact spelling; when it is someone else, or you cannot tell, transcribe what is written.',
+    `  ${list.join(' · ')}`,
+  ].join('\n');
+}
+
 export function buildPageClassifyPrompt(): string {
   return [
     'This is ONE scanned page from a NICHIDO COSMETICS "Semi-Monthly Inventory" packet.',

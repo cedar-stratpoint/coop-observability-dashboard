@@ -2,17 +2,19 @@ import 'server-only';
 import {outOfScopeStores} from './company';
 import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatus} from './goldline-data';
 import {readerSignature, reuseIdenticalRead, sha256, stampFingerprint} from './goldline-read-reuse';
-import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateDeliveryColumn, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
+import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateFormVersion, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
-import {renderReadImages} from './goldline-page-bands';
+import {baHintEnabled, batchLegacyEnabled, batchReadEnabled, headerCropsEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {getCurrentBas} from './goldline-ba-data';
+import {distinctBas} from './goldline-ba';
+import {renderHeaderCrops, renderReadImages} from './goldline-page-bands';
 import {boxCustomId, buildLocateParams, locateRowsFor} from './goldline-row-boxes';
-import {anchorVersion, shouldRetrySetAside, versionFromDeliveryColumn, type AnchoredMapResult} from './goldline-anchored-extract';
+import {anchorVersion, shouldRetrySetAside, versionUnsure, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
-import {knownStoreCodes} from './goldline-store-registry';
-import {isInventoryPage, pageKey as buildPageKey, snapStoreCode} from './goldline-segment';
+import {knownStores} from './goldline-store-registry';
+import {isInventoryPage, pageKey as buildPageKey, snapStoreWithName, type StoreRef} from './goldline-segment';
 import {getWriterProfile} from './goldline-writer-data';
-import {humanizeExtractError, MANIFESTS} from './goldline-extract';
+import {buildBaHint, humanizeExtractError, MANIFESTS} from './goldline-extract';
 import {uploadSource} from './goldline-upload-groups';
 import {logReadEvent, type ReadLogInput} from './goldline-read-log';
 import {syncReaderMarks} from './goldline-review-marks-data';
@@ -127,7 +129,20 @@ export async function runInventoryRead(args: {
     // page_key, and flag any duplicate / re-upload — all before extraction.
     emit?.({type: 'stage', stage: 'detecting'});
     const classifyStart = Date.now();
-    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    // Sharp header crops for the store code / name (GOLDLINE_HEADER_CROP_COMPANIES), rendered once
+    // and reused by the set-aside retry. A render failure classifies from the page alone.
+    const headerCrops = headerCropsEnabled(companyId) ? await renderHeaderCrops(pdfBase64) : null;
+    // The BA roster learned from committed forms, as a reference for the handwritten BA name
+    // (GOLDLINE_BA_HINT_COMPANIES). Best-effort: no roster = the classify call as before.
+    let baHint: string | null = null;
+    if (baHintEnabled(companyId)) {
+      try {
+        baHint = buildBaHint(distinctBas((await getCurrentBas(companyId)).names)) || null;
+      } catch (e) {
+        console.error('goldline read: BA roster read failed', msg(e));
+      }
+    }
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops, baHint));
     rec.classifyMs = Date.now() - classifyStart;
     // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
     // a real inventory page misread. Re-classify once (a blind second read) before setting it
@@ -135,7 +150,7 @@ export async function runInventoryRead(args: {
     // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
     let setAsideRetry: {kind: string; confidence: number} | null = null;
     if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
-      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops, baHint));
       if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
         setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
         cls = retry;
@@ -148,16 +163,18 @@ export async function runInventoryRead(args: {
     rec.orientation = cls.orientation;
     rec.storeFrom = cls.store_code;
 
-    // Reconcile the store code against the registry (best-effort: no registry = raw).
-    let registry: string[] = [];
+    // Reconcile the store code against the registry, checked against the handwritten store name
+    // (QA Nov 26: 2414 read as 2944 / 2410 beside a correctly read "SM Center Pulilan").
+    // Best-effort: no registry = raw.
+    let registry: StoreRef[] = [];
     try {
-      registry = await knownStoreCodes(companyId);
+      registry = await knownStores(companyId);
     } catch (e) {
       console.error('goldline read: store registry read failed', msg(e));
     }
-    const snap = snapStoreCode(cls.store_code, registry);
+    const snap = snapStoreWithName(cls.store_code, cls.store_name, registry);
     rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap, ...(setAsideRetry ? {setAsideRetry} : {})};
+    rec.detail = {classify: cls, snap, headerCrops: Boolean(headerCrops?.length), baHint: baHint ? baHint.split(' · ').length : 0, ...(setAsideRetry ? {setAsideRetry} : {})};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})
@@ -234,9 +251,26 @@ export async function runInventoryRead(args: {
     let av: 'v1' | 'v2' | null = null;
     let versionSource: 'locator' | 'classify' | null = null;
     let deliveryColumn: number | null = null;
+    let unsure = false;
     if (templateReadEnabled(companyId)) {
-      deliveryColumn = await locateDeliveryColumn(extractB64);
-      const located = versionFromDeliveryColumn(deliveryColumn);
+      // QA Nov 26 (p30): the layout read can come back empty on a faint page, which silently left
+      // the page on the classifier's unsure guess. One retry (it is cheap), then log what it saw so
+      // an empty answer is debuggable, and flag the page when nothing proved the version.
+      let loc = await locateFormVersion(extractB64);
+      let tries = 1;
+      // No retry on a page the classifier calls Legacy: its seven printed columns never give a V1/V2
+      // answer, so a retry there always fires and only doubles the call (seen on the first re-read).
+      if (!loc.version && cls.version !== 'legacy') {
+        const again = await locateFormVersion(extractB64);
+        tries = 2;
+        if (again.version || !loc.seen) loc = again;
+      }
+      deliveryColumn = loc.deliveryColumn;
+      rec.detail = {
+        ...(rec.detail && typeof rec.detail === 'object' ? (rec.detail as Record<string, unknown>) : {}),
+        locator: {version: loc.version, by: loc.by, deliveryColumn: loc.deliveryColumn, conflict: loc.conflict, tries, seen: loc.seen, error: loc.error ?? null},
+      };
+      const located = loc.version;
       if (located) {
         av = located;
         versionSource = 'locator';
@@ -244,6 +278,7 @@ export async function runInventoryRead(args: {
         av = anchorVersion(cls.version, cls.confidence);
         if (av) versionSource = 'classify';
       }
+      unsure = versionUnsure(cls.version, av);
     }
     const template = av ? await getFormTemplate(companyId, av, page) : null;
     // The layout proved the version; if it differs from the classifier's, correct the persisted tag
@@ -262,6 +297,18 @@ export async function runInventoryRead(args: {
         pageKey: correctedPk,
         classification: {...cls, version: av, version_corrected_from: cls.version, version_source: versionSource, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
       }).catch((e) => console.error('goldline read: saveClassification (version correction) failed', msg(e)));
+    } else if (unsure) {
+      // Nothing proved V1 or V2 (layout read empty, classifier under the anchor bar): say so on the
+      // page and in the Flags hub instead of reading quietly with the guess (QA Nov 26, p30).
+      await saveClassification({
+        uploadId,
+        pageNo: page,
+        pageKind: cls.kind,
+        orientation: cls.orientation,
+        formVersion: cls.version,
+        pageKey: pk,
+        classification: {...cls, version_unsure: true, store_snap: snap, duplicate_of: duplicateOf.map((d) => d.id)},
+      }).catch((e) => console.error('goldline read: saveClassification (version unsure) failed', msg(e)));
     }
     // L7 batch mode (flag-gated): the fast classify + locate are done and the version/template are
     // known, so instead of running the expensive anchored read inline, submit it to the Anthropic
