@@ -11,6 +11,7 @@ import {
   contactStatusLabel,
   countStates,
   inDayRange,
+  leadPerson,
   leadsCsv,
   matchesLeadSearch,
   prizeTally,
@@ -30,7 +31,7 @@ import {CopyButton} from './customer-profile';
 import {FilterSelect} from './filter-select';
 import {Pagination} from './pagination';
 import {BoughtCell, BoughtHelp} from './lead-capture';
-import {pawsportLine, type PawsportBadge} from '@/src/pawsport';
+import {countPawsportStates, matchesPawsportFilter, pawsportLine, pawsportMatchable, pawsportState, type PawsportBadge, type PawsportFilter, type PawsportRead} from '@/src/pawsport';
 
 const PAGE_SIZE = 20;
 
@@ -40,6 +41,8 @@ export type LeadsContactsData = {
   statuses: Record<string, ContactStatus>;
   /** RET-18 P1: the lead's PawSport when they are the same person as a holder. */
   passports: Record<string, PawsportBadge>;
+  /** RET-18 P1b: whether Shopify was read (and in full); not 'ok' = every lead's PawSport is Can't tell. */
+  pawsportRead: Pick<PawsportRead, 'status' | 'incomplete'>;
 };
 
 /** RET-18 P1: a small chip on a lead who holds a PawSport (same email or mobile as the Shopify holder). */
@@ -56,6 +59,9 @@ function PawsportChip({badge}: {badge: PawsportBadge | undefined}) {
 }
 
 const UNKNOWN: ContactStatus = {state: 'unknown', lastAt: null, lastChannel: null};
+/** RET-18 P1b: a lead's PawSport state; no usable email or mobile (Instagram-only) can't be matched, so it reads unknown ("Can't tell"). */
+const leadPawsport = (l: SpinLead, passports: LeadsContactsData['passports'], read: LeadsContactsData['pawsportRead']) =>
+  pawsportState(passports[leadKey(l)], read, pawsportMatchable(leadPerson(l)));
 /** A lead the team can log a contact for: at least one key the log accepts (a junk mobile or handle does not count). */
 export const hasContactKey = (l: SpinLead): boolean => hasLoggableKey(l);
 
@@ -176,7 +182,7 @@ export function LeadsContacts({
   logRead: boolean;
   onLog: (l: SpinLead) => void;
 }) {
-  const {vouchers, statuses, passports} = data;
+  const {vouchers, statuses, passports, pawsportRead} = data;
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [event, setEvent] = useState('all');
@@ -185,6 +191,9 @@ export function LeadsContacts({
   const [collectedTo, setCollectedTo] = useState('all');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [unused, setUnused] = useState(false);
+  // RET-18 P1b: PawSport All / Has / None / Can't tell. Unread Shopify = All, so a stale choice can't empty the list.
+  const [psFilter, setPsFilter] = useState<PawsportFilter>('all');
+  const psEffective: PawsportFilter = pawsportRead.status === 'ok' ? psFilter : 'all';
   const statusOf = (l: SpinLead): ContactStatus => statuses[leadKey(l)] ?? UNKNOWN;
   const reset = <T,>(set: (v: T) => void) => (v: T) => {
     set(v);
@@ -228,8 +237,17 @@ export function LeadsContacts({
         .sort((a, b) => Date.parse(b.collectedAt) - Date.parse(a.collectedAt)),
     [leads, unused, vouchers, event, prize, collectedFrom, collectedTo, q],
   );
-  const counts = useMemo(() => countStates(scoped, statuses), [scoped, statuses]);
-  const filtered = useMemo(() => withState(scoped, status, statuses), [scoped, status, statuses]);
+  // Status and PawSport each count over the other's choice, so every count says what picking it would show.
+  const psScoped = useMemo(
+    () => (psEffective === 'all' ? scoped : scoped.filter((l) => matchesPawsportFilter(psEffective, leadPawsport(l, passports, pawsportRead)))),
+    [scoped, psEffective, passports, pawsportRead],
+  );
+  const counts = useMemo(() => countStates(psScoped, statuses), [psScoped, statuses]);
+  const psCounts = useMemo(
+    () => countPawsportStates(withState(scoped, status, statuses), (l) => leadPawsport(l, passports, pawsportRead)),
+    [scoped, status, statuses, passports, pawsportRead],
+  );
+  const filtered = useMemo(() => withState(psScoped, status, statuses), [psScoped, status, statuses]);
   const filtering = filtered.length !== leads.length;
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -315,8 +333,29 @@ export function LeadsContacts({
           onChange={(v) => reset(setStatus)(v as StatusFilter)}
           options={(['all', 'not_contacted', 'contacted', 'replied', 'unknown'] as const).map((s): [string, string] => [
             s,
-            `${STATUS_LABEL[s]} (${(s === 'all' ? scoped.length : counts[s]).toLocaleString()})`,
+            `${STATUS_LABEL[s]} (${(s === 'all' ? psScoped.length : counts[s]).toLocaleString()})`,
           ])}
+        />
+        <FilterSelect
+          label="PawSport"
+          value={psEffective}
+          disabled={pawsportRead.status !== 'ok'}
+          title={
+            pawsportRead.status !== 'ok'
+              ? 'Unavailable: Shopify could not be read through the CRM, so no lead can be checked'
+              : `Can't tell: leads with no email or mobile (Instagram-only) can't be matched to a holder${pawsportRead.incomplete ? ', nor can anyone past where the PawSport list was cut off' : ''}`
+          }
+          onChange={(v) => reset(setPsFilter)(v as PawsportFilter)}
+          options={
+            pawsportRead.status === 'ok'
+              ? [
+                  ['all', 'All'],
+                  ['has', `Has · ${psCounts.has.toLocaleString()}`],
+                  ['none', `None · ${psCounts.none.toLocaleString()}`],
+                  ['unknown', `Can't tell · ${psCounts.unknown.toLocaleString()}`],
+                ]
+              : [['all', 'Unavailable']]
+          }
         />
         <button
           type="button"

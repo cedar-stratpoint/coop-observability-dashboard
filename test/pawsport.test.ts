@@ -1,6 +1,7 @@
 // RET-18 P1: PawSport holders from the Shopify customer metafield + tags, matched to CRM customers and event leads.
 import {describe, expect, it} from 'vitest';
-import {PAWSPORT_QUERY, loadPawsportHolders, matchesPawsportFilter, parsePawsportNode, pawsportLine, pawsportMatcher, pawsportState, type PawsportHolder} from '../src/pawsport';
+import {PAWSPORT_QUERY, countPawsportStates, loadPawsportHolders, matchesPawsportFilter, parsePawsportNode, pawsportLine, pawsportMatchable, pawsportMatcher, pawsportState, type PawsportHolder} from '../src/pawsport';
+import {leadPerson} from '../src/spin-leads-types';
 
 const passport = (o: object) => ({value: JSON.stringify(o)});
 const node = (o: Record<string, unknown>) => ({id: 'gid://shopify/Customer/1', email: 'Mia@Example.com ', phone: '+63 917 123 4567', tags: ['pet-passport-2026', 'pawsport-qr'], passport: passport({number: 'ZMY26-AB12-CD34', issuedAt: '2026-11-12T03:00:00Z', pet: {name: 'Mimi', type: 'cat', furparent: 'Mia'}}), ...o});
@@ -109,5 +110,32 @@ describe('pawsportState / filter / line', () => {
   it('profile line', () => {
     expect(pawsportLine(b)).toBe('PawSport ZMY26-AB12-CD34 · Mimi (cat) · joined via QR, Nov 12');
     expect(pawsportLine({...b, number: null, issuedAt: null, pet: {name: null, type: null}, route: 'account'})).toBe('PawSport (no number) · joined via Account');
+  });
+});
+
+describe('Event leads PawSport state (RET-18 P1b)', () => {
+  const b = {number: 'ZMY26-AB12-CD34', issuedAt: null, pet: {name: null, type: null}, route: 'form' as const};
+  const lead = (k: {email?: string | null; mobile?: string | null; instagram?: string | null}) => leadPerson({email: null, mobile: null, instagram: null, ...k} as Parameters<typeof leadPerson>[0]);
+  const ok = {status: 'ok' as const};
+  const stateOf = (badge: typeof b | null, p: ReturnType<typeof lead>, read: {status: 'ok' | 'unavailable'; incomplete?: boolean} = ok) => pawsportState(badge, read, pawsportMatchable(p));
+  it('Has: a matched lead', () => {
+    expect(stateOf(b, lead({email: 'mia@example.com'}))).toBe('has');
+  });
+  it('None: email or mobile, read ok and complete, no match', () => {
+    expect(stateOf(null, lead({email: 'x@example.com'}))).toBe('none');
+    expect(stateOf(null, lead({mobile: '0917 123 4567', instagram: 'mia'}))).toBe('none');
+  });
+  it("Can't tell: Instagram-only (or junk keys) can't be matched, so never None", () => {
+    expect(pawsportMatchable(lead({instagram: 'mia'}))).toBe(false);
+    expect(pawsportMatchable(lead({email: 'not-an-email', mobile: '123'}))).toBe(false);
+    expect(stateOf(null, lead({instagram: 'mia'}))).toBe('unknown');
+  });
+  it("Can't tell: unavailable or incomplete read, for every lead without a match", () => {
+    expect(stateOf(null, lead({email: 'x@example.com'}), {status: 'unavailable'})).toBe('unknown');
+    expect(stateOf(b, lead({email: 'mia@example.com'}), {status: 'unavailable'})).toBe('unknown');
+    expect(stateOf(null, lead({email: 'x@example.com'}), {status: 'ok', incomplete: true})).toBe('unknown');
+  });
+  it('counts each state', () => {
+    expect(countPawsportStates(['has', 'none', 'unknown', 'unknown'] as const, (s) => s)).toEqual({has: 1, none: 1, unknown: 2});
   });
 });
