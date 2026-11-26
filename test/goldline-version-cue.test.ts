@@ -12,6 +12,9 @@ import {
   mapAnchoredToExtractedPage,
   shouldRetrySetAside,
   versionFromDeliveryColumn,
+  versionFromLocator,
+  versionFromNumbering,
+  versionUnsure,
   type AnchoredOutput,
 } from '../src/goldline-anchored-extract';
 
@@ -147,5 +150,46 @@ describe('shouldRetrySetAside', () => {
     expect(shouldRetrySetAside('blank', 0.95)).toBe(false);
     expect(shouldRetrySetAside('inventory', 0.2)).toBe(false);
     expect(shouldRetrySetAside('unknown', 0.2)).toBe(false);
+  });
+});
+
+// QA Nov 26 (p30): on a faint copy the locator invented header words and the thinking used the whole
+// 500-token cap, so nothing proved the version. The printed column NUMBERS stay legible: V1 numbers
+// six data columns (Delivery is 4), V2 numbers five and prints Delivery apart, unnumbered.
+describe('versionFromNumbering / versionFromLocator', () => {
+  it('reads the version from the printed numbering', () => {
+    expect(versionFromNumbering({highest_column_number: 5, unnumbered_data_column: true})).toBe('v2');
+    expect(versionFromNumbering({highest_column_number: 5, unnumbered_data_column: null})).toBe('v2');
+    expect(versionFromNumbering({highest_column_number: null, unnumbered_data_column: true})).toBe('v2');
+    expect(versionFromNumbering({highest_column_number: 6, unnumbered_data_column: false})).toBe('v1');
+    expect(versionFromNumbering({highest_column_number: 6, unnumbered_data_column: null})).toBe('v1');
+    expect(versionFromNumbering({highest_column_number: 6, unnumbered_data_column: true})).toBeNull(); // cues disagree
+    expect(versionFromNumbering({highest_column_number: 7, unnumbered_data_column: false})).toBeNull(); // Legacy-like
+    expect(versionFromNumbering(null)).toBeNull();
+  });
+  it('numbering wins over a misread Delivery position, and the disagreement is kept', () => {
+    // What the locator said about p30 with the old prompt: Legacy-sounding headers, Delivery 4.
+    const p30 = {columns_left_to_right: ['Price', 'Total', 'Beginning Inventory', 'Delivery', 'Sales'], delivery_column: 4, highest_column_number: 5, unnumbered_data_column: true};
+    expect(versionFromLocator(p30)).toEqual({version: 'v2', by: 'numbering', deliveryColumn: 4, conflict: true});
+  });
+  it('falls back to the Delivery position, then to nothing', () => {
+    expect(versionFromLocator({delivery_column: 1, highest_column_number: null, unnumbered_data_column: null})).toEqual({version: 'v2', by: 'delivery', deliveryColumn: 1, conflict: false});
+    expect(versionFromLocator({delivery_column: 2, highest_column_number: null, unnumbered_data_column: null}).version).toBeNull();
+    expect(versionFromLocator(null)).toEqual({version: null, by: null, deliveryColumn: null, conflict: false});
+  });
+  it('the prompt asks for the numbers without stating any expected order', () => {
+    const p = buildDeliveryLocatorPrompt();
+    expect(p).toMatch(/highest_column_number/);
+    expect(p).toMatch(/unnumbered_data_column/);
+    expect(p).not.toMatch(/\b(5|6)\b/);
+  });
+});
+
+describe('versionUnsure', () => {
+  it('a V1/V2/unknown page with nothing anchoring its version is unsure', () => {
+    expect(versionUnsure('v1', null)).toBe(true);
+    expect(versionUnsure('unknown', null)).toBe(true);
+    expect(versionUnsure('v2', 'v2')).toBe(false);
+    expect(versionUnsure('legacy', null)).toBe(false);
   });
 });

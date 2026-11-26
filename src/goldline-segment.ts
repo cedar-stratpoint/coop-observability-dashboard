@@ -8,6 +8,7 @@
 // extraction is Phase 1.
 
 import {FORM_VERSIONS, INVENTORY_PAGES, PAGE_KINDS, type FormVersion, type PageKind} from './goldline-extract';
+import {suggestStore} from './store-suggest';
 
 /** One page as read by the classifier (before any extraction). Mirrors
  *  PAGE_CLASSIFY_SCHEMA; see sanitizeClassification for the defensive parse. */
@@ -81,6 +82,7 @@ export const FORM_FLAGS = {
   unknownStore: 'unknown-store',
   storeCorrected: 'store-corrected', // OCR code snapped to a known store
   storeUnmatched: 'store-unmatched', // OCR code not in the registry, reviewer must pick
+  storeNameMismatch: 'store-name-mismatch', // a real code, but the written store name points at another store
   periodMissing: 'period-missing',
   periodUnparsed: 'period-unparsed',
   periodInvalidDay: 'period-invalid-day',
@@ -170,9 +172,11 @@ export type StoreSnap = {
   /** The code to use for keying: the matched/corrected code, or the raw candidate
    *  when nothing matched (so grouping still works, just flagged). */
   code: string | null;
-  status: 'exact' | 'corrected' | 'ambiguous' | 'unknown' | 'missing';
+  status: 'exact' | 'corrected' | 'ambiguous' | 'unknown' | 'missing' | 'name_mismatch';
   /** The raw candidate, when it differs from `code` (status 'corrected'). */
   from?: string;
+  /** 'name' when the handwritten store name picked the store (snapStoreWithName). */
+  by?: 'name';
   /** Nearest known codes to offer the reviewer when not auto-resolved. */
   candidates?: string[];
 };
@@ -209,16 +213,56 @@ export function snapStoreCode(candidate: string | null, known: Iterable<string>,
   return {code, status: nearest.length > 1 && best <= maxDistance ? 'ambiguous' : 'unknown', candidates};
 }
 
+/** A registry store: its code and (truncated, 20-character) name. */
+export type StoreRef = {code: string; name: string | null};
+
+/** Edit distance allowed between the code read and the store its NAME points at. Wider than the
+ *  code-only snap (1) because the name is independent evidence: QA (Nov 26) saw 2414 read as
+ *  2944, 2494, 2140 and 2410, every time beside a correctly read "SM Center Pulilan". */
+export const NAME_SNAP_MAX_DISTANCE = 2;
+
+/**
+ * snapStoreCode, checked against the handwritten store name (QA Nov 26). suggestStore picks a
+ * store from the name only on rare, unambiguous words, so this only acts on a clear name:
+ *  - code not a known store, name points at a store within NAME_SNAP_MAX_DISTANCE of it →
+ *    that store, status 'corrected', by 'name' (auto-corrected, flagged, the reviewer can undo);
+ *  - code IS a known store but the name points at a different one that close → keep the code
+ *    (a real code is never overridden), status 'name_mismatch' with the name's store as the
+ *    candidate, so it's flagged;
+ *  - no code read → stays 'missing', the name's store offered as the first candidate.
+ * Without a usable name it is exactly snapStoreCode.
+ */
+export function snapStoreWithName(candidate: string | null, readName: string | null | undefined, stores: StoreRef[]): StoreSnap {
+  const base = snapStoreCode(candidate, stores.map((s) => s.code));
+  const named = stores.filter((s): s is {code: string; name: string} => typeof s.name === 'string' && s.name.trim() !== '');
+  const byName = named.length ? suggestStore(readName, named) : null;
+  if (!byName) return base;
+  const raw = normalizeStoreCode(candidate);
+  const withFirst = (c: string[] | undefined) => [byName, ...(c ?? []).filter((x) => x !== byName)].slice(0, 5);
+  if (!raw) return {...base, candidates: withFirst(base.candidates)};
+  if (base.status === 'exact') {
+    if (byName === raw || editDistance(raw, byName) > NAME_SNAP_MAX_DISTANCE) return base;
+    return {code: raw, status: 'name_mismatch', candidates: [byName]};
+  }
+  if (editDistance(raw, byName) <= NAME_SNAP_MAX_DISTANCE) return {code: byName, status: 'corrected', from: raw, by: 'name'};
+  return {...base, candidates: withFirst(base.candidates)};
+}
+
+/** Accept plain codes (no names) or registry stores. */
+export function storeRefs(known: Iterable<string | StoreRef>): StoreRef[] {
+  return [...known].map((k) => (typeof k === 'string' ? {code: k, name: null} : k));
+}
+
 /**
  * Resolve every page's store code against the known registry before grouping, so a
  * misread "472" and the real "473" land in the same form. Returns new pages with
  * `store_code` set to the resolved code and `store_snap` recording how it resolved
  * (for the triage board + flags). With an empty registry it's a no-op pass-through.
  */
-export function applyStoreRegistry(pages: ClassifiedPage[], known: Iterable<string>): ClassifiedPage[] {
-  const knownSet = [...known];
+export function applyStoreRegistry(pages: ClassifiedPage[], known: Iterable<string | StoreRef>): ClassifiedPage[] {
+  const refs = storeRefs(known);
   return pages.map((p) => {
-    const snap = snapStoreCode(p.store_code, knownSet);
+    const snap = snapStoreWithName(p.store_code, p.store_name, refs);
     return {...p, store_code: snap.code, store_snap: snap};
   });
 }
@@ -475,6 +519,7 @@ function formFlagsFor(
   if (!g.store_code) flags.push(FORM_FLAGS.unknownStore);
   if (extra.snaps.has('corrected')) flags.push(FORM_FLAGS.storeCorrected);
   if (extra.snaps.has('unknown') || extra.snaps.has('ambiguous')) flags.push(FORM_FLAGS.storeUnmatched);
+  if (extra.snaps.has('name_mismatch')) flags.push(FORM_FLAGS.storeNameMismatch);
   if (extra.yearReconciled) flags.push(FORM_FLAGS.yearReconciled);
   if (extra.periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
   for (const f of periodFlags(g.period_start, g.period_end)) flags.push(f);

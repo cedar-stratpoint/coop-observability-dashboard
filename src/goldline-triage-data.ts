@@ -4,7 +4,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
-import {knownStoreCodes} from './goldline-store-registry';
+import {knownStores} from './goldline-store-registry';
 import {reconcileBaNames} from './goldline-ba-reconcile';
 import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
@@ -233,7 +233,7 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
   // (the handwritten year is the noisiest field) to the bundle's dominant year before
   // grouping — so neither a drifted store code ("DS 5300") nor a misread year spins a
   // page off into its own fake form. Snapped pages are flagged on their form.
-  const known = await knownStoreCodes(companyId);
+  const known = await knownStores(companyId);
   // Scan order first (blank-store runs need it), snap stores, then cut blank runs into
   // forms, then reconcile years, then group.
   const pages = assignBlankFormRuns(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known));

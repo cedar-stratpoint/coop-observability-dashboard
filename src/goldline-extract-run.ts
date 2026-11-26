@@ -1,4 +1,4 @@
-import type {ReaderFlag} from './goldline-reader-marks';
+import {cleanHeaders, HEADERS_PROMPT_LINES, withHeadersSchema, type ReaderFlag} from './goldline-reader-marks';
 import 'server-only';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import Anthropic from '@anthropic-ai/sdk';
@@ -41,7 +41,8 @@ import {
   buildAnchoredSystemPromptP1,
   buildDeliveryLocatorPrompt,
   anchoredSchemaFor,
-  deliveryColumnFromLocator,
+  versionFromLocator,
+  type LocatedVersion,
   mapAnchoredOutput,
   type AnchoredMapResult,
   type AnchoredOutput,
@@ -122,6 +123,9 @@ export type ExtractedPage = {
   slant?: {angle: number; px: number} | null;
   /** NICH-36 · printed column headers the BA wrote their own names over (GOLDLINE_READ_MARKS). */
   headers_written_over?: string[] | null;
+  /** Legacy only: how the page's columns were used, from its own arithmetic (PR #685). 'locations'
+   *  = col1 to col3 filed as Stockroom / Drawer / Selling, i.e. the BA repurposed the printed columns. */
+  legacy_layout?: 'locations' | 'printed' | null;
   /** Each heading band's paper total and written price, and whether the paper points at another
    *  price than the printed one (QA Nov 25). Absent on pages read before then. */
   bands?: PaperBand[] | null;
@@ -464,9 +468,12 @@ export function buildInventoryReadParams(
   // Unknown version falls back to v1 (the current default three-location layout).
   // Reader review flags (NICH-36) ride on the Legacy read; the free V1/V2 read is unchanged.
   const marks = isLegacy && readMarksEnabled();
+  // QA Nov 26: the free V1/V2 read (a page whose version wasn't proven) also says which printed
+  // headers the BA wrote over, so "Columns changed" isn't limited to the anchored read.
+  const headers = !isLegacy && readMarksEnabled();
   const manifest = isLegacy
     ? buildLegacyManifestPrompt(page, {marks})
-    : buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1');
+    : [buildManifestPrompt(page, version === 'v2' ? 'v2' : 'v1'), ...(headers ? HEADERS_PROMPT_LINES : [])].join('\n');
 
   // L1 cost lever (flagged, default off): lower effort / thinking off to cut output tokens.
   const effort = readEffort();
@@ -490,7 +497,7 @@ export function buildInventoryReadParams(
     // output_config.effort is added only when GOLDLINE_READ_EFFORT is set (L1); otherwise
     // the model's default effort (high) stands, i.e. today's behavior.
     output_config: {
-      format: {type: 'json_schema', schema: isLegacy ? (marks ? withLegacyMarksSchema(LEGACY_EXTRACTION_SCHEMA) : LEGACY_EXTRACTION_SCHEMA) : EXTRACTION_SCHEMA},
+      format: {type: 'json_schema', schema: isLegacy ? (marks ? withLegacyMarksSchema(LEGACY_EXTRACTION_SCHEMA) : LEGACY_EXTRACTION_SCHEMA) : headers ? withHeadersSchema(EXTRACTION_SCHEMA) : EXTRACTION_SCHEMA},
       ...(effort ? {effort} : {}),
     },
     // No `thinking` param by default. Sonnet 5.5 rejects `{type:'disabled'}` with a 400
@@ -535,7 +542,8 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
       throw new Error('Extraction JSON did not match the expected Legacy page shape');
     }
     const p = parsed as LegacyPage;
-    const {rows} = legacyPageToCore(p.rows, page);
+    const {rows, layout} = legacyPageToCore(p.rows, page);
+    const headersOver = cleanHeaders((p as {headers_written_over?: unknown}).headers_written_over);
     // Band totals (written per heading band) catch misreads that still add up within a row.
     const totals = Array.isArray(p.family_totals) ? p.family_totals : [];
     const printed = printedPageItems('legacy', page);
@@ -545,6 +553,8 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
     const bands = checkBands(printed, rows, totals);
     return {
       ...(bands.length ? {bands} : {}),
+      ...(headersOver.length ? {headers_written_over: headersOver} : {}),
+      legacy_layout: layout,
       store_code: typeof p.store_code === 'string' ? p.store_code : '',
       store_name: p.store_name ?? undefined,
       period_start: p.period_start ?? null,
@@ -562,10 +572,12 @@ export function mapInventoryRead(parsed: unknown, page: number, profile?: Writer
   }
   // "O/S" (QA Nov 25): printed on the form = a quiet note; one a BA wrote = 0 in that cell.
   applyPageOutOfStock(parsed.rows, {version, page, layout: version === 'v2' ? 'v2' : 'v1'});
+  const headersOver = cleanHeaders((parsed as {headers_written_over?: unknown}).headers_written_over);
   // store_code is header-only (page 1); normalize a missing/null one to '' so the
   // rest of the pipeline (and the reviewer's editable field) has a string.
   return {
     ...parsed,
+    headers_written_over: headersOver.length ? headersOver : undefined,
     store_code: typeof parsed.store_code === 'string' ? parsed.store_code : '',
     reader: {profile: Boolean(profile?.reference || profile?.notes), reference_upload_id: profile?.reference?.uploadId ?? null, notes: Boolean(profile?.notes)},
   };
@@ -678,26 +690,32 @@ export async function fetchAnchoredBatch(batchId: string): Promise<{status: stri
 }
 
 /**
- * Safeguard (B): read ONLY where the "Delivery" column is physically printed, with no expected
- * column order stated, and return its 1-based position (or null if it can't be read). The caller
- * turns that into the anchor version (col 1 -> v2, col 4 -> v1). This is the reliable version
- * signal: the classifier confidently mis-reads some V2 pages as V1 (QA page 16), but asked this way
- * the model reads the Delivery position correctly. Degrades to null (caller falls back to the
- * classify-based gate) rather than throwing. Cheap: a tiny header-only read.
+ * Safeguard (B): read the printed layout ONLY, with no expected column order stated: where the
+ * "Delivery" column is, and the printed column numbers (QA Nov 26). The caller turns that into the
+ * anchor version (versionFromLocator). The classifier confidently mis-reads some V2 pages as V1 (QA
+ * page 16) and wavers on faint copies (QA p30, 0.5 to 0.6), so this layout read decides. Degrades to
+ * an empty verdict (caller falls back to the classify-based gate) rather than throwing, and keeps
+ * what it saw for the read log. Cheap: a tiny header-only read.
  */
-export async function locateDeliveryColumn(pdfBase64: string): Promise<number | null> {
+export async function locateFormVersion(pdfBase64: string): Promise<LocatedVersion & {seen: DeliveryLocatorOutput | null; error?: string}> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
     model: EXTRACT_MODEL,
-    max_tokens: 500,
+    // 4000 (was 500): the model thinks before it answers, and on a faint page the thinking alone
+    // used all 500 tokens, so it never wrote an answer (QA p30, 4 of 4 tries: stop_reason
+    // max_tokens, 499 to 500 thinking tokens) and the page silently fell back to the classifier's
+    // unsure guess. A real answer measured 740 to 1200 tokens. Billed on actual output, so the
+    // headroom is cheap (same fix the classifier got on Nov 24).
+    max_tokens: 4000,
     output_config: {format: {type: 'json_schema', schema: DELIVERY_LOCATOR_SCHEMA}},
     messages: [{role: 'user', content: [pageBlock, {type: 'text', text: buildDeliveryLocatorPrompt()}]}],
   };
   try {
-    return deliveryColumnFromLocator((await visionJson(params, {timeout: 30_000})) as DeliveryLocatorOutput);
-  } catch {
-    return null;
+    const seen = (await visionJson(params, {timeout: 30_000})) as DeliveryLocatorOutput;
+    return {...versionFromLocator(seen), seen};
+  } catch (e) {
+    return {version: null, by: null, deliveryColumn: null, conflict: false, seen: null, error: e instanceof Error ? e.message : String(e)};
   }
 }
 
