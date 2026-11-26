@@ -93,6 +93,8 @@ export interface CrmExecutorDeps extends CrmDeps {
   manualContacts?: ManualContactsRead;
   /** RET-10 9B: the saved cohorts (rules only), from the route's server seam (app/api/chat/cohorts-seam.ts). Absent or null: "not set up". Read only. */
   cohorts?: SavedCohortsRead;
+  /** RET-18 P2: the team's contact log and PawSport holders (src/chat/contacts/status.ts), read once per request. Absent: both read unknown. */
+  people?: () => Promise<import('../contacts/status').PeopleFacts | null>;
 }
 
 export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (input: unknown) => Promise<unknown>> {
@@ -211,7 +213,7 @@ export function createCrmExecutors(deps: CrmExecutorDeps): Record<CrmToolName, (
       const req = readCustomersInput(input);
       const scope = isMetricError(req) ? null : await resolveCohortScope(req, deps.cohorts);
       const reader = (): CrmCustomersRequest | MetricError => (isMetricError(req) ? req : scope && isMetricError(scope) ? scope : req);
-      return tool('list_crm_customers', reader, (r, get) => crmCustomersResult(r, get, deps.now, deps.manualContacts, scope && !isMetricError(scope) ? scope : undefined))(input);
+      return tool('list_crm_customers', reader, (r, get) => crmCustomersResult(r, get, deps.now, deps.manualContacts, scope && !isMetricError(scope) ? scope : undefined, {facts: deps.people, identity: deps.allowIdentity === true}))(input);
     },
     // RET-10 9B: drafts only. Validated and counted in code; drawn as a block a PERSON saves (Save cohort → the 9A create action). No write path here.
     propose_crm_cohort: async (input: unknown): Promise<unknown> => {

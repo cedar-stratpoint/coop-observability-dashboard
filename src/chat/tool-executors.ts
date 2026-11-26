@@ -3,7 +3,8 @@
 import {voucherMatch} from '../crm-compute';
 import {draftLeads} from './contacts/draft';
 import {matchPeople} from './contacts/match';
-import {findPeople, overlapPeople, type PeopleSource} from './contacts/people';
+import {findPeople, listPeople, overlapPeople, type PeopleSource} from './contacts/people';
+import type {PeopleFacts} from './contacts/status';
 import {tracked} from './crm/executors';
 import {crmEnrichedCustomers} from './crm/tools';
 import {listEventLeads, readContactsInput} from './contacts/leads';
@@ -58,18 +59,22 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
 
   // The website side of find/overlap goes through the chat's own GET-only CRM client (one chat_crm_call line per read); never src/crm-data.ts.
   const peopleSource = async (s: import('./contacts/leads').LeadsSource): Promise<PeopleSource> => {
-    const base = {leads: s.leads, lazada: s.lazada ?? null, events: s.events};
+    const base = {leads: s.leads, lazada: s.lazada ?? null, events: s.events, facts: s.facts ?? null};
     if (!ctx.crm) return {...base, website: null, websiteNote: 'the website CRM is not connected for this chat'};
     const out = await tracked({client: ctx.crm, user: ctx.user, sink: ctx.sink}, 'contacts', {endpoint: 'customers'}, (get) => crmEnrichedCustomers(get, ctx.now), (r) => r.enriched.length);
     return 'error' in out ? {...base, website: null, websiteNote: out.error.split('. ')[0].toLowerCase()} : {...base, website: out.enriched};
   };
+
+  // RET-18 P2: the team's contact log and PawSport holders, read once per request (null = unread: status and PawSport read unknown).
+  let factsP: Promise<PeopleFacts | null> | null = null;
+  const facts = (): Promise<PeopleFacts | null> => (factsP ??= ctx.people ? ctx.people().catch(() => null) : Promise.resolve(null));
 
   return {
     ...createRenderExecutors(ctx, session),
     ...createReportExecutors(ctx, session, data),
     ...(ctx.explore ? {run_query: ctx.explore} : {}),
     ...(ctx.exploreSchema ? {list_tables: ctx.exploreSchema.list_tables, describe_table: ctx.exploreSchema.describe_table} : {}),
-    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true, manualContacts: ctx.manualContacts, cohorts: ctx.cohorts}) : {}),
+    ...(ctx.crm ? createCrmExecutors({client: ctx.crm, now: ctx.now, user: ctx.user, sink: ctx.sink, keep, emitBlock: ctx.emitBlock, allowIdentity: ctx.identity === true, manualContacts: ctx.manualContacts, cohorts: ctx.cohorts, people: facts}) : {}),
     // One product across POS, Shopee and the website (src/sku-compare.ts). Not strict: validated in code. The website channel reads the CRM once per week through the
     // same client (one chat_crm_call line for the whole call); a CRM failure makes that channel "failed" in the result, never a silent zero.
     ...(ctx.sku
@@ -194,14 +199,18 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
     ...(ctx.leads ? {contacts: async (input: unknown) => {
       const req = readContactsInput(input);
       if ('error' in req) return {error: req.error};
-      const source = await ctx.leads!();
+      const leads = await ctx.leads!();
+      // RET-18 P2: every person row carries the team's contact status and PawSport; a draft reads them only to apply the same filter as
+      // the list it follows (so its row numbers and recipients are that list's). Matches show neither.
+      const needFacts = req.mode !== 'matches' && (req.mode !== 'draft' || req.filter !== undefined);
+      const source = needFacts ? {...leads, facts: await facts()} : leads;
       let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
-      if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches') {
+      if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches' || req.mode === 'people') {
         const all = await peopleSource(source);
         // RET-14: an overlap scoped to one discount code keeps only the website customers who used it on any order (same rule as the page).
         const voucher = req.mode === 'overlap' || req.mode === 'matches' ? req.voucher : undefined;
         const people = voucher && all.website ? {...all, website: all.website.filter((c) => voucherMatch(c, voucher))} : all;
-        out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : matchPeople(req, people);
+        out = req.mode === 'find' ? findPeople(req, people) : req.mode === 'overlap' ? overlapPeople(req, people) : req.mode === 'people' ? listPeople(req, people) : matchPeople(req, people);
       } else {
         out = req.mode === 'draft' ? draftLeads(req, source) : listEventLeads(req, source);
       }
