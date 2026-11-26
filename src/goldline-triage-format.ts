@@ -29,6 +29,8 @@ export const FLAG_LABEL: Record<string, string> = {
   'store-corrected': 'Store auto-corrected',
   'store-unmatched': 'Store needs a pick',
   'store-name-mismatch': 'Store name differs',
+  'store-from-form': 'Store from the form',
+  'store-form-conflict': 'Stores differ in one form',
   'period-missing': 'No period read',
   'period-unparsed': 'Period unreadable',
   'period-invalid-day': 'Invalid date',
@@ -43,7 +45,7 @@ export function flagTone(flag: string): 'warn' | 'crit' | 'info' {
   if (flag === 'duplicate-pages' || flag === 'unknown-version' || flag === 'store-unmatched' || flag === 'period-invalid-day') {
     return 'crit';
   }
-  if (flag === 'store-corrected' || flag === 'year-reconciled') return 'info';
+  if (flag === 'store-corrected' || flag === 'year-reconciled' || flag === 'store-from-form') return 'info';
   return 'warn';
 }
 
