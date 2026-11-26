@@ -2,13 +2,14 @@ import 'server-only';
 import {unstable_cache} from 'next/cache';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
-import {applyStoreRegistry, assignBlankFormRuns, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, reconcileYears, segmentBundle, type ClassifiedPage, type FormGroup} from './goldline-segment';
 import {diffExtractions, type DiffRow, type ExtractionDiff} from './goldline-dup-diff';
 import {knownStores} from './goldline-store-registry';
 import {reconcileBaNames} from './goldline-ba-reconcile';
 import {glTags} from './goldline-ref-data';
 import {uploadSource} from './goldline-upload-groups';
 import {familyOf, type BatchLink} from './upload-drops';
+import {scanPosition} from './upload-batch';
 import type {FormVersion} from './goldline-extract';
 
 // Phase 2 — the store-day triage board. Reads the Phase 0/1 classification that the
@@ -236,7 +237,9 @@ async function loadTriageBoard(companyId: string, source: string | null, batchId
   const known = await knownStores(companyId);
   // Scan order first (blank-store runs need it), snap stores, then cut blank runs into
   // forms, then reconcile years, then group.
-  const pages = assignBlankFormRuns(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known));
+  // Pages with no sure code take the one their own physical form read (QA Nov 26).
+  const filed = inheritFormStores(applyStoreRegistry(inScanOrder(rows).map(toClassifiedPage), known), (p) => scanPosition(byId.get(p.id)?.filename ?? ''));
+  const pages = assignBlankFormRuns(filed);
   const {forms, sales, blanks, unplaceable} = segmentBundle(reconcileYears(pages));
 
   const parked: ParkedPage[] = [
