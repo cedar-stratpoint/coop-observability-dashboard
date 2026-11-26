@@ -5,13 +5,15 @@
 import {getCustomerContactLog} from '@/src/customer-contacts-data';
 import {getCustomerLinks} from '@/src/customer-links-data';
 import {getPawsportHolders} from '@/src/pawsport-data';
-import type {PeopleFacts} from '@/src/chat/contacts/status';
+import {pawsportWithin, type PeopleFacts} from '@/src/chat/contacts/status';
 
 export async function loadPeopleFacts(): Promise<PeopleFacts> {
   const [log, links, pawsport] = await Promise.all([
     getCustomerContactLog().catch(() => null), // null = unreadable: status reads unknown, never "not contacted"
     getCustomerLinks().catch(() => null),
-    getPawsportHolders(), // never throws: 'unavailable' = PawSport reads unknown, never "no"
+    // never throws: 'unavailable' = PawSport reads unknown, never "no". Chat only: a cold cache walks Shopify page by page, so it gets
+    // its own time budget (12 s) and the answer goes on without it; the walk keeps running and warms the cache for the next ask.
+    pawsportWithin(getPawsportHolders()),
   ]);
   return {log: log ? {rows: log.rows.map((r) => ({...r, note: null, createdBy: ''})), legacy: log.legacy} : null, links, pawsport};
 }

@@ -200,8 +200,10 @@ export function createExecutors(ctx: ChatToolContext): ChatExecutors {
       const req = readContactsInput(input);
       if ('error' in req) return {error: req.error};
       const leads = await ctx.leads!();
-      // RET-18 P2: every person row carries the team's contact status and PawSport (draft and matches show neither).
-      const source = req.mode === 'draft' || req.mode === 'matches' ? leads : {...leads, facts: await facts()};
+      // RET-18 P2: every person row carries the team's contact status and PawSport; a draft reads them only to apply the same filter as
+      // the list it follows (so its row numbers and recipients are that list's). Matches show neither.
+      const needFacts = req.mode !== 'matches' && (req.mode !== 'draft' || req.filter !== undefined);
+      const source = needFacts ? {...leads, facts: await facts()} : leads;
       let out: ReturnType<typeof listEventLeads> | ReturnType<typeof draftLeads> | ReturnType<typeof findPeople>;
       if (req.mode === 'find' || req.mode === 'overlap' || req.mode === 'matches' || req.mode === 'people') {
         const all = await peopleSource(source);

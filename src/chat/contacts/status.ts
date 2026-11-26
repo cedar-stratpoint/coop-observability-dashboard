@@ -47,7 +47,10 @@ export function personFacts(facts: PeopleFacts | null) {
     const states = persons.map((p) => contactStatus(p, log?.rows ?? null, links, read));
     // Replied beats contacted beats not contacted; "not contacted" only when every key says so (any unknown key keeps it unknown).
     const best = states.reduce((a, b) => (RANK[b.state] > RANK[a.state] ? b : a));
-    const state: ContactState = best.state === 'not_contacted' && states.some((s) => s.state === 'unknown') ? 'unknown' : best.state;
+    // Unread Same person links: a contact logged under a linked key could be missed, so "not contacted" cannot be told (unknown);
+    // contacted / replied stay, they were seen.
+    const unsure = states.some((s) => s.state === 'unknown') || (facts !== null && facts.links === null);
+    const state: ContactState = best.state === 'not_contacted' && unsure ? 'unknown' : best.state;
     const lastAt = states.map((s) => s.lastAt).filter((x): x is string => x !== null).sort().pop() ?? null;
     let contacts: CustomerContact[] | null = null;
     if (state !== 'unknown' && log) {
@@ -63,7 +66,9 @@ export function personFacts(facts: PeopleFacts | null) {
 
 /** The filter: unknown matches only "unknown" (never "not contacted" or "no"); contacted_since needs a logged contact on or after that PH day (a replied one with contact_status replied). */
 export function keepFacts(f: PersonFacts, filter: FactFilter): boolean {
-  if (filter.contact_status !== 'all' && f.state !== filter.contact_status) return false;
+  // With a contact day, "contacted" includes those who replied (a reply implies a contact); without one it is "contacted, no reply yet".
+  const okState = f.state === filter.contact_status || (filter.contacted_since !== '' && filter.contact_status === 'contacted' && f.state === 'replied');
+  if (filter.contact_status !== 'all' && !okState) return false;
   if (filter.has_pawsport !== 'all' && f.pawsport !== filter.has_pawsport) return false;
   if (filter.contacted_since) {
     const since = filter.contacted_since;
@@ -79,8 +84,28 @@ export function readFactFilter(o: Record<string, unknown>): FactFilter | {error:
   const since = o.contacted_since ?? '';
   if (!(CONTACT_STATUSES as readonly unknown[]).includes(cs)) return {error: `contact_status must be one of: ${CONTACT_STATUSES.join(', ')}.`};
   if (!(HAS_PAWSPORT as readonly unknown[]).includes(hp)) return {error: `has_pawsport must be one of: ${HAS_PAWSPORT.join(', ')}.`};
-  if (typeof since !== 'string' || (since !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(since))) return {error: 'contacted_since must be a PH day YYYY-MM-DD, or "" for no filter.'};
+  if (typeof since !== 'string' || (since !== '' && !realDay(since))) return {error: 'contacted_since must be a real PH day YYYY-MM-DD, or "" for no filter.'};
+  if (since !== '' && (cs === 'not_contacted' || cs === 'unknown')) return {error: `contacted_since keeps people with a contact logged on or after that day, so it cannot go with contact_status ${cs}. For "not contacted since <day>" use not_contacted_days (list_crm_customers) or drop contacted_since.`};
   return {contact_status: cs as FactFilter['contact_status'], has_pawsport: hp as FactFilter['has_pawsport'], contacted_since: since};
+}
+
+const realDay = (d: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
+
+/** The filter in words, for a result title or headline: says "replied included" where the filter includes them. */
+export function factFilterText(f: FactFilter): string {
+  const status = f.contact_status === 'all' ? null : f.contact_status === 'contacted' && f.contacted_since ? 'contacted (replied included)' : f.contact_status.replace('_', ' ');
+  return [f.has_pawsport !== 'all' ? `PawSport ${f.has_pawsport}` : null, status, f.contacted_since ? `contacted by the team since ${f.contacted_since}` : null].filter(Boolean).join(', ');
+}
+
+/** A PawSport read with its own time budget (chat only): past it, PawSport reads unknown with a note, and the rest of the answer goes on. */
+export const PAWSPORT_BUDGET_MS = 12_000;
+export const PAWSPORT_SLOW = `PawSport took longer than ${PAWSPORT_BUDGET_MS / 1000} s to read from Shopify, so it is unknown in this answer. Ask again in a minute (the read keeps warming its cache).`;
+export function pawsportWithin(read: Promise<PawsportRead>, ms: number = PAWSPORT_BUDGET_MS): Promise<PawsportRead> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<PawsportRead>((resolve) => {
+    timer = setTimeout(() => resolve({status: 'unavailable', holders: [], warnings: [PAWSPORT_SLOW]}), ms);
+  });
+  return Promise.race([read.catch((): PawsportRead => ({status: 'unavailable', holders: [], warnings: []})), late]).finally(() => clearTimeout(timer));
 }
 
 const col = (key: string, label: string, unit: ResultColumn['unit'] = 'text', role: ResultColumn['role'] = 'category'): ResultColumn => ({key, label, unit, role});
@@ -125,10 +150,14 @@ export function factNotes(facts: PeopleFacts | null): string[] {
   const out: string[] = [];
   if (!facts.log) out.push('The team\'s contact log could not be read (or is not set up here), so contact_status is unknown for everyone. Say so; never call anyone "not contacted".');
   else if (facts.log.legacy) out.push('The contact log is read without its Instagram / mobile / replied columns (not applied yet): people without an email read unknown, and nobody reads replied.');
-  if (facts.pawsport.status !== 'ok') out.push('Shopify could not be read for PawSport, so pawsport is unknown for everyone. Say so; never say someone has none.');
+  if (facts.log && facts.links === null) out.push('The Same person links could not be read, so nobody can be told "not contacted" (they read unknown); contacted and replied are still shown.');
+  if (facts.pawsport.status !== 'ok') out.push(`Shopify could not be read for PawSport, so pawsport is unknown for everyone. Say so; never say someone has none.${facts.pawsport.warnings.includes(PAWSPORT_SLOW) ? ` ${PAWSPORT_SLOW}` : ''}`);
   else {
     out.push(`Shopify has ${facts.pawsport.holders.length} PawSport holders in all${facts.pawsport.incomplete ? ' found so far (the list was cut off, so there may be more: people without a match read unknown)' : ''}.`);
   }
   out.push(STATUS_RULE, PAWSPORT_RULE);
   return out;
 }
+
+/** Only what could not be read (no rules, no total): for a "nobody matches" answer, so an empty result is never read as "none". */
+export const factCaveats = (facts: PeopleFacts | null): string[] => factNotes(facts).filter((n) => n !== STATUS_RULE && n !== PAWSPORT_RULE && !n.startsWith('Shopify has '));

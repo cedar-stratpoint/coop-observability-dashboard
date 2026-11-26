@@ -9,7 +9,7 @@ import {phDay, phDayStart, type RangeOrder} from '../../custom-range';
 import {dayKeysBetween, MAX_RANGE_DAYS, mondayOf, rangeLabel} from '../range';
 import type {Check, ColumnRole, ColumnUnit, MeasureDecl, MetricError, MetricResult, MetricRow, ResultColumn, ResultMeta, ResultMetricId} from '../result-types';
 import {CRM_LIMITS, CrmError, type CrmEndpointId, type CrmRead} from './client';
-import {factColumns, factCounts, factFilterOn, factNotes, factRow, keepFacts, personFacts, readFactFilter, type FactFilter, type PeopleFacts} from '../contacts/status';
+import {factColumns, factCounts, factFilterOn, factFilterText, factNotes, factRow, keepFacts, personFacts, readFactFilter, type FactFilter, type PeopleFacts} from '../contacts/status';
 
 export type CrmGet = (endpoint: CrmEndpointId, query?: Readonly<Record<string, number | string>>, opts?: {paged?: boolean}) => Promise<CrmRead>;
 /** The manual contact log (RET-05), read by the route's server seam (app/api/chat/contacts-log-seam.ts): one entry per logged contact, its email, channel and time only (never the note or author; RET-07). Null = not applied or unreadable. Not a CRM read. */
@@ -548,10 +548,11 @@ const COHORT_GROUP_MEASURES: MeasureDecl[] = [
 export type CustomerFactsOpts = {facts?: () => Promise<PeopleFacts | null>; identity?: boolean};
 
 export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date, manual?: ManualContactsRead, scope: CohortScope = NO_SCOPE, people: CustomerFactsOpts = {}): Promise<MetricResult> {
-  const {enriched, orders, windowStart, membership, capped} = await crmEnrichedCustomers(get, now);
-  // RET-18 P2: read only when a list shows the columns or a filter needs them (the PawSport walk is a few Shopify pages, cached 10 minutes).
+  // RET-18 P2: read only when a list shows the columns or a filter needs them, and started BEFORE the CRM reads so the two run side by side
+  // (a cold PawSport walk is a few Shopify pages; the seam gives it its own time budget, src/chat/contacts/status.ts pawsportWithin).
   const factsOn = factFilterOn(req.facts);
-  const facts = req.group_by === 'none' || factsOn ? ((await people.facts?.().catch(() => null)) ?? null) : null;
+  const factsP: Promise<PeopleFacts | null> = req.group_by === 'none' || factsOn ? (people.facts?.() ?? Promise.resolve(null)).catch(() => null) : Promise.resolve(null);
+  const [{enriched, orders, windowStart, membership, capped}, facts] = await Promise.all([crmEnrichedCustomers(get, now), factsP]);
   const factsOf = personFacts(facts);
   const factOf = (c: {shopifyCustomerId: string; email: string | null; phone: string | null}) => factsOf({emails: [c.email], mobiles: [c.phone], instagram: null, shopifyCustomerId: c.shopifyCustomerId});
   const identity = people.identity === true;
@@ -586,7 +587,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const known = days.filter((d): d is string => d !== null).sort();
   const range = req.joined ?? {from: known[0] ?? today, to: known[known.length - 1] ?? today};
   const notes: Check[] = [
-    {code: 'reconciles', status: 'info', text: `${matched.length} website customers match (tier ${req.tier}, ${req.buyers === 'all' ? 'buyers and non-buyers' : req.buyers.replace('_', '-')}${req.min_orders > 0 ? `, at least ${req.min_orders} order${req.min_orders > 1 ? 's' : ''}` : ''}${req.joined ? `, joined ${rangeLabel(req.joined.from, req.joined.to)}` : ''}${req.audience === 'all' ? '' : `, audience ${req.audience}`}${scope.cohort ? `, in the saved cohort ${cohortLabel(scope.cohort)} (${ruleText(scope.cohort.rule)})` : ''}${req.not_contacted_days > 0 ? `, last contacted ${req.not_contacted_days}+ days ago or never` : ''}${req.facts.contact_status !== 'all' ? `, team status ${req.facts.contact_status}` : ''}${req.facts.has_pawsport !== 'all' ? `, PawSport ${req.facts.has_pawsport}` : ''}${req.facts.contacted_since ? `, contacted by the team since ${req.facts.contacted_since}` : ''}).`, values: {customers: matched.length, ...(facts || factsOn ? factCounts(cohortRows.map(factOf)) : {})}},
+    {code: 'reconciles', status: 'info', text: `${matched.length} website customers match (tier ${req.tier}, ${req.buyers === 'all' ? 'buyers and non-buyers' : req.buyers.replace('_', '-')}${req.min_orders > 0 ? `, at least ${req.min_orders} order${req.min_orders > 1 ? 's' : ''}` : ''}${req.joined ? `, joined ${rangeLabel(req.joined.from, req.joined.to)}` : ''}${req.audience === 'all' ? '' : `, audience ${req.audience}`}${scope.cohort ? `, in the saved cohort ${cohortLabel(scope.cohort)} (${ruleText(scope.cohort.rule)})` : ''}${req.not_contacted_days > 0 ? `, last contacted ${req.not_contacted_days}+ days ago or never` : ''}${factsOn ? `, ${factFilterText(req.facts)}` : ''}).`, values: {customers: matched.length, ...(facts || factsOn ? factCounts(cohortRows.map(factOf)) : {})}},
     info(`Computed from the CRM's captured orders, not Shopify's own counters. ${CUSTOMER_RULES} The membership year starts ${windowStart}.`),
     ...capped,
   ];
