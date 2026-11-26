@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Uploads tiles count "need a store" the way the board files pages; one period per form (Nov 26)
+
+After v1.30.0 on prod the Uploads tile for "[PART 2] … Nov 20 scan" said 13 pages need a store while the scan board had filed 8 of them under the store their own form read: the tile (and Commit all's "what's missing") checked each page alone.
+- `storesFromForm` rebuilds each scan's physical forms (same `inheritFormStores`, batches kept apart so a re-upload is its own scan) and `pageNeed` treats a page that takes its form's store as having one.
+- **One period per form:** a page that read no period takes the one most of its form's pages read (a tie fills nothing). Without it, pages that gained a store moved from "need a store" to "need a date"; on the board they also land in the right form instead of a "No period read" one.
+- Staging, the two Nov 20 scans: Part 1 18 store + 1 date → 8 store + 0 date; Part 2 12 store → 0 and 0. The 8 left are forms with no code written on any page.
+
 ## Unreleased — BA roster learns without duplicates, and feeds the reader (flagged, Nov 26)
 
 Coop's BA roster comes only from the forms (decided Oct 27): a reviewer's saved or committed BA name joins it (`learnFormBa`), never a raw read. Two gaps:

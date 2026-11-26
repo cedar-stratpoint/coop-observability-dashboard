@@ -40,6 +40,8 @@ export type ClassifiedPage = PageClassification & {
   /** Set by formConsultants when this page's BA was replaced by its form's agreed name: what the
    *  page itself read (null when it read none). */
   consultant_read?: string | null;
+  /** Set by inheritFormStores when this page read no period and took its form's (Nov 26). */
+  period_from_form?: boolean;
   /** Set by inheritFormStores when this page's physical form shows two different store codes
    *  (QA Nov 26), so nothing was filled and the form is flagged for a look. */
   form_store_conflict?: boolean;
@@ -430,6 +432,24 @@ export function formRuns<T extends ClassifiedPage>(pages: T[], positionOf: (p: T
 export function inheritFormStores<T extends ClassifiedPage>(pages: T[], positionOf: (p: T) => {source: string; index: number} | null): T[] {
   const out = [...pages];
   for (const run of formRuns(out, positionOf)) {
+    // One physical form has one period: a page that read none takes the period most of its form's
+    // pages read (a tie fills nothing). Nov 26: pages filled with the form's store then showed "need a
+    // date", and one misread day on a sibling page must not block the rest.
+    const periods = new Map<string, {start: string | null; end: string | null; n: number}>();
+    for (const x of run) {
+      if (!x.p.period_start && !x.p.period_end) continue;
+      const k = `${x.p.period_start}|${x.p.period_end}`;
+      const cur = periods.get(k);
+      periods.set(k, {start: x.p.period_start, end: x.p.period_end, n: (cur?.n ?? 0) + 1});
+    }
+    const ranked = [...periods.values()].sort((a, b) => b.n - a.n);
+    if (ranked.length && !(ranked[1] && ranked[1].n === ranked[0].n)) {
+      const top = ranked[0];
+      for (const x of run) {
+        if (x.p.period_start || x.p.period_end) continue;
+        out[x.i] = {...out[x.i], period_start: top.start, period_end: top.end, period_from_form: true};
+      }
+    }
     const sure = run.filter((x) => x.p.store_code && x.p.store_snap && SURE_STORE.has(x.p.store_snap.status));
     const codes = new Set(sure.map((x) => x.p.store_code));
     if (codes.size > 1) {

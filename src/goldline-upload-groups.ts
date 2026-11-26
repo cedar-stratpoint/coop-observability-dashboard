@@ -6,7 +6,7 @@
 // unit-tests. Used by the Uploads "Groups" view.
 
 import {scanPosition} from './upload-batch';
-import {snapStoreWithName, storeRefs, type StoreRef} from './goldline-segment';
+import {applyStoreRegistry, inheritFormStores, snapStoreWithName, storeRefs, type ClassifiedPage, type StoreRef} from './goldline-segment';
 
 /** What a page still to review is missing before Commit all can file it (Nov 25):
  *  'store' when no registry store can be read off it, 'date' when the store is known but no
@@ -14,14 +14,65 @@ import {snapStoreWithName, storeRefs, type StoreRef} from './goldline-segment';
  *  all can file it (a misread year is corrected the way the board corrects it). */
 export type PageNeed = 'store' | 'date';
 export function pageNeed(
-  p: {status: string; batchHasStore: boolean; readStore: string | null | undefined; readStart: string | null | undefined; readName?: string | null},
+  p: {status: string; batchHasStore: boolean; readStore: string | null | undefined; readStart: string | null | undefined; readName?: string | null; storeFromForm?: boolean},
   knownStores: Iterable<string | StoreRef>,
 ): PageNeed | null {
   if (p.status !== 'needs_review' || p.batchHasStore) return null;
   const snap = snapStoreWithName(p.readStore ?? null, p.readName, storeRefs(knownStores));
   // name_mismatch keeps a real registry code, so the page can still be filed (it's flagged elsewhere).
-  if (snap.status !== 'exact' && snap.status !== 'corrected' && snap.status !== 'name_mismatch') return 'store';
+  // A page that takes its store from its own form (storesFromForm) has one, as on the scan board.
+  if (!p.storeFromForm && snap.status !== 'exact' && snap.status !== 'corrected' && snap.status !== 'name_mismatch') return 'store';
   return p.readStart ? null : 'date';
+}
+
+/** A page row as the Uploads list reads it, enough to rebuild its physical form. */
+export type FormFillRow = {
+  id: string;
+  filename: string;
+  batch_id: string | null;
+  status: string;
+  page_no: number | null;
+  page_kind: string | null;
+  form_version: string | null;
+  readStore: string | null | undefined;
+  readName: string | null | undefined;
+  readStart?: string | null;
+};
+
+/**
+ * The pages that take their store (and, when they read none, their period) from their own physical
+ * form (inheritFormStores), so the Uploads
+ * tiles count "need a store" the way the scan board files them (Nov 26, prod: Part 2's tile said 13
+ * pages need a store while the board had filled 8 of them). Forms never span batches: a re-upload of
+ * the same file is its own scan. Pages still in review only. Pure.
+ */
+export function storesFromForm(rows: FormFillRow[], knownStores: Iterable<string | StoreRef>): Map<string, {store: boolean; periodStart: string | null}> {
+  const live = rows.filter((r) => r.batch_id && r.status === 'needs_review' && r.page_kind === 'inventory');
+  const pages: ClassifiedPage[] = live.map((r) => ({
+    id: r.id,
+    page: r.page_no ?? 0,
+    kind: 'inventory',
+    orientation: 0,
+    version: (r.form_version as ClassifiedPage['version']) ?? 'unknown',
+    store_code: r.readStore?.trim() || null,
+    store_name: r.readName?.trim() || null,
+    period_start: r.readStart?.trim() || null,
+    period_end: null,
+    consultant: null,
+    confidence: 0,
+  }));
+  const row = new Map(live.map((r) => [r.id, r]));
+  const filled = inheritFormStores(applyStoreRegistry(pages, storeRefs(knownStores)), (p) => {
+    const r = row.get(p.id);
+    const pos = r ? scanPosition(r.filename) : null;
+    return r && pos ? {source: `${r.batch_id}|${pos.source}`, index: pos.index} : null;
+  });
+  const out = new Map<string, {store: boolean; periodStart: string | null}>();
+  for (const p of filled) {
+    const store = p.store_snap?.status === 'from_form';
+    if (store || p.period_from_form) out.set(p.id, {store, periodStart: p.period_from_form ? p.period_start : null});
+  }
+  return out;
 }
 
 export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null;
