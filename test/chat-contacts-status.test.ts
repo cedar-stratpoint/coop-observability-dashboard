@@ -1,7 +1,8 @@
-import {describe, expect, it} from 'vitest';
-import {readContactsInput} from '../src/chat/contacts/leads';
+import {describe, expect, it, vi} from 'vitest';
+import {draftLeads} from '../src/chat/contacts/draft';
+import {listEventLeads, readContactsInput, type LeadsSource} from '../src/chat/contacts/leads';
 import {listPeople, findPeople, type PeopleSource} from '../src/chat/contacts/people';
-import {factNotes, personFacts, type PeopleFacts} from '../src/chat/contacts/status';
+import {factNotes, PAWSPORT_SLOW, pawsportWithin, personFacts, type PeopleFacts} from '../src/chat/contacts/status';
 import {crmCustomersResult, readCustomersInput, type CrmGet} from '../src/chat/crm/tools';
 import type {CustomerContact} from '../src/customer-contacts';
 import type {EnrichedCustomer} from '../src/crm-compute';
@@ -124,5 +125,90 @@ describe('list_crm_customers: status, PawSport and the identity rule (D3)', () =
     if ('error' in req) throw new Error(req.error);
     const r = await crmCustomersResult(req, get(), NOW, undefined, undefined, {facts: async () => { throw new Error('down'); }});
     expect(r.rows).toEqual([]);
+  });
+});
+
+// ---------- review fixes (2026-11-26) ----------
+
+const EVENT_SRC: LeadsSource = {
+  events: [{event_id: 'e1', name: 'Circuit Makati', starts_on: '2026-09-26', ends_on: '2026-09-26'}],
+  leads: [lead({email: 'ana@example.com', pet: 'Ana pet'}), lead({email: 'dee@example.com', pet: 'Dee pet'}), lead({email: 'eve@example.com', pet: 'Eve pet'})],
+  facts: {...FACTS, log: {rows: [contact({email: 'ana@example.com'})], legacy: false}},
+};
+const contactsReq = (input: Record<string, unknown>) => {
+  const r = readContactsInput({event: 'Circuit Makati', ...input});
+  if ('error' in r) throw new Error(r.error);
+  return r;
+};
+
+describe('review 1: a draft follows the filtered list it comes after', () => {
+  it('list_leads not_contacted numbers Dee 1 and Eve 2; per_lead row 1 goes to Dee, not Ana', () => {
+    const list = listEventLeads(contactsReq({mode: 'list_leads', contact_status: 'not_contacted'}) as never, EVENT_SRC);
+    if (!('table' in list)) throw new Error('no table');
+    expect(list.table.rows.map((r) => [r.n, r.email])).toEqual([[1, 'dee@example.com'], [2, 'eve@example.com']]);
+    const d = draftLeads(contactsReq({mode: 'draft', channel: 'email', contact_status: 'not_contacted', per_lead: [{n: 1, text: 'Hi Dee'}]}) as never, EVENT_SRC);
+    expect('table' in d && d.table.rows).toEqual([{n: 1, to: 'dee@example.com', message: 'Hi Dee'}]);
+    expect(draftLeads(contactsReq({mode: 'draft', channel: 'email', contact_status: 'not_contacted', per_lead: [{n: 3, text: 'x'}]}) as never, EVENT_SRC)).toEqual({error: expect.stringMatching(/Row 3 is not in the list: it has 2 rows/)});
+  });
+  it('a template draft goes only to the filtered leads', () => {
+    const d = draftLeads(contactsReq({mode: 'draft', channel: 'email', contact_status: 'not_contacted', template: 'Hi {{pet}}'}) as never, EVENT_SRC);
+    expect('table' in d && d.table.rows.map((r) => r.to)).toEqual(['dee@example.com', 'eve@example.com']);
+    expect('model' in d && d.model.notes.join(' ')).toMatch(/Only the 2 of 3 leads that match the filter \(not contacted\)/);
+  });
+});
+
+describe('review 2: unread Same person links never make "not contacted"', () => {
+  it('not_contacted becomes unknown, contacted and replied stay, and a note says why', () => {
+    const r = people({}, {...SRC, facts: {...FACTS, links: null}});
+    expect(r.model.counts).toMatchObject({status_not_contacted: 0, status_unknown: 2, status_contacted: 1, status_replied: 1});
+    expect(r.model.notes.join(' ')).toMatch(/Same person links could not be read/);
+  });
+});
+
+describe('review 3: PawSport has its own time budget, and starts beside the CRM reads', () => {
+  it('a read past the budget is unavailable with the slow note; a fast one passes through', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = pawsportWithin(new Promise(() => {}), 12_000);
+      await vi.advanceTimersByTimeAsync(12_000);
+      await expect(slow).resolves.toEqual({status: 'unavailable', holders: [], warnings: [PAWSPORT_SLOW]});
+    } finally {
+      vi.useRealTimers();
+    }
+    await expect(pawsportWithin(Promise.resolve(FACTS.pawsport))).resolves.toBe(FACTS.pawsport);
+    expect(factNotes({...FACTS, pawsport: {status: 'unavailable', holders: [], warnings: [PAWSPORT_SLOW]}}).join(' ')).toContain(PAWSPORT_SLOW);
+  });
+  it('list_crm_customers asks for the facts before the CRM answers', async () => {
+    let factsAsked = false;
+    let crmDoneFirst = false;
+    const slowGet: CrmGet = async (e) => {
+      await new Promise((r) => setTimeout(r, 20));
+      if (!factsAsked) crmDoneFirst = true;
+      return fakeCrmClient().client.get(e);
+    };
+    const req = readCustomersInput({group_by: 'none'});
+    if ('error' in req) throw new Error(req.error);
+    await crmCustomersResult(req, slowGet, NOW, undefined, undefined, {facts: async () => { factsAsked = true; return FACTS; }});
+    expect(factsAsked).toBe(true);
+    expect(crmDoneFirst).toBe(false);
+  });
+});
+
+describe('review 4-6: contacted includes replied with a day; caveats on no match; date checks', () => {
+  it('contacted + contacted_since includes those who replied, and the title says so', () => {
+    const r = people({contact_status: 'contacted', contacted_since: '2026-09-01'});
+    expect(r.table.rows.map((x) => x.contact_status).sort()).toEqual(['contacted', 'replied']);
+    expect(r.table.title).toMatch(/contacted \(replied included\)/);
+    expect(people({contact_status: 'contacted'}).table.rows.map((x) => x.contact_status)).toEqual(['contacted']);
+  });
+  it('a zero-match list names every unread source', () => {
+    const src: LeadsSource = {...EVENT_SRC, facts: {log: null, links: [], pawsport: {status: 'unavailable', holders: [], warnings: []}}};
+    const r = listEventLeads(contactsReq({mode: 'list_leads', has_pawsport: 'yes'}) as never, src);
+    expect('error' in r && r.error).toMatch(/contact log could not be read[\s\S]*Shopify could not be read/);
+  });
+  it('refuses an impossible day and not_contacted / unknown with contacted_since', () => {
+    expect(readContactsInput({mode: 'people', contacted_since: '2026-02-30'})).toEqual({error: expect.stringMatching(/real PH day/)});
+    expect(readContactsInput({mode: 'people', contact_status: 'not_contacted', contacted_since: '2026-11-01'})).toEqual({error: expect.stringMatching(/cannot go with contact_status not_contacted/)});
+    expect(readCustomersInput({contact_status: 'unknown', contacted_since: '2026-11-01'})).toEqual({error: expect.stringMatching(/cannot go with contact_status unknown/)});
   });
 });

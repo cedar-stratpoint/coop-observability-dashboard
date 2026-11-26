@@ -9,7 +9,7 @@ import {manilaDayKey} from '../../pos-sales-compute';
 import type {SpinLead} from '../../spin-leads-types';
 import type {MetricRow, ResultColumn} from '../result-types';
 import {clean, type FindInput, type LeadsTable, type OverlapInput, type PeopleInput} from './leads';
-import {factColumns, factCounts, factFilterOn, factNotes, factRow, keepFacts, personFacts, type PeopleFacts, type PersonFacts} from './status';
+import {factColumns, factCounts, factFilterOn, factFilterText, factNotes, factRow, keepFacts, personFacts, type PeopleFacts, type PersonFacts} from './status';
 
 export const PEOPLE_FIND_MAX = 10;
 export const PEOPLE_OVERLAP_MAX = 200;
@@ -192,7 +192,7 @@ export function listPeople(input: PeopleInput, src: PeopleSource): PeopleOutcome
   const factsOf = personFacts(src.facts ?? null);
   const inSource = people.filter((p) => input.source === 'any' || p.sources.includes(input.source)).map((p) => ({p, f: factsOf(keysOf(p))}));
   const kept = inSource.filter((x) => keepFacts(x.f, input.filter));
-  const scope = `${PEOPLE_TITLE[input.source]}${factFilterOn(input.filter) ? `: ${[input.filter.has_pawsport !== 'all' ? `PawSport ${input.filter.has_pawsport}` : null, input.filter.contact_status !== 'all' ? input.filter.contact_status.replace('_', ' ') : null, input.filter.contacted_since ? `contacted since ${input.filter.contacted_since}` : null].filter(Boolean).join(', ')}` : ''}`;
+  const scope = `${PEOPLE_TITLE[input.source]}${factFilterOn(input.filter) ? `: ${factFilterText(input.filter)}` : ''}`;
   const shown = kept.slice(0, input.limit);
   const rows = shown.map((x, i) => toRow(x.p, i + 1, x.f));
   const modelRows = rows.slice(0, MODEL_ROWS);

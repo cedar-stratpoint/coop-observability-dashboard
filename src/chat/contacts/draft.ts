@@ -11,6 +11,7 @@ import type {SpinLead} from '../../spin-leads-types';
 import type {ClarifyResult} from '../clarify';
 import type {MetricRow, ResultColumn} from '../result-types';
 import {clean, selectLeads, slug, type DraftInput, type LeadsOutcome, type LeadsSource} from './leads';
+import {factFilterText} from './status';
 
 export const PLACEHOLDERS = ['pet', 'prize', 'event', 'treats', 'collected_date'] as const;
 const SAMPLES = 5;
@@ -84,9 +85,10 @@ export function draftLeads(input: DraftInput, source: LeadsSource): DraftOutcome
   }
   if (rows.length === 0) return {error: `None of the ${chosen.length} chosen leads has ${field === 'email' ? 'an email' : field === 'mobile' ? 'a mobile number' : 'an Instagram handle'}, so there is nothing to draft for ${CHANNEL_LABEL[input.channel]}.`};
 
-  const counts = {listed: listed.length, drafted: rows.length, skipped_no_channel: skipped, without_consent_date: chosen.filter((c) => !c.lead.consentAt).length};
+  const counts = {listed: listed.length, ...(input.filter ? {before_filter: sel.beforeFilter} : {}), drafted: rows.length, skipped_no_channel: skipped, without_consent_date: chosen.filter((c) => !c.lead.consentAt).length};
   const notes = [
     `${rows.length} ${CHANNEL_LABEL[input.channel]} drafts for ${label}. Nothing was sent: the owner copies them out and sends them.`,
+    ...(input.filter ? [`Only the ${listed.length} of ${sel.beforeFilter} leads that match the filter (${factFilterText(input.filter)}), numbered as in that filtered list.`] : []),
     ...(skipped > 0 ? [`${skipped} chosen lead${skipped === 1 ? ' has' : 's have'} no ${field}, so no draft was made for them.`] : []),
     ...(unsure > 0 ? [`${unsure} draft${unsure === 1 ? ' uses' : 's use'} an unsure order match for the treats (booth timing was close to another order).`] : []),
     'Leads with no pet name read "your furbaby"; leads with no order match read "treats". You see only a few sample drafts; the owner sees them all.',
