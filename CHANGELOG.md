@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — PawSport filter on Event leads (RET-18 P1b)
+
+Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
+- **Filter PawSport: All / Has · n / None · n / Can't tell · n** beside Status on `/customers/leads`. It combines with every other filter, resets the page, and the CSV and Copy buttons follow it; Status and PawSport each count over the other's choice.
+- **Decided: Can't tell, never None, when we can't know.** Shopify unread or cut off, or a lead with no usable email or mobile (Instagram-only, most booth leads) reads Can't tell. None = has an email or mobile, Shopify read in full, no holder matches. When Shopify is unread the filter is disabled ("Unavailable") and counts as All, like the Website CRM.
+- **Reuse:** the Website CRM's helpers in `src/pawsport.ts` gain an optional `matchable` argument on `pawsportState`, `pawsportMatchable` and `countPawsportStates` (the CRM view now uses it too); the page passes the read status as the Website CRM page does.
 ## 2026-11-26 — Flags hub P0: every flag in one place, what needs you first (behind GOLDLINE_FLAGS_HUB)
 
 Owner (Nov 26): "This Flags page only shows flags against BAs. We want a page to see all the flags Nichido-wide (flags from review, from OCR, from BAs, etc.)", and it should feel premium: aesthetic-usability, Hick's law, Von Restorff, room to breathe. Plan with the decisions: `knowledge/tasks/2026-11-26-nichido-flags-hub.md`. This is P0 of five: checks and review flags only, no schema.
