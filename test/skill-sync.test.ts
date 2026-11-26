@@ -127,10 +127,11 @@ describe('size and caching', () => {
   // Train 3 (2026-10-07): +EXP-09..11, PAGE-01, the base-table stock bullet. Budgets were 4,500 and 6,600; measured 4,597 and 6,861, plus 5%.
   // Ask Coop leads P1 (2026-10-19): +the `contacts` topic (explore only). Budget was 7,210; measured 7,387, plus 3%.
   // Calculation guardrail (2026-10-22): THINK-03 allows shown arithmetic. Budget was 7,610; measured 7,612 (26,642 characters), now 7,660.
-  it('the explore variant fits its budget (7,660) and puts sql-explore after dashboard-composition', () => {
+  // RET-18 P2 (2026-11-26): +3 contacts-topic lines (PawSport, status words, unknown is not never). Measured 7,724, now 7,780.
+  it('the explore variant fits its budget (7,780) and puts sql-explore after dashboard-composition', () => {
     const tokens = estimateTokens(exploreText);
     console.log(`explore skill: ${exploreText.length} characters, about ${tokens} tokens`);
-    expect(tokens).toBeLessThan(7660);
+    expect(tokens).toBeLessThan(7780);
     expect(exploreText.indexOf('## Topic: dashboard-composition')).toBeGreaterThan(-1);
     expect(exploreText.indexOf('## Topic: dashboard-composition')).toBeLessThan(exploreText.indexOf('## Topic: sql-explore'));
     expect([...EXPLORE_TOPICS]).toEqual(['sql-explore', 'contacts']);

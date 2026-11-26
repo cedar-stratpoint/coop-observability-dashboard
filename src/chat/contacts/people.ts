@@ -8,7 +8,8 @@ import type {LazadaCustomer} from '../../lazada-types';
 import {manilaDayKey} from '../../pos-sales-compute';
 import type {SpinLead} from '../../spin-leads-types';
 import type {MetricRow, ResultColumn} from '../result-types';
-import {clean, type FindInput, type LeadsTable, type OverlapInput} from './leads';
+import {clean, type FindInput, type LeadsTable, type OverlapInput, type PeopleInput} from './leads';
+import {factColumns, factCounts, factFilterOn, factNotes, factRow, keepFacts, personFacts, type PeopleFacts, type PersonFacts} from './status';
 
 export const PEOPLE_FIND_MAX = 10;
 export const PEOPLE_OVERLAP_MAX = 200;
@@ -23,8 +24,10 @@ export interface PeopleSource {
   websiteNote?: string | null;
   /** The events, for the event anchor of matches. */
   events?: import('./leads').LeadsEvent[];
+  /** RET-18 P2: the team's contact log and the PawSport holders (null or absent: status and PawSport read unknown). */
+  facts?: PeopleFacts | null;
 }
-export type { FindInput, OverlapInput };
+export type { FindInput, OverlapInput, PeopleInput };
 export interface PeopleOutcome {
   table: LeadsTable;
   model: {counts: Record<string, number>; rows: MetricRow[]; notes: string[]};
@@ -46,11 +49,14 @@ const COLUMNS: ResultColumn[] = [
   {key: 'events', label: 'Booth events (campaign)', unit: 'text', role: 'category'},
   {key: 'prize', label: 'Booth prize', unit: 'text', role: 'category'},
   {key: 'last_seen', label: 'Last seen', unit: 'date', role: 'time'},
+  // The contacts tool is allowlist-only, so the passport details (D3) are always shown here.
+  ...factColumns(true),
 ];
 
 const joinClean = (values: string[], max = 80): string | null => clean(values.map((v) => clean(v, 60)).filter(Boolean).join('; '), max);
 
-const toRow = (p: UnifiedContact, n: number): MetricRow => ({
+const keysOf = (p: UnifiedContact) => ({emails: p.emails, mobiles: p.mobiles, instagram: p.instagram});
+const toRow = (p: UnifiedContact, n: number, f: PersonFacts): MetricRow => ({
   n,
   name: clean(p.name, 80),
   email: clean(p.email, 80),
@@ -65,6 +71,7 @@ const toRow = (p: UnifiedContact, n: number): MetricRow => ({
   events: joinClean(p.campaigns, 120),
   prize: clean(p.prize, 60),
   last_seen: p.lastSeen ? manilaDayKey(p.lastSeen) : null,
+  ...factRow(f, true),
 });
 
 const SOURCE_LABEL: Record<ContactSource, string> = {website: 'website CRM', booth: 'booth leads', lazada: 'Lazada'};
@@ -129,12 +136,14 @@ export function findPeople(input: FindInput, src: PeopleSource): PeopleOutcome |
     return {error: `No customer matches that. Email and mobile are matched exactly and names by their words; a misspelt name is not guessed. Try the email or mobile number.${notes.length ? ` ${notes.join(' ')}` : ''}`};
   }
   const shown = hits.slice(0, PEOPLE_FIND_MAX);
-  const rows = shown.map((h, i) => toRow(h.p, i + 1));
+  const factsOf = personFacts(src.facts ?? null);
+  const rows = shown.map((h, i) => toRow(h.p, i + 1, factsOf(keysOf(h.p))));
   const outNotes = [
     ...(hits.length > shown.length ? [`${hits.length} people match; showing the first ${shown.length}. Ask for one by email or mobile number to see just them.`] : []),
     ...(shown.length > 1 ? ['Several people fit: ask the owner which row (or an email or mobile) they mean before saying anything about "the" customer.'] : []),
     ...notes,
     ...BASIS,
+    ...factNotes(src.facts ?? null),
   ];
   return {
     table: table(`Customer: ${shown.length === 1 ? 'profile' : 'matches'}`, rows, `${hits.length} ${hits.length === 1 ? 'person' : 'people'} found across the website, booth and Lazada`),
@@ -153,7 +162,8 @@ export function overlapPeople(input: OverlapInput, src: PeopleSource): PeopleOut
   const scope = input.voucher ? ` who used ${input.voucher}` : '';
   if (both.length === 0) return {error: `Nobody${scope ? ` among the website customers${scope}` : ''} appears in both the ${SOURCE_LABEL[input.a]} and the ${SOURCE_LABEL[input.b]} (matched by the same email or mobile).`};
   const shown = both.slice(0, PEOPLE_OVERLAP_MAX);
-  const rows = shown.map((p, i) => toRow(p, i + 1));
+  const factsOf = personFacts(src.facts ?? null);
+  const rows = shown.map((p, i) => toRow(p, i + 1, factsOf(keysOf(p))));
   const modelRows = rows.slice(0, MODEL_ROWS);
   const outNotes = [
     ...(both.length > shown.length ? [`${both.length} people are in both; the table shows the first ${shown.length}.`] : []),
@@ -161,10 +171,42 @@ export function overlapPeople(input: OverlapInput, src: PeopleSource): PeopleOut
     ...(input.voucher ? [`Website side = only the customers who used ${input.voucher} on any order (the Website CRM's Voucher filter); the booth side is every lead.`, 'Instagram (booth) is the handle the person typed at the booth; blank = they left none.'] : []),
     ...notes,
     ...BASIS,
+    ...factNotes(src.facts ?? null),
   ];
   return {
     table: table(`In both ${SOURCE_LABEL[input.a]} and ${SOURCE_LABEL[input.b]}${scope ? ` (website: used ${input.voucher})` : ''}`, rows, `${both.length} people in both`),
     model: {counts: {people: both.length, shown: shown.length}, rows: modelRows, notes: outNotes},
+    audit: {eventId: null, rows: rows.length, columns: COLUMNS.map((c) => c.key)},
+  };
+}
+
+const PEOPLE_TITLE: Record<PeopleInput['source'], string> = {any: 'People', website: 'Website customers', booth: 'Booth leads', lazada: 'Lazada buyers'};
+
+/**
+ * RET-18 P2, mode people: everyone (or one source) as one person each (the Customers page's merge), filtered by the team's contact
+ * status, PawSport and a contact day. "Which PawSport holders haven't we contacted?", "Which booth leads have a PawSport?".
+ */
+export function listPeople(input: PeopleInput, src: PeopleSource): PeopleOutcome | {error: string} {
+  const {people, missing, notes} = load(src);
+  if (input.source !== 'any' && missing.includes(input.source)) return {error: `${notes.find((n) => n.toLowerCase().includes(input.source === 'website' ? 'website' : 'lazada')) ?? 'That source could not be read.'} There is no answer without it.`};
+  const factsOf = personFacts(src.facts ?? null);
+  const inSource = people.filter((p) => input.source === 'any' || p.sources.includes(input.source)).map((p) => ({p, f: factsOf(keysOf(p))}));
+  const kept = inSource.filter((x) => keepFacts(x.f, input.filter));
+  const scope = `${PEOPLE_TITLE[input.source]}${factFilterOn(input.filter) ? `: ${[input.filter.has_pawsport !== 'all' ? `PawSport ${input.filter.has_pawsport}` : null, input.filter.contact_status !== 'all' ? input.filter.contact_status.replace('_', ' ') : null, input.filter.contacted_since ? `contacted since ${input.filter.contacted_since}` : null].filter(Boolean).join(', ')}` : ''}`;
+  const shown = kept.slice(0, input.limit);
+  const rows = shown.map((x, i) => toRow(x.p, i + 1, x.f));
+  const modelRows = rows.slice(0, MODEL_ROWS);
+  const outNotes = [
+    `${kept.length} of ${inSource.length} ${PEOPLE_TITLE[input.source].toLowerCase()} match. The counts are computed here: quote them, do not add rows up.`,
+    ...(shown.length < kept.length ? [`The table shows the first ${shown.length} (the limit asked for).`] : []),
+    ...(modelRows.length < rows.length ? [`You were given the first ${MODEL_ROWS} rows only; the owner's table has ${rows.length}.`] : []),
+    ...notes,
+    ...BASIS,
+    ...factNotes(src.facts ?? null),
+  ];
+  return {
+    table: table(scope, rows, `${kept.length} of ${inSource.length} people`),
+    model: {counts: {in_source: inSource.length, matching: kept.length, shown: shown.length, ...factCounts(inSource.map((x) => x.f))}, rows: modelRows, notes: outNotes},
     audit: {eventId: null, rows: rows.length, columns: COLUMNS.map((c) => c.key)},
   };
 }
