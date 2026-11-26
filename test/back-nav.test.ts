@@ -21,7 +21,14 @@ describe('return entry', () => {
   const entry = (over: Partial<ReturnEntry> = {}) => JSON.stringify({url: '/stock?filter=out&page=2', scrollY: 640, rowId: 'GL-01', at: now - 1000, to: '/stock/GL-01', ...over});
 
   it('parses a good entry', () => {
-    expect(parseReturnEntry(entry(), now)).toEqual({url: '/stock?filter=out&page=2', scrollY: 640, rowId: 'GL-01', at: now - 1000, to: '/stock/GL-01'});
+    expect(parseReturnEntry(entry(), now)).toEqual({url: '/stock?filter=out&page=2', scrollY: 640, rowId: 'GL-01', at: now - 1000, to: '/stock/GL-01', label: null});
+  });
+  it('keeps a short label for the detail page\'s Back, trimmed and capped', () => {
+    const raw = (label: unknown) => JSON.stringify({url: '/flags?kind=needs.mark%3Aprice', scrollY: 0, rowId: 'm:1', at: now - 1000, to: '/uploads/1', label});
+    expect(parseReturnEntry(raw('  Price written '), now)?.label).toBe('Price written');
+    expect(parseReturnEntry(raw(''), now)?.label).toBeNull();
+    expect(parseReturnEntry(raw(42), now)?.label).toBeNull();
+    expect(parseReturnEntry(raw('x'.repeat(200)), now)?.label).toHaveLength(80);
   });
 
   it('rejects stale, future, malformed and off-site entries', () => {

@@ -3,7 +3,8 @@
 import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {createPortal} from 'react-dom';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {NamedReturnLink} from '@/components/analyst/back-nav';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
@@ -120,6 +121,9 @@ export function BatchReview({
   initialPageId?: string | null;
 }) {
   const router = useRouter();
+  // Opened from the Flags hub (a flagged page redirected here with ?from=flags): Back names the
+  // flags view and returns to it, instead of the scan.
+  const fromFlags = useSearchParams().get('from') === 'flags';
   const queue = useUploadQueue();
   const committed = batch.status === 'committed';
   const editable = canEdit && !committed;
@@ -368,12 +372,23 @@ export function BatchReview({
           {/* A breadcrumb to the scan, so it links straight there. (Not history.back(): the
               scan board is filter-heavy, and stepping back through history just retraced the
               view tabs / version cards / store chips the reviewer had clicked.) */}
-          <Link
-            href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
-            className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
-          </Link>
+          {fromFlags ? (
+            <NamedReturnLink
+              listKey="flags"
+              fallback="/flags"
+              fallbackLabel="Flags"
+              detailPrefix="/uploads/"
+              icon={<ArrowLeft className="size-3.5 shrink-0" />}
+              className="inline-flex min-w-0 max-w-[18rem] shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+            />
+          ) : (
+            <Link
+              href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
+              className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
+            </Link>
+          )}
           {curPageLabel && (
             <span
               className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums"

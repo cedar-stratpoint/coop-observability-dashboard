@@ -80,14 +80,16 @@ export function useListParams<D extends ListDefaults>(defaults: D): [D, (patch: 
   return [state, set];
 }
 
-/** Remember this list (URL, scroll, the row being opened) before following a row's link. */
-export function leaveList(listKey: string, rowId: string | null, href: string) {
+/** Remember this list (URL, scroll, the row being opened, and optionally what it was showing,
+ *  for the detail page's Back label) before following a row's link. */
+export function leaveList(listKey: string, rowId: string | null, href: string, label?: string | null) {
   const entry: ReturnEntry = {
     url: `${window.location.pathname}${window.location.search}`,
     scrollY: window.scrollY,
     rowId,
     at: Date.now(),
     to: normPath(href),
+    label: label ?? null,
   };
   try {
     store()?.setItem(returnKey(listKey), JSON.stringify(entry));
@@ -139,7 +141,7 @@ export function useReturnTrip(listKey: string) {
     returnToRow(entry.rowId, entry.scrollY);
   }, [listKey]);
 
-  const leave = useCallback((rowId: string | null, href: string) => leaveList(listKey, rowId, href), [listKey]);
+  const leave = useCallback((rowId: string | null, href: string, label?: string | null) => leaveList(listKey, rowId, href, label), [listKey]);
   return {leave};
 }
 
@@ -248,6 +250,12 @@ export function markReturn(listKey: string) {
   }
 }
 
+/** What the list was showing when this page was opened from it ("Price written"), else null. */
+export function returnLabel(listKey: string, detailPrefix?: string): string | null {
+  const entry = readEntry(listKey);
+  return cameFrom(entry, detailPrefix) ? (entry?.label ?? null) : null;
+}
+
 /** Where a detail page's Back should land: the remembered list URL when this page was opened
  *  from it, else `fallback`. Client-only (reads per-tab storage). */
 export function returnTarget(listKey: string, fallback: string, detailPrefix?: string): string {
@@ -312,6 +320,38 @@ export function ReturnLink({
     >
       {children}
     </Link>
+  );
+}
+
+/**
+ * A detail page's Back that names where you came from: "Back to Price written" when this page was
+ * opened from that list view (the label it left, see leaveList), else "Back to <fallbackLabel>".
+ * Same landing rules as ReturnLink (the list exactly as left, else `fallback`).
+ */
+export function NamedReturnLink({
+  listKey,
+  fallback,
+  fallbackLabel,
+  detailPrefix,
+  icon,
+  className,
+}: {
+  listKey: string;
+  fallback: string;
+  fallbackLabel: string;
+  detailPrefix?: string;
+  icon?: ReactNode;
+  className?: string;
+}) {
+  const [label, setLabel] = useState(fallbackLabel);
+  useEffect(() => {
+    setLabel(returnLabel(listKey, detailPrefix) ?? fallbackLabel);
+  }, [listKey, detailPrefix, fallbackLabel]);
+  return (
+    <ReturnLink listKey={listKey} fallback={fallback} detailPrefix={detailPrefix} className={className} title={`Back to ${label}`}>
+      {icon}
+      <span className="truncate">Back to {label}</span>
+    </ReturnLink>
   );
 }
 

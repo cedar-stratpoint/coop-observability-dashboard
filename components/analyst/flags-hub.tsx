@@ -42,10 +42,10 @@ import {cn} from '@/lib/utils';
 import {FilterSelect, type FilterOption} from '@/components/ui/filter-select';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
-import {keptId, useDrillIn} from '@/components/analyst/back-nav';
+import {keptId, useDrillIn, useReturnTrip} from '@/components/analyst/back-nav';
 import {FLAG_SOURCES, SOURCE_LABEL, filterLines, type FlagFilter, type FlagLine} from '@/src/goldline-flag-lines';
 import type {FlagLinesData} from '@/src/goldline-flag-lines-data';
-import {CLEARED_TILE, HUB_TIERS, clearableIds, hubTiles, isTileKey, pageOf, tileLines, type HubTier, type HubTile} from '@/src/goldline-flag-hub';
+import {CLEARED_TILE, HUB_TIERS, clearableIds, hubTiles, isTileKey, kindMeta, lineMeta, pageOf, tileLines, type FlagMeta, type FlagTone, type HubTier, type HubTile} from '@/src/goldline-flag-hub';
 import {titleName} from '@/src/goldline-ui';
 import {peso} from '@/src/band-prices';
 import {remarkFlagAction} from '@/app/flags/actions';
@@ -70,6 +70,46 @@ const ICON: Record<string, LucideIcon> = {
   'mark:other': Flag,
 };
 const iconFor = (kind: string | null) => (kind ? (ICON[kind] ?? Flag) : CircleCheck);
+
+// One color per kind of flag (kindMeta), the same on its tile, its list header and every row.
+// Info is a slate blue set on the hub's root (--flag-info), so it never reads as the brand green.
+const TONE: Record<FlagTone, string> = {
+  crit: 'var(--status-crit)',
+  warn: 'var(--status-warn)',
+  info: 'var(--flag-info)',
+  good: 'var(--status-good)',
+  neutral: 'var(--muted-foreground)',
+};
+/** Text on a tint: mixed toward the foreground so it clears AA in both themes. */
+const toneInk = (t: FlagTone) => (t === 'neutral' ? 'var(--muted-foreground)' : `color-mix(in oklab, ${TONE[t]} 72%, var(--foreground))`);
+const toneBg = (t: FlagTone, pct = 14) => `color-mix(in oklab, ${TONE[t]} ${pct}%, transparent)`;
+
+/** The kind's icon on a tile of its color. */
+function IconChip({kind, tone, size = 'md'}: {kind: string | null; tone: FlagTone; size?: 'md' | 'lg'}) {
+  const Icon = iconFor(kind);
+  return (
+    <span
+      className={cn('inline-flex shrink-0 items-center justify-center', size === 'lg' ? 'size-11 rounded-xl' : 'size-9 rounded-xl')}
+      style={{background: toneBg(tone, tone === 'neutral' ? 10 : 15), color: tone === 'neutral' ? 'var(--muted-foreground)' : TONE[tone]}}
+    >
+      <Icon aria-hidden className={size === 'lg' ? 'size-5' : 'size-4'} />
+    </span>
+  );
+}
+
+/** What to do next, as a small pill in the kind's color: a dot carries the color, the words
+ *  carry the meaning (so color is never the only cue). */
+function TodoPill({meta, className}: {meta: FlagMeta; className?: string}) {
+  return (
+    <span
+      className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[0.6875rem] leading-4 font-medium whitespace-nowrap', className)}
+      style={{color: toneInk(meta.tone), background: toneBg(meta.tone, meta.tone === 'neutral' ? 10 : 13)}}
+    >
+      <span aria-hidden className="size-1.5 rounded-full" style={{background: TONE[meta.tone]}} />
+      {meta.todo}
+    </span>
+  );
+}
 
 /** The overview's one-line hint under each tier (the list view carries the full note). */
 const TIER_HINT: Record<HubTier, string> = {
@@ -133,6 +173,9 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
   const [pending, start] = useTransition();
   const [f, setF] = useState<FlagFilter>({...initial, open: 'all'});
   const [openParam, openTile, closeTile] = useDrillIn('kind');
+  // Coming back from a page opened here (our Back link or the browser's): scroll and the row
+  // come back, the row marked. `leave` remembers them, with the tile's name for the Back label.
+  const {leave} = useReturnTrip('flags');
   const tileKey = isTileKey(openParam) ? openParam : null;
   const page = Math.max(1, Number(params.get('p')) || 1);
   // Lines on their way out (fading) and gone (removed until the server agrees).
@@ -269,7 +312,7 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
   if (!data.configured) return <p className="py-16 text-center text-sm text-muted-foreground">Connect the database to see flags.</p>;
 
   return (
-    <div ref={top} className="flex w-full min-w-0 max-w-[80rem] scroll-mt-24 flex-col gap-10">
+    <div ref={top} className="flex w-full min-w-0 max-w-[80rem] scroll-mt-24 flex-col gap-10 [--flag-info:#3d6a99] dark:[--flag-info:#8eb2d9]">
       <Filters data={data} f={f} setF={setF} filtersOn={filtersOn} reset={reset} csv={csv} />
 
       {error && (
@@ -286,6 +329,7 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
           page={page}
           setPage={setPage}
           onBack={closeTile}
+          leave={leave}
           canEdit={canEdit}
           pending={pending}
           leaving={leaving}
@@ -392,7 +436,7 @@ function Overview({tiles, total, filtersOn, reset, onOpen}: {tiles: Record<HubTi
 
 /** A square tile: the kind's icon, one big number, its name, and where it is. */
 function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
-  const Icon = iconFor(t.kind);
+  const meta = kindMeta(t.kind, t.tier);
   const needs = t.tier === 'needs';
   const quiet = t.tier === 'fyi' || t.tier === 'cleared';
   const where = [t.stores ? plural(t.stores, 'store') : null, t.pages ? plural(t.pages, 'page') : null].filter(Boolean).join(' · ');
@@ -400,6 +444,7 @@ function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
     <button
       type="button"
       data-row
+      title={where ? `${t.label} · ${where}` : t.label}
       onClick={() => onOpen(t.key)}
       className={cn(
         'group/tile relative flex aspect-square w-full flex-col rounded-2xl border p-4.5 text-left outline-none',
@@ -416,14 +461,7 @@ function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
       )}
     >
       <span className="flex items-start justify-between gap-3">
-        <span
-          className={cn(
-            'inline-flex size-9 items-center justify-center rounded-xl',
-            needs ? 'bg-[color-mix(in_oklab,var(--status-crit)_14%,transparent)] text-[var(--status-crit)]' : 'bg-muted text-muted-foreground',
-          )}
-        >
-          <Icon aria-hidden className="size-4" />
-        </span>
+        <IconChip kind={t.kind} tone={meta.tone} />
         <ArrowUpRight
           aria-hidden
           className={cn('size-4 text-muted-foreground/60 transition-[translate,color] duration-200 group-hover/tile:translate-x-0.5 group-hover/tile:-translate-y-0.5 group-hover/tile:text-foreground motion-reduce:group-hover/tile:translate-0', EASE)}
@@ -432,7 +470,7 @@ function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
       <span className={cn('mt-3 font-heading text-[2.25rem] leading-none font-semibold tracking-tight tabular-nums', quiet && 'text-foreground/70')}>{fmt(t.count)}</span>
       <span className="mt-auto flex min-w-0 flex-col gap-1">
         <span className="line-clamp-2 text-[0.8125rem] leading-snug font-medium text-balance">{t.label}</span>
-        {where && <span className="text-xs text-muted-foreground">{where}</span>}
+        <TodoPill meta={meta} className="mt-0.5 self-start" />
       </span>
     </button>
   );
@@ -441,6 +479,7 @@ function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
 // -------------------------------------------------------------------------------- Tile view
 
 type ViewProps = {canEdit: boolean; pending: boolean; leaving: Set<string>; act: Act};
+type Leave = (rowId: string | null, href: string, label?: string | null) => void;
 
 function TileView({
   tileKey,
@@ -449,12 +488,14 @@ function TileView({
   page,
   setPage,
   onBack,
+  leave,
   ...rest
-}: {tileKey: string; tile: HubTile | null; lines: FlagLine[]; page: number; setPage: (p: number) => void; onBack: () => void} & ViewProps) {
+}: {tileKey: string; tile: HubTile | null; lines: FlagLine[]; page: number; setPage: (p: number) => void; onBack: () => void; leave: Leave} & ViewProps) {
   const [confirm, setConfirm] = useState(false);
   const paged = pageOf(lines, page);
   const kind = tile?.kind ?? (tileKey === CLEARED_TILE ? null : tileKey.slice(tileKey.indexOf('.') + 1));
-  const Icon = iconFor(kind);
+  const tier = tile?.tier ?? (tileKey.split('.')[0] as HubTier);
+  const meta = kindMeta(kind, tier);
   const label = tile?.label ?? (tileKey === CLEARED_TILE ? 'Cleared and resolved' : 'Flags');
   const ids = clearableIds(lines);
   const needs = tile?.tier === 'needs';
@@ -472,20 +513,25 @@ function TileView({
         </button>
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex min-w-0 items-start gap-4">
-            <span
-              className={cn(
-                'inline-flex size-11 shrink-0 items-center justify-center rounded-xl',
-                needs ? 'bg-[color-mix(in_oklab,var(--status-crit)_14%,transparent)] text-[var(--status-crit)]' : 'bg-muted text-muted-foreground',
-              )}
-            >
-              <Icon aria-hidden className="size-5" />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
+            <IconChip kind={kind} tone={meta.tone} size="lg" />
+            <div className="flex min-w-0 flex-col gap-1.5">
               <h2 id="tile-title" className="flex flex-wrap items-baseline gap-x-3 font-heading text-xl font-semibold tracking-tight">
                 {label}
-                <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">{plural(lines.length, 'flag')}</span>
+                <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">
+                  {[plural(lines.length, 'flag'), tile?.stores ? plural(tile.stores, 'store') : null, tile?.pages ? plural(tile.pages, 'page') : null].filter(Boolean).join(' · ')}
+                </span>
               </h2>
               <p className="max-w-2xl text-sm text-muted-foreground">{tile ? tileNote(tile) : 'Nothing left here with these filters.'}</p>
+              {!mixed && (
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <TodoPill meta={meta} />
+                  {meta.cause && (
+                    <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[0.6875rem] leading-4 font-medium text-muted-foreground">
+                      Scorecard: {meta.cause}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           {/* Not on Needs you: clearing an unanswered price skips the decision it asks for. */}
@@ -538,7 +584,7 @@ function TileView({
             </div>
             <ul>
               {paged.rows.map((l) => (
-                <Row key={l.key} l={l} mixed={mixed} {...rest} />
+                <Row key={l.key} l={l} mixed={mixed} onOpen={(href) => leave(l.key, href, label)} {...rest} />
               ))}
             </ul>
           </div>
@@ -561,11 +607,12 @@ function reasonOf(l: FlagLine): string | null {
   return l.source === 'reviewer' ? `“${l.note}”` : l.note;
 }
 
-function Row({l, mixed, canEdit, pending, leaving, act}: {l: FlagLine; mixed: boolean} & ViewProps) {
+function Row({l, mixed, onOpen, canEdit, pending, leaving, act}: {l: FlagLine; mixed: boolean; onOpen: (href: string) => void} & ViewProps) {
   const [editing, setEditing] = useState(false);
   const out = leaving.has(l.key);
   const isCheck = l.source === 'check';
   const reason = reasonOf(l);
+  const meta = lineMeta(l);
   const head = mixed ? l.why : (l.product ?? (l.itemCode ? l.itemCode : 'Whole page'));
   const sub = mixed ? [l.product, reason].filter(Boolean).join(' · ') : reason;
   const store = l.storeName ? titleName(l.storeName) : l.storeCode ? `Store ${l.storeCode}` : 'Store not known yet';
@@ -574,6 +621,7 @@ function Row({l, mixed, canEdit, pending, leaving, act}: {l: FlagLine; mixed: bo
 
   return (
     <li
+      data-kept-id={keptId(l.key)}
       className={cn(
         'grid grid-cols-[minmax(0,1fr)] border-b border-border/70 transition-[grid-template-rows,opacity] duration-200 last:border-b-0 motion-reduce:transition-none',
         EASE,
@@ -587,7 +635,10 @@ function Row({l, mixed, canEdit, pending, leaving, act}: {l: FlagLine; mixed: bo
               {head}
               {status && <span className="ml-2 text-xs font-normal text-muted-foreground">{status}</span>}
             </p>
-            {sub && <p className="line-clamp-2 text-[0.8125rem] leading-snug text-muted-foreground">{sub}</p>}
+            <div className="mt-0.5 flex min-w-0 items-start gap-2">
+              <TodoPill meta={meta} className="mt-px" />
+              {sub && <p className="line-clamp-2 min-w-0 text-[0.8125rem] leading-snug text-muted-foreground">{sub}</p>}
+            </div>
             {isCheck && l.note && <p className="truncate text-[0.8125rem] text-foreground/75">Remark: {l.note}</p>}
           </div>
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -608,7 +659,8 @@ function Row({l, mixed, canEdit, pending, leaving, act}: {l: FlagLine; mixed: bo
             <Actions l={l} canEdit={canEdit} pending={pending} act={act} editing={editing} setEditing={setEditing} />
             {l.uploadId && (
               <Link
-                href={`/uploads/${l.uploadId}`}
+                href={`/uploads/${l.uploadId}?from=flags`}
+                onClick={() => onOpen(`/uploads/${l.uploadId}`)}
                 aria-label={`Open ${where || 'the page'}`}
                 title="Open page"
                 className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors duration-150 pointer-fine:hover:bg-muted pointer-fine:hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40"
