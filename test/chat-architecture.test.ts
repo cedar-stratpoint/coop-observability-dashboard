@@ -67,8 +67,8 @@ describe('real tree', () => {
     expect(hits).toEqual([]);
   });
 
-  it('RET-18 P2: the people seam reaches only the Website CRM page\'s reads of the contact log, the Same person links and PawSport, never an action', () => {
-    expect(extractImports(files[PEOPLE_SEAM] ?? '').sort()).toEqual(['@/src/customer-contacts-data', '@/src/customer-links-data', '@/src/pawsport-data']);
+  it('RET-18 P2: the people seam reaches only the Website CRM page\'s reads of the contact log, the Same person links and PawSport (plus the pure time budget), never an action', () => {
+    expect(extractImports(files[PEOPLE_SEAM] ?? '').sort()).toEqual(['@/src/chat/contacts/status', '@/src/customer-contacts-data', '@/src/customer-links-data', '@/src/pawsport-data']);
   });
 
   it('the SKU seam reaches only the two loaders behind the comparison (compare_sku)', () => {
