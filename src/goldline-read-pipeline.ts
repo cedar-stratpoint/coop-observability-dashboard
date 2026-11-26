@@ -4,7 +4,9 @@ import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatu
 import {readerSignature, reuseIdenticalRead, sha256, stampFingerprint} from './goldline-read-reuse';
 import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateFormVersion, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {batchLegacyEnabled, batchReadEnabled, headerCropsEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {baHintEnabled, batchLegacyEnabled, batchReadEnabled, headerCropsEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {getCurrentBas} from './goldline-ba-data';
+import {distinctBas} from './goldline-ba';
 import {renderHeaderCrops, renderReadImages} from './goldline-page-bands';
 import {boxCustomId, buildLocateParams, locateRowsFor} from './goldline-row-boxes';
 import {anchorVersion, shouldRetrySetAside, versionUnsure, type AnchoredMapResult} from './goldline-anchored-extract';
@@ -12,7 +14,7 @@ import {applyOrientation} from './goldline-orient';
 import {knownStores} from './goldline-store-registry';
 import {isInventoryPage, pageKey as buildPageKey, snapStoreWithName, type StoreRef} from './goldline-segment';
 import {getWriterProfile} from './goldline-writer-data';
-import {humanizeExtractError, MANIFESTS} from './goldline-extract';
+import {buildBaHint, humanizeExtractError, MANIFESTS} from './goldline-extract';
 import {uploadSource} from './goldline-upload-groups';
 import {logReadEvent, type ReadLogInput} from './goldline-read-log';
 import {syncReaderMarks} from './goldline-review-marks-data';
@@ -130,7 +132,17 @@ export async function runInventoryRead(args: {
     // Sharp header crops for the store code / name (GOLDLINE_HEADER_CROP_COMPANIES), rendered once
     // and reused by the set-aside retry. A render failure classifies from the page alone.
     const headerCrops = headerCropsEnabled(companyId) ? await renderHeaderCrops(pdfBase64) : null;
-    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops));
+    // The BA roster learned from committed forms, as a reference for the handwritten BA name
+    // (GOLDLINE_BA_HINT_COMPANIES). Best-effort: no roster = the classify call as before.
+    let baHint: string | null = null;
+    if (baHintEnabled(companyId)) {
+      try {
+        baHint = buildBaHint(distinctBas((await getCurrentBas(companyId)).names)) || null;
+      } catch (e) {
+        console.error('goldline read: BA roster read failed', msg(e));
+      }
+    }
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops, baHint));
     rec.classifyMs = Date.now() - classifyStart;
     // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
     // a real inventory page misread. Re-classify once (a blind second read) before setting it
@@ -138,7 +150,7 @@ export async function runInventoryRead(args: {
     // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
     let setAsideRetry: {kind: string; confidence: number} | null = null;
     if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
-      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops));
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops, baHint));
       if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
         setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
         cls = retry;
@@ -162,7 +174,7 @@ export async function runInventoryRead(args: {
     }
     const snap = snapStoreWithName(cls.store_code, cls.store_name, registry);
     rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap, headerCrops: Boolean(headerCrops?.length), ...(setAsideRetry ? {setAsideRetry} : {})};
+    rec.detail = {classify: cls, snap, headerCrops: Boolean(headerCrops?.length), baHint: baHint ? baHint.split(' · ').length : 0, ...(setAsideRetry ? {setAsideRetry} : {})};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})

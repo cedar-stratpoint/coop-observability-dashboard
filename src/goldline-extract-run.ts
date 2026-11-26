@@ -417,7 +417,7 @@ export async function detectPage(pdfBase64: string): Promise<number> {
  * and never throws on a bad read: sanitizeClassification coerces to 'unknown'/null so
  * the page still groups (and gets flagged) instead of sinking the batch.
  */
-export async function classifyPage(pdfBase64: string, headerCrops?: PageBlock[] | null): Promise<PageClassification> {
+export async function classifyPage(pdfBase64: string, headerCrops?: PageBlock[] | null, baHint?: string | null): Promise<PageClassification> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
@@ -434,9 +434,10 @@ export async function classifyPage(pdfBase64: string, headerCrops?: PageBlock[] 
     messages: [
       {
         role: 'user',
+        // Known BA names (GOLDLINE_BA_HINT_COMPANIES) ride after the page, before the instruction.
         content: headerCrops?.length
-          ? [pageBlock, ...headerCrops, {type: 'text', text: `${HEADER_CROPS_NOTE}\nClassify this page. Return JSON only.`}]
-          : [pageBlock, {type: 'text', text: 'Classify this page. Return JSON only.'}],
+          ? [pageBlock, ...headerCrops, {type: 'text', text: [HEADER_CROPS_NOTE, baHint, 'Classify this page. Return JSON only.'].filter(Boolean).join('\n')}]
+          : [pageBlock, {type: 'text', text: [baHint, 'Classify this page. Return JSON only.'].filter(Boolean).join('\n')}],
       },
     ],
   };

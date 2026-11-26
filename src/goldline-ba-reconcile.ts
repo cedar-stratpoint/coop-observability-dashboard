@@ -24,7 +24,7 @@ export function baSlug(name: string): string {
 
 /** Whether two slugs are the same person: equal, or within a small edit distance scaled
  *  to the name length (so "bernil" vs "bermil" matches, but short unrelated names don't). */
-function sameBa(a: string, b: string): boolean {
+export function sameBa(a: string, b: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
   const d = editDistance(a, b);

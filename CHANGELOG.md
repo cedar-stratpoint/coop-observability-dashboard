@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — BA roster learns without duplicates, and feeds the reader (flagged, Nov 26)
+
+Coop's BA roster comes only from the forms (decided Oct 27): a reviewer's saved or committed BA name joins it (`learnFormBa`), never a raw read. Two gaps:
+- **Duplicates:** a name counted as known only on an exact match (case and dots aside), so each spelling became a new BA. Staging's roster holds 8 names for 4 people (Leonisa Ramos / RAMOR, Rhea Mae P. Bermil / RHEA MAE BERMIL / Hrea Mae Bernil, Ma. Sofia / Jofia C. Lucero). `sameBaPerson`: the same once case, dots and middle initials are ignored, or the same first name with a small slip in the rest (the board's rule). Used when matching a written name (`matchBa`), adding to the roster (`baId`) and recording a store's BA. **Decided: the first name must match exactly**, so "Maria Santos" and "Marie Santos" stay two people; first-name misreads (Jofia/Sofia, Hrea/Rhea) still need a reviewer.
+- **The roster never reached the reader.** Behind `GOLDLINE_BA_HINT_COMPANIES`, the classify call gets the roster (one spelling per person, `distinctBas`, at most 200) as a dictionary for the handwritten BA name: use the exact spelling when the handwriting clearly is that person, else transcribe what is written. Each committed form makes later reads better. Read logs record `baHint` (names sent).
+
 ## Unreleased — One BA name per form (Nov 26)
 
 The header crops (#835) already read the BA from the sharp 300 dpi header: on the Nov 26 test, BA names missing fell from 9 pages to 3 and Pulilan's "Elaiza Mae V. Caleon" went from 0 to 4 of 5 exact. Handwriting still reads one person differently per page ("Cherry Mae P. Baluco / Balisco / Bacoo / Dimusco / Dalusco"), so each page's review showed its own spelling and forms split under several BA names.
