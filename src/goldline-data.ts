@@ -8,11 +8,11 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
 import type {FormVersion} from './goldline-extract';
-import {applyStoreRegistry, assignBlankFormRuns, isRealForm, reconcileYears, segmentBundle, snapStoreWithName, type StoreRef} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, isRealForm, reconcileYears, segmentBundle, snapStoreWithName, type StoreRef} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {knownStores} from './goldline-store-registry';
 import {uploadSource, distinctPages, pagesByStatus, pageNeed} from './goldline-upload-groups';
-import {splitName} from './upload-batch';
+import {scanPosition, splitName} from './upload-batch';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
 // Server-only writes/reads for the Goldline tables, in Goldline's own Nichido
@@ -871,7 +871,9 @@ export async function commitInventory(input: {
  *  no warning although the read code isn't a known store). Null when the code read is a known store
  *  that its written name agrees with, or a reviewer confirmed the store. */
 export type StoreCheck = {
-  status: 'corrected' | 'ambiguous' | 'unknown' | 'name_mismatch' | 'missing';
+  status: 'corrected' | 'ambiguous' | 'unknown' | 'name_mismatch' | 'missing' | 'from_form';
+  /** Status 'from_form': the form page number whose code this page took. */
+  fromPage?: number | null;
   /** The code as read, when Coop changed it. */
   from: string | null;
   by: 'name' | null;
@@ -893,9 +895,10 @@ export type PageSuggestion = {
 export async function getPageSuggestion(companyId: string, uploadId: string): Promise<PageSuggestion> {
   const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null, storeCheck: null, versionUnsure: false};
   if (!goldlineConfigured()) return none;
-  const res = await db().from('uploads').select('classification').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
+  const res = await db().from('uploads').select('classification,batch_id').eq('company_id', companyId).eq('id', uploadId).maybeSingle();
   if (res.error) throw new Error(`uploads read failed: ${res.error.message}`);
-  const c = ((res.data as {classification?: Record<string, unknown> | null} | null)?.classification ?? {}) as Record<string, unknown>;
+  const row = res.data as {classification?: Record<string, unknown> | null; batch_id?: string | null} | null;
+  const c = (row?.classification ?? {}) as Record<string, unknown>;
   const snap = (c.store_snap ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
   const iso = (v: unknown): string | null => {
@@ -912,7 +915,22 @@ export async function getPageSuggestion(companyId: string, uploadId: string): Pr
     if (stores.length) {
       const live = snapStoreWithName(str(c.store_code), str(c.store_name), stores);
       storeCode = live.code ?? storeCode;
-      storeCheck = live.status === 'exact' ? null : {status: live.status, from: live.from ?? null, by: live.by ?? null, candidates: live.candidates ?? []};
+      storeCheck = live.status === 'exact' || live.status === 'confirmed' || live.status === 'from_form'
+        ? null
+        : {status: live.status, from: live.from ?? null, by: live.by ?? null, candidates: live.candidates ?? []};
+      // No sure code on this page: take the one another page of the same physical form read
+      // (QA Nov 26, "Lee Plaza Dipolog": 1325 on page 1 only). Best-effort; any error keeps the above.
+      if (live.status !== 'exact' && live.status !== 'corrected' && row?.batch_id) {
+        try {
+          const fromForm = await formStoreFor(companyId, row.batch_id, uploadId, stores);
+          if (fromForm) {
+            storeCode = fromForm.code;
+            storeCheck = {status: 'from_form', from: str(c.store_code), by: null, candidates: [], fromPage: fromForm.fromPage};
+          }
+        } catch (e) {
+          console.error('goldline: form store lookup failed', e instanceof Error ? e.message : String(e));
+        }
+      }
     }
   }
   return {
@@ -924,6 +942,18 @@ export async function getPageSuggestion(companyId: string, uploadId: string): Pr
     periodEnd: iso(c.period_end),
     consultant: str(c.consultant),
   };
+}
+
+/** The store this page takes from its own physical form (inheritFormStores over its batch's pages),
+ *  or null when the form has no single sure code. */
+async function formStoreFor(companyId: string, batchId: string, uploadId: string, stores: StoreRef[]): Promise<{code: string; fromPage: number | null} | null> {
+  const sib = await db().from('uploads').select(UPLOAD_CLS_COLS).eq('company_id', companyId).eq('batch_id', batchId).limit(300);
+  if (sib.error) throw new Error(sib.error.message);
+  const rows = (sib.data ?? []) as unknown as UploadClsRow[];
+  const fileOf = new Map(rows.map((r) => [r.id, r.filename]));
+  const pages = inheritFormStores(applyStoreRegistry(rows.map(toClassifiedPage), stores), (p) => scanPosition(fileOf.get(p.id) ?? ''));
+  const me = pages.find((p) => p.id === uploadId);
+  return me?.store_snap?.status === 'from_form' && me.store_code ? {code: me.store_code, fromPage: me.store_snap.fromPage ?? null} : null;
 }
 
 /** List a company's uploads, newest first (paginated — never silently capped). Cached
@@ -1277,7 +1307,10 @@ export async function splitBatchIntoForms(companyId: string, batchId: string, cr
   // Then cut store-less pages into per-scan runs (uploads already read oldest-first) so a
   // blank-store form stays one physical form instead of merging several unreadable stores.
   const known = await knownStores(companyId);
-  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(applyStoreRegistry(uploads.map(toClassifiedPage), known))));
+  // Pages with no sure code take the one their own physical form read (QA Nov 26), so a form splits
+  // out whole under its store instead of leaving pages 2 to 5 in a "needs a store" form.
+  const filed = inheritFormStores(applyStoreRegistry(uploads.map(toClassifiedPage), known), (p) => scanPosition(byId.get(p.id)?.filename ?? ''));
+  const {forms} = segmentBundle(reconcileYears(assignBlankFormRuns(filed)));
   const realForms = forms.filter(isRealForm);
   if (realForms.length === 0) return []; // nothing confidently a form — leave the pile to sort
 

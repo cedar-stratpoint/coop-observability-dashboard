@@ -58,6 +58,15 @@ export function storeCheckNote(
           : `Coop read ${code} on the page, which isn’t a known store.${written} Pick the store from the form.`,
         action: first ? {label: `Use ${label(first)}`, code: first} : null,
       };
+    case 'from_form': {
+      const where = check.fromPage ? `page ${check.fromPage} of this same form` : 'another page of this same form';
+      return check.from
+        ? {
+            text: `Coop read ${check.from} on this page, which isn't a known store, so it used ${label(code)} from ${where}.`.replace("isn't", 'isn’t'),
+            action: {label: `Undo, use ${check.from}`, code: check.from},
+          }
+        : {text: `No store code is written on this page. Coop used ${label(code)} from ${where}.`, action: null};
+    }
     case 'missing':
       return first
         ? {

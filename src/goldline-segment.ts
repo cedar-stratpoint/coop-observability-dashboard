@@ -37,6 +37,9 @@ export type ClassifiedPage = PageClassification & {
    *  blank-store form groups by its physical run instead of collapsing every unreadable
    *  page into one bucket. Ignored once a store is known. */
   contiguityKey?: string;
+  /** Set by inheritFormStores when this page's physical form shows two different store codes
+   *  (QA Nov 26), so nothing was filled and the form is flagged for a look. */
+  form_store_conflict?: boolean;
 };
 
 /** All the ids seen for one inventory page number within a form (length > 1 = dup). */
@@ -83,6 +86,8 @@ export const FORM_FLAGS = {
   storeCorrected: 'store-corrected', // OCR code snapped to a known store
   storeUnmatched: 'store-unmatched', // OCR code not in the registry, reviewer must pick
   storeNameMismatch: 'store-name-mismatch', // a real code, but the written store name points at another store
+  storeFromForm: 'store-from-form', // a page with no usable code took the code another page of its form read
+  storeFormConflict: 'store-form-conflict', // one physical form shows two different store codes
   periodMissing: 'period-missing',
   periodUnparsed: 'period-unparsed',
   periodInvalidDay: 'period-invalid-day',
@@ -172,11 +177,13 @@ export type StoreSnap = {
   /** The code to use for keying: the matched/corrected code, or the raw candidate
    *  when nothing matched (so grouping still works, just flagged). */
   code: string | null;
-  status: 'exact' | 'corrected' | 'ambiguous' | 'unknown' | 'missing' | 'name_mismatch';
+  status: 'exact' | 'corrected' | 'ambiguous' | 'unknown' | 'missing' | 'name_mismatch' | 'from_form' | 'confirmed';
   /** The raw candidate, when it differs from `code` (status 'corrected'). */
   from?: string;
   /** 'name' when the handwritten store name picked the store (snapStoreWithName). */
   by?: 'name';
+  /** Status 'from_form': the form page number whose code this page took (inheritFormStores). */
+  fromPage?: number;
   /** Nearest known codes to offer the reviewer when not auto-resolved. */
   candidates?: string[];
 };
@@ -375,6 +382,61 @@ export function formKey(c: Pick<ClassifiedPage, 'store_code' | 'period_start' | 
   return [storeSlot, periodBucket(c.period_start, c.period_end), c.version].join('|');
 }
 
+/** Store statuses a form can lend to its other pages: a code that is a known store as read, one
+ *  corrected to a known store, or one a reviewer confirmed. */
+const SURE_STORE = new Set<StoreSnap['status']>(['exact', 'corrected', 'confirmed']);
+
+/**
+ * Pages take the store from their own physical form (QA Nov 26: "Lee Plaza Dipolog" had code 1325
+ * on page 1 only; pages 2 to 5 read no code, and the name alone suggested the wrong store, 2596).
+ * A form is a run of one scan's inventory pages, in scan position order, whose printed page number
+ * keeps rising (1 to 5) on the same version. When exactly one sure store code appears in the run,
+ * each other page with no code, an unmatched code, or a code whose written name points at that same
+ * store takes it (status 'from_form', `from` = what it read, `fromPage` = the page that had it).
+ * Two different sure codes in one run fill nothing and mark every page `form_store_conflict`. A sure
+ * code is never overwritten. `positionOf` gives a page's scan and its position in it; pages without
+ * one are left as they are. Returns the pages in their input order. Pure.
+ */
+export function inheritFormStores<T extends ClassifiedPage>(pages: T[], positionOf: (p: T) => {source: string; index: number} | null): T[] {
+  const out = [...pages];
+  const placed = out
+    .map((p, i) => ({p, i, pos: positionOf(p)}))
+    .filter((x): x is {p: T; i: number; pos: {source: string; index: number}} => x.pos != null && isInventoryPage(x.p))
+    .sort((a, b) => a.pos.source.localeCompare(b.pos.source) || a.pos.index - b.pos.index);
+  const runs: (typeof placed)[] = [];
+  let cur: typeof placed = [];
+  for (const x of placed) {
+    const prev = cur[cur.length - 1];
+    if (!prev || prev.pos.source !== x.pos.source || x.p.page <= prev.p.page || x.p.version !== prev.p.version) {
+      if (cur.length) runs.push(cur);
+      cur = [];
+    }
+    cur.push(x);
+  }
+  if (cur.length) runs.push(cur);
+  for (const run of runs) {
+    const sure = run.filter((x) => x.p.store_code && x.p.store_snap && SURE_STORE.has(x.p.store_snap.status));
+    const codes = new Set(sure.map((x) => x.p.store_code));
+    if (codes.size > 1) {
+      for (const x of run) out[x.i] = {...out[x.i], form_store_conflict: true};
+      continue;
+    }
+    if (codes.size === 0) continue;
+    const code = sure[0].p.store_code as string;
+    const fromPage = sure[0].p.page;
+    for (const x of run) {
+      const snap = x.p.store_snap;
+      if (snap && SURE_STORE.has(snap.status)) continue;
+      const status = snap?.status ?? (x.p.store_code ? 'unknown' : 'missing');
+      const takes =
+        status === 'missing' || status === 'ambiguous' || status === 'unknown' || (status === 'name_mismatch' && snap?.candidates?.[0] === code);
+      if (!takes) continue;
+      out[x.i] = {...out[x.i], store_code: code, store_snap: {code, status: 'from_form', ...(x.p.store_code ? {from: x.p.store_code} : {}), fromPage}};
+    }
+  }
+  return out;
+}
+
 /**
  * Give each store-less inventory page a contiguity "run" key, so a scan's consecutive
  * 1→5 run becomes ONE blank-store form instead of every unreadable page collapsing
@@ -473,6 +535,8 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
   const snapStatuses = new Map<string, Set<StoreSnap['status']>>();
   // Forms that contain at least one page whose year was reconciled.
   const yearSnapped = new Set<string>();
+  // Forms holding a page whose physical form showed two different store codes.
+  const formConflict = new Set<string>();
 
   for (const c of pages) {
     if (!isInventoryPage(c)) continue; // defensive: only item pages form groups
@@ -491,6 +555,7 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
       snapStatuses.set(g.key, set);
     }
     if (c.year_snapped) yearSnapped.add(g.key);
+    if (c.form_store_conflict) formConflict.add(g.key);
   }
 
   for (const g of groups.values()) {
@@ -502,6 +567,7 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
       periodMismatch: (periodReads.get(g.key)?.size ?? 0) > 1,
       snaps: snapStatuses.get(g.key) ?? new Set(),
       yearReconciled: yearSnapped.has(g.key),
+      formConflict: formConflict.has(g.key),
     });
   }
 
@@ -510,7 +576,7 @@ export function groupIntoForms(pages: ClassifiedPage[]): FormGroup[] {
 
 function formFlagsFor(
   g: FormGroup,
-  extra: {periodMismatch: boolean; snaps: Set<StoreSnap['status']>; yearReconciled: boolean},
+  extra: {periodMismatch: boolean; snaps: Set<StoreSnap['status']>; yearReconciled: boolean; formConflict?: boolean},
 ): string[] {
   const flags: string[] = [];
   if (g.duplicates.length > 0) flags.push(FORM_FLAGS.duplicatePages);
@@ -520,6 +586,8 @@ function formFlagsFor(
   if (extra.snaps.has('corrected')) flags.push(FORM_FLAGS.storeCorrected);
   if (extra.snaps.has('unknown') || extra.snaps.has('ambiguous')) flags.push(FORM_FLAGS.storeUnmatched);
   if (extra.snaps.has('name_mismatch')) flags.push(FORM_FLAGS.storeNameMismatch);
+  if (extra.snaps.has('from_form')) flags.push(FORM_FLAGS.storeFromForm);
+  if (extra.formConflict) flags.push(FORM_FLAGS.storeFormConflict);
   if (extra.yearReconciled) flags.push(FORM_FLAGS.yearReconciled);
   if (extra.periodMismatch) flags.push(FORM_FLAGS.periodMismatch);
   for (const f of periodFlags(g.period_start, g.period_end)) flags.push(f);

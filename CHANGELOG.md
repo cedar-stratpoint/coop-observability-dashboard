@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Pages take the store from their own form (Nov 26)
+
+"Lee Plaza Dipolog" wrote its code (1325) on page 1 only. Pages 2 to 5 read no code, and the name check, with only "Dipolog" to go on (the registry calls it LEE PLAZA CITY CENTR), suggested the wrong store, 2596 CITY MALL DIPOLOG. The registry has location data for 5 of 326 stores, so the fix uses the scan instead.
+- `inheritFormStores`: in scan position order, a run of one scan's pages whose printed page number keeps rising on the same version is one physical form. When exactly one sure code (exact, corrected, confirmed) appears in it, pages with no code, an unmatched code, or a code whose written name points at that same store take it (status `from_form`, "Store from the form", undoable on the page review).
+- **Decided: the form's code beats a guess from the name; a real code is never overwritten;** two different sure codes in one form fill nothing and flag "Stores differ in one form".
+- Applied on the scan board, the per-page review and the form split that feeds Commit all, all live, so pages already read get it.
+- On the "Header crops test Nov 26" run (65 pages): 23 pages filled, every one the right store (Lee Plaza 4, Malolos 4, Plaridel 4, San Fernando 4, Gaisano Surigao 3, Maria Cristina 2, Lanang 1, Veranza 1), no conflicts.
+
 ## Unreleased — Sharp header crops for the store code (flagged, Nov 26)
 
 The classifier reads the handwritten header (store code, store name, period, BA) off a ~90 dpi page, so codes came back misread or blank (2414 as 2494/2419, 481 as 81, 1216 as 121, 317 blank). Behind `GOLDLINE_HEADER_CROP_COMPANIES`, the classify call also gets 300 dpi crops of the page's top and bottom edges (the bottom turned upright, since many scans are upside down) and is told to read the header from them.
