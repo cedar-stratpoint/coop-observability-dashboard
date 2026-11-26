@@ -206,7 +206,10 @@ export function CustomerProfile({
   reminderTotal,
   boothInfo,
   pawsport,
+  pawsportUnavailable = false,
 }: {
+  /** RET-18: Shopify could not be read, so "no line" would wrongly read as "no PawSport": the header says unavailable instead. */
+  pawsportUnavailable?: boolean;
   /** RET-18 P1: this customer's PawSport (matched on the server); undefined = none, or Shopify was not read (the table says which). */
   pawsport?: PawsportBadge;
   /** RET-15 B: the booth lead's Instagram and sign-up details for this customer (exact match or a Same person link); undefined = none or not read. */
@@ -356,6 +359,9 @@ export function CustomerProfile({
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">{pawsportLine(pawsport)}</span>
                 </p>
+              )}
+              {row && !pawsport && pawsportUnavailable && (
+                <p className="mt-1.5 text-xs text-muted-foreground" title="Shopify could not be read through the CRM">PawSport unavailable</p>
               )}
             </div>
             <button
