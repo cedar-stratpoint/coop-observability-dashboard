@@ -10,6 +10,10 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.28.1: PawSport filter on Event leads
+
+PROD release of our own change only (cherry-picked onto main after v1.28.0): RET-18 P1b (#823). Owner: "i think dapat meron". Event leads get **PawSport: All / Has / None / Can't tell**; Can't tell covers Instagram-only leads, which Shopify can't match.
+
 ## Unreleased — PawSport filter on Event leads (RET-18 P1b)
 
 Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
