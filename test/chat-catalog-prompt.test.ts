@@ -12,7 +12,7 @@ import {estimateTokens} from '../src/chat/skills/load';
 import {buildPreamble} from '../src/chat/preamble';
 import type {MetricData} from '../src/chat/result-types';
 
-const BUDGET = 14500; // measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic); 14,424 on 2026-11-05 with the plan tables and /health-report page
+const BUDGET = 14650; // 14,556 on 2026-11-26 after RET-18 P2 (contacts topic: PawSport, status words); measured 13,002 estimated tokens on 2026-10-07 (Train 3), plus 10%; 14,327 on 2026-10-22 after the loosened calculation guardrail (about +145: the rule now allows and describes arithmetic); 14,424 on 2026-11-05 with the plan tables and /health-report page
 
 describe('2b.2 data index in the cached prompt', () => {
   const text = buildDataIndexText();
