@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {headerCropsEnabled, templateReadEnabled} from '../src/goldline-anchored-flag';
+import {baHintEnabled, headerCropsEnabled, templateReadEnabled} from '../src/goldline-anchored-flag';
 import {HEADER_CROP_FRAC, HEADER_CROPS_NOTE} from '../src/goldline-page-bands';
 
 describe('templateReadEnabled', () => {
@@ -41,5 +41,16 @@ describe('headerCropsEnabled (GOLDLINE_HEADER_CROP_COMPANIES)', () => {
     expect(HEADER_CROPS_NOTE).toMatch(/whole page as usual/);
     expect(HEADER_CROP_FRAC).toBeGreaterThan(0.08);
     expect(HEADER_CROP_FRAC).toBeLessThan(0.2);
+  });
+});
+
+describe('baHintEnabled (GOLDLINE_BA_HINT_COMPANIES)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('is off unless the company is listed', () => {
+    vi.stubEnv('GOLDLINE_BA_HINT_COMPANIES', '');
+    expect(baHintEnabled('goldline')).toBe(false);
+    vi.stubEnv('GOLDLINE_BA_HINT_COMPANIES', 'goldline');
+    expect(baHintEnabled('goldline')).toBe(true);
+    expect(baHintEnabled('zoomy')).toBe(false);
   });
 });

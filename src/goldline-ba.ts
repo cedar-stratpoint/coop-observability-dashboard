@@ -14,7 +14,23 @@
 //      earlier forms);
 //   5. otherwise none (the tile reads "BA not named on the form").
 
+import {baSlug, sameBa} from './goldline-ba-reconcile';
+
 export type StoreBa = {name: string; started_on: string; ended_on: string | null};
+
+/**
+ * Whether two written names are the same BA (Nov 26: the roster gained a new BA per spelling,
+ * "Elaiza Mae V. Caleon" and "Elaiza Mae Caleon", splitting one person's forms). Same when the names
+ * match once case, dots and middle initials are ignored, or when the first name is identical and the
+ * rest is within a small spelling slip (baSlug + sameBa, as the board clusters). A different first
+ * name is never the same person here ("Maria Santos" is not "Marie Santos"). Pure.
+ */
+export function sameBaPerson(a: string, b: string): boolean {
+  const sa = baSlug(a), sb = baSlug(b);
+  if (!sa || !sb) return false;
+  if (sa === sb) return true;
+  return sa.split(' ')[0] === sb.split(' ')[0] && sameBa(sa, sb);
+}
 
 /** Lowercase, no dots, single spaces: "Liza  M." → "liza m". */
 export const normName = (s: string) => s.toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
@@ -42,7 +58,12 @@ export function matchBa(written: string, candidates: string[], opts: {firstOnly?
     // One initial for a longer last name ("Liza M." for "Liza Mendoza Cruz").
     return wr.length === 1 && wr[0].length === 1 && cr.join(' ').startsWith(wr[0]);
   });
-  return fits.length === 1 ? fits[0] : null;
+  if (fits.length === 1) return fits[0];
+  if (fits.length > 1) return null;
+  // Spelling slips and dropped middle initials ("Elaiza Mae Caleon" for "Elaiza Mae V. Caleon"),
+  // only when exactly one candidate is the same person.
+  const alike = [...new Set(candidates)].filter((c) => sameBaPerson(written, c));
+  return alike.length === 1 ? alike[0] : null;
 }
 
 /** The store's BA on a date (the assignment covering it), or null. */
@@ -77,6 +98,22 @@ export function resolveBa(input: {written: string | null | undefined; storeBas: 
 export function shouldRecordBa(name: string, storeBas: StoreBa[], periodStart: string): boolean {
   const open = storeBas.find((a) => a.ended_on == null);
   if (!open) return !storeBas.some((a) => a.started_on <= periodStart && (a.ended_on ?? '') >= periodStart);
-  if (normName(open.name) === normName(name)) return false;
+  if (normName(open.name) === normName(name) || sameBaPerson(open.name, name)) return false;
   return open.started_on <= periodStart;
+}
+
+/** One spelling per person (sameBaPerson), for the reader's BA reference: a roster holding both
+ *  "Leonisa Ramos" and "LEONISA RAMOR" would hand the reader the misspelling too. Keeps the fullest
+ *  spelling (most words, then a written-case one over ALL CAPS, then longest), in first-seen order. */
+export function distinctBas(names: string[]): string[] {
+  const groups: string[][] = [];
+  for (const raw of names) {
+    const n = cleanName(raw);
+    if (!n) continue;
+    const g = groups.find((grp) => sameBaPerson(grp[0], n));
+    if (g) g.push(n);
+    else groups.push([n]);
+  }
+  const caps = (s: string) => s === s.toUpperCase();
+  return groups.map((g) => g.slice().sort((a, b) => b.split(' ').length - a.split(' ').length || Number(caps(a)) - Number(caps(b)) || b.length - a.length)[0]);
 }

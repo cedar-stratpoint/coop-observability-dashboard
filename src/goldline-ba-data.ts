@@ -4,7 +4,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlStores, glTags} from './goldline-ref-data';
 import {runChecks} from './goldline-checks-data';
-import {cleanName, normName, resolveBa, shouldRecordBa, type StoreBa} from './goldline-ba';
+import {cleanName, normName, resolveBa, sameBaPerson, shouldRecordBa, type StoreBa} from './goldline-ba';
 import {baScores, baTags, type BaScore, type FlagCause} from './goldline-checks';
 
 // The BA directory (A1): every BA (bas) and who covers which store from when
@@ -158,7 +158,9 @@ export async function getBaDirectory(companyId: string, scope: string[] | null):
 async function baId(companyId: string, name: string, by: string | null): Promise<{id: string; name: string}> {
   const supa = db();
   const all = (await fetchAllRows('bas', (from, to) => supa.from('bas').select('id,name').eq('company_id', companyId).order('id').range(from, to))) as unknown as Array<{id: string; name: string}>;
-  const hit = all.find((b) => normName(b.name) === normName(name));
+  // The same person under another spelling is the same BA, not a new one (exactly one match).
+  const alike = all.filter((b) => sameBaPerson(b.name, name));
+  const hit = all.find((b) => normName(b.name) === normName(name)) ?? (alike.length === 1 ? alike[0] : undefined);
   if (hit) return hit;
   const res = await supa.from('bas').insert({company_id: companyId, name, created_by: by}).select('id,name').single();
   if (res.error) throw new Error(`add BA failed: ${res.error.message}`);
