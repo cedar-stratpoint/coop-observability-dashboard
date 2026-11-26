@@ -10,6 +10,18 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.29.0: Flags hub, band prices and O/S on review, Overview to Stores by month (Nichido)
+
+PROD release of Nichido work from staging (cherry-picked onto main after v1.28.1, plan `knowledge/tasks/2026-11-26-nichido-prod-release-v1.29.0.md`). Owner decisions Nov 26: all five groups in one release, the Flags hub on at release, and every page in review re-read afterwards.
+
+- **Review QA fixes (QA San Pablo):** a heading band priced differently on the paper gets one flag and the reviewer picks the price (#808); "O/S" written in a cell reads as 0 and an O/S-only row goes to review once (#809); "O/S" printed on the form is a note, not a count, band flags tuned, one click for every paper price on a page (#812). Needs SQL `supabase/nichido/p7_review_marks_price.sql` on Nichido Prod (applied before this merge).
+- **Flags hub** (#822, #826, #827): `/flags` opens on All flags, square tiles per kind (Needs you tinted), a tile opens its flags in place, 25 a page, compact rows with a colored "what to do" pill; Open page then "Back to <tile>" returns to the same tile, page and scroll. BA scorecard is the second tab, unchanged. On with `GOLDLINE_FLAGS_HUB=1` on Production.
+- **Overview to Stores by month** (#795): each month of the Overview trend opens Stores filtered to that month. Needs SQL `supabase/nichido/f2h_sales_by_store_month.sql` on Nichido Prod (applied before this merge).
+- **Reconcile** (#819, #821): the page top is compact so the table is above the fold; Reco pills use short names with a hover card.
+- **Uploads** (#814): themed filter dropdowns, one date-range pill, an animated Filters button.
+- Not in this release (staging only on purpose): the GitLab staging deploys and `vercel.json` change, the temporary L7 spike route, and Zoomy/Coop staging items.
+- Pages read before this release show no band price flags or O/S handling until re-read; the 125 pages in review are re-read after the deploy.
+
 ## 2026-11-26 — Release v1.28.1: PawSport filter on Event leads
 
 PROD release of our own change only (cherry-picked onto main after v1.28.0): RET-18 P1b (#823). Owner: "i think dapat meron". Event leads get **PawSport: All / Has / None / Can't tell**; Can't tell covers Instagram-only leads, which Shopify can't match.

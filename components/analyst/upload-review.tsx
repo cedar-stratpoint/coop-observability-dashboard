@@ -3,12 +3,13 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitReview} from '@/app/uploads/actions';
+import {commitReview, setBandPriceAction, setBandPricesAction} from '@/app/uploads/actions';
+import {bandFlagRows, cleanBands, withPickedPrices} from '@/src/band-prices';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
@@ -22,7 +23,7 @@ import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/component
 import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
 import type {ReviewMark} from '@/src/goldline-review-marks';
 import type {AddableItem} from '@/src/review-add-row';
-import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
+import {markReturn, NamedReturnLink, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
@@ -92,7 +93,7 @@ export function UploadReview({
   productNames = {},
   rowNames,
   inventoryHref = null,
-  catalog = {},
+  catalog: baseCatalog = {},
   pageStrip = null,
   stores = [],
   nav = null,
@@ -137,6 +138,10 @@ export function UploadReview({
   bas?: {byStore: Record<string, string>; names: string[]};
 }) {
   const router = useRouter();
+  // Opened from the Flags hub (?from=flags): Back names the flags view it came from and returns
+  // there; the page strip and the batch link keep the trip going.
+  const fromFlags = useSearchParams().get('from') === 'flags';
+  const keepFrom = fromFlags ? '?from=flags' : '';
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
   // Re-read a failed page in place (synchronous, heartbeat-kept-alive), then refresh to pick up
   // the new status/reason — so a "couldn't read" page is retried without leaving this screen.
@@ -220,10 +225,32 @@ export function UploadReview({
   }, [nav, router, lightboxOpen]);
   // Flags = rows under the threshold, fixed at load (editing a value doesn't change
   // the reader's confidence). A flag is resolved by editing its row or "Looks right".
-  const flagged = useMemo(
-    () => (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i})).filter((x) => x.c < LOW || rowNotes[x.i] != null).map((x) => x.i),
-    [head, rowNotes],
-  );
+  // Plus one row per band whose paper points at another price than the printed one (QA Nov 25).
+  const flagged = useMemo(() => {
+    const band = new Set(bandFlagRows(cleanBands(head?.bands)));
+    return (head?.rows ?? []).map((r, i) => ({c: rowConfidence(r.confidence), i, os: Boolean(r.oos?.check)})).filter((x) => x.c < LOW || x.os || rowNotes[x.i] != null || band.has(x.i)).map((x) => x.i);
+  }, [head, rowNotes]);
+  // The band price picks for this form; the totals value a picked band at its picked price.
+  const [bands, setBands] = useState(() => cleanBands(head?.bands));
+  const catalog = useMemo(() => withPickedPrices(baseCatalog, bands), [baseCatalog, bands]);
+  // The pick answers the band's flag; a row also low on confidence still wants its own look.
+  const answerBand = (i: number | null | undefined) => {
+    if (i != null && rowConfidence(rows[i]?.confidence) >= LOW && !rows[i]?.oos?.check && rowNotes[i] == null) resolve(i);
+  };
+  async function pickBandPrice(group: string, price: number | null): Promise<string | null> {
+    const res = await setBandPriceAction({company, uploadId: upload.id, group, price});
+    if (!res.ok) return res.error;
+    setBands(res.bands);
+    if (price != null) answerBand(res.bands.find((x) => x.group === group)?.first_index);
+    return null;
+  }
+  async function pickBandPrices(picks: Array<{group: string; price: number}>): Promise<string | null> {
+    const res = await setBandPricesAction({company, uploadId: upload.id, picks});
+    if (!res.ok) return res.error;
+    setBands(res.bands);
+    for (const p of picks) answerBand(res.bands.find((x) => x.group === p.group)?.first_index);
+    return null;
+  }
   const [resolved, setResolved] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState<number | null>(null);
   // Jumping to a flag (the navigator) points the scan at that row too.
@@ -436,9 +463,20 @@ export function UploadReview({
         </div>
       ) : (
       <div className="flex flex-col gap-1">
-        <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-3.5" /> Back to uploads
-        </Link>
+        {fromFlags ? (
+          <NamedReturnLink
+            listKey="flags"
+            fallback="/flags"
+            fallbackLabel="Flags"
+            detailPrefix="/uploads/"
+            icon={<ArrowLeft className="size-3.5 shrink-0" />}
+            className="inline-flex w-fit max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          />
+        ) : (
+          <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3.5" /> Back to uploads
+          </Link>
+        )}
         <h1 className="font-heading text-xl font-semibold tracking-tight break-all">{upload.filename}</h1>
         {extraction && pageStrip && (
           <nav aria-label="Form pages" className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -472,14 +510,14 @@ export function UploadReview({
                   </span>
                 );
               return (
-                <Link key={p.page} href={`/uploads/${p.uploadId}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
+                <Link key={p.page} href={`/uploads/${p.uploadId}${keepFrom}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
                   {inner}
                 </Link>
               );
             })}
             <span className="ml-1 text-[11px] text-muted-foreground">red dot = has flags · ✓ committed</span>
             {pageStrip.batchId && (
-              <Link href={`/uploads/batch/${pageStrip.batchId}`} className="ml-1 text-[11px] font-medium text-primary underline-offset-4 hover:underline">
+              <Link href={`/uploads/batch/${pageStrip.batchId}${keepFrom}`} className="ml-1 text-[11px] font-medium text-primary underline-offset-4 hover:underline">
                 Review the batch
               </Link>
             )}
@@ -596,6 +634,7 @@ export function UploadReview({
             docConfidence={docConfidence}
             rowConfidences={rows.map((r) => r.confidence)}
             page={extraction.page}
+            flagged={flagged.length}
             onReviewFlagged={() => {
               setView('needs');
               goToFlag(open[0] ?? flagged[0] ?? null);
@@ -614,6 +653,7 @@ export function UploadReview({
               <DocumentConfidence
                 docConfidence={docConfidence}
                 rowConfidences={rows.map((r) => r.confidence)}
+                flagged={flagged.length}
                 onReviewFlagged={() => {
                   setView('needs');
                   goToFlag(open[0] ?? flagged[0] ?? null);
@@ -735,6 +775,9 @@ export function UploadReview({
             catalog={catalog}
             flagged={flagged}
             rowNotes={rowNotes}
+            bands={bands}
+            onBandPrice={pickBandPrice}
+            onBandPrices={pickBandPrices}
             resolved={resolved}
             active={active}
             view={view}

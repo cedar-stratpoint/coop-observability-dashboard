@@ -24,6 +24,7 @@ export function ConfidenceSticky({
   docConfidence,
   rowConfidences,
   page,
+  flagged,
   onReviewFlagged,
 }: {
   /** A sentinel at the end of the full summary; the bar shows once it scrolls above the header. */
@@ -31,9 +32,11 @@ export function ConfidenceSticky({
   docConfidence: number | null;
   rowConfidences: Array<number | null | undefined>;
   page?: number | null;
+  /** The rows the review flags (Needs review), when more than the low-confidence ones. */
+  flagged?: number;
   onReviewFlagged: () => void;
 }) {
-  const s = summarizeConfidence(docConfidence, rowConfidences);
+  const s = summarizeConfidence(docConfidence, rowConfidences, flagged);
   const tone = s.band ? TONE[s.band] : undefined;
   const [stuck, setStuck] = useState(false);
 
@@ -73,9 +76,9 @@ export function ConfidenceSticky({
         </span>
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground max-sm:hidden">{s.guidance}</span>
         {page ? <span className="shrink-0 text-xs text-muted-foreground max-md:hidden">page {page} of 5</span> : null}
-        {s.counts.low > 0 && (
+        {s.flagged > 0 && (
           <Button variant="outline" size="xs" onClick={onReviewFlagged} className="shrink-0">
-            <ArrowDown className="size-3" /> {s.counts.low} flagged
+            <ArrowDown className="size-3" /> {s.flagged} flagged
           </Button>
         )}
       </div>

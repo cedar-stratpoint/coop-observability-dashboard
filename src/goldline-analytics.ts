@@ -239,3 +239,88 @@ async function loadGoldlineOverviewData(companyId: string): Promise<GoldlineOver
     trend,
   };
 }
+
+/** "2026-06" when the value is a real YYYY-MM month, else null. */
+export function parseMonthParam(v: string | undefined | null): string | null {
+  if (!v || !/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return null;
+  return v;
+}
+
+/** Months with store sales, newest first, as YYYY-MM. [] where the function isn't
+ *  deployed yet (f2h_sales_by_store_month.sql), which hides the month picker. */
+export function getSalesMonths(companyId: string): Promise<string[]> {
+  if (!configured()) return Promise.resolve([]);
+  return cachedSalesView(
+    companyId,
+    ['sales-months'],
+    async () => {
+      const res = await db().rpc('sales_store_months', {p_company: companyId});
+      // Thrown, not returned, so a failed read isn't cached as "no months".
+      if (res.error) throw new Error(`sales_store_months failed: ${res.error.message}`);
+      return ((res.data ?? []) as Array<{month: string}>).map((r) => String(r.month).slice(0, 7));
+    },
+    ['sales'],
+  ).catch((e: Error) => {
+    console.error('stores:', e.message);
+    return [];
+  });
+}
+
+/** One month's store leaderboard (Stores page ?month=YYYY-MM, opened from an Overview
+ *  trend bar). Same shape as getGoldlineAnalytics' byStore + summary; null when the
+ *  month read isn't available, so the page falls back to all-time totals. */
+export function getGoldlineStoresMonth(
+  companyId: string,
+  month: string,
+): Promise<{byStore: StoreRollup[]; summary: SalesSummary} | null> {
+  if (!configured()) return Promise.resolve(null);
+  return cachedSalesView(companyId, ['stores-month', month], async () => {
+    const y = Number(month.slice(0, 4));
+    const m = Number(month.slice(5, 7));
+    const start = `${month}-01`;
+    const end = `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+    const [stores, res] = await Promise.all([
+      getGlStores(companyId),
+      db().rpc('sales_by_store', {p_company: companyId, p_start: start, p_end: end}),
+    ]);
+    if (res.error) throw new Error(`sales_by_store failed: ${res.error.message}`);
+    const perStore = new Map(
+      ((res.data ?? []) as Array<{store_code: string; units: unknown; gross: unknown; net: unknown; sku_count: unknown}>).map((r) => [
+        r.store_code,
+        {units: num(r.units), gross: num(r.gross), net: num(r.net), skuCount: num(r.sku_count)},
+      ]),
+    );
+    const codes = new Set<string>([...stores.map((s) => s.store_code), ...perStore.keys()]);
+    const byName = new Map(stores.map((s) => [s.store_code, s]));
+    const byStore: StoreRollup[] = [...codes]
+      .map((code) => {
+        const a = perStore.get(code) ?? {units: 0, gross: 0, net: 0, skuCount: 0};
+        const s = byName.get(code);
+        return {store_code: code, name: s?.name ?? code, region: s?.region ?? null, ...a};
+      })
+      .sort((a, b) => b.gross - a.gross);
+    let gross = 0;
+    let units = 0;
+    let net = 0;
+    for (const a of perStore.values()) {
+      gross += a.gross;
+      units += a.units;
+      net += a.net;
+    }
+    return {
+      byStore,
+      summary: {
+        gross,
+        units,
+        net,
+        storeCount: [...perStore.values()].filter((a) => a.units > 0 || a.gross > 0).length,
+        skuCount: 0,
+        periodStart: start,
+        periodEnd: end,
+      },
+    };
+  }).catch((e: Error) => {
+    console.error('stores:', e.message);
+    return null;
+  });
+}

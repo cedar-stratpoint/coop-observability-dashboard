@@ -8,9 +8,9 @@ import {Card, CardContent} from '@/components/ui/card';
 import {cn} from '@/lib/utils';
 import {MonthPicker, StorePicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE, titleName} from '@/src/goldline-ui';
-import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, RECO_LETTERS, RECO_META, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
+import {ALL_PAGE, ALL_STORES, AUDIT_META, auditRows, parsePattern, patternState, RECO_META, recoAction, WHY_LABEL, type AuditQuery, type AuditSort, type AuditState, type Leg} from '@/src/goldline-audit';
 import type {AuditResult, AuditRow} from '@/src/goldline-audit-data';
-import {CoverageNote, ink, Mark, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, RecoStrip, ReconTabs, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
+import {ink, Mark, monthLabel, NeedsStepStat, NoSalesNotice, NotebookGrid, Pager, ReconContext, ReconHeader, RecoPills, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
 import {StickyBar, TopButton, useStuckSentinel} from '@/components/analyst/sticky-bar';
 
 // Reconciliation · By store (NICH-17). One store (or every store) and month: every product's
@@ -103,9 +103,9 @@ export function AuditMatrix({data}: {data: AuditResult}) {
   const where = all ? 'any store' : 'this store';
 
   return (
-    <div className={GL_PAGE}>
+    <div className={cn(GL_PAGE, 'gap-8')}>
       {sel && (
-        <StickyBar stuck={stuck} gapClass="-mb-6">
+        <StickyBar stuck={stuck} gapClass="-mb-8">
           <span className="flex min-w-0 flex-1 items-baseline gap-2">
             <span className="shrink-0 font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">Reconcile</span>
             <span className="min-w-0 truncate text-sm font-semibold">
@@ -113,34 +113,7 @@ export function AuditMatrix({data}: {data: AuditResult}) {
             </span>
           </span>
           <span className="flex flex-wrap items-center gap-2">
-            {data.coverage.loaded && (
-              <span role="group" aria-label="Reco A to D" className="flex gap-1">
-                {RECO_LETTERS.map((l) => {
-                  const tone = toneOf(RECO_META[l].states[0]);
-                  const on = letter === l;
-                  return (
-                    <button
-                      key={l}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => go({reco: on ? null : l, why: null, q: ''})}
-                      title={RECO_META[l].label}
-                      className={cn(
-                        'inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs transition-[transform,border-color,background-color] duration-150 ease-out active:scale-[0.97]',
-                        on ? 'border-transparent' : 'border-border bg-background [@media(hover:hover)]:hover:border-foreground/25',
-                        data.summary.letters[l] === 0 && !on && 'opacity-55',
-                      )}
-                      style={on ? {background: tint(tone, 16), color: ink(tone)} : undefined}
-                    >
-                      <span className="font-mono font-semibold" style={on ? undefined : {color: ink(tone)}}>
-                        {l}
-                      </span>
-                      <span className="tabular-nums">{data.summary.letters[l].toLocaleString('en-US')}</span>
-                    </button>
-                  );
-                })}
-              </span>
-            )}
+            {data.coverage.loaded && <RecoPills size="sm" summary={data.summary} active={letter} onPick={(l) => go({reco: letter === l ? null : l, why: null, q: ''})} />}
             {!searching && (
               <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                 {lm ? <span className="font-medium text-foreground">{lm.label}</span> : <StateChip state={state} />}
@@ -151,20 +124,11 @@ export function AuditMatrix({data}: {data: AuditResult}) {
           </span>
         </StickyBar>
       )}
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="max-w-2xl">
-            <p className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase">Reconciliation</p>
-            <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">Watsons, inventory and PO, side by side</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              Each product gets a yes or no on three legs and one recommendation. A mark with no data behind it shows as not known, never as a no.
-            </p>
-          </div>
-          <ReconTabs query={sel ? `month=${sel.month}` : undefined} />
-        </div>
-        <PoSourceBar po={data.po} />
-      </header>
-
+      <ReconHeader
+        title="Reconcile"
+        help="Watsons, the inventory form and the PO, side by side. Each product gets a yes or no on three legs and one recommendation. A mark with no data behind it shows as not known, never as a no."
+        tabsQuery={sel ? `month=${sel.month}` : undefined}
+      />
       {data.mock && (
         <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           Sample view. Example rows; connect the database to see real counts.
@@ -180,24 +144,22 @@ export function AuditMatrix({data}: {data: AuditResult}) {
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-              Store
+          {/* One control row and one quiet line (Nov 26): pick, then see what needs a step. */}
+          <section aria-label="What you're looking at" className="-mt-3 flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-3">
               <StorePicker stores={data.stores} value={sel.code} onChange={(code) => setParam('store', code)} />
-            </div>
-            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-              Month
               <MonthPicker months={data.months} value={sel.month} onChange={(month) => setParam('month', month)} />
+              {data.coverage.loaded && (
+                <span className="flex items-center gap-2 max-sm:w-full">
+                  <RecoPills summary={data.summary} active={letter} onPick={(l) => go({reco: letter === l ? null : l, why: null, q: ''})} />
+                </span>
+              )}
+              <NeedsStepStat n={data.summary.needsAction} of={data.summary.total} unit={all ? 'pairs' : 'products'} target="recon-table" />
             </div>
-            <div className="ml-auto text-right">
-              <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.summary.needsAction.toLocaleString('en-US')}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                of {data.summary.total.toLocaleString('en-US')} {all ? 'store and product pairs' : 'products'} need a step
-              </p>
-            </div>
-          </div>
-
-          <CoverageNote month={sel.month} coverage={data.coverage} all={all} />
+            <ReconContext po={data.po} month={sel.month} coverage={data.coverage} all={all} summary={data.summary} reasonsOpen={!searching && !letter && state === 'unknown'}>
+              <UnknownReasons summary={data.summary} active={!searching && !letter && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', reco: null, why, q: ''})} />
+            </ReconContext>
+          </section>
 
           {/* A month without sales can't be judged: one notice instead of a grid of zeros. */}
           {!data.coverage.loaded ? (
@@ -209,15 +171,11 @@ export function AuditMatrix({data}: {data: AuditResult}) {
               otherHref={otherMonth ? `/stock/audit?${new URLSearchParams({store: sel.code, month: otherMonth})}` : null}
             />
           ) : (
-            <>
-              <RecoStrip summary={data.summary} active={letter} onPick={(l) => go({reco: letter === l ? null : l, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
-              <NotebookGrid summary={data.summary} active={searching ? null : lm ? lm.states : state} onPick={(s) => go({state: s, reco: null, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
-            </>
+            <NotebookGrid summary={data.summary} active={searching ? null : lm ? lm.states : state} onPick={(s) => go({state: s, reco: null, why: null, q: ''})} unit={all ? 'store and product pairs' : 'products'} />
           )}
-          <UnknownReasons summary={data.summary} active={!searching && !letter && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', reco: null, why, q: ''})} />
-          <div ref={filtersEnd} aria-hidden className="-mt-6 h-0" />
+          <div ref={filtersEnd} aria-hidden className="-mt-8 h-0" />
 
-          <Card className="gap-0 overflow-hidden py-0">
+          <Card id="recon-table" className="scroll-mt-28 gap-0 overflow-hidden py-0">
             {/* The table's header says what it shows. No second filter here. */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
               {searching ? (

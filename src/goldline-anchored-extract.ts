@@ -1,6 +1,8 @@
 import {PAGE_COUNT, type FormVersion} from './goldline-extract';
 import {columnsForVersion, templateItems, type FormTemplate} from './goldline-form-template';
 import type {ExtractedPage, ExtractedRow} from './goldline-extract-run';
+import {checkBands, type PaperTotal} from './band-prices';
+import {applyPageOsFlags} from './printed-os';
 import {applyReaderFlags, cleanHeaders, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_ANCHORED} from './goldline-reader-marks';
 
 // Phase 1 of template-anchored extraction (plan: knowledge/tasks/2026-11-12-template-anchored-extraction.md).
@@ -398,6 +400,20 @@ export function mapAnchoredToExtractedPage(template: FormTemplate, out: Anchored
     rows,
   };
 
+  // Each band's paper total (P1 reads them) and any written price (price_notes), saved with the
+  // page and flagged when the paper points at another price than the printed one (QA Nov 25).
+  const paper: PaperTotal[] = ((out as {family_totals?: Array<{family?: unknown; amount?: unknown}>}).family_totals ?? [])
+    .filter((f) => f && typeof f.family === 'string')
+    .map((f) => ({family: f.family as string, amount: typeof f.amount === 'number' ? f.amount : null}));
+  for (const pn of out.price_notes ?? []) {
+    if (!pn || typeof pn.group !== 'string' || typeof pn.written_price !== 'number') continue;
+    const same = paper.find((t) => t.family.toUpperCase() === (pn.group as string).toUpperCase());
+    if (same) same.written_price = pn.written_price;
+    else paper.push({family: pn.group, amount: null, written_price: pn.written_price});
+  }
+  const bands = checkBands(items.map((it) => ({code: it.itemCode, group: it.group, price: it.unitPrice})), rows, paper);
+  if (bands.length) page.bands = bands;
+
   // Safeguard (B): verify the page's real layout against the template's version. A seen Delivery
   // position that disagrees with the expected one means a confident version mis-tag slipped past
   // the confidence gate (e.g. a V2 page read as V1), so the counts above were read from the wrong
@@ -685,6 +701,9 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
   // The reader's review flags (NICH-36): a BA note or revision, or "Damage" in a count. Kept on the
   // row for the review flags, and the row goes to review.
   for (let i = 0; i < items.length; i++) applyReaderFlags(rows[i], cleanReaderFlags(claimed[i]?.flags));
+  // "O/S" the reader flagged in a cell (os_drawer, ...) becomes 0 there (QA Nov 25), unless the
+  // form prints that O/S itself (audit Nov 25): then the row only says so.
+  applyPageOsFlags(rows.slice(0, items.length), items.map((_, i) => claimed[i]?.flags), {version: template.version, page: template.page});
   const headersOver = cleanHeaders(out.headers_written_over);
   if (headersOver.length) base.page.headers_written_over = headersOver;
 
@@ -713,6 +732,10 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
     const paper = totals.find((t) => t.k === gk || t.k.includes(gk) || gk.includes(t.k));
     if (!paper) continue;
     familyChecked++;
+    // A band the paper prices differently, whose total reconciles at that price, is the band
+    // price flag's job (src/band-prices.ts), not a misread: no "family total" note on its rows.
+    const repriced = (base.page.bands ?? []).find((b) => b.group === group && b.kind != null && b.offer_price != null && b.amount != null && Math.abs(b.amount - b.pieces * b.offer_price) <= 1);
+    if (repriced) continue;
     const price = items[idxs[0]].unitPrice as number;
     const sum = idxs.reduce((a, i) => a + (rows[i].ending_on_hand ?? 0), 0) * price;
     if (Math.abs(sum - paper.amount) > 1) {

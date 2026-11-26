@@ -1,5 +1,5 @@
 import {getDataContext} from '@/src/active-context';
-import {getGoldlineAnalytics} from '@/src/goldline-analytics';
+import {getGoldlineAnalytics, getGoldlineStoresMonth, getSalesMonths, parseMonthParam} from '@/src/goldline-analytics';
 import {getStoreScope} from '@/src/goldline-ref-data';
 import {canEditData} from '@/src/company';
 import {GoldlineStoresView} from '@/components/analyst/goldline-stores-view';
@@ -12,8 +12,9 @@ export const dynamic = 'force-dynamic';
 const SORTS = new Set(['gross', 'units', 'net', 'name'] as const);
 
 // ?sort=gross|units|net|name picks the starting sort, so an Overview tile opens the
-// leaderboard ranked by the figure that was clicked.
-export default async function Page(props: {searchParams: Promise<{sort?: string}>}) {
+// leaderboard ranked by the figure that was clicked. ?month=YYYY-MM shows that one
+// month's totals (an Overview trend bar opens it); without it, every month on file.
+export default async function Page(props: {searchParams: Promise<{sort?: string; month?: string}>}) {
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
     return (
@@ -23,14 +24,26 @@ export default async function Page(props: {searchParams: Promise<{sort?: string}
       </div>
     );
   }
-  const {sort} = await props.searchParams;
+  const {sort, month: monthParam} = await props.searchParams;
   const initialSort = sort && SORTS.has(sort as 'gross') ? (sort as 'gross' | 'units' | 'net' | 'name') : undefined;
-  const [{byStore, summary}, scope] = await Promise.all([getGoldlineAnalytics(ctx.companyId), getStoreScope(ctx.companyId).catch(() => [])]);
+  const months = await getSalesMonths(ctx.companyId);
+  const wanted = parseMonthParam(monthParam);
+  const month = wanted && months.includes(wanted) ? wanted : null;
+  const [all, monthly, scope] = await Promise.all([
+    getGoldlineAnalytics(ctx.companyId),
+    month ? getGoldlineStoresMonth(ctx.companyId, month) : Promise.resolve(null),
+    getStoreScope(ctx.companyId).catch(() => []),
+  ]);
+  const view = monthly ?? all;
   return (
     <GoldlineStoresView
+      key={monthly ? month : 'all'}
       company={ctx.companyId}
-      stores={byStore}
-      summary={summary}
+      stores={view.byStore}
+      summary={view.summary}
+      latestEnd={all.summary.periodEnd}
+      months={months}
+      month={monthly ? month : null}
       scope={scope}
       canEditScope={canEditData(ctx.role) && !ctx.storeScope}
       initialSort={initialSort}

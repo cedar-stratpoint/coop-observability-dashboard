@@ -70,7 +70,7 @@ export function StorePicker({stores, value, onChange}: {stores: StoreOption[]; v
       }}
       autoHighlight
     >
-      <Combobox.Trigger aria-label="Store" className={cn(TRIGGER, 'w-[min(20rem,calc(100vw-2rem))]')}>
+      <Combobox.Trigger aria-label="Store" className={cn(TRIGGER, 'w-[min(17rem,calc(100vw-2rem))]')}>
         <Store aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{storeText(selected)}</span>
         {selected.code === ALL_STORES && <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">{stores.length}</span>}

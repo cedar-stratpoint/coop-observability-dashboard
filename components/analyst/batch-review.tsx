@@ -3,7 +3,8 @@
 import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import {createPortal} from 'react-dom';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {NamedReturnLink} from '@/components/analyst/back-nav';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Crosshair, ExternalLink, FileText, Loader2, X} from 'lucide-react';
 import type {BatchRow, ExtractionRecord, StoreOption, UploadRow} from '@/src/goldline-data';
@@ -12,12 +13,13 @@ import {ScanPageViewer} from '@/components/analyst/scan-page-viewer';
 import {scanPointBox, useScanRotation} from '@/components/analyst/scan-rotation';
 import {estimateRowBoxes} from '@/src/row-box-fill';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
-import {commitBatchAction, updateBatchInfoAction} from '@/app/uploads/actions';
+import {commitBatchAction, setBandPriceAction, setBandPricesAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import {batchCoverage, batchReadiness, storeConflict, scanPageLabel, scanPageNumber, FORM_PAGES} from '@/src/upload-batch';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {fmtTriagePeriod} from '@/src/goldline-triage-format';
 import {stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
+import {cleanBands, flaggedRowIndexes, withPickedPrices, type PaperBand} from '@/src/band-prices';
 import {draftKey, packPage, parseDraft, unpackPage, type Draft} from '@/src/review-draft';
 import {DocumentConfidence} from '@/components/analyst/document-confidence';
 import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/components/analyst/review-rows';
@@ -52,6 +54,8 @@ type PageState = {
   view: ReviewView;
   query: string;
   seed: string; // which server snapshot the edits started from (see seedKey)
+  /** Band price picks saved this session (absent: the page's bands as read). */
+  bands?: PaperBand[];
 };
 
 // A page's edits start from its extraction. Re-seed only when the server has something
@@ -60,10 +64,8 @@ type PageState = {
 const seedKey = (p: BatchReviewPage) => `${p.upload.status}:${p.extraction ? p.extraction.data?.rows?.length ?? 0 : 'none'}`;
 
 function flagsOf(p: BatchReviewPage): number[] {
-  return (p.extraction?.data?.rows ?? [])
-    .map((r, i) => ({c: rowConfidence(r.confidence), i}))
-    .filter((x) => x.c < LOW_BELOW)
-    .map((x) => x.i);
+  // Low-confidence rows, plus one row per band whose paper points at another price.
+  return flaggedRowIndexes(p.extraction?.data, LOW_BELOW);
 }
 
 function seedPage(p: BatchReviewPage): PageState {
@@ -119,6 +121,9 @@ export function BatchReview({
   initialPageId?: string | null;
 }) {
   const router = useRouter();
+  // Opened from the Flags hub (a flagged page redirected here with ?from=flags): Back names the
+  // flags view and returns to it, instead of the scan.
+  const fromFlags = useSearchParams().get('from') === 'flags';
   const queue = useUploadQueue();
   const committed = batch.status === 'committed';
   const editable = canEdit && !committed;
@@ -268,6 +273,31 @@ export function BatchReview({
   const curFlags = cur ? flaggedById[cur.upload.id] ?? [] : [];
   const setCur = (p: Partial<PageState> | ((s: PageState) => Partial<PageState>)) =>
     cur && setState((all) => ({...all, [cur.upload.id]: {...all[cur.upload.id], ...(typeof p === 'function' ? p(all[cur.upload.id]) : p)}}));
+  // This page's band price picks (QA Nov 25): a picked band is valued at its picked price.
+  const curBands = curState?.bands ?? cleanBands(cur?.extraction?.data?.bands);
+  const curCatalog = useMemo(() => withPickedPrices(catalog, curBands), [catalog, curBands]);
+  async function pickBandPrice(group: string, price: number | null): Promise<string | null> {
+    if (!cur) return 'That page could not be found.';
+    const res = await setBandPriceAction({company, uploadId: cur.upload.id, group, price});
+    if (!res.ok) return res.error;
+    const b = res.bands.find((x) => x.group === group);
+    const i = b?.first_index;
+    // The pick answers the band's flag; a row also low on confidence still wants its own look.
+    const answers = price != null && i != null && rowConfidence(cur.extraction?.data?.rows?.[i]?.confidence) >= LOW_BELOW && !cur.extraction?.data?.rows?.[i]?.oos?.check;
+    setCur((s) => ({bands: res.bands, resolved: answers ? new Set(s.resolved).add(i as number) : s.resolved}));
+    return null;
+  }
+  async function pickBandPrices(picks: Array<{group: string; price: number}>): Promise<string | null> {
+    if (!cur) return 'That page could not be found.';
+    const res = await setBandPricesAction({company, uploadId: cur.upload.id, picks});
+    if (!res.ok) return res.error;
+    const read = cur.extraction?.data?.rows ?? [];
+    const answered = picks
+      .map((p) => res.bands.find((x) => x.group === p.group)?.first_index)
+      .filter((i): i is number => i != null && rowConfidence(read[i]?.confidence) >= LOW_BELOW && !read[i]?.oos?.check);
+    setCur((s) => ({bands: res.bands, resolved: new Set([...s.resolved, ...answered])}));
+    return null;
+  }
 
   function saveInfo(next: {storeCode?: string; periodStart?: string; periodEnd?: string}) {
     const v = {storeCode, periodStart, periodEnd, ...next};
@@ -342,12 +372,23 @@ export function BatchReview({
           {/* A breadcrumb to the scan, so it links straight there. (Not history.back(): the
               scan board is filter-heavy, and stepping back through history just retraced the
               view tabs / version cards / store chips the reviewer had clicked.) */}
-          <Link
-            href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
-            className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
-          </Link>
+          {fromFlags ? (
+            <NamedReturnLink
+              listKey="flags"
+              fallback="/flags"
+              fallbackLabel="Flags"
+              detailPrefix="/uploads/"
+              icon={<ArrowLeft className="size-3.5 shrink-0" />}
+              className="inline-flex min-w-0 max-w-[18rem] shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+            />
+          ) : (
+            <Link
+              href={`/uploads/scan/${encodeURIComponent(scanSource)}`}
+              className="inline-flex min-w-0 shrink-0 items-center gap-1 transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" /> <span className="max-w-[16rem] truncate">{scanSource}</span>
+            </Link>
+          )}
           {curPageLabel && (
             <span
               className="inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums"
@@ -658,6 +699,7 @@ export function BatchReview({
                     <DocumentConfidence
                       docConfidence={cur.extraction?.docConfidence ?? null}
                       rowConfidences={curState.rows.map((r) => r.confidence)}
+                      flagged={curFlags.length}
                       onReviewFlagged={() => goToFlag(unresolvedFlags(curFlags, curState.resolved)[0] ?? curFlags[0] ?? null)}
                     />
                   </CardContent>
@@ -673,8 +715,11 @@ export function BatchReview({
                   rows={curState.rows}
                   productNames={cur.productNames}
                   rowNames={cur.rowNames}
-                  catalog={catalog}
+                  catalog={curCatalog}
                   flagged={curFlags}
+                  bands={curBands}
+                  onBandPrice={pickBandPrice}
+                  onBandPrices={pickBandPrices}
                   resolved={curState.resolved}
                   active={curState.active}
                   view={curState.view}

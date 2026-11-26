@@ -26,6 +26,8 @@ import {MANIFESTS, PAGE_COUNT} from './goldline-extract';
 import {generatedTemplateItems} from './goldline-form-templates.generated';
 import {printedNames, printedPageItems, type PrintedItem} from './goldline-printed-page';
 import {applyReaderFlags, cleanReaderFlags, FLAGS_PROPERTY, MARKS_PROMPT_LEGACY, type ReaderFlag} from './goldline-reader-marks';
+import {type OutOfStock} from './out-of-stock';
+import {applyPageOutOfStock} from './printed-os';
 
 /** One Legacy item row, in printed column order (handwritten int or null each). */
 export type LegacyExtractedRow = {
@@ -55,6 +57,10 @@ export type CoreRow = {
   alt?: string | null;
   extra?: Record<string, number | null>;
   reader_flags?: ReaderFlag[] | null;
+  /** "O/S" written on the row: the cells it set to 0, and whether the row wants a look. */
+  oos?: OutOfStock | null;
+  /** "O/S" printed on the form for this row (not a BA's mark, not a count). */
+  os_printed?: boolean | null;
 };
 
 /** How a Legacy page's handwritten columns are used. `locations`: col1-col3 are stockroom /
@@ -117,9 +123,12 @@ function legacyRowCore(r: LegacyExtractedRow, layout: LegacyLayout): CoreRow {
 }
 
 /** Map a whole Legacy page: decide its layout once from its arithmetic, then map each row. */
-export function legacyPageToCore(rows: LegacyExtractedRow[]): {layout: LegacyLayout; rows: CoreRow[]} {
+export function legacyPageToCore(rows: LegacyExtractedRow[], page?: number | null): {layout: LegacyLayout; rows: CoreRow[]} {
   const layout = legacyPageLayout(rows);
-  return {layout, rows: rows.map((r) => legacyRowToCore(r, layout))};
+  // "O/S" (QA Nov 25): printed on the form for this page's rows = a quiet note; one a BA wrote =
+  // 0 in that cell, by this page's column use. After the layout is decided, so zeros don't vote.
+  const osLayout = layout === 'locations' ? 'legacy-locations' : 'legacy-printed';
+  return {layout, rows: applyPageOutOfStock(rows.map((r) => legacyRowToCore(r, layout)), {version: 'legacy', page, layout: osLayout})};
 }
 
 /** Consecutive printed rows under one heading band, with the band's price when its rows share
@@ -264,6 +273,8 @@ export function buildLegacyManifestPrompt(page: number, opts: {marks?: boolean} 
     'candidate in "alt". This overrides any general rule about making rows add up.',
     'Name columns in "alt" by what this page uses them for (Stockroom, Drawer, Selling area,',
     'or Beginning, Delivery, Beginning + Delivery, Deducted) and Ending, never "col3".',
+    'If a count cell holds "O/S" (out of stock) instead of a number, set that cell to null and',
+    'write "O/S in <column>" in "alt" (e.g. "O/S in Drawer"), naming the column the same way.',
     ...(opts.marks ? MARKS_PROMPT_LEGACY : []),
     'Read the header: store code + name, period (MM/DD–MM/DD), beauty consultant.',
     banded

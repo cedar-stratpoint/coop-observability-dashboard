@@ -4,13 +4,15 @@
 // chip, the notebook grid of the eight recommendations (the page's only filter), the
 // "Can't tell yet" reasons, the no-sales notice, and the section tabs.
 
-import {useId, type ReactNode} from 'react';
+import {useEffect, useId, useRef, useState, type ReactNode} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {AlertTriangle, Check, ChevronLeft, ChevronRight, FileSpreadsheet, HelpCircle, X} from 'lucide-react';
+import {AlertTriangle, ArrowDown, Check, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {AUDIT_META, MATRIX_STATES, NEEDS_ACTION, RECO_LETTERS, RECO_META, WHY_LABEL, WHY_ORDER, type AuditState, type AuditSummary, type Leg, type RecoLetter, type WhyUnknown} from '@/src/goldline-audit';
 import type {AuditCoverage, PoLeg} from '@/src/goldline-audit-data';
+import {InfoTip} from '@/components/analyst/info-tip';
+import {Tooltip} from '@base-ui/react/tooltip';
 
 export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> = {
   good: 'var(--status-good)',
@@ -197,52 +199,6 @@ function GridCell({state, n, on, onClick, unit, col}: {state: AuditState; n: num
       </button>
       <StateTip id={tip} state={state} fit />
     </div>
-  );
-}
-
-/**
- * Syl's Reco A to D (Nov 25): the four groups she reports on, as one row above the grid.
- * A letter is a filter like a box; C covers both Watsons boxes. Same press and active
- * treatment as the grid's boxes, no motion beyond the press.
- */
-export function RecoStrip({summary, active, onPick, unit}: {summary: AuditSummary; active: RecoLetter | null; onPick: (l: RecoLetter) => void; unit: string}) {
-  return (
-    <section aria-label="Reco A to D" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {RECO_LETTERS.map((l) => {
-        const m = RECO_META[l];
-        const c = toneOf(m.states[0]);
-        const n = summary.letters[l];
-        const on = active === l;
-        return (
-          <button
-            key={l}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onPick(l)}
-            className={cn(
-              'flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left',
-              'transition-[transform,border-color,background-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.98]',
-              'focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none',
-              !on && 'border-border bg-card [@media(hover:hover)]:hover:border-foreground/25',
-              n === 0 && !on && 'opacity-55',
-            )}
-            style={on ? {borderColor: `color-mix(in oklab, ${c} 60%, transparent)`, background: tint(c, 11), boxShadow: `0 0 0 3px ${tint(c, 16)}`} : undefined}
-          >
-            <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg font-mono text-sm font-semibold" style={{color: ink(c), background: tint(c, 16)}}>
-              {l}
-            </span>
-            <span className="flex min-w-0 flex-col">
-              <span className="font-heading text-xl leading-none font-semibold tabular-nums">{n.toLocaleString('en-US')}</span>
-              <span className="mt-1 truncate text-xs font-medium">{m.label}</span>
-              <span className="truncate text-[11px] text-muted-foreground">{m.owner}</span>
-            </span>
-            <span className="sr-only">
-              Reco {l}, {n} {unit}
-            </span>
-          </button>
-        );
-      })}
-    </section>
   );
 }
 
@@ -554,44 +510,237 @@ export function Pager({page, pages, total, size, onPage, label}: {page: number; 
   );
 }
 
-/** What this month's data can't answer yet, said once above the grid. */
-export function CoverageNote({month, coverage, all}: {month: string; coverage: AuditCoverage; all: boolean}) {
-  const notes: ReactNode[] = [];
-  // A month without sales is said by NoSalesNotice, which replaces the grid; these are the
-  // gaps in a month that does have sales.
-  if (coverage.loaded && coverage.storesCounted === 0)
-    notes.push(
-      <>
-        <span className="font-medium text-foreground">No inventory form for {monthLabel(month)}.</span> Only products that sold are listed, and their stock isn&apos;t known.
-      </>,
+// ── Compact page top (Nov 26, owner: "too many before the table") ────────────────────────────
+// Hick's Law: one control row and one quiet context line instead of a banner, four cards and
+// a chip row. Von Restorff: the count that needs a step is the one thing in colour, and it
+// jumps to the table, which is what the page is for.
+
+const EASE = 'ease-[cubic-bezier(0.23,1,0.32,1)]';
+
+/** 1 to 3 words per Reco group for the pills; the full name, owner and step are in the hover card. */
+const RECO_SHORT: Record<RecoLetter, string> = {A: 'Retire', B: 'Accounting', C: 'Watsons audit', D: 'Add to form'};
+
+/** Syl's Reco A to D as pills (control row and the pinned bar): a coloured dot, a short name and
+ *  the count. Hovering or focusing one opens a card with what it means: the Reco letter and who
+ *  acts, the full name, and the step. One card opens after a short wait; moving along the row
+ *  swaps cards at once (shared delay, no re-animation). */
+export function RecoPills({summary, active, onPick, size = 'md'}: {summary: AuditSummary; active: RecoLetter | null; onPick: (l: RecoLetter) => void; size?: 'sm' | 'md'}) {
+  return (
+    <Tooltip.Provider delay={250} closeDelay={60}>
+      <span role="group" aria-label="Reco A to D" className="flex flex-wrap gap-1.5">
+        {RECO_LETTERS.map((l) => {
+          const m = RECO_META[l];
+          const tone = toneOf(m.states[0]);
+          const on = active === l;
+          const n = summary.letters[l];
+          return (
+            <Tooltip.Root key={l}>
+              <Tooltip.Trigger
+                render={<button type="button" />}
+                aria-pressed={on}
+                onClick={() => onPick(l)}
+                aria-label={`Reco ${l}, ${m.label}, ${m.owner}: ${n.toLocaleString('en-US')}`}
+                className={cn(
+                  'inline-flex items-center gap-2 border whitespace-nowrap tabular-nums outline-none',
+                  size === 'md' ? 'h-10 rounded-xl pr-3.5 pl-3 text-sm' : 'h-8 rounded-lg px-2.5 text-xs',
+                  'transition-[scale,border-color,background-color,color] duration-150 active:scale-[0.97] motion-reduce:active:scale-100',
+                  EASE,
+                  'focus-visible:ring-3 focus-visible:ring-ring/40',
+                  on ? 'border-transparent' : 'border-border bg-card text-foreground/85 [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:bg-muted/50 [@media(hover:hover)]:hover:text-foreground',
+                  n === 0 && !on && 'opacity-50',
+                )}
+                style={on ? {background: tint(tone, 16), color: ink(tone), boxShadow: `0 0 0 3px ${tint(tone, 12)}`} : undefined}
+              >
+                <span aria-hidden className="size-2 shrink-0 rounded-full" style={{background: tone}} />
+                <span className="font-medium">{RECO_SHORT[l]}</span>
+                <span className={cn('font-semibold', !on && 'text-foreground')}>{n.toLocaleString('en-US')}</span>
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="z-50">
+                  <Tooltip.Popup
+                    className={cn(
+                      'w-72 origin-[var(--transform-origin)] rounded-xl border bg-popover px-3.5 py-3 text-popover-foreground',
+                      'shadow-[0_16px_40px_-16px_color-mix(in_oklab,var(--foreground)_35%,transparent)]',
+                      'transition-[opacity,scale] duration-150',
+                      EASE,
+                      'data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[ending-style]:duration-100 data-[instant]:transition-none',
+                      'motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100',
+                    )}
+                  >
+                    <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="grid size-5 place-items-center rounded-md font-mono text-[11px] font-semibold" style={{color: ink(tone), background: tint(tone, 16)}}>
+                        {l}
+                      </span>
+                      Reco {l} · {m.owner === 'Admin' ? 'You' : m.owner}
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{m.label}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{m.action}</p>
+                    <p className="mt-2.5 border-t pt-2 text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground tabular-nums">{n.toLocaleString('en-US')}</span> {n === 1 ? 'line' : 'lines'} this month · click to list {n === 1 ? 'it' : 'them'}
+                    </p>
+                  </Tooltip.Popup>
+                </Tooltip.Positioner>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+          );
+        })}
+      </span>
+    </Tooltip.Provider>
+  );
+}
+
+/** The page's headline count, the only coloured figure up top; pressing it scrolls to `target`. */
+export function NeedsStepStat({n, of, unit, target}: {n: number; of?: number; unit: string; target: string}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        document.getElementById(target)?.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+      }}
+      className={cn(
+        'group/need ml-auto flex items-center gap-3 rounded-xl py-1 pr-1 pl-3 text-right outline-none',
+        'transition-[background-color,scale] duration-150 active:scale-[0.98] motion-reduce:active:scale-100',
+        EASE,
+        'focus-visible:ring-3 focus-visible:ring-ring/40 [@media(hover:hover)]:hover:bg-primary/8',
+      )}
+    >
+      <span className="flex flex-col items-end">
+        <span className="font-heading text-4xl leading-none font-semibold text-primary tabular-nums">{n.toLocaleString('en-US')}</span>
+        <span className="mt-1.5 text-xs whitespace-nowrap text-muted-foreground">
+          {of != null ? `of ${of.toLocaleString('en-US')} ${unit} need a step` : `${unit} need a step`}
+        </span>
+      </span>
+      <span
+        aria-hidden
+        className={cn(
+          'grid size-8 place-items-center rounded-full bg-primary/12 text-primary transition-[translate,background-color] duration-200',
+          EASE,
+          'group-hover/need:translate-y-0.5 group-hover/need:bg-primary/20 motion-reduce:group-hover/need:translate-y-0',
+        )}
+      >
+        <ArrowDown className="size-4" />
+      </span>
+    </button>
+  );
+}
+
+/** Page title with its explainer behind a ? (the tabs say which view), and the tabs. */
+export function ReconHeader({title, help, tabsQuery}: {title: string; help: string; tabsQuery?: string}) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-4">
+      <h1 className="flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">
+        {title}
+        <InfoTip text={help} />
+      </h1>
+      <ReconTabs query={tabsQuery} />
+    </header>
+  );
+}
+
+/**
+ * One quiet line under the controls: where the PO leg comes from, how much the month covers,
+ * and how many lines can't be told yet. The reasons (and their fixes) open below it on demand,
+ * and stay open while the table shows "Can't tell yet". A missing PO form keeps its banner:
+ * nothing can be recommended without it.
+ */
+export function ReconContext({po, month, coverage, all, summary, reasonsOpen, children}: {
+  po: PoLeg;
+  month: string | null;
+  coverage: AuditCoverage | null;
+  all: boolean;
+  summary: AuditSummary | null;
+  /** Open the reasons from the start (the table is on "Can't tell yet"). */
+  reasonsOpen?: boolean;
+  /** The reason chips (UnknownReasons). */
+  children?: ReactNode;
+}) {
+  const [open, setOpen] = useState(Boolean(reasonsOpen));
+  useEffect(() => {
+    if (reasonsOpen) setOpen(true);
+  }, [reasonsOpen]);
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (panel.current) panel.current.inert = !open;
+  }, [open]);
+  const id = useId();
+  const form = po.source === 'form' ? po : null;
+  const when = form?.activatedAt ? new Date(form.activatedAt).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'}) : null;
+  const unknown = summary?.unknown ?? 0;
+  const facts: ReactNode[] = [];
+  if (form)
+    facts.push(
+      <span key="po" className="inline-flex items-center gap-1.5" title={`${form.fileName}${when ? `, in use since ${when}` : ''}`}>
+        <FileSpreadsheet className="size-3.5" aria-hidden />
+        PO form, <span className="text-foreground/85 tabular-nums">{form.onPo}</span> products
+        <Link href="/stock/po-form" className="font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
+          Update
+        </Link>
+      </span>,
     );
-  else if (coverage.loaded && all && coverage.storesCounted < coverage.storesSold)
-    notes.push(
-      <>
-        <span className="font-medium text-foreground tabular-nums">
-          {coverage.storesCounted} of {coverage.storesSold} stores
-        </span>{' '}
-        have a form. At the others only products that sold are listed, and their stock isn&apos;t known.
-      </>,
-    );
-  if (coverage.unlinkedUnits > 0)
-    notes.push(
-      <>
-        <span className="font-medium text-foreground tabular-nums">{coverage.unlinkedUnits.toLocaleString('en-US')} units</span> sold on Watsons SKUs with no product link, so they can&apos;t show here.{' '}
+  if (coverage?.loaded && month) {
+    if (coverage.storesCounted === 0) facts.push(<span key="cov">No inventory form for {monthLabel(month)}, so stock isn&apos;t known</span>);
+    else if (all && coverage.storesCounted < coverage.storesSold)
+      facts.push(
+        <span key="cov" title="At stores without a form only products that sold are listed, and their stock isn't known.">
+          Forms from <span className="text-foreground/85 tabular-nums">{coverage.storesCounted}</span> of {coverage.storesSold} stores
+        </span>,
+      );
+  }
+  if (coverage && coverage.unlinkedUnits > 0)
+    facts.push(
+      <span key="unl" className="inline-flex items-center gap-1.5" title="Units sold on Watsons SKUs with no product link can't show here.">
+        <span className="text-foreground/85 tabular-nums">{coverage.unlinkedUnits.toLocaleString('en-US')}</span> units on unlinked SKUs
         <Link href="/stock/skus" className="font-medium text-primary underline-offset-4 [@media(hover:hover)]:hover:underline">
           Link SKUs
         </Link>
-      </>,
+      </span>,
     );
-  if (!notes.length) return null;
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-      <HelpCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
-      <ul className="flex flex-col gap-1">
-        {notes.map((n, i) => (
-          <li key={i}>{n}</li>
+    <div className="flex flex-col">
+      {po.source === 'none' && (
+        <div className="mb-3">
+          <PoSourceBar po={po} />
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground max-sm:flex-col max-sm:items-start">
+        {facts.map((f, i) => (
+          <span key={i} className="inline-flex items-center gap-3">
+            {i > 0 && <span aria-hidden className="text-border max-sm:hidden">·</span>}
+            {f}
+          </span>
         ))}
-      </ul>
+        {unknown > 0 && children && (
+          <>
+            {facts.length > 0 && <span aria-hidden className="text-border max-sm:hidden">·</span>}
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={id}
+              onClick={() => setOpen((o) => !o)}
+              className={cn(
+                'group/why inline-flex h-7 items-center gap-1.5 rounded-full border border-dashed px-2.5 outline-none',
+                'transition-[border-color,background-color,color,scale] duration-150 active:scale-[0.97] motion-reduce:active:scale-100',
+                EASE,
+                'focus-visible:ring-3 focus-visible:ring-ring/40',
+                open ? 'border-muted-foreground/50 bg-muted text-foreground' : 'border-muted-foreground/35 [@media(hover:hover)]:hover:border-muted-foreground/60 [@media(hover:hover)]:hover:text-foreground',
+              )}
+            >
+              <span className="font-medium text-foreground/90 tabular-nums">{unknown.toLocaleString('en-US')}</span> can&apos;t tell yet
+              <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200', EASE, open && 'rotate-180')} />
+            </button>
+          </>
+        )}
+      </div>
+      {unknown > 0 && children && (
+        <div
+          id={id}
+          ref={panel}
+          className={cn('grid transition-[grid-template-rows,opacity,margin] duration-300 motion-reduce:transition-none', EASE, open ? 'mt-3 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}
+        >
+          <div className="-m-1 min-h-0 overflow-hidden p-1">{children}</div>
+        </div>
+      )}
     </div>
   );
 }
