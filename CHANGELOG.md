@@ -19,6 +19,14 @@ Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who
 - **Review fixes:** a draft after a filtered list takes the same filters, so per_lead row numbers and template recipients are that list's (the filter now lives in `selectLeads`); unread Same person links turn every would-be "not contacted" into unknown (contacted / replied stay); Ask Coop's PawSport read starts beside the CRM reads and has its own 12 s budget, then reads unknown with a note (the pages are unchanged); with `contacted_since`, "contacted" includes those who replied; `contacted_since` must be a real day and is refused with not_contacted / unknown; a no-match answer names every unread source.
 - **Drawer chips:** "Not contacted yet" and "PawSport holders not contacted yet". Skill topic `contacts.md`: PawSport = pet passport = raffle entry, status words, unknown is not never. Prompt budgets re-recorded (explore skill 7,724 tokens, cached Explore prompt 14,556).
 
+## 2026-11-26 — Reconcile: Reco pills say what they are, with a hover card
+
+Owner: the A to D pills were bare letters, so you couldn't tell what they meant.
+
+- Each pill is now a coloured dot, 1 to 3 words and the count: **Retire**, **Accounting**, **Watsons audit**, **Add to form** (was A, B, C, D). Same on the pinned bar.
+- Hover or focus a pill (250 ms wait) for a card: the Reco letter and who acts (so Syl's A to D still reads), the full name, the step, and how many lines are in it. Moving along the row swaps cards at once with no re-animation; it scales in from the pill and fades out faster. Reduced motion drops the scale.
+- To fit the row on one line at 1440: the store picker is 17rem (was 20rem) and the count reads "of 33,961 pairs need a step".
+
 ## 2026-11-26 — Reconcile: the table is above the fold (Hick's Law + Von Restorff on the page top)
 
 Owner: too much stood between the pickers and the table, which is the point of the page. Kept the Recommendations grid as is; everything above it is now one control row and one quiet line.
