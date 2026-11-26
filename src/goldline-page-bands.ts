@@ -121,3 +121,51 @@ export async function renderReadImages(
     return null;
   }
 }
+
+/** Share of the page height each header crop covers. The handwritten header line sits in the top
+ *  ~10% of an upright page (the bottom ~10% of an upside-down one). */
+export const HEADER_CROP_FRAC = 0.13;
+
+/** What the classify call is told about the header crops. */
+export const HEADER_CROPS_NOTE = [
+  'The two images after the page are sharp 300 dpi crops of the TOP and BOTTOM edges of this same page, each turned',
+  'so its text reads upright if the header is there. The handwritten header line (Period Covered, Beauty Consultant,',
+  'Store Assignment w/ Code) is in one of them: read store_code, store_name, the period and the consultant from that',
+  'sharp crop. Judge page, kind, orientation and version from the whole page as usual.',
+].join(' ');
+
+/**
+ * Render a single-page PDF at 300 dpi and return two JPEG crops: the top edge as is, and the bottom
+ * edge turned 180 degrees (so an upside-down page's header reads upright). Null on any failure (the
+ * caller classifies from the page alone, as before). Server-only in practice, loaded lazily.
+ */
+export async function renderHeaderCrops(pdfBase64: string): Promise<ImageBlock[] | null> {
+  try {
+    const {pdf} = await import('pdf-to-img');
+    const {createCanvas, loadImage} = await import('@napi-rs/canvas');
+    const doc = await pdf(Buffer.from(pdfBase64, 'base64'), {scale: BAND_DPI / 72});
+    let png: Buffer | null = null;
+    for await (const p of doc) {
+      png = p;
+      break;
+    }
+    if (!png) return null;
+    const img = await loadImage(png);
+    const w = img.width, h = img.height;
+    if (!(w > 0 && h > 0)) return null;
+    const ch = Math.round(h * HEADER_CROP_FRAC);
+    const cw = Math.min(w, MAX_BAND_WIDTH);
+    const scaledH = Math.round((ch * cw) / w);
+    const top = createCanvas(cw, scaledH);
+    top.getContext('2d').drawImage(img, 0, 0, w, ch, 0, 0, cw, scaledH);
+    const bottom = createCanvas(cw, scaledH);
+    const bctx = bottom.getContext('2d');
+    bctx.translate(cw, scaledH);
+    bctx.rotate(Math.PI);
+    bctx.drawImage(img, 0, h - ch, w, ch, 0, 0, cw, scaledH);
+    return [jpeg(await top.encode('jpeg', 88)), jpeg(await bottom.encode('jpeg', 88))];
+  } catch (e) {
+    console.error('goldline: header crop render failed, classifying from the page alone', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
