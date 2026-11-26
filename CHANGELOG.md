@@ -19,6 +19,17 @@ Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who
 - **Review fixes:** a draft after a filtered list takes the same filters, so per_lead row numbers and template recipients are that list's (the filter now lives in `selectLeads`); unread Same person links turn every would-be "not contacted" into unknown (contacted / replied stay); Ask Coop's PawSport read starts beside the CRM reads and has its own 12 s budget, then reads unknown with a note (the pages are unchanged); with `contacted_since`, "contacted" includes those who replied; `contacted_since` must be a real day and is refused with not_contacted / unknown; a no-match answer names every unread source.
 - **Drawer chips:** "Not contacted yet" and "PawSport holders not contacted yet". Skill topic `contacts.md`: PawSport = pet passport = raffle entry, status words, unknown is not never. Prompt budgets re-recorded (explore skill 7,724 tokens, cached Explore prompt 14,556).
 
+## 2026-11-26 — Reconcile: the table is above the fold (Hick's Law + Von Restorff on the page top)
+
+Owner: too much stood between the pickers and the table, which is the point of the page. Kept the Recommendations grid as is; everything above it is now one control row and one quiet line.
+
+- **Header**: "Reconcile" plus a ? that holds the explainer (was eyebrow, a long title and a two-line description). Tabs unchanged.
+- **Control row**: store and month pickers (no labels above them, their icons say it), Syl's Reco A to D as small letter pills (label and owner on hover; was four big cards that repeated the grid), and the count that needs a step. That count is the only coloured figure up top (Von Restorff); pressing it scrolls to the table.
+- **Context line**: PO form and its product count with Update, "Forms from 4 of 299 stores", unlinked SKU units with Link SKUs, and a "33,194 can't tell yet" toggle. The reason chips and their fixes open under it on demand (and stay open while the table shows Can't tell yet). Was a banner plus a separate chip row. A missing PO form keeps its warning banner.
+- **Spacing**: 32px between sections (was 24px), 16px inside the top block.
+- By product gets the same top. `RecoStrip` and `CoverageNote` are gone; `RecoPills`, `NeedsStepStat`, `ReconHeader` and `ReconContext` live in `audit-shared.tsx`, and the pinned bar uses `RecoPills` too.
+- Measured at 1440 wide: the table starts at 674px from the top (was 965px), so its first rows show without scrolling.
+
 ## 2026-11-26 — PawSport on the Website CRM and Event leads (RET-18 P1)
 
 PawSports live only in Shopify (customer metafield `custom.pet_passport` + tags), so Coop could not say who holds one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`.

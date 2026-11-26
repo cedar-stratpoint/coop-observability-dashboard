@@ -10,7 +10,7 @@ import {MonthPicker} from '@/components/analyst/audit-pickers';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {ALL_STORES, AUDIT_META, AUDIT_STATES, NEEDS_ACTION, openingState, patternState, type AuditState} from '@/src/goldline-audit';
 import type {ProductAuditResult, ProductAuditRow} from '@/src/goldline-audit-data';
-import {CoverageNote, ink, monthLabel, NoSalesNotice, NotebookGrid, Pager, PoSourceBar, ReconTabs, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
+import {ink, monthLabel, NeedsStepStat, NoSalesNotice, NotebookGrid, Pager, ReconContext, ReconHeader, StateChip, tint, toneOf, UnknownReasons} from '@/components/analyst/audit-shared';
 
 // Reconciliation · By product (NICH-17). Every counted store in a month, rolled up per
 // product: how many stores sit in each of the 8 states, as one stacked bar per product.
@@ -48,21 +48,12 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
   };
 
   return (
-    <div className={GL_PAGE}>
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="max-w-2xl">
-            <p className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground uppercase">Reconciliation</p>
-            <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">Every product, across every store</h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              Each bar splits a product&apos;s stores by recommendation. Open a product to see its stores.
-            </p>
-          </div>
-          <ReconTabs query={data.month ? `month=${data.month}` : undefined} />
-        </div>
-        <PoSourceBar po={data.po} />
-      </header>
-
+    <div className={cn(GL_PAGE, 'gap-8')}>
+      <ReconHeader
+        title="Reconcile"
+        help="Every product, across every store. Each bar splits a product's stores by recommendation. Open a product to see its stores."
+        tabsQuery={data.month ? `month=${data.month}` : undefined}
+      />
       {data.mock && (
         <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Sample view. Connect the database to see real counts.</div>
       )}
@@ -76,25 +67,22 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
         </Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-              Month
+          <section aria-label="What you're looking at" className="-mt-3 flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-3">
               {/* A month is a filter, not a step: replace, so Back leaves the page. */}
               <MonthPicker months={data.months} value={data.month} onChange={(month) => router.replace(`/stock/audit/products?month=${month}`, {scroll: false})} />
+              <NeedsStepStat n={data.rows.filter((r) => r.needsAction > 0).length} unit="products" target="recon-table" />
             </div>
-            <div className="ml-auto flex gap-6 text-right">
-              <div>
-                <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.storeCount}</p>
-                <p className="mt-1 text-xs text-muted-foreground">stores, {data.coverage.storesCounted} with a form</p>
-              </div>
-              <div>
-                <p className="font-heading text-3xl leading-none font-semibold tabular-nums">{data.rows.filter((r) => r.needsAction > 0).length}</p>
-                <p className="mt-1 text-xs text-muted-foreground">products need a step somewhere</p>
-              </div>
-            </div>
-          </div>
-
-          <CoverageNote month={data.month} coverage={data.coverage} all />
+            {/* This view counts products, not lines: a reason opens its lines across all stores. */}
+            <ReconContext po={data.po} month={data.month} coverage={data.coverage} all summary={data.summary}>
+              <UnknownReasons
+                summary={data.summary}
+                active={false}
+                activeWhy={null}
+                hrefFor={(why) => `/stock/audit?${new URLSearchParams({store: 'all', month: data.month!, state: 'unknown', ...(why ? {why} : {})})}`}
+              />
+            </ReconContext>
+          </section>
 
           {!data.coverage.loaded ? (
             <NoSalesNotice
@@ -117,15 +105,7 @@ export function AuditProducts({data}: {data: ProductAuditResult}) {
               unit="store and product pairs"
             />
           )}
-          {/* This view counts products, not lines: a reason opens its lines across all stores. */}
-          <UnknownReasons
-            summary={data.summary}
-            active={false}
-            activeWhy={null}
-            hrefFor={(why) => `/stock/audit?${new URLSearchParams({store: 'all', month: data.month!, state: 'unknown', ...(why ? {why} : {})})}`}
-          />
-
-          <Card className="gap-0 overflow-hidden py-0">
+          <Card id="recon-table" className="scroll-mt-28 gap-0 overflow-hidden py-0">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
               {searching ? (
                 <p className="text-sm">
