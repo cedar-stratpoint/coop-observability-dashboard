@@ -52,6 +52,8 @@ export type ReturnEntry = {
   at: number;
   /** The detail path the row opened (decoded), so Back only uses this entry from that page. */
   to: string | null;
+  /** What the list was showing, for the detail page's Back label ("Back to Price written"). */
+  label?: string | null;
 };
 
 /** How long a remembered list stays good for. Past this, Back uses the plain fallback. */
@@ -78,6 +80,7 @@ export function parseReturnEntry(raw: string | null, now: number): ReturnEntry |
     rowId: typeof e.rowId === 'string' ? e.rowId : null,
     at: e.at,
     to: typeof e.to === 'string' ? e.to : null,
+    label: typeof e.label === 'string' && e.label.trim() ? e.label.trim().slice(0, 80) : null,
   };
 }
 
