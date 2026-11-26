@@ -79,6 +79,16 @@ export function headerCropsEnabled(companyId: string): boolean {
   return companyInEnv(companyId, process.env.GOLDLINE_HEADER_CROP_COMPANIES);
 }
 
+/**
+ * Known BA names for the classify call (Nov 26): the roster Coop learns from committed forms is
+ * passed to the reader as a reference, so a handwritten Beauty Consultant name is matched against
+ * real names instead of guessed letter by letter. Per company via `GOLDLINE_BA_HINT_COMPANIES`;
+ * fail-closed, off = today's classify call unchanged.
+ */
+export function baHintEnabled(companyId: string): boolean {
+  return companyInEnv(companyId, process.env.GOLDLINE_BA_HINT_COMPANIES);
+}
+
 function companyInEnv(companyId: string, raw: string | undefined): boolean {
   if (!companyId) return false;
   return (raw ?? '')
