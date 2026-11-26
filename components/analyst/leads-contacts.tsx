@@ -30,6 +30,7 @@ import {CopyButton} from './customer-profile';
 import {FilterSelect} from './filter-select';
 import {Pagination} from './pagination';
 import {BoughtCell, BoughtHelp} from './lead-capture';
+import {pawsportLine, type PawsportBadge} from '@/src/pawsport';
 
 const PAGE_SIZE = 20;
 
@@ -37,7 +38,22 @@ const PAGE_SIZE = 20;
 export type LeadsContactsData = {
   vouchers: Record<string, SpinVoucherInfo>;
   statuses: Record<string, ContactStatus>;
+  /** RET-18 P1: the lead's PawSport when they are the same person as a holder. */
+  passports: Record<string, PawsportBadge>;
 };
+
+/** RET-18 P1: a small chip on a lead who holds a PawSport (same email or mobile as the Shopify holder). */
+function PawsportChip({badge}: {badge: PawsportBadge | undefined}) {
+  if (!badge) return null;
+  return (
+    <span
+      className="ml-1.5 inline-flex shrink-0 items-center rounded-md border border-primary/25 bg-accent px-1.5 align-middle text-[10.5px] font-medium leading-5 text-accent-foreground"
+      title={pawsportLine(badge)}
+    >
+      PawSport
+    </span>
+  );
+}
 
 const UNKNOWN: ContactStatus = {state: 'unknown', lastAt: null, lastChannel: null};
 /** A lead the team can log a contact for: at least one key the log accepts (a junk mobile or handle does not count). */
@@ -160,7 +176,7 @@ export function LeadsContacts({
   logRead: boolean;
   onLog: (l: SpinLead) => void;
 }) {
-  const {vouchers, statuses} = data;
+  const {vouchers, statuses, passports} = data;
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [event, setEvent] = useState('all');
@@ -369,7 +385,12 @@ export function LeadsContacts({
                   <td className="px-3 py-2">
                     <StatusChip status={statusOf(l)} onLog={hasContactKey(l) ? () => onLog(l) : undefined} name={leadName(l)} />
                   </td>
-                  <td className="max-w-[180px] truncate px-3 py-2 font-medium" title={l.name ?? undefined}>{l.name ?? <span className="font-normal text-muted-foreground">—</span>}</td>
+                  <td className="max-w-[220px] px-3 py-2 font-medium" title={l.name ?? undefined}>
+                    <span className="flex min-w-0 items-center">
+                      <span className="truncate">{l.name ?? <span className="font-normal text-muted-foreground">—</span>}</span>
+                      <PawsportChip badge={passports[leadKey(l)]} />
+                    </span>
+                  </td>
                   <td className="whitespace-nowrap px-3 py-1.5">
                     <Actions lead={l} onLog={() => onLog(l)} />
                   </td>
@@ -402,7 +423,10 @@ export function LeadsContacts({
             <li key={leadKey(l)} className="flex flex-col gap-2 px-3.5 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{leadName(l)}</div>
+                  <div className="flex min-w-0 items-center text-sm font-medium">
+                    <span className="truncate">{leadName(l)}</span>
+                    <PawsportChip badge={passports[leadKey(l)]} />
+                  </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {[l.name && l.instagram ? `@${l.instagram}` : null, l.email, l.mobile].filter(Boolean).join(' · ') || 'No contact details'}
                   </div>

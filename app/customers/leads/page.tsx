@@ -11,6 +11,8 @@ import type {CustomerContact} from '@/src/customer-contacts';
 import {reportsViewerEmail} from '@/src/reports-session';
 import {spinVoucherOrderAt, spinVoucherState, type SpinVoucherInfo} from '@/src/spin-voucher';
 import {leadKey} from '@/src/lead-order-match';
+import {getPawsportHolders} from '@/src/pawsport-data';
+import {pawsportMatcher, type PawsportBadge} from '@/src/pawsport';
 import {LeadsView} from '@/components/analyst/leads-view';
 import {LeadsUpdateButton} from '@/components/analyst/leads-update-button';
 
@@ -23,7 +25,7 @@ export const dynamic = 'force-dynamic';
  * The per-event slice of the same leads stays on the event page.
  */
 export default async function Page() {
-  const [leads, orders, prizeOrders, crmOrders, log, links, viewer] = await Promise.all([
+  const [leads, orders, prizeOrders, crmOrders, log, links, pawsport, viewer] = await Promise.all([
     getSpinLeads(),
     // The purchase match is an extra; a POS read failure must not take the
     // contact list down with it.
@@ -35,11 +37,20 @@ export default async function Page() {
     getCustomerContactLog().catch(() => null),
     // RET-17 D3: a Same person link joins a lead to a website customer's contacts. Unread = no links (the lead's own keys still count).
     getCustomerLinks().catch(() => null),
+    // RET-18 P1: PawSport holders (Shopify via the CRM). Only a positive match shows a chip, so an unread list shows nothing.
+    getPawsportHolders(),
     reportsViewerEmail(),
   ]);
   // Computed here so the CRM orders list (customer emails) never reaches the browser.
   const vouchers: Record<string, SpinVoucherInfo> = {};
   for (const l of leads) vouchers[leadKey(l)] = {state: spinVoucherState(l, crmOrders), orderAt: crmOrders ? spinVoucherOrderAt(l, crmOrders) : null};
+  // RET-18: the same person as a holder (RET-17 samePerson keys), matched here so the holders' emails never reach the browser.
+  const matchPawsport = pawsportMatcher(pawsport.holders);
+  const passports: Record<string, PawsportBadge> = {};
+  for (const l of leads) {
+    const b = matchPawsport(leadPerson(l));
+    if (b) passports[leadKey(l)] = b;
+  }
   const matches = matchLeadsToOrders(leads, orders, new Set(prizeOrders));
   // RET-17: status and each lead's contacts are computed here, so the links (website customers' emails) never reach the browser.
   const contacts = log?.rows ?? null;
@@ -64,7 +75,7 @@ export default async function Page() {
         </div>
         <LeadsUpdateButton />
       </header>
-      <LeadsView leads={leads} matches={matches} vouchers={vouchers} statuses={statuses} histories={histories} legacy={read.legacy} logRead={contacts !== null} viewer={viewer} />
+      <LeadsView leads={leads} matches={matches} vouchers={vouchers} passports={passports} statuses={statuses} histories={histories} legacy={read.legacy} logRead={contacts !== null} viewer={viewer} />
     </div>
   );
 }
