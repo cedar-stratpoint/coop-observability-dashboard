@@ -34,10 +34,11 @@ export default async function Page(props: {searchParams: Promise<Search>}) {
   if (hub && one('view') !== 'ba') {
     const data = await flagLines(ctx.companyId, scope);
     const initial = parseFlagFilter({store: one('store'), month: one('month'), source: one('source'), status: 'all', q: one('q')});
-    const kind = one('kind');
+    // The open tile (?kind=) and its page (?p=) are read on the client: opening a tile is a
+    // pushed Back step in the same page, not a new request.
     return (
       <FlagsHubShell view="all" company={ctx.companyId} canEdit={canEdit}>
-        <FlagsHub data={data} initial={initial} initialKind={kind && /^(check|mark):[a-z_]{1,40}$/.test(kind) ? kind : null} company={ctx.companyId} canEdit={canEdit} />
+        <FlagsHub data={data} initial={initial} company={ctx.companyId} canEdit={canEdit} />
       </FlagsHubShell>
     );
   }

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {clearableIds, flagsHubEnabled, groupByKind, hubKinds, hubView, kindKey, lineTitle, tierOf, visibleKinds} from '../src/goldline-flag-hub';
+import {CLEARED_TILE, clearableIds, flagsHubEnabled, hubTiles, isTileKey, kindKey, lineTitle, pageOf, tierOf, tileKeyOf, tileLines} from '../src/goldline-flag-hub';
 import type {FlagLine} from '../src/goldline-flag-lines';
 
 let n = 0;
@@ -53,65 +53,57 @@ describe('tierOf', () => {
   });
 });
 
-describe('kinds and groups', () => {
+describe('tiles', () => {
   const lines = [
-    line({source: 'check', kind: 'zero_or_below', why: 'Count at 0 or below'}),
-    line({source: 'check', kind: 'zero_or_below', why: 'Count at 0 or below'}),
-    line({source: 'check', kind: 'row_math', why: 'Row doesn’t add up'}),
+    line({source: 'check', kind: 'zero_or_below', why: 'Count at 0 or below', storeCode: '473', uploadId: 'a'}),
+    line({source: 'check', kind: 'zero_or_below', why: 'Count at 0 or below', storeCode: '5300', uploadId: 'b'}),
+    line({source: 'check', kind: 'row_math', why: 'Row doesn’t add up', uploadId: 'a'}),
     line({kind: 'damage', why: 'Damage written'}),
     line({source: 'reviewer', kind: 'damage', why: 'Damage written'}),
+    line({kind: 'price', why: 'Price written', uploadStatus: 'needs_review'}),
+    line({kind: 'price', why: 'Price written', uploadStatus: 'committed'}),
+    line({kind: 'note', open: false}),
+    line({source: 'check', kind: 'row_math', open: false}),
   ];
-  it('keys a kind by check or mark, so reader and reviewer marks of a kind share a chip', () => {
+  const tiles = hubTiles(lines);
+  it('keys a kind by check or mark, so reader and reviewer marks of a kind share a tile', () => {
     expect(kindKey(lines[3])).toBe(kindKey(lines[4]));
-    expect(kindKey(lines[0])).toBe('check:zero_or_below');
+    expect(tileKeyOf(lines[0])).toBe('open.check:zero_or_below');
   });
-  it('counts kinds most first, then by name', () => {
-    expect(hubKinds(lines).map((k) => [k.label, k.count])).toEqual([
+  it('makes one tile per kind within its tier, biggest first, with stores and pages', () => {
+    expect(tiles.open.map((t) => [t.label, t.count])).toEqual([
       ['Count at 0 or below', 2],
       ['Damage written', 2],
+      ['Price written', 1],
       ['Row doesn’t add up', 1],
     ]);
+    expect(tiles.open[0]).toMatchObject({stores: 2, pages: 2});
   });
-  it('groups biggest first and keeps line order', () => {
-    const g = groupByKind(lines);
-    expect(g[0].lines).toEqual([lines[0], lines[1]]);
-    expect(g.at(-1)?.label).toBe('Row doesn’t add up');
+  it('splits one kind across tiers: an unanswered price on a page in review needs you', () => {
+    expect(tiles.needs).toEqual([expect.objectContaining({key: 'needs.mark:price', count: 1})]);
   });
-});
-
-describe('hubView', () => {
-  const lines = [
-    line({kind: 'price', why: 'Price written', uploadStatus: 'needs_review'}),
-    line({source: 'check', kind: 'row_math', why: 'Row doesn’t add up'}),
-    line({kind: 'note'}),
-    line({kind: 'note', open: false}),
-  ];
-  it('splits into tiers with counts', () => {
-    const v = hubView(lines, null);
-    expect(v.counts).toEqual({needs: 1, open: 1, fyi: 1, cleared: 1});
-    expect(v.fyi[0].lines).toHaveLength(1);
+  it('puts every closed line in one Cleared tile', () => {
+    expect(tiles.cleared).toEqual([expect.objectContaining({key: CLEARED_TILE, count: 2, kind: null})]);
+    expect(tileLines(lines, CLEARED_TILE)).toHaveLength(2);
   });
-  it('builds chips from open lines only', () => {
-    expect(hubView(lines, null).kinds.find((k) => k.key === 'mark:note')?.count).toBe(1);
-  });
-  it('applies the chosen kind last, keeping every chip', () => {
-    const v = hubView(lines, 'mark:note');
-    expect(v.counts).toEqual({needs: 0, open: 0, fyi: 1, cleared: 1});
-    expect(v.kinds).toHaveLength(3);
+  it('accepts only tile keys it can make', () => {
+    expect(isTileKey('needs.mark:price')).toBe(true);
+    expect(isTileKey(CLEARED_TILE)).toBe(true);
+    expect(isTileKey('cleared.mark:note')).toBe(false);
+    expect(isTileKey('open.mark:<x>')).toBe(false);
+    expect(isTileKey(null)).toBe(false);
   });
 });
 
-describe('visibleKinds', () => {
-  const kinds = Array.from({length: 9}, (_, i) => ({key: `k${i}`, label: `K${i}`, count: 9 - i}));
-  it('shows the top six and counts the rest', () => {
-    const v = visibleKinds(kinds, null);
-    expect(v.shown).toHaveLength(6);
-    expect(v.more).toBe(3);
+describe('pageOf', () => {
+  const rows = Array.from({length: 53}, (_, i) => i);
+  it('pages 25 at a time with a 1-based range', () => {
+    expect(pageOf(rows, 3)).toMatchObject({rows: [50, 51, 52], page: 3, pageCount: 3, from: 51, to: 53});
   });
-  it('keeps a chosen kind visible outside the top', () => {
-    const v = visibleKinds(kinds, 'k8');
-    expect(v.shown.at(-1)?.key).toBe('k8');
-    expect(v.more).toBe(2);
+  it('clamps a page out of range and copes with none', () => {
+    expect(pageOf(rows, 9).page).toBe(3);
+    expect(pageOf(rows, 0).page).toBe(1);
+    expect(pageOf([], 1)).toMatchObject({rows: [], page: 1, pageCount: 1, from: 0, to: 0});
   });
 });
 
