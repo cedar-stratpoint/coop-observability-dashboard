@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.30.1: Uploads tiles count "need a store" the way the board files pages; one period per form (Nichido)
+
+PROD release (cherry-picked onto main after v1.30.0). Owner asked after reviewing the fresh v1.30.0 uploads on prod: the tiles said 17 / 13 / 16 pages need a store while the scan board had filed 10 / 8 / 4 of them under their form's store. No SQL, no env change.
+
+- **Tiles and Commit all** (#840): a page that takes its store from its own form counts as having one (`storesFromForm`, batches kept apart).
+- **One period per form** (#840): a page that read no period takes the one most of its form's pages read (a tie fills nothing), so it doesn't move to "need a date" and groups with its form on the board.
+
 ## 2026-11-26 — Release v1.30.0: store codes and BA names read right (header crops, name and form checks), version check fixed, relabelled columns flagged (Nichido)
 
 PROD release (cherry-picked onto main after v1.29.1): QA findings of Nov 26 and the fixes measured on the Staging test runs that day. Owner decisions Nov 26: promote to prod for the owner's review there; turn on header crops, the BA roster for the reader, and reader flags in prod with the release. No SQL.
