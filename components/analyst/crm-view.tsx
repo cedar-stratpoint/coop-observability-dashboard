@@ -490,6 +490,8 @@ export function CrmView({
   // RET-18 P1: PawSport All / Has / None; disabled when Shopify could not be read (never "None" on an unknown).
   const [psFilter, setPsFilter] = useState<PawsportFilter>('all');
   const pawsportOf = (c: {shopifyCustomerId: string}): PawsportBadge | undefined => pawsport[c.shopifyCustomerId];
+  // The filter in effect: 'all' while Shopify is unreadable, so a choice made before (a stale "Has") never empties the list.
+  const psEffective: PawsportFilter = pawsportRead.status === 'ok' ? psFilter : 'all';
   // The viewer can only unlink a link they made (the action checks again).
   const myLinkId = (c: CustomerRow): string | null => (viewer === null ? null : (boothOf(c)?.links.find((l) => l.createdBy === viewer)?.id ?? null));
   const unlink = (id: string) =>
@@ -575,7 +577,7 @@ export function CrmView({
       : tab === 'orders'
         ? filterActive(orderFilter)
         : tab === 'customers'
-          ? filterActive(customerFilter) || cohortOn || igFilter !== 'all' || psFilter !== 'all'
+          ? filterActive(customerFilter) || cohortOn || igFilter !== 'all' || psEffective !== 'all'
           : petFilter !== 'all';
   const clearFilters = () => {
     if (tab === 'carts') setCartFilter(EMPTY_CART_FILTER);
@@ -687,9 +689,9 @@ export function CrmView({
     const rule = savedCohort?.rule ?? ruleBuiltin?.rule ?? null;
     const ruled = rule ? audience.filter((r) => matchesCohort(r, rule)) : audience;
     const igListed = igFilter === 'all' ? ruled : ruled.filter((r) => matchesInstagramFilter(igFilter, instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead)));
-    const listed = psFilter === 'all' ? igListed : igListed.filter((r) => matchesPawsportFilter(psFilter, pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)));
+    const listed = psEffective === 'all' ? igListed : igListed.filter((r) => matchesPawsportFilter(psEffective, pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)));
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
-  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead, psFilter, pawsport, pawsportRead]);
+  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead, psEffective, pawsport, pawsportRead]);
   const igCount = useMemo(() => all.filter((r) => instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead) === 'has').length, [all, booth, boothRead]);
   const psCounts = useMemo(() => {
     const n = {has: 0, none: 0, unknown: 0};
@@ -1163,7 +1165,7 @@ export function CrmView({
               />
               <FilterSelect
                 label="PawSport"
-                value={pawsportRead.status === 'ok' ? psFilter : 'all'}
+                value={psEffective}
                 disabled={pawsportRead.status !== 'ok'}
                 title={pawsportRead.status !== 'ok' ? 'Unavailable: Shopify could not be read through the CRM' : pawsportRead.incomplete ? 'The PawSport list was cut off: customers not found read unknown and are in neither Has nor None' : undefined}
                 onChange={(v) => {
@@ -1176,6 +1178,8 @@ export function CrmView({
                         ['all', 'All'],
                         ['has', `Has PawSport · ${psCounts.has}`],
                         ['none', `No PawSport · ${psCounts.none}`],
+                        // A cut-off list (page cap or no cursor): the customers not checked are counted and can be listed, so the gap is visible.
+                        ...(pawsportRead.incomplete ? ([['unknown', `Unknown · ${psCounts.unknown}`]] as Array<[string, string]>) : []),
                       ]
                     : [['all', 'Unavailable']]
                 }
@@ -1862,6 +1866,7 @@ export function CrmView({
           row={profileRow}
           boothInfo={profileRow ? boothOf(profileRow) : undefined}
           pawsport={profileRow ? pawsportOf(profileRow) : undefined}
+          pawsportUnavailable={pawsportRead.status !== 'ok'}
           orders={orders}
           checkouts={checkouts}
           birthdayVouchers={birthdayVouchers}

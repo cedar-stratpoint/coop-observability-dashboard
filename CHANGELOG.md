@@ -13,11 +13,11 @@ Dates are local working dates (GMT+8). Newest first.
 ## 2026-11-26 — PawSport on the Website CRM and Event leads (RET-18 P1)
 
 PawSports live only in Shopify (customer metafield `custom.pet_passport` + tags), so Coop could not say who holds one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`.
-- **Decided (D1 = A): read Shopify through the CRM's existing read-only door** (`POST /api/shopify/query`, the read token, server-side), reusing Ask Coop's `postShopify` client: no new Shopify app, no new secret, no copy of the data. One fixed query for customers tagged `pet-passport-2026`, 100 a page, at most 10 pages (a cut-off list marks misses unknown). Cached 10 minutes, refreshed by the page's Refresh; a failed read is not cached.
+- **Decided (D1 = A): read Shopify through the CRM's existing read-only door** (`POST /api/shopify/query`, the read token, server-side), reusing Ask Coop's `postShopify` client: no new Shopify app, no new secret, no copy of the data. One fixed query walks ALL customers (no tag search, so a holder whose tag is missing is still found), 100 a page, at most 10 pages (~209 on PROD = 3); a cut-off list (page cap, or more pages but no cursor) marks misses Unknown and the filter shows their count. Cached 10 minutes, refreshed by the page's Refresh; a failed read is not cached.
 - **Decided (D2): a holder is a metafield with a number;** the tag is the fallback (tagged but no or unreadable metafield = holder with no number, plus a warning; bad JSON never breaks the page). Route: `pawsport-qr` = QR, `join-now` = Form, neither = Account.
 - **Website CRM:** a **PawSport** column (number, pet, QR / Form / Account chip), a **PawSport: All / Has / None** filter with counts, and a profile line "PawSport ZMY26-… · Mimi (cat) · joined via QR, Nov 12". Matched on the server by Shopify id, then email, then mobile (RET-17 rules: one phone with two different emails is two people).
 - **Event leads:** a **PawSport** chip on a lead who is the same person as a holder (RET-17 `samePerson`).
-- **Unknown is never "None":** when Shopify can't be read the column says "Unavailable" and the filter is disabled. Only each person's passport reaches the browser, never the holders' emails or phones.
+- **Unknown is never "None":** when Shopify can't be read the column says "Unavailable", the filter is disabled (and a filter chosen earlier stops applying) and the profile says "PawSport unavailable". Only each person's passport reaches the browser, never the holders' emails or phones.
 - Not in this change: Ask Coop reading PawSport (P2).
 ## 2026-11-25 — Release v1.27.2: the Same person button looks like a button
 

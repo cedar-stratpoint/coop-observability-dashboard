@@ -76,21 +76,24 @@ export function parsePawsportNode(node: unknown): {holder: PawsportHolder | null
   };
 }
 
-/** The one query: tagged customers, 100 a page (the CRM door's cap). The search rides in a variable, so its quotes need no escaping. */
-export const PAWSPORT_QUERY = `query PawsportHolders($after: String, $q: String) {
-  customers(first: 100, after: $after, query: $q) {
+/**
+ * The one query: EVERY customer, 100 a page (the CRM door's cap), classified by parsePawsportNode. No tag search: D2 makes the
+ * metafield the source and the tag only a fallback, so a holder whose tag is missing must still be found (~209 customers on PROD
+ * = 3 pages).
+ */
+export const PAWSPORT_QUERY = `query PawsportHolders($after: String) {
+  customers(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes { id email phone tags passport: metafield(namespace: "custom", key: "pet_passport") { value } }
   }
 }`;
-export const PAWSPORT_SEARCH = `tag:"${PAWSPORT_TAG}"`;
 export const PAWSPORT_MAX_PAGES = 10;
 
 /** Posts one GraphQL page and returns the parsed JSON body ({data, errors}); throws on any transport failure. */
 export type PostShopify = (body: {query: string; variables: Record<string, unknown>}) => Promise<unknown>;
 
 /**
- * Walks the tagged customers page by page. Throws when Shopify answers with errors or an unexpected shape (the seam turns that
+ * Walks all customers page by page. Throws when Shopify answers with errors or an unexpected shape (the seam turns that
  * into 'unavailable', never an empty "ok"). Hitting the page cap returns what was read with `incomplete`.
  */
 export async function loadPawsportHolders(post: PostShopify, maxPages = PAWSPORT_MAX_PAGES): Promise<PawsportRead> {
@@ -98,7 +101,7 @@ export async function loadPawsportHolders(post: PostShopify, maxPages = PAWSPORT
   const warnings: string[] = [];
   let after: string | null = null;
   for (let page = 0; page < maxPages; page += 1) {
-    const body = (await post({query: PAWSPORT_QUERY, variables: {after, q: PAWSPORT_SEARCH}})) as {data?: {customers?: {pageInfo?: {hasNextPage?: unknown; endCursor?: unknown}; nodes?: unknown}}; errors?: unknown} | null;
+    const body = (await post({query: PAWSPORT_QUERY, variables: {after}})) as {data?: {customers?: {pageInfo?: {hasNextPage?: unknown; endCursor?: unknown}; nodes?: unknown}}; errors?: unknown} | null;
     if (Array.isArray(body?.errors) && body.errors.length > 0) throw new Error('Shopify answered with errors');
     const conn = body?.data?.customers;
     if (!conn || !Array.isArray(conn.nodes)) throw new Error('Shopify answer had no customers list');
@@ -107,8 +110,10 @@ export async function loadPawsportHolders(post: PostShopify, maxPages = PAWSPORT
       if (r.holder) holders.push(r.holder);
       if (r.warning) warnings.push(r.warning);
     }
-    const next = conn.pageInfo?.hasNextPage === true ? str(conn.pageInfo.endCursor) : null;
-    if (!next) return {status: 'ok', holders, warnings};
+    if (conn.pageInfo?.hasNextPage !== true) return {status: 'ok', holders, warnings};
+    const next = str(conn.pageInfo.endCursor);
+    // More pages but no cursor to reach them: what was read is real, the rest is unknown (never a clean, complete "none").
+    if (!next) return {status: 'ok', holders, warnings: [...warnings, 'Shopify said there are more customers but gave no cursor: the PawSport list may be incomplete.'], incomplete: true};
     after = next;
   }
   return {status: 'ok', holders, warnings: [...warnings, `Stopped after ${maxPages} pages: the PawSport list may be incomplete.`], incomplete: true};
@@ -142,15 +147,15 @@ export function pawsportMatcher(holders: readonly PawsportHolder[]) {
   };
 }
 
-/** The Website CRM "PawSport" filter: has one, has none, or unknown when Shopify could not be read (fully). */
-export type PawsportFilter = 'all' | 'has' | 'none';
+/** The Website CRM "PawSport" filter: has one, has none, or (offered only on a cut-off list) the customers not checked. */
+export type PawsportFilter = 'all' | 'has' | 'none' | 'unknown';
 export type PawsportState = 'has' | 'none' | 'unknown';
 export function pawsportState(badge: PawsportBadge | null | undefined, read: {status: PawsportRead['status']; incomplete?: boolean}): PawsportState {
   if (read.status !== 'ok') return 'unknown';
   if (badge) return 'has';
   return read.incomplete ? 'unknown' : 'none';
 }
-/** Unknown matches neither "has" nor "none" (unknown is never "never"). */
+/** Unknown matches neither "has" nor "none" (unknown is never "never"); only the "unknown" choice lists it. */
 export const matchesPawsportFilter = (f: PawsportFilter, s: PawsportState): boolean => f === 'all' || f === s;
 
 export const ROUTE_LABEL: Readonly<Record<PawsportRoute, string>> = Object.freeze({qr: 'QR', form: 'Form', account: 'Account'});
