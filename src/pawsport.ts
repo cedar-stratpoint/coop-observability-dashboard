@@ -147,16 +147,28 @@ export function pawsportMatcher(holders: readonly PawsportHolder[]) {
   };
 }
 
-/** The Website CRM "PawSport" filter: has one, has none, or (offered only on a cut-off list) the customers not checked. */
+/**
+ * The "PawSport" filter (Website CRM and Event leads): has one, has none, or the people not checked (Website CRM: offered only on
+ * a cut-off list; Event leads: also every lead with no email or mobile, e.g. Instagram-only, shown as "Can't tell").
+ */
 export type PawsportFilter = 'all' | 'has' | 'none' | 'unknown';
 export type PawsportState = 'has' | 'none' | 'unknown';
-export function pawsportState(badge: PawsportBadge | null | undefined, read: {status: PawsportRead['status']; incomplete?: boolean}): PawsportState {
+/** `matchable` false = the person has no key a holder could match (no usable email or mobile): never "none", only unknown. */
+export function pawsportState(badge: PawsportBadge | null | undefined, read: {status: PawsportRead['status']; incomplete?: boolean}, matchable = true): PawsportState {
   if (read.status !== 'ok') return 'unknown';
   if (badge) return 'has';
-  return read.incomplete ? 'unknown' : 'none';
+  return read.incomplete || !matchable ? 'unknown' : 'none';
 }
+/** Whether pawsportMatcher could ever match this person without a Shopify id: a usable email or mobile (an Instagram handle is not one). */
+export const pawsportMatchable = (p: Person): boolean => emailKey(p.email) !== null || phoneKey(p.mobile) !== null;
 /** Unknown matches neither "has" nor "none" (unknown is never "never"); only the "unknown" choice lists it. */
 export const matchesPawsportFilter = (f: PawsportFilter, s: PawsportState): boolean => f === 'all' || f === s;
+/** How many rows are in each PawSport state, for the filter's counts. */
+export function countPawsportStates<T>(rows: readonly T[], stateOf: (r: T) => PawsportState): Record<PawsportState, number> {
+  const n: Record<PawsportState, number> = {has: 0, none: 0, unknown: 0};
+  for (const r of rows) n[stateOf(r)] += 1;
+  return n;
+}
 
 export const ROUTE_LABEL: Readonly<Record<PawsportRoute, string>> = Object.freeze({qr: 'QR', form: 'Form', account: 'Account'});
 export const petText = (pet: PawsportBadge['pet']): string | null => (pet.name ? (pet.type ? `${pet.name} (${pet.type})` : pet.name) : pet.type);
