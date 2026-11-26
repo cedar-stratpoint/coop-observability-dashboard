@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — One BA name per form (Nov 26)
+
+The header crops (#835) already read the BA from the sharp 300 dpi header: on the Nov 26 test, BA names missing fell from 9 pages to 3 and Pulilan's "Elaiza Mae V. Caleon" went from 0 to 4 of 5 exact. Handwriting still reads one person differently per page ("Cherry Mae P. Baluco / Balisco / Bacoo / Dimusco / Dalusco"), so each page's review showed its own spelling and forms split under several BA names.
+- `formConsultants`: within each physical form (the same `formRuns` as the store fill), names cluster as on the board (`reconcileBaNames`, first-name fold) and the cluster most pages read wins. Its spelling: the registry's when known, else the normalized name most pages wrote, a tie going to the reading closest to the others (`agreedSpelling`; never just the longest, which picked "Nanette Vadpacagia" over "Saladaga").
+- Pages in that cluster, pages with no BA, and pages whose "BA" is a word of the form's store registry name (a field read into the wrong slot, "Walter Plaridel") take the agreed name. A page naming someone else keeps its own; two pages must agree before anything changes.
+- **Decided: compare against the store's registry name, not the read store name** (the reader swapped the two fields on one page). Applied on the scan board, the form split and the page review, where the BA field notes what the page itself read.
+- Test run: 30 pages changed; every form's pages now read one name (Elaiza Mae V. Caleon, Flordeliza G. Tipay, Chen T. Alesna, Ortega, Connilyn, Cherry Mae P. Baluco, ...). Ties without a registry entry stay a judgment call (Saralaga vs Saladaga).
+
 ## Unreleased — Pages take the store from their own form (Nov 26)
 
 "Lee Plaza Dipolog" wrote its code (1325) on page 1 only. Pages 2 to 5 read no code, and the name check, with only "Dipolog" to go on (the registry calls it LEE PLAZA CITY CENTR), suggested the wrong store, 2596 CITY MALL DIPOLOG. The registry has location data for 5 of 326 stores, so the fix uses the scan instead.
