@@ -151,6 +151,7 @@ import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
 import {unlinkPeople} from '@/src/customer-links-actions';
 import {boothCell, boothText, instagramState, matchesInstagramFilter, type CustomerBooth, type InstagramFilter} from '@/src/customer-links';
+import {ROUTE_LABEL, matchesPawsportFilter, pawsportState, petText, type PawsportBadge, type PawsportFilter, type PawsportRead} from '@/src/pawsport';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -324,6 +325,32 @@ function InstagramCell({found, read, linkId, onUnlink, busy}: {found: CustomerBo
   );
 }
 
+type PawsportReadState = {status: PawsportRead['status']; incomplete: boolean};
+
+/** RET-18 P1: the PawSport cell: number, pet and how they joined. Unavailable / unknown is never "—" (unknown is never "none"). */
+function PawsportCell({badge, read}: {badge: PawsportBadge | undefined; read: PawsportReadState}) {
+  const state = pawsportState(badge, read);
+  if (state === 'unknown')
+    return (
+      <span className="text-xs text-muted-foreground" title={read.status === 'ok' ? 'Unknown: the PawSport list was cut off before this customer could be checked' : 'Unavailable: Shopify could not be read through the CRM'}>
+        {read.status === 'ok' ? 'unknown' : 'Unavailable'}
+      </span>
+    );
+  if (!badge) return <span className="text-xs text-muted-foreground">—</span>;
+  const pet = petText(badge.pet);
+  return (
+    <span className="flex min-w-[9rem] flex-col gap-0.5 text-xs">
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <span className="font-medium tabular-nums text-foreground">{badge.number ?? 'No number'}</span>
+        <span className="rounded-md border border-border bg-card px-1.5 text-[11px] leading-5 text-muted-foreground" title="How they joined: the printed QR, the /pawsport form, or My Account">
+          {ROUTE_LABEL[badge.route]}
+        </span>
+      </span>
+      {pet && <span className="truncate text-muted-foreground">{pet}</span>}
+    </span>
+  );
+}
+
 /** RET-15 Slice B: the Booth cell, one chip per lead: campaign, prize, pet. */
 function BoothChips({found, read}: {found: CustomerBooth | undefined; read: {leads: boolean; links: boolean}}) {
   const cell = boothCell(found, read);
@@ -398,6 +425,8 @@ export function CrmView({
   cohorts,
   booth,
   boothRead,
+  pawsport,
+  pawsportRead,
   viewer,
   contactLogLegacy = false,
   configured,
@@ -420,6 +449,10 @@ export function CrmView({
   booth: Record<string, CustomerBooth>;
   /** Whether the booth leads and the links were read; when not, a customer with nothing found reads "unknown", never "—". */
   boothRead: {leads: boolean; links: boolean};
+  /** RET-18 P1: per shopifyCustomerId, the customer's PawSport (matched on the server by Shopify id, email, then mobile). */
+  pawsport: Record<string, PawsportBadge>;
+  /** Whether Shopify was read (fully): when not, a customer without a match reads "Unavailable" / "unknown", never "—". */
+  pawsportRead: PawsportReadState;
   /** The signed-in email: the log shows Delete only on this person's own contacts. */
   viewer: string | null;
   /** RET-17: the log was read without the Instagram / mobile / replied columns (SQL not applied): the Log dialog logs by email only. */
@@ -454,6 +487,9 @@ export function CrmView({
   const boothOf = (c: CustomerRow): CustomerBooth | undefined => booth[(c.email ?? '').trim().toLowerCase()];
   // Owner 2026-11-25: "filter na has Instagram". Kept apart from CustomerFilter: the handle comes from the page's booth map, not the CRM row.
   const [igFilter, setIgFilter] = useState<InstagramFilter>('all');
+  // RET-18 P1: PawSport All / Has / None; disabled when Shopify could not be read (never "None" on an unknown).
+  const [psFilter, setPsFilter] = useState<PawsportFilter>('all');
+  const pawsportOf = (c: {shopifyCustomerId: string}): PawsportBadge | undefined => pawsport[c.shopifyCustomerId];
   // The viewer can only unlink a link they made (the action checks again).
   const myLinkId = (c: CustomerRow): string | null => (viewer === null ? null : (boothOf(c)?.links.find((l) => l.createdBy === viewer)?.id ?? null));
   const unlink = (id: string) =>
@@ -539,7 +575,7 @@ export function CrmView({
       : tab === 'orders'
         ? filterActive(orderFilter)
         : tab === 'customers'
-          ? filterActive(customerFilter) || cohortOn || igFilter !== 'all'
+          ? filterActive(customerFilter) || cohortOn || igFilter !== 'all' || psFilter !== 'all'
           : petFilter !== 'all';
   const clearFilters = () => {
     if (tab === 'carts') setCartFilter(EMPTY_CART_FILTER);
@@ -548,6 +584,7 @@ export function CrmView({
       setCustomerFilter(EMPTY_CUSTOMER_FILTER);
       setCohortSel('all');
       setIgFilter('all');
+      setPsFilter('all');
     } else setPetFilter('all');
     setPage(1);
   };
@@ -649,10 +686,16 @@ export function CrmView({
     const audience = audienceRows(filterCustomers(all, customerFilter, needle), preset, nowDate);
     const rule = savedCohort?.rule ?? ruleBuiltin?.rule ?? null;
     const ruled = rule ? audience.filter((r) => matchesCohort(r, rule)) : audience;
-    const listed = igFilter === 'all' ? ruled : ruled.filter((r) => matchesInstagramFilter(igFilter, instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead)));
+    const igListed = igFilter === 'all' ? ruled : ruled.filter((r) => matchesInstagramFilter(igFilter, instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead)));
+    const listed = psFilter === 'all' ? igListed : igListed.filter((r) => matchesPawsportFilter(psFilter, pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)));
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
-  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead]);
+  }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead, psFilter, pawsport, pawsportRead]);
   const igCount = useMemo(() => all.filter((r) => instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead) === 'has').length, [all, booth, boothRead]);
+  const psCounts = useMemo(() => {
+    const n = {has: 0, none: 0, unknown: 0};
+    for (const r of all) n[pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)] += 1;
+    return n;
+  }, [all, pawsport, pawsportRead]);
   // The cohort bar: everyone in the selected cohort (search and the other filters aside), their repeat buyer rate and the rule.
   const cohortBar = useMemo(() => {
     if (!cohortOn) return null;
@@ -1119,6 +1162,25 @@ export function CrmView({
                 ]}
               />
               <FilterSelect
+                label="PawSport"
+                value={pawsportRead.status === 'ok' ? psFilter : 'all'}
+                disabled={pawsportRead.status !== 'ok'}
+                title={pawsportRead.status !== 'ok' ? 'Unavailable: Shopify could not be read through the CRM' : pawsportRead.incomplete ? 'The PawSport list was cut off: customers not found read unknown and are in neither Has nor None' : undefined}
+                onChange={(v) => {
+                  setPsFilter(v as PawsportFilter);
+                  setPage(1);
+                }}
+                options={
+                  pawsportRead.status === 'ok'
+                    ? [
+                        ['all', 'All'],
+                        ['has', `Has PawSport · ${psCounts.has}`],
+                        ['none', `No PawSport · ${psCounts.none}`],
+                      ]
+                    : [['all', 'Unavailable']]
+                }
+              />
+              <FilterSelect
                 label="Sort"
                 value={sortChoiceOf(customerSort)}
                 onChange={(v) => v !== 'column' && onFilter(setCustomerSort, SORT_CHOICES[v as Exclude<SortChoice, 'column'>])}
@@ -1384,6 +1446,7 @@ export function CrmView({
                         />
                         <th className={th} title="Instagram from the booth lead with the same email or mobile, or one you linked with Same person in Ask Coop">Instagram</th>
                         <th className={th} title="Booth sign-up: campaign, prize, pet">Booth</th>
+                        <th className={th} title="PawSport from Shopify (custom.pet_passport): number, pet, and how they joined (QR, Form or Account)">PawSport</th>
                         {ruleBuiltin && <th className={th} title="This year's birthday voucher: sent, not used (with its expiry), expired, or used">Birthday voucher</th>}
                         <SortTh label="First order" k="firstOrder" sort={customerSort} onSort={sortCustomers} />
                         <SortTh label="Last order" k="lastOrder" sort={customerSort} onSort={sortCustomers} />
@@ -1520,6 +1583,7 @@ export function CrmView({
                           <td className="px-4 py-2.5"><VoucherChips uses={c.vouchers} /></td>
                           <td className="px-4 py-2.5"><InstagramCell found={boothOf(c)} read={boothRead} linkId={myLinkId(c)} onUnlink={unlink} busy={unlinking} /></td>
                           <td className="px-4 py-2.5"><BoothChips found={boothOf(c)} read={boothRead} /></td>
+                          <td className="px-4 py-2.5"><PawsportCell badge={pawsportOf(c)} read={pawsportRead} /></td>
                           {ruleBuiltin && <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{bdayVoucherText(c.bdayVoucher)}</td>}
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.firstOrderAt)}</td>
                           <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted-foreground">{fmtPhDate(c.lastOrderAt)}</td>
@@ -1720,6 +1784,10 @@ export function CrmView({
                           <dt>Booth</dt>
                           <dd><BoothChips found={boothOf(c)} read={boothRead} /></dd>
                         </div>
+                        <div className="col-span-3 flex justify-between gap-2">
+                          <dt>PawSport</dt>
+                          <dd><PawsportCell badge={pawsportOf(c)} read={pawsportRead} /></dd>
+                        </div>
                         {ruleBuiltin && (
                           <div className="col-span-3 flex justify-between gap-2">
                             <dt>Birthday voucher</dt>
@@ -1793,6 +1861,7 @@ export function CrmView({
         <CustomerProfile
           row={profileRow}
           boothInfo={profileRow ? boothOf(profileRow) : undefined}
+          pawsport={profileRow ? pawsportOf(profileRow) : undefined}
           orders={orders}
           checkouts={checkouts}
           birthdayVouchers={birthdayVouchers}
