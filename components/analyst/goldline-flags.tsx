@@ -123,10 +123,13 @@ export function GoldlineFlags({
   data,
   canEdit,
   initialMonth = null,
+  embedded = false,
 }: {
   company: string;
   data: FlagsData;
   canEdit: boolean;
+  /** Inside the Flags hub (GOLDLINE_FLAGS_HUB): the hub draws the title, tabs and Run checks. */
+  embedded?: boolean;
   /** Tile key (store|month|BA) to open on, from the BA scorecard. */
   initialOpen?: string | null;
   initialMonth?: string | null;
@@ -171,7 +174,8 @@ export function GoldlineFlags({
   const cov = data.coverage.find((c) => c.month === month);
 
   return (
-    <div className={cn(GL_PAGE, GL_TILES_MOBILE)}>
+    <div className={cn(embedded ? 'flex flex-col gap-6' : GL_PAGE, GL_TILES_MOBILE)}>
+      {!embedded && (
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Flags</h1>
@@ -191,6 +195,7 @@ export function GoldlineFlags({
           )}
         </div>
       </header>
+      )}
 
       {notice && (
         <p role="status" className={cn('text-sm', notice.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive')}>

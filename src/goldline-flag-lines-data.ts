@@ -5,6 +5,7 @@ import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
 import {checkWhy, filePage, markWhy, type FlagLine} from './goldline-flag-lines';
 import type {MarkKind} from './goldline-review-marks';
+import {cleanBands, type PaperBand} from './band-prices';
 
 // Every flag as one line, with where it is (NICH-43 §3, §4). Reads the BA scorecard flags and
 // the review flags, then joins each to its page (uploads), the page's form (upload_batches:
@@ -16,15 +17,24 @@ const db = nichidoDb;
 const ISO = /^\d{4}-\d{2}-\d{2}/;
 
 type MarkRow = {id: string; upload_id: string; item_code: string | null; kind: MarkKind; source: 'reader' | 'reviewer'; reason: string | null; status: string; created_at: string};
-type CheckRow = {id: string; kind: string; status: string; store_code: string; item_code: string; period_end: string; consultant: string | null; source_upload_id: string | null; remark: string | null; created_at: string};
-type PageInfo = {filename: string; batchId: string | null; batchName: string | null};
+type CheckRow = {id: string; kind: string; status: string; details: Record<string, unknown> | null; store_code: string; item_code: string; period_end: string; consultant: string | null; source_upload_id: string | null; remark: string | null; created_at: string};
+type PageInfo = {filename: string; batchId: string | null; batchName: string | null; status: string | null};
 type FormInfo = {store: string | null; periodEnd: string | null};
-type HeadInfo = {store: string | null; periodEnd: string | null; ba: string | null};
+type HeadInfo = {store: string | null; periodEnd: string | null; ba: string | null; bands: PaperBand[]};
 
 async function inChunks<T>(ids: string[], read: (chunk: string[]) => Promise<T[]>): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < ids.length; i += 100) out.push(...(await read(ids.slice(i, i + 100))));
   return out;
+}
+
+/** The band a "Price written" mark sits on (its first row's code), as the two prices a reviewer
+ *  may pick. Null when the band was answered, re-read away, or has no price to offer. */
+function bandFor(bands: PaperBand[], itemCode: string | null): FlagLine['band'] {
+  if (!itemCode) return null;
+  const b = bands.find((x) => x.kind != null && x.codes?.[0] === itemCode) ?? bands.find((x) => x.kind != null && x.codes?.includes(itemCode));
+  if (!b || b.use_price != null || b.printed_price == null || b.offer_price == null) return null;
+  return {group: b.group, printed: b.printed_price, offer: b.offer_price};
 }
 
 export type FlagLinesData = {configured: boolean; lines: FlagLine[]; stores: Array<{code: string; name: string | null}>; months: string[]};
@@ -39,7 +49,7 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
       db().from('review_marks').select('id,upload_id,item_code,kind,source,reason,status,created_at').eq('company_id', companyId).order('created_at', {ascending: false}).order('id').range(from, to),
     ) as unknown as Promise<MarkRow[]>,
     fetchAllRows('flags', (from, to) => {
-      let q = db().from('flags').select('id,kind,status,store_code,item_code,period_end,consultant,source_upload_id,remark,created_at').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      let q = db().from('flags').select('id,kind,status,details,store_code,item_code,period_end,consultant,source_upload_id,remark,created_at').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
       if (scope) q = q.in('store_code', scope);
       return q.order('created_at', {ascending: false}).order('id').range(from, to);
     }) as unknown as Promise<CheckRow[]>,
@@ -51,18 +61,18 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
   // pagination-ok: chunks of 100 ids, one row per upload (and one extraction per upload) each.
   const [ups, exts] = await Promise.all([
     inChunks(uploadIds, async (chunk) => {
-      const r = await db().from('uploads').select('id,filename,batch_id,batch_name').eq('company_id', companyId).in('id', chunk);
+      const r = await db().from('uploads').select('id,filename,batch_id,batch_name,status').eq('company_id', companyId).in('id', chunk);
       if (r.error) throw new Error(`uploads read failed: ${r.error.message}`);
-      return (r.data ?? []) as Array<{id: string; filename: string; batch_id: string | null; batch_name: string | null}>;
+      return (r.data ?? []) as Array<{id: string; filename: string; batch_id: string | null; batch_name: string | null; status: string | null}>;
     }),
     inChunks(uploadIds, async (chunk) => {
-      const r = await db().from('extractions').select('upload_id,store:rows->>store_code,pe:rows->>period_end,ba:rows->>consultant').eq('company_id', companyId).in('upload_id', chunk); // pagination-ok: ≤100 ids, one extraction each
+      const r = await db().from('extractions').select('upload_id,store:rows->>store_code,pe:rows->>period_end,ba:rows->>consultant,bands:rows->bands').eq('company_id', companyId).in('upload_id', chunk); // pagination-ok: ≤100 ids, one extraction each
       if (r.error) throw new Error(`extractions read failed: ${r.error.message}`);
-      return (r.data ?? []) as unknown as Array<{upload_id: string; store: string | null; pe: string | null; ba: string | null}>;
+      return (r.data ?? []) as unknown as Array<{upload_id: string; store: string | null; pe: string | null; ba: string | null; bands: unknown}>;
     }),
   ]);
-  for (const u of ups) pages.set(u.id, {filename: u.filename, batchId: u.batch_id, batchName: u.batch_name});
-  for (const e of exts) heads.set(e.upload_id, {store: e.store?.trim() || null, periodEnd: e.pe && ISO.test(e.pe) ? e.pe.slice(0, 10) : null, ba: e.ba?.trim() || null});
+  for (const u of ups) pages.set(u.id, {filename: u.filename, batchId: u.batch_id, batchName: u.batch_name, status: u.status});
+  for (const e of exts) heads.set(e.upload_id, {store: e.store?.trim() || null, periodEnd: e.pe && ISO.test(e.pe) ? e.pe.slice(0, 10) : null, ba: e.ba?.trim() || null, bands: cleanBands(e.bands)});
 
   const batchIds = [...new Set(ups.map((u) => u.batch_id).filter((x): x is string => Boolean(x)))];
   const forms = new Map<string, FormInfo>();
@@ -80,7 +90,7 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
     const pg = uploadId ? pages.get(uploadId) : undefined;
     const form = pg?.batchId ? forms.get(pg.batchId) : undefined;
     const head = uploadId ? heads.get(uploadId) : undefined;
-    return {pg, ...filePage(pg?.filename, pg?.batchName), store: form?.store ?? head?.store ?? null, periodEnd: form?.periodEnd ?? head?.periodEnd ?? null, ba: head?.ba ?? null};
+    return {pg, ...filePage(pg?.filename, pg?.batchName), store: form?.store ?? head?.store ?? null, periodEnd: form?.periodEnd ?? head?.periodEnd ?? null, ba: head?.ba ?? null, bands: head?.bands ?? []};
   };
 
   const lines: FlagLine[] = [];
@@ -106,6 +116,10 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
       page: w.page,
       pageOf: w.pageOf,
       createdAt: m.created_at,
+      id: m.id,
+      kind: m.kind,
+      uploadStatus: w.pg.status,
+      band: m.kind === 'price' && m.status === 'open' && w.pg.status === 'needs_review' ? bandFor(w.bands, m.item_code) : null,
     });
   }
   for (const c of checks) {
@@ -127,6 +141,10 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
       page: w.page,
       pageOf: w.pageOf,
       createdAt: c.created_at,
+      id: c.id,
+      kind: c.kind,
+      uploadStatus: w.pg?.status ?? null,
+      details: c.details ?? null,
     });
   }
   const inStores = [...new Set(lines.map((l) => l.storeCode).filter((x): x is string => Boolean(x)))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));

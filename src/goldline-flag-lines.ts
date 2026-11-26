@@ -38,6 +38,17 @@ export type FlagLine = {
   page: number | null;
   pageOf: number | null;
   createdAt: string;
+  /** The mark's or check's own id (no prefix), for the hub's inline actions. */
+  id?: string;
+  /** The raw kind: a MarkKind for marks, a check kind for checks. */
+  kind?: string;
+  /** The page's upload status ('needs_review', 'committed', ...); null when no page. */
+  uploadStatus?: string | null;
+  /** For an open "Price written" mark on a page still in review: the band, so the hub can
+   *  offer the same two prices the review page does. */
+  band?: {group: string; printed: number; offer: number} | null;
+  /** A check's stored details (what Coop saw), for its one-sentence reason. */
+  details?: Record<string, unknown> | null;
 };
 
 export const markWhy = (kind: MarkKind) => MARK_LABEL[kind];

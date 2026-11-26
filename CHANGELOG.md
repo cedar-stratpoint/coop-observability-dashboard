@@ -8,6 +8,18 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-26 — Flags hub P0: every flag in one place, what needs you first (behind GOLDLINE_FLAGS_HUB)
+
+Owner (Nov 26): "This Flags page only shows flags against BAs. We want a page to see all the flags Nichido-wide (flags from review, from OCR, from BAs, etc.)", and it should feel premium: aesthetic-usability, Hick's law, Von Restorff, room to breathe. Plan with the decisions: `knowledge/tasks/2026-11-26-nichido-flags-hub.md`. This is P0 of five: checks and review flags only, no schema.
+
+- **`/flags` becomes a hub with two tabs** when `GOLDLINE_FLAGS_HUB=1`: **All flags** (opens first) and **BA scorecard** (`?view=ba`, today's tiles, unchanged, Run checks moves to the hub header). Each tab reads only what it shows, so All flags no longer pays for the scorecard's form vs. sales coverage. `/flags/review` redirects to All flags with its filters. Switch off = both pages exactly as before.
+- **Four tiers, one line each flag** (`src/goldline-flag-hub.ts`, tested): **Needs you**, the only tinted surface, holds an unanswered band price or a "can't read" mark on a page still in review; **Open**, grouped by kind (Count at 0 or below, Row doesn't add up, Damage written, ...), five lines a group until Show all; **For your information** (notes, relabelled columns, products written in) and **Cleared and resolved**, both collapsed. A check is never in Needs you and never clearable: it always counts against the BA (Oct 26).
+- **Answer in place:** Use or Keep a band's price (same two prices as the review page), Clear a review flag with a 5 s Undo, Clear all on a kind (confirm inline, Undo restores all), Reopen a cleared one, and a Remark on a check inline (it still counts). Every line keeps Open page. New actions `reopenMarkAction` and `setMarksAction` (bulk, every page scope-checked) in `app/uploads/review-marks-actions.ts`.
+- **Grouped lines lead with the reason:** a check says what Coop saw ("Drawer 10 + selling area 5 = 15, but the ending says 5"), reusing the scorecard's `explain`; a mark shows the reader's or reviewer's note. `flagLines` now also returns the mark or check id, its kind, the page's status, a check's details and, for an open price flag on a page in review, the band.
+- **Hick's law:** month, store and Raised by as pills plus search; kind chips show the top five, the rest behind "+N more" (a chosen kind always stays visible); at most one contextual action per line plus Open page. Filters sit in the URL via `replaceState` (no server round trip per keystroke), and Export CSV takes the same filters.
+- **Motion:** a cleared line fades and collapses in 200 ms (strong ease-out), the remark editor opens with `grid-template-rows`, the toast rises 8 px; tabs switch instantly. Reduced motion drops the movement.
+- Checked on Nichido Staging: 394 open (53 band prices in Needs you, 170 open, 171 for your information); Clear then Undo round-trips in the database; 1440, 390 (no sideways scroll) and dark mode.
+
 ## Unreleased — Ask Coop reads PawSport and the team's contact status (RET-18 P2)
 
 Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who replied this week?": the contact log (RET-17) and PawSport (P1) were page-only. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P2.
