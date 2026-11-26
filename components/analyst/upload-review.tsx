@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreOption, UploadRow} from '@/src/goldline-data';
 import {StoreCodeField} from '@/components/analyst/store-code-field';
@@ -23,7 +23,7 @@ import {reviewRowEl, ReviewRows, type ColKey, type ReviewView} from '@/component
 import {ReviewFlagsProvider} from '@/components/analyst/review-flags';
 import type {ReviewMark} from '@/src/goldline-review-marks';
 import type {AddableItem} from '@/src/review-add-row';
-import {markReturn, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
+import {markReturn, NamedReturnLink, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
 import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
@@ -138,6 +138,10 @@ export function UploadReview({
   bas?: {byStore: Record<string, string>; names: string[]};
 }) {
   const router = useRouter();
+  // Opened from the Flags hub (?from=flags): Back names the flags view it came from and returns
+  // there; the page strip and the batch link keep the trip going.
+  const fromFlags = useSearchParams().get('from') === 'flags';
+  const keepFrom = fromFlags ? '?from=flags' : '';
   const committed = upload.status === 'committed' || extraction?.status === 'confirmed';
   // Re-read a failed page in place (synchronous, heartbeat-kept-alive), then refresh to pick up
   // the new status/reason — so a "couldn't read" page is retried without leaving this screen.
@@ -459,9 +463,20 @@ export function UploadReview({
         </div>
       ) : (
       <div className="flex flex-col gap-1">
-        <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-3.5" /> Back to uploads
-        </Link>
+        {fromFlags ? (
+          <NamedReturnLink
+            listKey="flags"
+            fallback="/flags"
+            fallbackLabel="Flags"
+            detailPrefix="/uploads/"
+            icon={<ArrowLeft className="size-3.5 shrink-0" />}
+            className="inline-flex w-fit max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          />
+        ) : (
+          <Link href="/uploads" className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3.5" /> Back to uploads
+          </Link>
+        )}
         <h1 className="font-heading text-xl font-semibold tracking-tight break-all">{upload.filename}</h1>
         {extraction && pageStrip && (
           <nav aria-label="Form pages" className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -495,14 +510,14 @@ export function UploadReview({
                   </span>
                 );
               return (
-                <Link key={p.page} href={`/uploads/${p.uploadId}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
+                <Link key={p.page} href={`/uploads/${p.uploadId}${keepFrom}`} replace className={cn(cls, 'hover:bg-muted')} title={`Open page ${p.page} of this form`}>
                   {inner}
                 </Link>
               );
             })}
             <span className="ml-1 text-[11px] text-muted-foreground">red dot = has flags · ✓ committed</span>
             {pageStrip.batchId && (
-              <Link href={`/uploads/batch/${pageStrip.batchId}`} className="ml-1 text-[11px] font-medium text-primary underline-offset-4 hover:underline">
+              <Link href={`/uploads/batch/${pageStrip.batchId}${keepFrom}`} className="ml-1 text-[11px] font-medium text-primary underline-offset-4 hover:underline">
                 Review the batch
               </Link>
             )}

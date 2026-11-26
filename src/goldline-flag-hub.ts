@@ -104,3 +104,59 @@ export function lineTitle(l: FlagLine): string {
   const where = l.page != null ? (l.pageOf ? `Page ${l.page} of ${l.pageOf}` : `Page ${l.page}`) : null;
   return where ? `${store} · ${where}` : store;
 }
+
+// ---- What a flag is about and what to do (Nov 26, owner: "color so it is easier to recognize
+// what needs to be done and what the flag is about"). One tone per kind, shared by the tile,
+// the list header and every row, so a kind reads the same everywhere. Checks use the BA
+// scorecard's cause tones (padding crit, incorrect total warn, messy handwriting info).
+
+export type FlagTone = 'crit' | 'warn' | 'info' | 'good' | 'neutral';
+
+export type FlagMeta = {
+  tone: FlagTone;
+  /** The next step, in a few words ("Fix the total"). */
+  todo: string;
+  /** The scorecard cause a check counts as, for checks only. */
+  cause: string | null;
+};
+
+const MARK_META: Record<string, Omit<FlagMeta, 'cause'>> = {
+  price: {tone: 'crit', todo: 'Pick the price'},
+  illegible: {tone: 'warn', todo: 'Read the number'},
+  damage: {tone: 'warn', todo: 'Log the damage'},
+  other: {tone: 'info', todo: 'Take a look'},
+  note: {tone: 'neutral', todo: 'Read the note'},
+  added_row: {tone: 'neutral', todo: 'Check the product'},
+  column_changed: {tone: 'neutral', todo: 'Check the columns'},
+};
+
+/** Tone and next step for a kind (`check:row_math`, `mark:price`) in a tier. A sales gap's tone
+ *  depends on its direction, so a line can refine it with `lineMeta`. */
+export function kindMeta(kind: string | null, tier: HubTier): FlagMeta {
+  if (tier === 'cleared' || !kind) return {tone: 'good', todo: 'Done', cause: null};
+  const [src, k] = kind.split(':');
+  if (src === 'check') {
+    if (k === 'zero_or_below') return {tone: 'crit', todo: 'Confirm it sold out', cause: 'Padding'};
+    if (k === 'row_math') return {tone: 'warn', todo: 'Fix the total', cause: 'Incorrect total'};
+    if (k === 'unreadable') return {tone: 'info', todo: 'Read the cell again', cause: 'Messy handwriting'};
+    if (k === 'sales_gap') return {tone: 'warn', todo: 'Check against POS', cause: 'Incorrect total or padding'};
+    return {tone: 'info', todo: 'Take a look', cause: null};
+  }
+  const m = MARK_META[k] ?? {tone: 'info' as const, todo: 'Take a look'};
+  // Can't-read on a page still in review blocks the value: it needs you.
+  return {...m, tone: tier === 'needs' ? 'crit' : m.tone, cause: null};
+}
+
+/** A line's own tone and next step: a sales gap where POS sold more than the counts show is
+ *  padding (the ending looks too high); the other way is an incorrect total. */
+export function lineMeta(l: FlagLine): FlagMeta {
+  const tier = tierOf(l);
+  const base = kindMeta(tier === 'cleared' ? null : kindKey(l), tier);
+  if (tier !== 'cleared' && l.source === 'check' && l.kind === 'sales_gap') {
+    const gap = Number(l.details?.gap);
+    if (Number.isFinite(gap) && gap !== 0) {
+      return gap > 0 ? {tone: 'warn', todo: 'Find where it went', cause: 'Incorrect total'} : {tone: 'crit', todo: 'Check the ending', cause: 'Padding'};
+    }
+  }
+  return base;
+}

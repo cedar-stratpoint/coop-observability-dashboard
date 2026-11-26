@@ -56,7 +56,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   // The Per file list opts out as well: there a page is reviewed and committed on its own.
   if (!fromFile && upload.kind === 'inventory_pdf' && upload.status === 'needs_review' && upload.batch_id) {
     const batch = await getBatch(ctx.companyId, upload.batch_id);
-    if (batch?.status === 'open' && batch.kind !== 'scan') redirect(`/uploads/batch/${batch.id}?page=${upload.id}`);
+    if (batch?.status === 'open' && batch.kind !== 'scan') redirect(`/uploads/batch/${batch.id}?page=${upload.id}${one('from') === 'flags' ? '&from=flags' : ''}`);
   }
   const extraction = upload.kind === 'inventory_pdf' ? await getExtraction(ctx.companyId, id) : null;
   // Same-origin proxy (streams the private file) so the browser can embed it in an

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {CLEARED_TILE, clearableIds, flagsHubEnabled, hubTiles, isTileKey, kindKey, lineTitle, pageOf, tierOf, tileKeyOf, tileLines} from '../src/goldline-flag-hub';
+import {CLEARED_TILE, clearableIds, flagsHubEnabled, kindMeta, lineMeta, hubTiles, isTileKey, kindKey, lineTitle, pageOf, tierOf, tileKeyOf, tileLines} from '../src/goldline-flag-hub';
 import type {FlagLine} from '../src/goldline-flag-lines';
 
 let n = 0;
@@ -115,5 +115,26 @@ describe('clearableIds and lineTitle', () => {
   it('titles by store and page, with a plain fallback', () => {
     expect(lineTitle(line({}))).toBe('SM CITY-SAN PABLO 1 · Page 23 of 98');
     expect(lineTitle(line({storeName: null, storeCode: null, page: null}))).toBe('Store not known yet');
+  });
+});
+
+describe('kindMeta and lineMeta', () => {
+  it('uses the scorecard cause tones for checks', () => {
+    expect(kindMeta('check:zero_or_below', 'open')).toMatchObject({tone: 'crit', cause: 'Padding'});
+    expect(kindMeta('check:row_math', 'open')).toMatchObject({tone: 'warn', cause: 'Incorrect total', todo: 'Fix the total'});
+    expect(kindMeta('check:unreadable', 'open')).toMatchObject({tone: 'info', cause: 'Messy handwriting'});
+  });
+  it('makes Needs you critical and Cleared good', () => {
+    expect(kindMeta('mark:illegible', 'needs').tone).toBe('crit');
+    expect(kindMeta('mark:illegible', 'open').tone).toBe('warn');
+    expect(kindMeta(null, 'cleared')).toMatchObject({tone: 'good', todo: 'Done'});
+  });
+  it('keeps the quiet kinds neutral', () => {
+    expect(kindMeta('mark:note', 'fyi').tone).toBe('neutral');
+  });
+  it('splits a sales gap by direction', () => {
+    expect(lineMeta(line({source: 'check', kind: 'sales_gap', details: {gap: -3}}))).toMatchObject({tone: 'crit', cause: 'Padding'});
+    expect(lineMeta(line({source: 'check', kind: 'sales_gap', details: {gap: 2}}))).toMatchObject({tone: 'warn', cause: 'Incorrect total'});
+    expect(lineMeta(line({source: 'check', kind: 'sales_gap', open: false, details: {gap: 2}})).tone).toBe('good');
   });
 });
