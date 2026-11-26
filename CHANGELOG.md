@@ -10,7 +10,11 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
-## Unreleased — Ask Coop reads PawSport and the team's contact status (RET-18 P2)
+## 2026-11-26 — Release v1.28.0: PawSport on the Website CRM, Event leads and in Ask Coop; Ask Coop reads contact status
+
+PROD release of our own changes only (cherry-picked onto main after v1.27.2): RET-18 P1 (#815) and P2 (#817). Checked on coop-cedar-staging 2026-11-26: PawSport column + filter, drawer chips, and "unknown, not zero" answers render; staging's CRM answers every Shopify query with HTTP 502 (Ask Coop's existing `shopify_query` too), so real PawSport data could not be read there. Owner chose to release and check the data on PROD ("1 na lang"). `test/chat-flexible-tools-prompt.test.ts` is develop-only, so its budget bump is not in this release.
+
+## 2026-11-26 — Ask Coop reads PawSport and the team's contact status (RET-18 P2)
 
 Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who replied this week?": the contact log (RET-17) and PawSport (P1) were page-only. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P2.
 - **One read, two tools:** a new server seam `app/api/chat/people-seam.ts` reuses the Website CRM page's reads (contact log, Same person links, PawSport holders; the log's note and author never leave it). `src/chat/contacts/status.ts` turns them into the same four columns everywhere: `contact_status`, `team_last_contacted` (PH day), `replied`, `pawsport` (yes / no / unknown).
