@@ -11,6 +11,7 @@ import {
   SKU_SEAM,
   CONTACTS_LOG_SEAM,
   COHORTS_SEAM,
+  PEOPLE_SEAM,
   forbiddenInClosure,
   impureInClosure,
   importersOf,
@@ -40,7 +41,7 @@ describe('real tree', () => {
   });
 
   it('the only legacy exception is the old digest import, and it is not traversed (Train 4 removed the CRM one)', () => {
-    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/cohorts-seam.ts', 'app/api/chat/contacts-log-seam.ts', 'app/api/chat/leads-seam.ts', 'app/api/chat/sku-seam.ts', 'src/data.ts']);
+    expect([...closure.legacyHits].sort()).toEqual(['app/api/chat/cohorts-seam.ts', 'app/api/chat/contacts-log-seam.ts', 'app/api/chat/leads-seam.ts', 'app/api/chat/people-seam.ts', 'app/api/chat/sku-seam.ts', 'src/data.ts']);
     expect(closure.files.has('src/data.ts')).toBe(false);
     expect(closure.files.has('src/crm-data.ts')).toBe(false);
   });
@@ -64,6 +65,10 @@ describe('real tree', () => {
       .filter((f) => (f.startsWith('src/chat/') || f.startsWith('app/api/chat/')) && !/\.(test|spec)\./.test(f))
       .filter((f) => /\b(createCohort|updateCohort|deleteCohort|createCohortWith|updateCohortWith|deleteCohortWith)\b|customer-cohorts-actions/.test(strip(files[f], true)));
     expect(hits).toEqual([]);
+  });
+
+  it('RET-18 P2: the people seam reaches only the Website CRM page\'s reads of the contact log, the Same person links and PawSport (plus the pure time budget), never an action', () => {
+    expect(extractImports(files[PEOPLE_SEAM] ?? '').sort()).toEqual(['@/src/chat/contacts/status', '@/src/customer-contacts-data', '@/src/customer-links-data', '@/src/pawsport-data']);
   });
 
   it('the SKU seam reaches only the two loaders behind the comparison (compare_sku)', () => {
