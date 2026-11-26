@@ -88,6 +88,50 @@ export async function clearMark(companyId: string, id: string, by: string | null
   return res.data ? toMark(res.data as unknown as Row) : null;
 }
 
+/** Reopen a cleared mark (the hub's Undo). Returns null when it is not this company's. */
+export async function reopenMark(companyId: string, id: string): Promise<ReviewMark | null> {
+  if (!nichidoConfigured()) throw new Error('The database is not connected.');
+  const res = await nichidoDb()
+    .from('review_marks')
+    .update({status: 'open', cleared_by: null, cleared_at: null, updated_at: new Date().toISOString()})
+    .eq('company_id', companyId)
+    .eq('id', id)
+    .select(COLS)
+    .maybeSingle();
+  if (res.error) throw new Error(`review_marks reopen failed: ${res.error.message}`);
+  return res.data ? toMark(res.data as unknown as Row) : null;
+}
+
+/** The pages several marks are on, keyed by mark id (only this company's). */
+export async function marksUploads(companyId: string, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!nichidoConfigured() || !ids.length) return out;
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await nichidoDb().from('review_marks').select('id,upload_id').eq('company_id', companyId).in('id', ids.slice(i, i + 100)); // pagination-ok: ≤100 ids, one row each
+    if (res.error) throw new Error(`review_marks read failed: ${res.error.message}`);
+    for (const r of (res.data ?? []) as Array<{id: string; upload_id: string}>) out.set(r.id, r.upload_id);
+  }
+  return out;
+}
+
+/** Clear or reopen several marks at once (the hub's "Clear all" and its Undo). */
+export async function setMarksStatus(companyId: string, ids: string[], open: boolean, by: string | null): Promise<number> {
+  if (!nichidoConfigured()) throw new Error('The database is not connected.');
+  const now = new Date().toISOString();
+  let n = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await nichidoDb()
+      .from('review_marks') // pagination-ok: an update of ≤100 ids, ids returned
+      .update(open ? {status: 'open', cleared_by: null, cleared_at: null, updated_at: now} : {status: 'cleared', cleared_by: by, cleared_at: now, updated_at: now})
+      .eq('company_id', companyId)
+      .in('id', ids.slice(i, i + 100))
+      .select('id');
+    if (res.error) throw new Error(`review_marks update failed: ${res.error.message}`);
+    n += (res.data ?? []).length;
+  }
+  return n;
+}
+
 /** The page a mark is on, for the scope check before clearing. */
 export async function markUpload(companyId: string, id: string): Promise<string | null> {
   if (!nichidoConfigured()) return null;

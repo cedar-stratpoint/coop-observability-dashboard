@@ -2,6 +2,8 @@ import {getDataContext} from '@/src/active-context';
 import {flagLines} from '@/src/goldline-flag-lines-data';
 import {parseFlagFilter} from '@/src/goldline-flag-lines';
 import {FlagLines} from '@/components/analyst/flag-lines';
+import {redirect} from 'next/navigation';
+import {flagsHubEnabled} from '@/src/goldline-flag-hub';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,15 @@ export const dynamic = 'force-dynamic';
 export default async function Page(props: {searchParams: Promise<Record<string, string | string[] | undefined>>}) {
   const sp = await props.searchParams;
   const one = (k: string) => (typeof sp[k] === 'string' ? (sp[k] as string) : null);
+  // The Flags hub folds this list into All flags; old links keep their filters.
+  if (flagsHubEnabled()) {
+    const keep = new URLSearchParams();
+    for (const k of ['store', 'month', 'source', 'q']) {
+      const v = one(k);
+      if (v) keep.set(k, v);
+    }
+    redirect(`/flags${keep.size ? `?${keep}` : ''}`);
+  }
   const ctx = await getDataContext();
   if (!ctx || !ctx.companyId) {
     return (
