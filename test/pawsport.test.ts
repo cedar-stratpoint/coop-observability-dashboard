@@ -1,6 +1,6 @@
 // RET-18 P1: PawSport holders from the Shopify customer metafield + tags, matched to CRM customers and event leads.
 import {describe, expect, it} from 'vitest';
-import {PAWSPORT_QUERY, PAWSPORT_SEARCH, loadPawsportHolders, matchesPawsportFilter, parsePawsportNode, pawsportLine, pawsportMatcher, pawsportState, type PawsportHolder} from '../src/pawsport';
+import {PAWSPORT_QUERY, loadPawsportHolders, matchesPawsportFilter, parsePawsportNode, pawsportLine, pawsportMatcher, pawsportState, type PawsportHolder} from '../src/pawsport';
 
 const passport = (o: object) => ({value: JSON.stringify(o)});
 const node = (o: Record<string, unknown>) => ({id: 'gid://shopify/Customer/1', email: 'Mia@Example.com ', phone: '+63 917 123 4567', tags: ['pet-passport-2026', 'pawsport-qr'], passport: passport({number: 'ZMY26-AB12-CD34', issuedAt: '2026-11-12T03:00:00Z', pet: {name: 'Mimi', type: 'cat', furparent: 'Mia'}}), ...o});
@@ -43,17 +43,29 @@ describe('parsePawsportNode', () => {
 
 describe('loadPawsportHolders', () => {
   const page = (nodes: unknown[], next: string | null) => ({data: {customers: {pageInfo: {hasNextPage: next !== null, endCursor: next}, nodes}}});
-  it('walks pages with the cursor and the tag search in variables', async () => {
+  it('walks ALL customers (no tag search) with the cursor, and keeps only holders (D2)', async () => {
     const calls: unknown[] = [];
-    const pages = [page([node({})], 'c1'), page([node({id: 'gid://shopify/Customer/2', email: 'leo@example.com', phone: null})], null)];
+    const pages = [
+      page([node({}), node({id: 'gid://shopify/Customer/3', tags: [], passport: null})], 'c1'),
+      // a holder by metafield whose tag is missing must still be found
+      page([node({id: 'gid://shopify/Customer/2', email: 'leo@example.com', phone: null, tags: []})], null),
+    ];
     const r = await loadPawsportHolders(async (b) => (calls.push(b), pages.shift()));
     expect(r).toMatchObject({status: 'ok', warnings: []});
+    expect(r.incomplete).toBeUndefined();
     expect(r.holders.map((h) => h.shopifyCustomerId)).toEqual(['gid://shopify/Customer/1', 'gid://shopify/Customer/2']);
     expect(calls).toEqual([
-      {query: PAWSPORT_QUERY, variables: {after: null, q: PAWSPORT_SEARCH}},
-      {query: PAWSPORT_QUERY, variables: {after: 'c1', q: PAWSPORT_SEARCH}},
+      {query: PAWSPORT_QUERY, variables: {after: null}},
+      {query: PAWSPORT_QUERY, variables: {after: 'c1'}},
     ]);
-    expect(PAWSPORT_QUERY).not.toContain('\\'); // the CRM guard refuses backslashes in a search
+    expect(PAWSPORT_QUERY).not.toMatch(/query:|tag:/);
+    expect(PAWSPORT_QUERY).toContain('customers(first: 100, after: $after)');
+  });
+  it('more pages but no cursor = incomplete, not a clean complete walk', async () => {
+    const r = await loadPawsportHolders(async () => ({data: {customers: {pageInfo: {hasNextPage: true, endCursor: null}, nodes: [node({})]}}}));
+    expect(r).toMatchObject({status: 'ok', incomplete: true});
+    expect(r.holders).toHaveLength(1);
+    expect(r.warnings.at(-1)).toMatch(/no cursor/);
   });
   it('GraphQL errors or a missing list throw (the seam reports unavailable, never an empty ok)', async () => {
     await expect(loadPawsportHolders(async () => ({errors: [{message: 'denied'}], data: null}))).rejects.toThrow();
@@ -91,6 +103,8 @@ describe('pawsportState / filter / line', () => {
     expect(pawsportState(undefined, {status: 'ok'})).toBe('none');
     expect(matchesPawsportFilter('none', 'unknown')).toBe(false);
     expect(matchesPawsportFilter('all', 'unknown')).toBe(true);
+    expect(matchesPawsportFilter('unknown', 'unknown')).toBe(true);
+    expect(matchesPawsportFilter('unknown', 'none')).toBe(false);
   });
   it('profile line', () => {
     expect(pawsportLine(b)).toBe('PawSport ZMY26-AB12-CD34 · Mimi (cat) · joined via QR, Nov 12');
