@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {distinctPages, groupUploads, pageNeed, pagesByStatus, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
+import {DROP_TYPE_LABEL, distinctPages, dropMatchesType, dropTypeOf, groupUploads, pageNeed, pagesByStatus, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
 
 const u = (filename: string, created_at: string, status = 'needs_review'): GroupableUpload => ({filename, created_at, status});
 
@@ -163,5 +163,31 @@ describe('pageNeed', () => {
     expect(p({readStore: null})).toBe('store');
     expect(p({readStore: 'Watsons 87'})).toBe('store');
     expect(p({readStore: '5300', readStart: null})).toBe('date');
+  });
+});
+
+describe('drop type (Nov 26)', () => {
+  const at = '2026-11-24T03:00:00Z';
+  const up = (filename: string, kind: string, batch_id = 'b1'): GroupableUpload => ({filename, created_at: at, status: 'committed', batch_id, kind});
+  it('collects the kinds in a drop, sorted and distinct', () => {
+    const [g] = groupUploads([up('Scan (page 1 of 2).pdf', 'inventory_pdf'), up('Scan (page 2 of 2).pdf', 'inventory_pdf'), up('Sales.xlsx', 'pos_xlsx')]);
+    expect(g.kinds).toEqual(['inventory_pdf', 'pos_xlsx']);
+    expect(groupUploads([{filename: 'x.pdf', created_at: at, status: 'committed'}])[0].kinds).toEqual([]);
+  });
+  it('names a drop by its one kind, or Mixed for several', () => {
+    expect(dropTypeOf(['inventory_pdf'])).toBe('inventory_pdf');
+    expect(dropTypeOf(['pos_csv', 'pos_xlsx'])).toBe('mixed');
+    expect(dropTypeOf([])).toBeNull();
+    expect(dropTypeOf(['something_else'])).toBeNull();
+    expect(DROP_TYPE_LABEL.inventory_pdf).toBe('Inventory form');
+    expect(DROP_TYPE_LABEL.pos_xlsx).toBe('Watsons sales');
+  });
+  it('filters by type: a mixed drop shows under Mixed and under each of its kinds', () => {
+    const mixed = ['inventory_pdf', 'pos_csv'];
+    expect(dropMatchesType(mixed, 'all')).toBe(true);
+    expect(dropMatchesType(mixed, 'mixed')).toBe(true);
+    expect(dropMatchesType(mixed, 'pos_csv')).toBe(true);
+    expect(dropMatchesType(mixed, 'pos_xlsx')).toBe(false);
+    expect(dropMatchesType(['pos_xlsx'], 'mixed')).toBe(false);
   });
 });

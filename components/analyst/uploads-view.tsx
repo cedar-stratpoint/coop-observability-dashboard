@@ -20,7 +20,7 @@ import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/anal
 import {cn} from '@/lib/utils';
 import {ToastStack} from '@/components/analyst/toast-stack';
 import {GL_PAGE} from '@/src/goldline-ui';
-import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upload-groups';
+import {DROP_TYPE_LABEL, dropMatchesType, dropTypeOf, groupUploads, uploadGroupKey, type DropType, type UploadGroup} from '@/src/goldline-upload-groups';
 
 // The Uploads inbox for one company: add a POS .csv, a Watsons POS Sales Data .xlsx
 // (one month, every store) or a scanned inventory .pdf
@@ -33,12 +33,12 @@ import {groupUploads, uploadGroupKey, type UploadGroup} from '@/src/goldline-upl
 const ROW_SIZES = [10, 20, 50] as const;
 const TILE_SIZES = [12, 24, 36] as const;
 
-export const KIND_LABEL: Record<UploadKind, string> = {pos_csv: 'Sales export', pos_xlsx: 'POS Sales Data', inventory_pdf: 'Inventory scan'};
+export const KIND_LABEL: Record<UploadKind, string> = {pos_csv: DROP_TYPE_LABEL.pos_csv, pos_xlsx: DROP_TYPE_LABEL.pos_xlsx, inventory_pdf: DROP_TYPE_LABEL.inventory_pdf};
 
 type StatusFilter = 'all' | UploadStatus;
-type KindFilter = 'all' | UploadKind;
+type KindFilter = 'all' | DropType;
 const STATUS_KEYS: Record<StatusFilter, true> = {all: true, needs_review: true, committed: true, processing: true, failed: true, rejected: true} as Record<StatusFilter, true>;
-const KIND_KEYS: Record<KindFilter, true> = {all: true, pos_csv: true, pos_xlsx: true, inventory_pdf: true} as Record<KindFilter, true>;
+const KIND_KEYS: Record<KindFilter, true> = {all: true, pos_csv: true, pos_xlsx: true, inventory_pdf: true, mixed: true} as Record<KindFilter, true>;
 const STATUS_OPTIONS: Array<FilterOption<StatusFilter>> = [
   {value: 'all', label: 'All statuses'},
   {value: 'needs_review', label: 'Needs review', dot: 'var(--status-warn)'},
@@ -49,10 +49,31 @@ const STATUS_OPTIONS: Array<FilterOption<StatusFilter>> = [
 ];
 const KIND_OPTIONS: Array<FilterOption<KindFilter>> = [
   {value: 'all', label: 'All types'},
-  {value: 'pos_csv', label: 'Sales CSV'},
-  {value: 'pos_xlsx', label: 'POS Sales Data'},
-  {value: 'inventory_pdf', label: 'Inventory PDF'},
+  {value: 'inventory_pdf', label: DROP_TYPE_LABEL.inventory_pdf},
+  {value: 'pos_xlsx', label: DROP_TYPE_LABEL.pos_xlsx},
+  {value: 'pos_csv', label: DROP_TYPE_LABEL.pos_csv},
+  {value: 'mixed', label: DROP_TYPE_LABEL.mixed},
 ];
+
+// The drop's type on its tile (Nov 26): what kind of file it is, in words, led by the same
+// color-coded format badge the drop zone uses (PDF violet, CSV green, XLS red), so a format
+// reads the same everywhere. No fill of its own, so it never competes with the status tags.
+const FORMAT_FILE: Record<string, string> = {inventory_pdf: 'f.pdf', pos_xlsx: 'f.xlsx', pos_csv: 'f.csv'};
+
+function DropTypeChip({kinds}: {kinds: string[]}) {
+  const type = dropTypeOf(kinds);
+  if (!type) return null;
+  const known = kinds.filter((k) => k in FORMAT_FILE);
+  const title = type === 'mixed' ? `Mixed: ${known.map((k) => DROP_TYPE_LABEL[k as DropType]).join(', ')}` : DROP_TYPE_LABEL[type];
+  return (
+    <span title={title} className="inline-flex items-center gap-1.5 pr-1 text-xs font-medium text-foreground/80">
+      {known.map((k) => (
+        <FileTypeBadge key={k} filename={FORMAT_FILE[k]} />
+      ))}
+      {DROP_TYPE_LABEL[type]}
+    </span>
+  );
+}
 // Filters, view and page live in the URL (replaceState, not Back steps), so opening a scan or
 // a file and coming back returns to the list as you left it. `?status=` was already a param.
 const UPLOADS_LIST = {q: '', status: 'all', kind: 'all', from: '', to: '', view: 'groups', page: '1'};
@@ -186,6 +207,7 @@ function GroupTile({
         )}
       </div>
       <div className="flex flex-wrap gap-1.5">
+        <DropTypeChip kinds={g.kinds} />
         {review > 0 && <Tag cls="text-amber-700 bg-amber-500/15 dark:text-amber-400" n={review} label="to review" />}
         {committed > 0 && <Tag cls="text-emerald-700 bg-emerald-500/15 dark:text-emerald-400" n={committed} label="committed" />}
         {bad > 0 && <Tag cls="text-destructive bg-destructive/10" n={bad} label={bad === 1 ? 'issue' : 'issues'} />}
@@ -308,11 +330,14 @@ export function UploadsView({
     return () => clearTimeout(t);
   }, [toasts]);
 
+  // Drops holding more than one kind of file, for the Mixed type filter on the file list.
+  const mixedKeys = useMemo(() => new Set(groupUploads(uploads).filter((g) => dropTypeOf(g.kinds) === 'mixed').map((g) => g.key)), [uploads]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return uploads.filter((u) => {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
-      if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
+      if (kindFilter === 'mixed' ? !mixedKeys.has(uploadGroupKey(u)) : kindFilter !== 'all' && u.kind !== kindFilter) return false;
       if (q && !matchesUpload(u, q)) return false;
       const day = (u.created_at ?? '').slice(0, 10);
       if (from && day < from) return false;
@@ -320,22 +345,22 @@ export function UploadsView({
       if (groupKey && uploadGroupKey(u) !== groupKey) return false;
       return true;
     });
-  }, [uploads, query, statusFilter, kindFilter, from, to, groupKey]);
+  }, [uploads, query, statusFilter, kindFilter, from, to, groupKey, mixedKeys]);
 
   // Groups honour the status/type/search/date filters too, so the tile view narrows
-  // with the same controls (but not the group drill-in, which IS the group).
+  // with the same controls (but not the group drill-in, which IS the group). Type is matched
+  // per drop, so a mixed drop shows whole under each of its kinds and under Mixed.
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     const forGroups = uploads.filter((u) => {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
-      if (kindFilter !== 'all' && u.kind !== kindFilter) return false;
       if (q && !matchesUpload(u, q)) return false;
       const day = (u.created_at ?? '').slice(0, 10);
       if (from && day < from) return false;
       if (to && day > to) return false;
       return true;
     });
-    return groupUploads(forGroups);
+    return groupUploads(forGroups).filter((g) => dropMatchesType(g.kinds, kindFilter));
   }, [uploads, query, statusFilter, kindFilter, from, to]);
 
   const allGroupCount = useMemo(() => groupUploads(uploads).length, [uploads]);
@@ -629,7 +654,7 @@ export function UploadsView({
                       {pageLabel(u.filename).title}
                     </Link>
                     <span className="truncate text-xs text-muted-foreground">
-                      {KIND_LABEL[u.kind] ?? 'Inventory scan'} · {fmtWhen(u.created_at)}
+                      {KIND_LABEL[u.kind] ?? DROP_TYPE_LABEL.inventory_pdf} · {fmtWhen(u.created_at)}
                     </span>
                     <StatusPill status={u.status} />
                     {/* Touch screens never show a tooltip: say why it was rejected / failed. */}
@@ -694,7 +719,7 @@ export function UploadsView({
                         </span>
                       </td>
                       <td className="py-2.5 pr-3 text-xs text-muted-foreground">
-                        {KIND_LABEL[u.kind] ?? 'Inventory scan'}
+                        {KIND_LABEL[u.kind] ?? DROP_TYPE_LABEL.inventory_pdf}
                       </td>
                       {/* The pill carries the state; the reason is a hover detail, not a red line per row. */}
                       <td className="py-2.5 pr-3" title={u.reject_reason ?? undefined}>
