@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.28.1: PawSport filter on Event leads
+
+PROD release of our own change only (cherry-picked onto main after v1.28.0): RET-18 P1b (#823). Owner: "i think dapat meron". Event leads get **PawSport: All / Has / None / Can't tell**; Can't tell covers Instagram-only leads, which Shopify can't match.
+
+## Unreleased — PawSport filter on Event leads (RET-18 P1b)
+
+Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
+- **Filter PawSport: All / Has · n / None · n / Can't tell · n** beside Status on `/customers/leads`. It combines with every other filter, resets the page, and the CSV and Copy buttons follow it; Status and PawSport each count over the other's choice.
+- **Decided: Can't tell, never None, when we can't know.** Shopify unread or cut off, or a lead with no usable email or mobile (Instagram-only, most booth leads) reads Can't tell. None = has an email or mobile, Shopify read in full, no holder matches. When Shopify is unread the filter is disabled ("Unavailable") and counts as All, like the Website CRM.
+- **Reuse:** the Website CRM's helpers in `src/pawsport.ts` gain an optional `matchable` argument on `pawsportState`, `pawsportMatchable` and `countPawsportStates` (the CRM view now uses it too); the page passes the read status as the Website CRM page does.
 ## 2026-11-26 — Release v1.28.0: PawSport on the Website CRM, Event leads and in Ask Coop; Ask Coop reads contact status
 
 PROD release of our own changes only (cherry-picked onto main after v1.27.2): RET-18 P1 (#815) and P2 (#817). Checked on coop-cedar-staging 2026-11-26: PawSport column + filter, drawer chips, and "unknown, not zero" answers render; staging's CRM answers every Shopify query with HTTP 502 (Ask Coop's existing `shopify_query` too), so real PawSport data could not be read there. Owner chose to release and check the data on PROD ("1 na lang"). `test/chat-flexible-tools-prompt.test.ts` is develop-only, so its budget bump is not in this release.

@@ -14,7 +14,7 @@ import {leadPerson} from '@/src/spin-leads-types';
 import type {CustomerContact} from '@/src/customer-contacts';
 import type {ContactStatus} from '@/src/person-identity';
 import type {SpinVoucherInfo} from '@/src/spin-voucher';
-import type {PawsportBadge} from '@/src/pawsport';
+import type {PawsportBadge, PawsportRead} from '@/src/pawsport';
 
 const VIEWS = [
   {value: 'contacts', label: 'Contacts'},
@@ -32,6 +32,7 @@ export function LeadsView({
   matches,
   vouchers,
   passports,
+  pawsportRead,
   statuses,
   histories,
   logRead,
@@ -44,6 +45,8 @@ export function LeadsView({
   vouchers: Record<string, SpinVoucherInfo>;
   /** RET-18 P1: per lead (leadKey) that is the same person as a PawSport holder, their passport. Absent = no match found. */
   passports: Record<string, PawsportBadge>;
+  /** RET-18 P1b: whether Shopify was read (and in full), for the PawSport filter. */
+  pawsportRead: Pick<PawsportRead, 'status' | 'incomplete'>;
   /** Per lead (leadKey): contact status from the manual log (D1, D2); 'unknown' never counts as not contacted. */
   statuses: Record<string, ContactStatus>;
   /** Per lead with contacts (or unreadable ones, null); a lead missing here has none yet. */
@@ -62,7 +65,7 @@ export function LeadsView({
     <div className="flex flex-col gap-6">
       <SegmentedControl ariaLabel="Leads view" options={VIEWS} value={view} onChange={setView} />
       {view === 'contacts' ? (
-        <LeadCapture leads={leads} orders={0} matches={matches} list={<LeadsContacts leads={leads} matches={matches} data={{vouchers, statuses, passports}} logRead={logRead} onLog={setLogFor} />} />
+        <LeadCapture leads={leads} orders={0} matches={matches} list={<LeadsContacts leads={leads} matches={matches} data={{vouchers, statuses, passports, pawsportRead}} logRead={logRead} onLog={setLogFor} />} />
       ) : (
         <FollowUps leads={leads} matches={matches} statusOf={statusOf} onLog={setLogFor} />
       )}
