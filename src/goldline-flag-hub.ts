@@ -35,63 +35,64 @@ export function tierOf(l: FlagLine): HubTier {
 /** One kind of flag across sources: a check kind or a mark kind. */
 export const kindKey = (l: FlagLine) => `${l.source === 'check' ? 'check' : 'mark'}:${l.kind ?? l.why}`;
 
-export type HubKind = {key: string; label: string; count: number};
+// ---- Tiles (Nov 26, owner: "too long; square tiles first, click one to see its flags") ----
+// The overview is one square tile per kind of flag within its tier; opening a tile swaps the
+// page to that tile's lines (same page, a Back step), paged.
 
-/** Kinds among the lines, most first (then by name), with the label the lines use. */
-export function hubKinds(lines: readonly FlagLine[]): HubKind[] {
-  const by = new Map<string, HubKind>();
+export type HubTile = {
+  /** `${tier}.${kindKey}`, or `cleared.all` for the one Cleared tile. Goes in the URL (?kind=). */
+  key: string;
+  tier: HubTier;
+  /** kindKey of the lines, null for the Cleared tile (every kind). */
+  kind: string | null;
+  label: string;
+  count: number;
+  stores: number;
+  pages: number;
+};
+
+export const CLEARED_TILE = 'cleared.all';
+const TILE_KEY = /^(needs|open|fyi)\.(check|mark):[a-z_]{1,40}$/;
+export const isTileKey = (s: string | null | undefined): s is string => s === CLEARED_TILE || (typeof s === 'string' && TILE_KEY.test(s));
+
+export const tileKeyOf = (l: FlagLine): string => {
+  const tier = tierOf(l);
+  return tier === 'cleared' ? CLEARED_TILE : `${tier}.${kindKey(l)}`;
+};
+
+/** The tiles for lines already filtered, by tier, biggest first (then by name). The Cleared
+ *  tier is one tile for every kind: it is a record, not a to-do. */
+export function hubTiles(lines: readonly FlagLine[]): Record<HubTier, HubTile[]> {
+  const by = new Map<string, {tile: HubTile; stores: Set<string>; pages: Set<string>}>();
   for (const l of lines) {
-    const k = kindKey(l);
-    const cur = by.get(k);
-    if (cur) cur.count++;
-    else by.set(k, {key: k, label: l.why, count: 1});
+    const key = tileKeyOf(l);
+    let t = by.get(key);
+    if (!t) {
+      const tier = tierOf(l);
+      t = {tile: {key, tier, kind: tier === 'cleared' ? null : kindKey(l), label: tier === 'cleared' ? 'Cleared and resolved' : l.why, count: 0, stores: 0, pages: 0}, stores: new Set(), pages: new Set()};
+      by.set(key, t);
+    }
+    t.tile.count++;
+    if (l.storeCode) t.stores.add(l.storeCode);
+    if (l.uploadId) t.pages.add(l.uploadId);
   }
-  return [...by.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  const out: Record<HubTier, HubTile[]> = {needs: [], open: [], fyi: [], cleared: []};
+  for (const {tile, stores, pages} of by.values()) out[tile.tier].push({...tile, stores: stores.size, pages: pages.size});
+  for (const tier of HUB_TIERS) out[tier].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  return out;
 }
 
-export type HubGroup = {key: string; label: string; lines: FlagLine[]};
+/** The lines behind a tile, in the order given. */
+export const tileLines = (lines: readonly FlagLine[], key: string): FlagLine[] => lines.filter((l) => tileKeyOf(l) === key);
 
-/** Lines grouped by kind, biggest group first; lines inside keep their order. */
-export function groupByKind(lines: readonly FlagLine[]): HubGroup[] {
-  const by = new Map<string, HubGroup>();
-  for (const l of lines) {
-    const k = kindKey(l);
-    const g = by.get(k);
-    if (g) g.lines.push(l);
-    else by.set(k, {key: k, label: l.why, lines: [l]});
-  }
-  return [...by.values()].sort((a, b) => b.lines.length - a.lines.length || a.label.localeCompare(b.label));
-}
+export const PAGE_SIZE = 25;
 
-export type HubView = {needs: FlagLine[]; open: HubGroup[]; fyi: HubGroup[]; cleared: FlagLine[]; counts: Record<HubTier, number>; kinds: HubKind[]};
-
-/**
- * The hub's layout for lines already filtered by store, month, source and search: the tiers,
- * the kind chips (from the lines still open, so a chip never leads to an empty view), and the
- * chosen kind applied last. `kind` null = every kind.
- */
-export function hubView(lines: readonly FlagLine[], kind: string | null): HubView {
-  const kinds = hubKinds(lines.filter((l) => l.open));
-  const shown = kind ? lines.filter((l) => kindKey(l) === kind) : lines;
-  const tiers: Record<HubTier, FlagLine[]> = {needs: [], open: [], fyi: [], cleared: []};
-  for (const l of shown) tiers[tierOf(l)].push(l);
-  return {
-    needs: tiers.needs,
-    open: groupByKind(tiers.open),
-    fyi: groupByKind(tiers.fyi),
-    cleared: tiers.cleared,
-    counts: {needs: tiers.needs.length, open: tiers.open.length, fyi: tiers.fyi.length, cleared: tiers.cleared.length},
-    kinds,
-  };
-}
-
-/** The kind chips to show (Hick's law): the top `max` by count, the rest behind "+N". The
- *  chosen kind always shows, even when it is not in the top. */
-export function visibleKinds(kinds: readonly HubKind[], chosen: string | null, max = 6): {shown: HubKind[]; more: number} {
-  const top = kinds.slice(0, max);
-  const pick = chosen ? kinds.find((k) => k.key === chosen) : undefined;
-  const shown = pick && !top.includes(pick) ? [...top, pick] : top;
-  return {shown, more: kinds.length - shown.length};
+/** One page of rows (1-based, clamped), with the page count. */
+export function pageOf<T>(rows: readonly T[], page: number, size = PAGE_SIZE): {rows: T[]; page: number; pageCount: number; from: number; to: number} {
+  const pageCount = Math.max(1, Math.ceil(rows.length / size));
+  const p = Math.min(Math.max(1, Math.floor(page) || 1), pageCount);
+  const from = (p - 1) * size;
+  return {rows: rows.slice(from, from + size), page: p, pageCount, from: rows.length ? from + 1 : 0, to: Math.min(rows.length, from + size)};
 }
 
 /** Ids of the open review marks in a group, for "Clear all". Checks are never in it. */
