@@ -1,27 +1,28 @@
 'use client';
 
-// All flags (Flags hub P0, Nov 26): every check, reader and reviewer flag for the company in
-// one place, laid out so the eye knows where to start. Plan:
+// All flags (Flags hub, Nov 26): every check, reader and reviewer flag for the company, as
+// square tiles first (one per kind, by tier), then the flags behind a tile. Plan:
 // knowledge/tasks/2026-11-26-nichido-flags-hub.md.
 //
-// - Needs you is the only tinted surface (Von Restorff): an unanswered band price or an
-//   unreadable cell on a page still in review. Answer it here.
-// - Then Open, grouped by kind, five lines a group until "Show all" (Hick's law); then the
-//   quiet tiers, For your information and Cleared, collapsed.
-// - Each line shows at most one contextual action and Open page. Checks take a remark, never
-//   a clear: they always count against the BA (Oct 26). Review flags never do.
-// - Filters live in the URL (replaceState, no server round trip per keystroke), so a view can
-//   be shared and the CSV takes the same filters.
+// - Overview: Needs you tiles are the only tinted ones (Von Restorff); Open, For your
+//   information and Cleared follow, each quieter than the last. A tile shows one number.
+// - A tile opens in place (same page): `?kind=<tile>` is pushed, so the browser's Back returns
+//   to the tiles with the scroll kept and the tile marked (useDrillIn). The page number sits in
+//   the URL too (replace, not push), so coming back from "Open page" lands on the same page.
+// - Rows are one compact line on desktop: product and why, store and page, BA, actions. Checks
+//   take a remark, never a clear: they always count against the BA (Oct 26).
+// - Filters live in the URL (replaceState, no server round trip per keystroke); the CSV takes
+//   the same filters.
 
-import {useEffect, useMemo, useRef, useState, useTransition} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, useTransition} from 'react';
 import type {ReactNode} from 'react';
 import Link from 'next/link';
-import {useRouter} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {
+  ArrowLeft,
   ArrowLeftRight,
   ArrowUpRight,
   Calculator,
-  ChevronDown,
   CircleCheck,
   Columns3,
   Download,
@@ -40,9 +41,12 @@ import {
 import {cn} from '@/lib/utils';
 import {FilterSelect, type FilterOption} from '@/components/ui/filter-select';
 import {Button} from '@/components/ui/button';
+import {Pagination} from '@/components/analyst/pagination';
+import {keptId, useDrillIn} from '@/components/analyst/back-nav';
 import {FLAG_SOURCES, SOURCE_LABEL, filterLines, type FlagFilter, type FlagLine} from '@/src/goldline-flag-lines';
 import type {FlagLinesData} from '@/src/goldline-flag-lines-data';
-import {clearableIds, hubView, kindKey, lineTitle, visibleKinds, type HubGroup} from '@/src/goldline-flag-hub';
+import {CLEARED_TILE, HUB_TIERS, clearableIds, hubTiles, isTileKey, pageOf, tileLines, type HubTier, type HubTile} from '@/src/goldline-flag-hub';
+import {titleName} from '@/src/goldline-ui';
 import {peso} from '@/src/band-prices';
 import {remarkFlagAction} from '@/app/flags/actions';
 import {clearMarkAction, reopenMarkAction, setMarksAction} from '@/app/uploads/review-marks-actions';
@@ -50,7 +54,6 @@ import {setBandPriceAction} from '@/app/uploads/actions';
 import {explain} from '@/components/analyst/goldline-flags';
 import type {FlagRow} from '@/src/goldline-flags-data';
 
-const GROUP_PEEK = 5;
 const EASE = 'ease-[cubic-bezier(0.23,1,0.32,1)]';
 
 const ICON: Record<string, LucideIcon> = {
@@ -66,42 +69,87 @@ const ICON: Record<string, LucideIcon> = {
   'mark:price': Tag,
   'mark:other': Flag,
 };
-const iconOf = (l: FlagLine) => ICON[kindKey(l)] ?? Flag;
+const iconFor = (kind: string | null) => (kind ? (ICON[kind] ?? Flag) : CircleCheck);
+
+/** The overview's one-line hint under each tier (the list view carries the full note). */
+const TIER_HINT: Record<HubTier, string> = {
+  needs: 'Answer before commit',
+  open: 'Checks count against the BA',
+  fyi: 'Nothing to fix',
+  cleared: 'Kept for the record',
+};
+
+const TIER: Record<HubTier, {title: string; sub: string}> = {
+  needs: {title: 'Needs you', sub: 'Answer these before the pages are committed, or the form is valued and checked on a guess.'},
+  open: {title: 'Open', sub: 'Coop’s checks count against the BA and can take a remark. Review flags never count.'},
+  fyi: {title: 'For your information', sub: 'Notes, relabelled columns and products written in. Worth knowing, nothing to fix.'},
+  cleared: {title: 'Cleared', sub: 'A resolved check still counts against the BA; the form was wrong when written.'},
+};
+
+/** One line under a tile's title in the list view: what it is and whether it counts. */
+function tileNote(t: HubTile): string {
+  if (t.tier === 'needs') return TIER.needs.sub;
+  if (t.tier === 'cleared') return TIER.cleared.sub;
+  if (t.tier === 'fyi') return 'Raised by the reader or a reviewer. Worth knowing, never counts against the BA.';
+  return t.kind?.startsWith('check:') ? 'Coop’s check. Counts against the BA; add a remark if there is more to it.' : 'Raised by the reader or a reviewer. Never counts against the BA.';
+}
 
 const monthName = (m: string) => {
   const [y, mo] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', {month: 'long', year: 'numeric', timeZone: 'UTC'});
 };
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+const monthShort = (m: string) => {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleDateString('en-US', {month: 'short', year: 'numeric', timeZone: 'UTC'});
+};
+const fmt = (n: number) => n.toLocaleString('en-US');
+const plural = (n: number, one: string, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
 
-function toQuery(f: FlagFilter, kind: string | null): string {
+/** The hub's URL: filters, plus the open tile and page when there is one. */
+function hubUrl(f: FlagFilter, kind: string | null, page: number): string {
   const sp = new URLSearchParams();
   if (f.store) sp.set('store', f.store);
   if (f.month) sp.set('month', f.month);
   if (f.source) sp.set('source', f.source);
   if (f.q) sp.set('q', f.q);
   if (kind) sp.set('kind', kind);
-  return sp.toString();
+  if (kind && page > 1) sp.set('p', String(page));
+  const q = sp.toString();
+  return `/flags${q ? `?${q}` : ''}`;
 }
 
 type Toast = {id: number; text: string; undo?: () => void};
+type Act = {
+  clear: (l: FlagLine) => void;
+  reopen: (l: FlagLine) => void;
+  clearAll: (lines: FlagLine[]) => void;
+  price: (l: FlagLine, price: number) => void;
+  remark: (l: FlagLine, remark: string) => Promise<string | null>;
+};
 
-export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: FlagLinesData; initial: FlagFilter; initialKind: string | null; company: string; canEdit: boolean}) {
+export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData; initial: FlagFilter; company: string; canEdit: boolean}) {
   const router = useRouter();
+  const params = useSearchParams();
   const [pending, start] = useTransition();
   const [f, setF] = useState<FlagFilter>({...initial, open: 'all'});
-  const [kind, setKind] = useState<string | null>(initialKind);
-  const [allKinds, setAllKinds] = useState(false);
+  const [openParam, openTile, closeTile] = useDrillIn('kind');
+  const tileKey = isTileKey(openParam) ? openParam : null;
+  const page = Math.max(1, Number(params.get('p')) || 1);
   // Lines on their way out (fading) and gone (removed until the server agrees).
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const top = useRef<HTMLDivElement>(null);
 
+  // Filters write the URL in place, keeping the open tile; a new filter starts at page 1. Only
+  // when they differ from the URL's, so a deep link's page (and a Back) is never reset.
   useEffect(() => {
-    const q = toQuery(f, kind);
-    window.history.replaceState(null, '', `/flags${q ? `?${q}` : ''}`);
-  }, [f, kind]);
+    const cur = new URLSearchParams(window.location.search);
+    const want: Record<string, string> = {store: f.store ?? '', month: f.month ?? '', source: f.source ?? '', q: f.q};
+    if (Object.entries(want).every(([k, v]) => (cur.get(k) ?? '') === v)) return;
+    window.history.replaceState(null, '', hubUrl(f, cur.get('kind'), 1));
+  }, [f]);
 
   // A server refresh brings lines back in their real state; forget the local removals.
   useEffect(() => {
@@ -109,18 +157,28 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
     setLeaving(new Set());
   }, [data]);
 
+  const setPage = useCallback(
+    (p: number) => {
+      window.history.replaceState(null, '', hubUrl(f, tileKey, p));
+      top.current?.scrollIntoView({block: 'start', behavior: 'instant'});
+    },
+    [f, tileKey],
+  );
+  const open = (key: string) => {
+    openTile(key);
+    window.scrollTo({top: 0, behavior: 'instant'});
+  };
+
   const filtered = useMemo(() => filterLines(data.lines, f).filter((l) => !gone.has(l.key)), [data.lines, f, gone]);
-  const view = useMemo(() => hubView(filtered, kind), [filtered, kind]);
-  const chips = visibleKinds(view.kinds, kind, 5);
-  const openTotal = view.kinds.reduce((s, k) => s + k.count, 0);
+  const tiles = useMemo(() => hubTiles(filtered), [filtered]);
+  const tile = tileKey ? (HUB_TIERS.flatMap((t) => tiles[t]).find((t) => t.key === tileKey) ?? null) : null;
+  const lines = useMemo(() => (tileKey ? tileLines(filtered, tileKey) : []), [filtered, tileKey]);
 
   const say = (text: string, undo?: () => void) => setToast({id: Date.now(), text, undo});
   const fail = (text: string) => {
     setError(text);
     setToast(null);
   };
-
-  /** Fade lines out, then drop them; the action runs alongside. */
   const remove = (keys: string[]) => {
     setLeaving((s) => new Set([...s, ...keys]));
     window.setTimeout(() => setGone((s) => new Set([...s, ...keys])), 200);
@@ -130,8 +188,8 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
     setLeaving((s) => new Set([...s].filter((k) => !keys.includes(k))));
   };
 
-  const act = {
-    clear(l: FlagLine) {
+  const act: Act = {
+    clear(l) {
       if (!l.id) return;
       setError(null);
       remove([l.key]);
@@ -145,7 +203,7 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
         router.refresh();
       });
     },
-    reopen(l: FlagLine) {
+    reopen(l) {
       if (!l.id) return;
       setToast(null);
       restore([l.key]);
@@ -155,21 +213,21 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
         router.refresh();
       });
     },
-    clearAll(g: HubGroup) {
-      const lines = g.lines.filter((l) => l.open && l.source !== 'check' && l.id);
-      const ids = clearableIds(lines);
+    clearAll(all) {
+      const marks = all.filter((l) => l.open && l.source !== 'check' && l.id);
+      const ids = clearableIds(marks);
       if (!ids.length) return;
       setError(null);
-      remove(lines.map((l) => l.key));
+      remove(marks.map((l) => l.key));
       start(async () => {
         const res = await setMarksAction({company, ids, open: false});
         if (!res.ok) {
-          restore(lines.map((l) => l.key));
+          restore(marks.map((l) => l.key));
           return fail(res.error);
         }
         say(`${plural(res.count, 'flag')} cleared`, () => {
           setToast(null);
-          restore(lines.map((l) => l.key));
+          restore(marks.map((l) => l.key));
           start(async () => {
             const back = await setMarksAction({company, ids, open: true});
             if (!back.ok) return fail(back.error);
@@ -179,7 +237,7 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
         router.refresh();
       });
     },
-    price(l: FlagLine, price: number) {
+    price(l, price) {
       if (!l.uploadId || !l.band) return;
       setError(null);
       const band = l.band;
@@ -194,7 +252,7 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
         router.refresh();
       });
     },
-    async remark(l: FlagLine, remark: string): Promise<string | null> {
+    async remark(l, remark) {
       if (!l.id) return 'That flag could not be found.';
       const res = await remarkFlagAction({company, id: l.id, remark});
       if (!res.ok) return res.error;
@@ -204,112 +262,37 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
     },
   };
 
-  const filtersOn = Boolean(f.store || f.month || f.source || f.q || kind);
-  const reset = () => {
-    setF({store: null, month: null, source: null, open: 'all', q: ''});
-    setKind(null);
-  };
-  const csv = toQuery(f, null);
-
-  const monthOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Every month'}, ...data.months.map((m) => ({value: m, label: monthName(m)}))];
-  const storeOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Every store'}, ...data.stores.map((s) => ({value: s.code, label: s.name ? `${s.name} · ${s.code}` : s.code}))];
-  const sourceOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Checks and review flags'}, ...FLAG_SOURCES.map((s) => ({value: s, label: SOURCE_LABEL[s]}))];
+  const filtersOn = Boolean(f.store || f.month || f.source || f.q);
+  const reset = () => setF({store: null, month: null, source: null, open: 'all', q: ''});
+  const csv = hubUrl(f, null, 1).replace(/^\/flags\??/, '');
 
   if (!data.configured) return <p className="py-16 text-center text-sm text-muted-foreground">Connect the database to see flags.</p>;
 
   return (
-    <div className="flex w-full max-w-[76rem] min-w-0 flex-col gap-12">
-      {/* Filters: three pills and a search (Hick's law); the CSV takes the same filters. */}
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-3">
-          <FilterSelect label="Month" value={f.month ?? 'all'} defaultValue="all" options={monthOpts} onValueChange={(v) => setF({...f, month: v === 'all' ? null : v})} />
-          <FilterSelect label="Store" value={f.store ?? 'all'} defaultValue="all" options={storeOpts} onValueChange={(v) => setF({...f, store: v === 'all' ? null : v})} />
-          <FilterSelect label="Raised by" value={f.source ?? 'all'} defaultValue="all" options={sourceOpts} onValueChange={(v) => setF({...f, source: v === 'all' ? null : (v as FlagFilter['source'])})} />
-          <label className="relative min-w-48 flex-1 sm:max-w-80">
-            <span className="sr-only">Search flags</span>
-            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={f.q}
-              maxLength={80}
-              onChange={(e) => setF({...f, q: e.target.value})}
-              placeholder="Product, item code, BA or scan"
-              className="h-8 w-full rounded-full border border-border bg-background pr-3 pl-8 text-xs outline-none transition-[border-color] duration-150 placeholder:text-muted-foreground pointer-fine:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-            />
-          </label>
-          <div className="ml-auto flex items-center gap-4">
-            {filtersOn && (
-              <button type="button" onClick={reset} className="text-xs font-medium text-muted-foreground underline-offset-4 transition-colors duration-150 pointer-fine:hover:text-foreground pointer-fine:hover:underline">
-                Clear filters
-              </button>
-            )}
-            <a
-              href={`/api/goldline/flag-lines-export${csv ? `?${csv}` : ''}`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-medium transition-[border-color,scale] duration-150 active:scale-[0.97] pointer-fine:hover:border-foreground/25 motion-reduce:active:scale-100"
-            >
-              <Download aria-hidden className="size-3.5" /> Export CSV
-            </a>
-          </div>
-        </div>
-
-        {view.kinds.length > 0 && (
-          <div
-            role="group"
-            aria-label="Kind of flag"
-            className="flex flex-wrap items-center gap-2 max-md:-mx-4 max-md:flex-nowrap max-md:overflow-x-auto max-md:px-4 max-md:pb-1 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden max-md:[&>button]:shrink-0"
-          >
-            <KindChip label="All open" count={openTotal} on={!kind} onClick={() => setKind(null)} />
-            {(allKinds ? view.kinds : chips.shown).map((k) => (
-              <KindChip key={k.key} label={k.label} count={k.count} on={kind === k.key} onClick={() => setKind(kind === k.key ? null : k.key)} />
-            ))}
-            {!allKinds && chips.more > 0 && (
-              <button type="button" onClick={() => setAllKinds(true)} className="h-8 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors duration-150 pointer-fine:hover:text-foreground">
-                +{chips.more} more
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+    <div ref={top} className="flex w-full min-w-0 max-w-[80rem] scroll-mt-24 flex-col gap-10">
+      <Filters data={data} f={f} setF={setF} filtersOn={filtersOn} reset={reset} csv={csv} />
 
       {error && (
-        <p role="alert" className="-mt-6 text-sm text-destructive">
+        <p role="alert" className="-mt-4 text-sm text-destructive">
           {error}
         </p>
       )}
 
-      <NeedsYou lines={view.needs} canEdit={canEdit} pending={pending} leaving={leaving} act={act} filtersOn={filtersOn} />
-
-      {view.counts.open > 0 && (
-        <section aria-labelledby="hub-open" className="flex flex-col gap-8">
-          <TierHead id="hub-open" title="Open" count={view.counts.open} sub="Coop’s checks count against the BA and can take a remark. Review flags never count." />
-          {view.open.map((g) => (
-            <Group key={g.key} g={g} canEdit={canEdit} pending={pending} leaving={leaving} act={act} />
-          ))}
-        </section>
-      )}
-
-      {view.counts.fyi > 0 && (
-        <Disclosure title="For your information" count={view.counts.fyi} sub="Notes, relabelled columns and products written in. Worth knowing, nothing to fix." defaultOpen={kind != null}>
-          {view.fyi.map((g) => (
-            <Group key={g.key} g={g} canEdit={canEdit} pending={pending} leaving={leaving} act={act} />
-          ))}
-        </Disclosure>
-      )}
-
-      {view.counts.cleared > 0 && (
-        <Disclosure title="Cleared and resolved" count={view.counts.cleared} sub="A resolved check still counts against the BA; the form was wrong when written.">
-          <Peek lines={view.cleared} canEdit={canEdit} pending={pending} leaving={leaving} act={act} />
-        </Disclosure>
-      )}
-
-      {filtered.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <p className="text-sm text-muted-foreground">{filtersOn ? 'No flags match these filters.' : 'No flags yet. They show here once forms are read and checked.'}</p>
-          {filtersOn && (
-            <Button size="sm" variant="outline" onClick={reset}>
-              Show every flag
-            </Button>
-          )}
-        </div>
+      {tileKey ? (
+        <TileView
+          tileKey={tileKey}
+          tile={tile}
+          lines={lines}
+          page={page}
+          setPage={setPage}
+          onBack={closeTile}
+          canEdit={canEdit}
+          pending={pending}
+          leaving={leaving}
+          act={act}
+        />
+      ) : (
+        <Overview tiles={tiles} total={filtered.length} filtersOn={filtersOn} reset={reset} onOpen={open} />
       )}
 
       <ToastBar toast={toast} onDone={() => setToast(null)} />
@@ -317,158 +300,280 @@ export function FlagsHub({data, initial, initialKind, company, canEdit}: {data: 
   );
 }
 
-type Act = {
-  clear: (l: FlagLine) => void;
-  reopen: (l: FlagLine) => void;
-  clearAll: (g: HubGroup) => void;
-  price: (l: FlagLine, price: number) => void;
-  remark: (l: FlagLine, remark: string) => Promise<string | null>;
-};
-type LineProps = {canEdit: boolean; pending: boolean; leaving: Set<string>; act: Act; /** Inside a kind group the kind is the heading, so the line leads with its reason. */ grouped?: boolean};
+// ---------------------------------------------------------------------------------- Filters
 
-function KindChip({label, count, on, onClick}: {label: string; count: number; on: boolean; onClick: () => void}) {
+function Filters({data, f, setF, filtersOn, reset, csv}: {data: FlagLinesData; f: FlagFilter; setF: (f: FlagFilter) => void; filtersOn: boolean; reset: () => void; csv: string}) {
+  const monthOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Every month'}, ...data.months.map((m) => ({value: m, label: monthName(m)}))];
+  const storeOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Every store'}, ...data.stores.map((s) => ({value: s.code, label: s.name ? `${titleName(s.name)} · ${s.code}` : s.code}))];
+  const sourceOpts: Array<FilterOption<string>> = [{value: 'all', label: 'Checks and review flags'}, ...FLAG_SOURCES.map((s) => ({value: s, label: SOURCE_LABEL[s]}))];
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <FilterSelect label="Month" value={f.month ?? 'all'} defaultValue="all" options={monthOpts} onValueChange={(v) => setF({...f, month: v === 'all' ? null : v})} />
+      <FilterSelect label="Store" value={f.store ?? 'all'} defaultValue="all" options={storeOpts} onValueChange={(v) => setF({...f, store: v === 'all' ? null : v})} />
+      <FilterSelect label="Raised by" value={f.source ?? 'all'} defaultValue="all" options={sourceOpts} onValueChange={(v) => setF({...f, source: v === 'all' ? null : (v as FlagFilter['source'])})} />
+      <label className="relative min-w-48 flex-1 sm:max-w-80">
+        <span className="sr-only">Search flags</span>
+        <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={f.q}
+          maxLength={80}
+          onChange={(e) => setF({...f, q: e.target.value})}
+          placeholder="Product, item code, BA or scan"
+          className="h-8 w-full rounded-full border border-border bg-background pr-3 pl-8 text-xs outline-none transition-[border-color] duration-150 placeholder:text-muted-foreground pointer-fine:hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+        />
+      </label>
+      <div className="ml-auto flex items-center gap-4">
+        {filtersOn && (
+          <button type="button" onClick={reset} className="text-xs font-medium text-muted-foreground underline-offset-4 transition-colors duration-150 pointer-fine:hover:text-foreground pointer-fine:hover:underline">
+            Clear filters
+          </button>
+        )}
+        <a
+          href={`/api/goldline/flag-lines-export${csv ? `?${csv}` : ''}`}
+          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-medium transition-[border-color,scale] duration-150 active:scale-[0.97] pointer-fine:hover:border-foreground/25 motion-reduce:active:scale-100"
+        >
+          <Download aria-hidden className="size-3.5" /> Export CSV
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------------- Overview
+
+function Overview({tiles, total, filtersOn, reset, onOpen}: {tiles: Record<HubTier, HubTile[]>; total: number; filtersOn: boolean; reset: () => void; onOpen: (key: string) => void}) {
+  if (!total) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <p className="text-sm text-muted-foreground">{filtersOn ? 'No flags match these filters.' : 'No flags yet. They show here once forms are read and checked.'}</p>
+        {filtersOn && (
+          <Button size="sm" variant="outline" onClick={reset}>
+            Show every flag
+          </Button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-start gap-x-14 gap-y-10">
+      {tiles.needs.length === 0 && (
+        <p className="flex w-full items-center gap-2.5 text-sm text-muted-foreground">
+          <CircleCheck aria-hidden className="size-4 shrink-0 text-[var(--status-good)]" />
+          {filtersOn ? 'Nothing in these filters needs you.' : 'Nothing needs you. Every band price and unreadable cell on pages in review is answered.'}
+        </p>
+      )}
+      {HUB_TIERS.filter((t) => tiles[t].length > 0).map((tier) => {
+        const count = tiles[tier].reduce((s, t) => s + t.count, 0);
+        return (
+          <section key={tier} aria-labelledby={`tier-${tier}`} className="flex flex-col gap-4 max-sm:w-full">
+            <div className="flex flex-col gap-1">
+              <h2 id={`tier-${tier}`} className="flex items-center gap-2.5 font-heading text-lg font-semibold tracking-tight">
+                {tier === 'needs' && <OctagonAlert aria-hidden className="size-[1.125rem] text-[var(--status-crit)]" />}
+                {TIER[tier].title}
+                <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">{fmt(count)}</span>
+              </h2>
+              <p className="text-sm text-muted-foreground" title={TIER[tier].sub}>
+                {TIER_HINT[tier]}
+              </p>
+            </div>
+            <ul className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap">
+              {tiles[tier].map((t) => (
+                <li key={t.key} data-kept-id={keptId(t.key)} className="sm:w-[11.5rem]">
+                  <TileButton t={t} onOpen={onOpen} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A square tile: the kind's icon, one big number, its name, and where it is. */
+function TileButton({t, onOpen}: {t: HubTile; onOpen: (key: string) => void}) {
+  const Icon = iconFor(t.kind);
+  const needs = t.tier === 'needs';
+  const quiet = t.tier === 'fyi' || t.tier === 'cleared';
+  const where = [t.stores ? plural(t.stores, 'store') : null, t.pages ? plural(t.pages, 'page') : null].filter(Boolean).join(' · ');
   return (
     <button
       type="button"
-      aria-pressed={on}
-      onClick={onClick}
+      data-row
+      onClick={() => onOpen(t.key)}
       className={cn(
-        'inline-flex h-8 items-center gap-2 rounded-full border px-3.5 text-xs font-medium outline-none transition-[background-color,border-color,color,scale] duration-150 active:scale-[0.97] motion-reduce:active:scale-100',
-        'focus-visible:ring-3 focus-visible:ring-ring/40',
-        on ? 'border-foreground bg-foreground text-background' : 'border-border text-foreground pointer-fine:hover:border-foreground/30',
+        'group/tile relative flex aspect-square w-full flex-col rounded-2xl border p-4.5 text-left outline-none',
+        'transition-[border-color,background-color,box-shadow,translate,scale] duration-200',
+        EASE,
+        'pointer-fine:hover:-translate-y-0.5 pointer-fine:hover:shadow-[0_14px_32px_-18px_color-mix(in_oklab,var(--foreground)_35%,transparent)] active:translate-y-0 active:scale-[0.98] active:duration-100',
+        'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        'motion-reduce:pointer-fine:hover:translate-y-0 motion-reduce:active:scale-100',
+        needs
+          ? 'border-[color-mix(in_oklab,var(--status-warn)_34%,transparent)] bg-[color-mix(in_oklab,var(--status-warn)_9%,var(--card))] pointer-fine:hover:border-[color-mix(in_oklab,var(--status-warn)_55%,transparent)]'
+          : quiet
+            ? 'border-border bg-transparent pointer-fine:hover:border-foreground/25 pointer-fine:hover:bg-card'
+            : 'border-border bg-card pointer-fine:hover:border-primary/40',
       )}
     >
-      {label}
-      <span className={cn('tabular-nums', on ? 'opacity-70' : 'text-muted-foreground')}>{count.toLocaleString('en-US')}</span>
+      <span className="flex items-start justify-between gap-3">
+        <span
+          className={cn(
+            'inline-flex size-9 items-center justify-center rounded-xl',
+            needs ? 'bg-[color-mix(in_oklab,var(--status-crit)_14%,transparent)] text-[var(--status-crit)]' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          <Icon aria-hidden className="size-4" />
+        </span>
+        <ArrowUpRight
+          aria-hidden
+          className={cn('size-4 text-muted-foreground/60 transition-[translate,color] duration-200 group-hover/tile:translate-x-0.5 group-hover/tile:-translate-y-0.5 group-hover/tile:text-foreground motion-reduce:group-hover/tile:translate-0', EASE)}
+        />
+      </span>
+      <span className={cn('mt-3 font-heading text-[2.25rem] leading-none font-semibold tracking-tight tabular-nums', quiet && 'text-foreground/70')}>{fmt(t.count)}</span>
+      <span className="mt-auto flex min-w-0 flex-col gap-1">
+        <span className="line-clamp-2 text-[0.8125rem] leading-snug font-medium text-balance">{t.label}</span>
+        {where && <span className="text-xs text-muted-foreground">{where}</span>}
+      </span>
     </button>
   );
 }
 
-function TierHead({id, title, count, sub}: {id: string; title: string; count: number; sub: string}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <h2 id={id} className="flex items-baseline gap-3 font-heading text-lg font-semibold tracking-tight">
-        {title}
-        <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">{count.toLocaleString('en-US')}</span>
-      </h2>
-      <p className="text-sm text-muted-foreground">{sub}</p>
-    </div>
-  );
-}
+// -------------------------------------------------------------------------------- Tile view
 
-/** The one highlighted surface. Quiet and reassuring when empty. */
-function NeedsYou({lines, filtersOn, ...rest}: {lines: FlagLine[]; filtersOn: boolean} & LineProps) {
-  if (!lines.length) {
-    return (
-      <p className="-mt-4 flex items-center gap-2.5 text-sm text-muted-foreground">
-        <CircleCheck aria-hidden className="size-4 shrink-0 text-[var(--status-good)]" />
-        {filtersOn ? 'Nothing in these filters needs you.' : 'Nothing needs you. Every band price and unreadable cell on pages in review is answered.'}
-      </p>
-    );
-  }
+type ViewProps = {canEdit: boolean; pending: boolean; leaving: Set<string>; act: Act};
+
+function TileView({
+  tileKey,
+  tile,
+  lines,
+  page,
+  setPage,
+  onBack,
+  ...rest
+}: {tileKey: string; tile: HubTile | null; lines: FlagLine[]; page: number; setPage: (p: number) => void; onBack: () => void} & ViewProps) {
+  const [confirm, setConfirm] = useState(false);
+  const paged = pageOf(lines, page);
+  const kind = tile?.kind ?? (tileKey === CLEARED_TILE ? null : tileKey.slice(tileKey.indexOf('.') + 1));
+  const Icon = iconFor(kind);
+  const label = tile?.label ?? (tileKey === CLEARED_TILE ? 'Cleared and resolved' : 'Flags');
+  const ids = clearableIds(lines);
+  const needs = tile?.tier === 'needs';
+  const mixed = tileKey === CLEARED_TILE;
+
   return (
-    <section
-      aria-labelledby="hub-needs"
-      className="flex flex-col gap-6 rounded-2xl border border-[color-mix(in_oklab,var(--status-warn)_30%,transparent)] bg-[color-mix(in_oklab,var(--status-warn)_8%,var(--card))] p-5 sm:p-7"
-    >
-      <div className="flex flex-col gap-1.5">
-        <h2 id="hub-needs" className="flex items-center gap-2.5 font-heading text-lg font-semibold tracking-tight">
-          <OctagonAlert aria-hidden className="size-[1.125rem] text-[var(--status-crit)]" />
-          Needs you
-          <span className="font-sans text-sm font-normal text-[color-mix(in_oklab,var(--foreground)_70%,var(--status-warn))] tabular-nums">{lines.length.toLocaleString('en-US')}</span>
-        </h2>
-        <p className="text-sm text-[color-mix(in_oklab,var(--foreground)_72%,var(--status-warn))]">
-          Answer these before the pages are committed, or the form is valued and checked on a guess.
-        </p>
+    <section aria-labelledby="tile-title" className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex w-fit items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground outline-none transition-colors duration-150 pointer-fine:hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40"
+        >
+          <ArrowLeft aria-hidden className="size-4" /> All flags
+        </button>
+        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+          <div className="flex min-w-0 items-start gap-4">
+            <span
+              className={cn(
+                'inline-flex size-11 shrink-0 items-center justify-center rounded-xl',
+                needs ? 'bg-[color-mix(in_oklab,var(--status-crit)_14%,transparent)] text-[var(--status-crit)]' : 'bg-muted text-muted-foreground',
+              )}
+            >
+              <Icon aria-hidden className="size-5" />
+            </span>
+            <div className="flex min-w-0 flex-col gap-1">
+              <h2 id="tile-title" className="flex flex-wrap items-baseline gap-x-3 font-heading text-xl font-semibold tracking-tight">
+                {label}
+                <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">{plural(lines.length, 'flag')}</span>
+              </h2>
+              <p className="max-w-2xl text-sm text-muted-foreground">{tile ? tileNote(tile) : 'Nothing left here with these filters.'}</p>
+            </div>
+          </div>
+          {/* Not on Needs you: clearing an unanswered price skips the decision it asks for. */}
+          {rest.canEdit && !needs && ids.length > 1 && (
+            <div className="flex items-center gap-2">
+              {confirm ? (
+                <>
+                  <span className="text-xs text-muted-foreground">Clear {plural(ids.length, 'flag')}?</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={rest.pending}
+                    onClick={() => {
+                      setConfirm(false);
+                      rest.act.clearAll(lines);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setConfirm(true)}>
+                  Clear all {fmt(ids.length)}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      <Peek lines={lines} {...rest} />
+
+      {lines.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
+          <CircleCheck aria-hidden className="size-5 text-[var(--status-good)]" />
+          <p className="text-sm text-muted-foreground">All done here.</p>
+          <Button size="sm" variant="outline" onClick={onBack}>
+            Back to all flags
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="overflow-hidden rounded-2xl border border-border bg-card">
+            <div aria-hidden className="hidden grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,0.75fr)_13rem] gap-6 border-b border-border px-6 py-3 text-xs text-muted-foreground md:grid">
+              <span>{mixed ? 'Flag' : 'Product'}</span>
+              <span>Store and page</span>
+              <span>BA</span>
+              <span />
+            </div>
+            <ul>
+              {paged.rows.map((l) => (
+                <Row key={l.key} l={l} mixed={mixed} {...rest} />
+              ))}
+            </ul>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {paged.pageCount > 1 ? `${fmt(paged.from)} to ${fmt(paged.to)} of ${fmt(lines.length)}` : plural(lines.length, 'flag')}
+            </span>
+            <Pagination page={paged.page} pageCount={paged.pageCount} onPage={setPage} label="Flag pages" variant="segmented" />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-/** The first five lines, the rest one click away (Hick's law). */
-function Peek({lines, ...rest}: {lines: FlagLine[]} & LineProps) {
-  const [all, setAll] = useState(false);
-  return (
-    <div className="flex flex-col gap-3.5">
-      <Lines lines={all ? lines : lines.slice(0, GROUP_PEEK)} {...rest} />
-      {lines.length > GROUP_PEEK && (
-        <button type="button" onClick={() => setAll(!all)} className="w-fit text-xs font-medium text-muted-foreground transition-colors duration-150 pointer-fine:hover:text-foreground">
-          {all ? 'Show fewer' : `Show all ${lines.length.toLocaleString('en-US')}`}
-        </button>
-      )}
-    </div>
-  );
+/** What Coop saw for a check, or the reader's or reviewer's words for a mark. */
+function reasonOf(l: FlagLine): string | null {
+  if (l.source === 'check') return l.details && l.kind ? explain({kind: l.kind, details: l.details} as unknown as FlagRow) : null;
+  if (!l.note) return null;
+  return l.source === 'reviewer' ? `“${l.note}”` : l.note;
 }
 
-function Group({g, ...rest}: {g: HubGroup} & LineProps) {
-  const [confirm, setConfirm] = useState(false);
-  const ids = clearableIds(g.lines);
-  const Icon = iconOf(g.lines[0]);
-  return (
-    <div className="flex flex-col gap-3.5">
-      <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h3 className="flex items-center gap-2.5 text-[0.9375rem] font-semibold">
-          <Icon aria-hidden className="size-4 text-muted-foreground" />
-          {g.label}
-          <span className="font-normal text-muted-foreground tabular-nums">{g.lines.length.toLocaleString('en-US')}</span>
-        </h3>
-        {rest.canEdit && ids.length > 1 &&
-          (confirm ? (
-            <span className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Clear {plural(ids.length, 'flag')}?</span>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={rest.pending}
-                onClick={() => {
-                  setConfirm(false);
-                  rest.act.clearAll(g);
-                }}
-              >
-                Clear
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
-                Cancel
-              </Button>
-            </span>
-          ) : (
-            <button type="button" onClick={() => setConfirm(true)} className="text-xs font-medium text-muted-foreground transition-colors duration-150 pointer-fine:hover:text-foreground">
-              Clear all {ids.length.toLocaleString('en-US')}
-            </button>
-          ))}
-      </div>
-      <Peek lines={g.lines} {...rest} grouped />
-    </div>
-  );
-}
-
-function Lines({lines, ...rest}: {lines: FlagLine[]} & LineProps) {
-  return (
-    <ul className="overflow-hidden rounded-xl border border-border bg-card">
-      {lines.map((l) => (
-        <Line key={l.key} l={l} {...rest} />
-      ))}
-    </ul>
-  );
-}
-
-function Line({l, canEdit, pending, leaving, act, grouped = false}: {l: FlagLine} & LineProps) {
+function Row({l, mixed, canEdit, pending, leaving, act}: {l: FlagLine; mixed: boolean} & ViewProps) {
   const [editing, setEditing] = useState(false);
-  const Icon = iconOf(l);
   const out = leaving.has(l.key);
   const isCheck = l.source === 'check';
-  const meta = [l.product ?? (l.itemCode ? l.itemCode : null), l.ba ? `BA ${l.ba}` : null, SOURCE_LABEL[l.source], l.file, l.month ? monthName(l.month) : null].filter(Boolean).join(' · ');
-  // What Coop saw for a check; the reader's or reviewer's words for a mark.
-  const reason = isCheck ? (l.details && l.kind ? explain({kind: l.kind, details: l.details} as unknown as FlagRow) : null) : l.note ? (l.source === 'reviewer' ? `“${l.note}”` : l.note) : null;
-  const remark = isCheck && l.note ? `Remark: ${l.note}` : null;
-  const lead = grouped ? (reason ?? l.why) : l.why;
-  const detail = grouped ? remark : [reason, remark].filter(Boolean).join(' ') || null;
-  const status = l.open ? null : isCheck ? 'Resolved, still counts against the BA' : 'Cleared';
+  const reason = reasonOf(l);
+  const head = mixed ? l.why : (l.product ?? (l.itemCode ? l.itemCode : 'Whole page'));
+  const sub = mixed ? [l.product, reason].filter(Boolean).join(' · ') : reason;
+  const store = l.storeName ? titleName(l.storeName) : l.storeCode ? `Store ${l.storeCode}` : 'Store not known yet';
+  const where = [l.page != null ? (l.pageOf ? `Page ${l.page} of ${l.pageOf}` : `Page ${l.page}`) : null, l.file].filter(Boolean).join(' · ');
+  const status = l.open ? null : isCheck ? 'Resolved, still counts' : 'Cleared';
 
   return (
     <li
-      data-leaving={out || undefined}
       className={cn(
         'grid grid-cols-[minmax(0,1fr)] border-b border-border/70 transition-[grid-template-rows,opacity] duration-200 last:border-b-0 motion-reduce:transition-none',
         EASE,
@@ -476,27 +581,39 @@ function Line({l, canEdit, pending, leaving, act, grouped = false}: {l: FlagLine
       )}
     >
       <div className="min-h-0 min-w-0 overflow-hidden">
-        <div className="grid min-h-[4.75rem] grid-cols-1 items-center gap-x-8 gap-y-3 px-5 py-[1.125rem] sm:px-6 md:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="flex min-w-0 flex-col gap-1">
-            <p className={cn('truncate text-[0.9375rem] font-medium', !l.open && 'text-muted-foreground')} title={lineTitle(l)}>
-              {lineTitle(l)}
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 px-5 py-4 transition-colors duration-150 pointer-fine:hover:bg-muted/40 sm:px-6 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,0.75fr)_13rem] md:items-center md:py-3.5">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className={cn('truncate text-sm font-medium', !l.open && 'text-muted-foreground')} title={head}>
+              {head}
+              {status && <span className="ml-2 text-xs font-normal text-muted-foreground">{status}</span>}
             </p>
-            <p className="flex items-center gap-2 text-sm">
-              <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              <span>{lead}</span>
-              {status && <span className="text-muted-foreground">· {status}</span>}
-            </p>
-            {detail && <p className="text-[0.8125rem] leading-relaxed text-foreground/80">{detail}</p>}
-            {meta && <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{meta}</p>}
+            {sub && <p className="line-clamp-2 text-[0.8125rem] leading-snug text-muted-foreground">{sub}</p>}
+            {isCheck && l.note && <p className="truncate text-[0.8125rem] text-foreground/75">Remark: {l.note}</p>}
           </div>
-          <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="truncate text-sm" title={l.storeName ?? undefined}>
+              {store}
+            </p>
+            {where && (
+              <p className="truncate text-xs text-muted-foreground" title={where}>
+                {where}
+              </p>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-col gap-0.5 max-md:flex-row max-md:gap-2">
+            <p className="truncate text-sm max-md:text-xs max-md:text-muted-foreground">{l.ba ? titleName(l.ba) : <span className="text-muted-foreground">No BA read</span>}</p>
+            {l.month && <p className="text-xs text-muted-foreground tabular-nums">{monthShort(l.month)}</p>}
+          </div>
+          <div className="flex items-center gap-2 md:justify-end">
             <Actions l={l} canEdit={canEdit} pending={pending} act={act} editing={editing} setEditing={setEditing} />
             {l.uploadId && (
               <Link
                 href={`/uploads/${l.uploadId}`}
-                className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 pointer-fine:hover:bg-muted pointer-fine:hover:text-foreground"
+                aria-label={`Open ${where || 'the page'}`}
+                title="Open page"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors duration-150 pointer-fine:hover:bg-muted pointer-fine:hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40"
               >
-                Open page <ArrowUpRight aria-hidden className="size-3.5" />
+                <ArrowUpRight aria-hidden className="size-4" />
               </Link>
             )}
           </div>
@@ -512,7 +629,7 @@ function Actions({l, canEdit, pending, act, editing, setEditing}: {l: FlagLine; 
   if (l.source === 'check') {
     if (!l.open) return null;
     return (
-      <Button size="sm" variant="outline" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+      <Button size="sm" variant="ghost" aria-expanded={editing} onClick={() => setEditing(!editing)}>
         {l.note ? 'Edit remark' : 'Remark'}
       </Button>
     );
@@ -527,24 +644,34 @@ function Actions({l, canEdit, pending, act, editing, setEditing}: {l: FlagLine; 
   if (l.band) {
     const b = l.band;
     return (
-      <>
-        <Button size="sm" disabled={pending} onClick={() => act.price(l, b.offer)}>
+      <span className="inline-flex items-center rounded-lg border border-border p-0.5">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => act.price(l, b.offer)}
+          className="h-7 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground tabular-nums transition-[opacity,scale] duration-150 active:scale-[0.97] disabled:opacity-50 motion-reduce:active:scale-100"
+        >
           Use {peso(b.offer)}
-        </Button>
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => act.price(l, b.printed)}>
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => act.price(l, b.printed)}
+          className="h-7 rounded-md px-2.5 text-xs font-medium text-muted-foreground tabular-nums transition-[background-color,color,scale] duration-150 pointer-fine:hover:bg-muted pointer-fine:hover:text-foreground active:scale-[0.97] disabled:opacity-50 motion-reduce:active:scale-100"
+        >
           Keep {peso(b.printed)}
-        </Button>
-      </>
+        </button>
+      </span>
     );
   }
   return (
-    <Button size="sm" variant="outline" disabled={pending} onClick={() => act.clear(l)}>
+    <Button size="sm" variant="ghost" disabled={pending} onClick={() => act.clear(l)}>
       Clear
     </Button>
   );
 }
 
-/** A remark on a check, inline under its line. It never changes the count. */
+/** A remark on a check, inline under its row. It never changes the count. */
 function RemarkEditor({open, l, act, onClose}: {open: boolean; l: FlagLine; act: Act; onClose: () => void}) {
   const [text, setText] = useState(l.note ?? '');
   const [err, setErr] = useState<string | null>(null);
@@ -563,7 +690,7 @@ function RemarkEditor({open, l, act, onClose}: {open: boolean; l: FlagLine; act:
     <div className={cn('grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows] duration-200 motion-reduce:transition-none', EASE, open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')} inert={!open}>
       <div className="min-h-0 overflow-hidden">
         <form
-          className="flex flex-col gap-2 px-5 pb-5 sm:px-6"
+          className="flex flex-col gap-2 px-5 pb-4 sm:px-6"
           onSubmit={(e) => {
             e.preventDefault();
             save();
@@ -594,31 +721,8 @@ function RemarkEditor({open, l, act, onClose}: {open: boolean; l: FlagLine; act:
   );
 }
 
-function Disclosure({title, count, sub, defaultOpen = false, children}: {title: string; count: number; sub: string; defaultOpen?: boolean; children: ReactNode}) {
-  const [open, setOpen] = useState(defaultOpen);
-  useEffect(() => setOpen(defaultOpen), [defaultOpen]);
-  return (
-    <section className="flex flex-col gap-8 border-t border-border pt-8">
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="group flex w-full items-start justify-between gap-6 text-left outline-none focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/40">
-        <span className="flex flex-col gap-1.5">
-          <span className="flex items-baseline gap-3 font-heading text-lg font-semibold tracking-tight">
-            {title}
-            <span className="font-sans text-sm font-normal text-muted-foreground tabular-nums">{count.toLocaleString('en-US')}</span>
-          </span>
-          <span className="text-sm text-muted-foreground">{sub}</span>
-        </span>
-        <span className="mt-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border px-3 text-xs font-medium transition-[border-color] duration-150 pointer-fine:group-hover:border-foreground/30">
-          {open ? 'Hide' : 'Show'}
-          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform duration-200 motion-reduce:transition-none', EASE, open && 'rotate-180')} />
-        </span>
-      </button>
-      {open && <div className="flex flex-col gap-8">{children}</div>}
-    </section>
-  );
-}
-
 /** One toast at a time, bottom centre, with Undo when the action can be taken back. */
-function ToastBar({toast, onDone}: {toast: Toast | null; onDone: () => void}) {
+function ToastBar({toast, onDone}: {toast: Toast | null; onDone: () => void}): ReactNode {
   const [shown, setShown] = useState<Toast | null>(toast);
   useEffect(() => {
     if (toast) setShown(toast);
