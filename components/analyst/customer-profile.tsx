@@ -60,6 +60,7 @@ import {remindersOf} from '@/src/crm-table';
 import type {CheckoutStage, CrmCheckout, CrmMembershipConfig, CrmOrder} from '@/src/crm-types';
 import type {CustomerContact} from '@/src/customer-contacts';
 import type {CustomerCohort} from '@/src/customer-cohorts';
+import {pawsportLine, type PawsportBadge} from '@/src/pawsport';
 
 export const STATUS_TONE: Record<CartStatus, string> = {
   Active: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
@@ -204,7 +205,10 @@ export function CustomerProfile({
   onLogContact,
   reminderTotal,
   boothInfo,
+  pawsport,
 }: {
+  /** RET-18 P1: this customer's PawSport (matched on the server); undefined = none, or Shopify was not read (the table says which). */
+  pawsport?: PawsportBadge;
   /** RET-15 B: the booth lead's Instagram and sign-up details for this customer (exact match or a Same person link); undefined = none or not read. */
   boothInfo?: CustomerBooth;
   /** The Customers tab row (null: the id in the URL matches no customer, or the CRM did not answer). */
@@ -347,6 +351,11 @@ export function CustomerProfile({
                   ))}
                   <span className="text-muted-foreground">{boothInfo.source === 'linked' ? 'Linked with Same person' : 'Same email or mobile as a booth lead'}</span>
                 </div>
+              )}
+              {row && pawsport && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{pawsportLine(pawsport)}</span>
+                </p>
               )}
             </div>
             <button
