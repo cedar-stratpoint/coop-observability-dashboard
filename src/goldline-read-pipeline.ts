@@ -4,8 +4,8 @@ import {findDuplicatePageKey, saveClassification, saveExtraction, setUploadStatu
 import {readerSignature, reuseIdenticalRead, sha256, stampFingerprint} from './goldline-read-reuse';
 import {buildAnchoredParams, buildInventoryReadParams, classifyPage, extractInventoryPage, extractInventoryPageAnchored, locateFormVersion, readUsageSnapshot, submitAnchoredBatch, withReadUsage, type ExtractedPage} from './goldline-extract-run';
 import {getFormTemplate} from './goldline-form-template-data';
-import {batchLegacyEnabled, batchReadEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
-import {renderReadImages} from './goldline-page-bands';
+import {batchLegacyEnabled, batchReadEnabled, headerCropsEnabled, readBandsEnabled, readBoxesEnabled, templateReadEnabled} from './goldline-anchored-flag';
+import {renderHeaderCrops, renderReadImages} from './goldline-page-bands';
 import {boxCustomId, buildLocateParams, locateRowsFor} from './goldline-row-boxes';
 import {anchorVersion, shouldRetrySetAside, versionUnsure, type AnchoredMapResult} from './goldline-anchored-extract';
 import {applyOrientation} from './goldline-orient';
@@ -127,7 +127,10 @@ export async function runInventoryRead(args: {
     // page_key, and flag any duplicate / re-upload — all before extraction.
     emit?.({type: 'stage', stage: 'detecting'});
     const classifyStart = Date.now();
-    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+    // Sharp header crops for the store code / name (GOLDLINE_HEADER_CROP_COMPANIES), rendered once
+    // and reused by the set-aside retry. A render failure classifies from the page alone.
+    const headerCrops = headerCropsEnabled(companyId) ? await renderHeaderCrops(pdfBase64) : null;
+    let cls = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops));
     rec.classifyMs = Date.now() - classifyStart;
     // Set-aside safety net (flag-gated): a LOW-confidence "sales"/"blank" classification could be
     // a real inventory page misread. Re-classify once (a blind second read) before setting it
@@ -135,7 +138,7 @@ export async function runInventoryRead(args: {
     // sales/blank (the common blanks and sales pages) never retries, so cost is unaffected there.
     let setAsideRetry: {kind: string; confidence: number} | null = null;
     if (templateReadEnabled(companyId) && shouldRetrySetAside(cls.kind, cls.confidence)) {
-      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64));
+      const retry = await withHeartbeat(emit, {type: 'stage', stage: 'detecting'}, () => classifyPage(pdfBase64, headerCrops));
       if (isInventoryPage(retry) || retry.confidence > cls.confidence) {
         setAsideRetry = {kind: cls.kind, confidence: cls.confidence};
         cls = retry;
@@ -159,7 +162,7 @@ export async function runInventoryRead(args: {
     }
     const snap = snapStoreWithName(cls.store_code, cls.store_name, registry);
     rec.storeCode = snap.code;
-    rec.detail = {classify: cls, snap, ...(setAsideRetry ? {setAsideRetry} : {})};
+    rec.detail = {classify: cls, snap, headerCrops: Boolean(headerCrops?.length), ...(setAsideRetry ? {setAsideRetry} : {})};
     const inv = isInventoryPage(cls);
     const pk = inv
       ? buildPageKey({store_code: snap.code, period_start: cls.period_start, period_end: cls.period_end, version: cls.version, page})

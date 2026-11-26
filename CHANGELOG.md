@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Sharp header crops for the store code (flagged, Nov 26)
+
+The classifier reads the handwritten header (store code, store name, period, BA) off a ~90 dpi page, so codes came back misread or blank (2414 as 2494/2419, 481 as 81, 1216 as 121, 317 blank). Behind `GOLDLINE_HEADER_CROP_COMPANIES`, the classify call also gets 300 dpi crops of the page's top and bottom edges (the bottom turned upright, since many scans are upside down) and is told to read the header from them.
+- **Measured before building** (55 inventory pages of the Nov 26 staging run, same prompt with and without crops): store code right on **24 vs 15** pages (Pulilan 5/5 vs 2/5, Lanang 5/5 vs 2/5, Tarlac 5/5 vs 4/5), at **~6.4k more input tokens per page** (+0.35M input, −9.5k output over 55 pages), estimated **+$1.6 per 98-page scan**. Pages with no code written (SM San Fernando) still rely on the name match.
+- **Decided (owner):** ship flagged, turn on for staging, and measure the real cost on a re-upload before any prod decision. Each read log records `headerCrops: true|false` for the comparison.
+
 ## Unreleased — Upload panel keeps every scan of a multi-scan upload (Nov 26)
 
 Dropping two scans showed only the second ("Scan2026-11-20_115129.pdf, 30 pages") once it started: each scan's server batch replaced the panel's list, while the first kept reading unseen. The panel now keeps a compact row per earlier scan ("Scan 1 of 2 · 30 of 35 read · 5 set aside", Open), polled until it settles; the heading says "2 scans" and the status line names the scan the full row is for.
