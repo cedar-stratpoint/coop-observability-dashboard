@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — PawSport filter on Event leads (RET-18 P1b)
+
+Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
+- **Filter PawSport: All / Has · n / None · n / Can't tell · n** beside Status on `/customers/leads`. It combines with every other filter, resets the page, and the CSV and Copy buttons follow it; Status and PawSport each count over the other's choice.
+- **Decided: Can't tell, never None, when we can't know.** Shopify unread or cut off, or a lead with no usable email or mobile (Instagram-only, most booth leads) reads Can't tell. None = has an email or mobile, Shopify read in full, no holder matches. When Shopify is unread the filter is disabled ("Unavailable") and counts as All, like the Website CRM.
+- **Reuse:** the Website CRM's helpers in `src/pawsport.ts` gain an optional `matchable` argument on `pawsportState`, `pawsportMatchable` and `countPawsportStates` (the CRM view now uses it too); the page passes the read status as the Website CRM page does.
+
 ## Unreleased — Ask Coop reads PawSport and the team's contact status (RET-18 P2)
 
 Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who replied this week?": the contact log (RET-17) and PawSport (P1) were page-only. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P2.

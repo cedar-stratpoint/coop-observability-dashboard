@@ -151,7 +151,7 @@ import {deleteCohort} from '@/src/customer-cohorts-actions';
 import {refreshCrm} from '@/src/crm-actions';
 import {unlinkPeople} from '@/src/customer-links-actions';
 import {boothCell, boothText, instagramState, matchesInstagramFilter, type CustomerBooth, type InstagramFilter} from '@/src/customer-links';
-import {ROUTE_LABEL, matchesPawsportFilter, pawsportState, petText, type PawsportBadge, type PawsportFilter, type PawsportRead} from '@/src/pawsport';
+import {ROUTE_LABEL, countPawsportStates, matchesPawsportFilter, pawsportState, petText, type PawsportBadge, type PawsportFilter, type PawsportRead} from '@/src/pawsport';
 import type {CrmCheckout, CrmCustomer, CrmMembershipConfig, CrmMetrics, CrmOrder} from '@/src/crm-types';
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -693,11 +693,7 @@ export function CrmView({
     return customerSort === null ? listed : sortRows(listed, customerSort, CUSTOMER_SORT);
   }, [all, customerFilter, needle, preset, savedCohort, ruleBuiltin, nowDate, customerSort, igFilter, booth, boothRead, psEffective, pawsport, pawsportRead]);
   const igCount = useMemo(() => all.filter((r) => instagramState(booth[(r.email ?? '').trim().toLowerCase()], boothRead) === 'has').length, [all, booth, boothRead]);
-  const psCounts = useMemo(() => {
-    const n = {has: 0, none: 0, unknown: 0};
-    for (const r of all) n[pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)] += 1;
-    return n;
-  }, [all, pawsport, pawsportRead]);
+  const psCounts = useMemo(() => countPawsportStates(all, (r) => pawsportState(pawsport[r.shopifyCustomerId], pawsportRead)), [all, pawsport, pawsportRead]);
   // The cohort bar: everyone in the selected cohort (search and the other filters aside), their repeat buyer rate and the rule.
   const cohortBar = useMemo(() => {
     if (!cohortOn) return null;

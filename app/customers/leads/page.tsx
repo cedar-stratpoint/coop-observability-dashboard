@@ -75,7 +75,7 @@ export default async function Page() {
         </div>
         <LeadsUpdateButton />
       </header>
-      <LeadsView leads={leads} matches={matches} vouchers={vouchers} passports={passports} statuses={statuses} histories={histories} legacy={read.legacy} logRead={contacts !== null} viewer={viewer} />
+      <LeadsView leads={leads} matches={matches} vouchers={vouchers} passports={passports} pawsportRead={{status: pawsport.status, incomplete: pawsport.incomplete ?? false}} statuses={statuses} histories={histories} legacy={read.legacy} logRead={contacts !== null} viewer={viewer} />
     </div>
   );
 }
