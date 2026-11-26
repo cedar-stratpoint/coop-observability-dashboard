@@ -49,7 +49,7 @@ import {
   type DeliveryLocatorOutput,
 } from './goldline-anchored-extract';
 import type {FormTemplate} from './goldline-form-template';
-import type {PageBlock} from './goldline-page-bands';
+import {HEADER_CROPS_NOTE, type PageBlock} from './goldline-page-bands';
 import {readMarksEnabled, readP1Enabled, readUnsureEnabled} from './goldline-anchored-flag';
 
 // The live Claude Vision call for one scanned inventory page. Server-only; reads
@@ -417,7 +417,7 @@ export async function detectPage(pdfBase64: string): Promise<number> {
  * and never throws on a bad read: sanitizeClassification coerces to 'unknown'/null so
  * the page still groups (and gets flagged) instead of sinking the batch.
  */
-export async function classifyPage(pdfBase64: string): Promise<PageClassification> {
+export async function classifyPage(pdfBase64: string, headerCrops?: PageBlock[] | null): Promise<PageClassification> {
   if (!extractionConfigured()) throw new Error('GOLDLINE_ANTHROPIC_API_KEY is not set');
   const pageBlock = await cheapPageBlock(pdfBase64);
   const params = {
@@ -429,7 +429,16 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
     system: cheapSystem(buildPageClassifyPrompt()),
     output_config: {format: {type: 'json_schema', schema: PAGE_CLASSIFY_SCHEMA}},
     // A document-only user turn is rejected (400); always pair the PDF with text.
-    messages: [{role: 'user', content: [pageBlock, {type: 'text', text: 'Classify this page. Return JSON only.'}]}],
+    // Header crops (GOLDLINE_HEADER_CROP_COMPANIES): sharp 300 dpi top/bottom edges after the page,
+    // so the handwritten store code and name are read from a legible image. Absent = as before.
+    messages: [
+      {
+        role: 'user',
+        content: headerCrops?.length
+          ? [pageBlock, ...headerCrops, {type: 'text', text: `${HEADER_CROPS_NOTE}\nClassify this page. Return JSON only.`}]
+          : [pageBlock, {type: 'text', text: 'Classify this page. Return JSON only.'}],
+      },
+    ],
   };
   // Same 20s budget as detectPage — it replaces detect in the Phase 0 path, so the
   // request timeout math (classify + extract < route maxDuration) is unchanged.
@@ -438,7 +447,7 @@ export async function classifyPage(pdfBase64: string): Promise<PageClassificatio
   // kind/version unknown, confidence 0), so ONE unreadable page is flagged for manual
   // placement instead of sinking the whole bundle.
   try {
-    return sanitizeClassification(await visionJson(params, {timeout: 20_000}));
+    return sanitizeClassification(await visionJson(params, {timeout: headerCrops?.length ? 30_000 : 20_000}));
   } catch {
     return sanitizeClassification({});
   }
