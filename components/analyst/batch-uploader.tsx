@@ -4,7 +4,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import Link from 'next/link';
 import {AlertDialog} from '@base-ui/react/alert-dialog';
 import {AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Sparkles, Trash2, Upload, X} from 'lucide-react';
-import {useUploadQueue, type QueueItem, type ServerBatchState} from '@/components/analyst/upload-queue';
+import {useUploadQueue, type PriorScan, type QueueItem, type ServerBatchState} from '@/components/analyst/upload-queue';
 import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, summarize, uploadStatus, uploadType, CATEGORY_LABEL, type ItemCategory, type QueueGroup, type UploadStatusFacet, type UploadType} from '@/components/analyst/upload-queue-format';
 import {batchCoverage, FORM_PAGES, groupForms, isSingleFormUpload, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
@@ -156,7 +156,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-semibold">{serverUploading ? ((q.serverRun?.length ?? 1) > 1 ? `Uploading ${q.serverRun!.length} scans` : 'Uploading scan') : !hasItems ? 'Add files' : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
+            <h2 className="font-heading text-base font-semibold">{serverUploading ? ((q.serverRun?.length ?? 1) > 1 ? `Uploading ${q.serverRun!.length} scans` : 'Uploading scan') : !hasItems ? 'Add files' : (q.serverRun?.length ?? 1) > 1 ? `${q.serverRun!.length} scans` : q.forms ? `${q.forms.filter((f) => !f.unsorted).length} forms in this scan` : manyForms ? 'Several forms in this scan' : 'This store’s form'}</h2>
             <p className="text-xs text-muted-foreground">
               {serverUploading ? (
                 sb!.phase === 'uploading'
@@ -168,7 +168,7 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
                     : 'Uploaded. Reading starts in a moment…'
               ) : hasItems ? (
                 busy ? (
-                  `Reading ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
+                  `${sb?.part && sb.part.total > 1 ? `Scan ${sb.part.index} of ${sb.part.total}: reading` : 'Reading'} ${s.done} of ${s.total} done${left ? ` · ${left}` : ''}. You can keep working; progress follows you.`
                 ) : (
                   // Colour-coded so the split reads on first glance: green for what came
                   // through, neutral for pages set aside (sales/blank), red only for real
@@ -389,6 +389,13 @@ export function BatchUploader({canEdit, configured, stores}: {canEdit: boolean; 
             </>
             )}
 
+            {q.priorScans.length > 0 && (
+              <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Earlier scans in this upload">
+                {q.priorScans.map((p, i) => (
+                  <PriorScanRow key={p.batchId} p={p} index={i + 1} total={q.serverRun?.length ?? q.priorScans.length + 1} />
+                ))}
+              </ul>
+            )}
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Files in this batch">
               {groupQueueItems(q.items, now).map((g) =>
                 g.isSplit ? (
@@ -1055,5 +1062,35 @@ function FormsPanel({forms, splitting, busy, stores}: {forms: SplitForm[] | null
         </div>
       )}
     </div>
+  );
+}
+
+/** A compact row for an earlier scan of a multi-scan upload: it keeps reading on the server after
+ *  the next scan starts, so the panel keeps showing it (Nov 26: a 2-scan drop showed only the
+ *  second). Links to that scan's own page once its pages exist. */
+function PriorScanRow({p, index, total}: {p: PriorScan; index: number; total: number}) {
+  const href = p.source ? `/uploads/scan/${encodeURIComponent(p.source)}?batch=${encodeURIComponent(p.batchId)}` : null;
+  const counts = p.total === 0 ? 'Splitting into pages…' : `${p.read} of ${p.total} read${p.setAside ? ` · ${p.setAside} set aside` : ''}${p.failed ? ` · ${p.failed} failed` : ''}`;
+  return (
+    <li className="flex items-center gap-3 px-4 py-3">
+      <FileTypeBadge filename={p.name} />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium">{p.name}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          Scan {index} of {total} · {counts}
+        </span>
+      </div>
+      {p.settled ? (
+        <Check className="size-4 shrink-0" style={{color: 'var(--status-good)'}} aria-label="All pages read" />
+      ) : (
+        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Reading" />
+      )}
+      {href && (
+        <Link href={href} className={cn(buttonVariants({variant: 'ghost', size: 'sm'}), 'shrink-0')}>
+          Open
+          <ArrowRight className="size-3.5" aria-hidden />
+        </Link>
+      )}
+    </li>
   );
 }
