@@ -10,6 +10,29 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.28.0: PawSport on the Website CRM, Event leads and in Ask Coop; Ask Coop reads contact status
+
+PROD release of our own changes only (cherry-picked onto main after v1.27.2): RET-18 P1 (#815) and P2 (#817). Checked on coop-cedar-staging 2026-11-26: PawSport column + filter, drawer chips, and "unknown, not zero" answers render; staging's CRM answers every Shopify query with HTTP 502 (Ask Coop's existing `shopify_query` too), so real PawSport data could not be read there. Owner chose to release and check the data on PROD ("1 na lang"). `test/chat-flexible-tools-prompt.test.ts` is develop-only, so its budget bump is not in this release.
+
+## 2026-11-26 — Ask Coop reads PawSport and the team's contact status (RET-18 P2)
+
+Ask Coop could not answer "which PawSport holders haven't we contacted?" or "who replied this week?": the contact log (RET-17) and PawSport (P1) were page-only. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P2.
+- **One read, two tools:** a new server seam `app/api/chat/people-seam.ts` reuses the Website CRM page's reads (contact log, Same person links, PawSport holders; the log's note and author never leave it). `src/chat/contacts/status.ts` turns them into the same four columns everywhere: `contact_status`, `team_last_contacted` (PH day), `replied`, `pawsport` (yes / no / unknown).
+- **`list_crm_customers`** gains `contact_status`, `has_pawsport`, `contacted_since` filters and the columns; the **`contacts`** tool gains **mode people** (everyone, or one source: website / booth / lazada) with the same filters, and its list_leads / find / overlap rows carry the columns too.
+- **Decided: "contacted" = logged by the team** (RET-17 D1). Automated emails (cart reminder, Leave a review email, …) never count; they stay in the existing `last_contacted` / `emails_sent` columns. The log keeps no reply time, so "replied this week" = a replied contact logged this week (`contacted_since`).
+- **Unknown is never "never":** an unreadable (or pre-SQL, for someone without an email) log reads `unknown`, never `not_contacted`; Shopify unread or a cut-off list reads PawSport `unknown`, never `no`; an unknown person matches only the "unknown" filter.
+- **D3 identity rule:** the yes/no and the holder total ("Shopify has N PawSport holders in all") are for everyone; the passport number and pet (`pawsport_detail`) only for viewers on `EXPLORE_ALLOWED_EMAILS` (the contacts tool is allowlist-only; `list_crm_customers` adds the column only for them).
+- **Review fixes:** a draft after a filtered list takes the same filters, so per_lead row numbers and template recipients are that list's (the filter now lives in `selectLeads`); unread Same person links turn every would-be "not contacted" into unknown (contacted / replied stay); Ask Coop's PawSport read starts beside the CRM reads and has its own 12 s budget, then reads unknown with a note (the pages are unchanged); with `contacted_since`, "contacted" includes those who replied; `contacted_since` must be a real day and is refused with not_contacted / unknown; a no-match answer names every unread source.
+- **Drawer chips:** "Not contacted yet" and "PawSport holders not contacted yet". Skill topic `contacts.md`: PawSport = pet passport = raffle entry, status words, unknown is not never. Prompt budgets re-recorded (explore skill 7,724 tokens, cached Explore prompt 14,556).
+## 2026-11-26 — PawSport on the Website CRM and Event leads (RET-18 P1)
+
+PawSports live only in Shopify (customer metafield `custom.pet_passport` + tags), so Coop could not say who holds one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`.
+- **Decided (D1 = A): read Shopify through the CRM's existing read-only door** (`POST /api/shopify/query`, the read token, server-side), reusing Ask Coop's `postShopify` client: no new Shopify app, no new secret, no copy of the data. One fixed query walks ALL customers (no tag search, so a holder whose tag is missing is still found), 100 a page, at most 10 pages (~209 on PROD = 3); a cut-off list (page cap, or more pages but no cursor) marks misses Unknown and the filter shows their count. Cached 10 minutes, refreshed by the page's Refresh; a failed read is not cached.
+- **Decided (D2): a holder is a metafield with a number;** the tag is the fallback (tagged but no or unreadable metafield = holder with no number, plus a warning; bad JSON never breaks the page). Route: `pawsport-qr` = QR, `join-now` = Form, neither = Account.
+- **Website CRM:** a **PawSport** column (number, pet, QR / Form / Account chip), a **PawSport: All / Has / None** filter with counts, and a profile line "PawSport ZMY26-… · Mimi (cat) · joined via QR, Nov 12". Matched on the server by Shopify id, then email, then mobile (RET-17 rules: one phone with two different emails is two people).
+- **Event leads:** a **PawSport** chip on a lead who is the same person as a holder (RET-17 `samePerson`).
+- **Unknown is never "None":** when Shopify can't be read the column says "Unavailable", the filter is disabled (and a filter chosen earlier stops applying) and the profile says "PawSport unavailable". Only each person's passport reaches the browser, never the holders' emails or phones.
+- Not in this change: Ask Coop reading PawSport (P2).
 ## 2026-11-25 — Release v1.27.2: the Same person button looks like a button
 
 Owner: "di kasi mukhang button". The Same person link (Ask Coop matches table) is now a filled button with a link icon, hover and press states; a saved link shows as a green Linked chip. Was PR #780 (v1.26.16), which went stale behind v1.27.0 / v1.27.1 and is re-cut on top of main.

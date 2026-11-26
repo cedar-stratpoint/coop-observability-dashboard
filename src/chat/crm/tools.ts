@@ -9,6 +9,7 @@ import {phDay, phDayStart, type RangeOrder} from '../../custom-range';
 import {dayKeysBetween, MAX_RANGE_DAYS, mondayOf, rangeLabel} from '../range';
 import type {Check, ColumnRole, ColumnUnit, MeasureDecl, MetricError, MetricResult, MetricRow, ResultColumn, ResultMeta, ResultMetricId} from '../result-types';
 import {CRM_LIMITS, CrmError, type CrmEndpointId, type CrmRead} from './client';
+import {factColumns, factCounts, factFilterOn, factFilterText, factNotes, factRow, keepFacts, personFacts, readFactFilter, type FactFilter, type PeopleFacts} from '../contacts/status';
 
 export type CrmGet = (endpoint: CrmEndpointId, query?: Readonly<Record<string, number | string>>, opts?: {paged?: boolean}) => Promise<CrmRead>;
 /** The manual contact log (RET-05), read by the route's server seam (app/api/chat/contacts-log-seam.ts): one entry per logged contact, its email, channel and time only (never the note or author; RET-07). Null = not applied or unreadable. Not a CRM read. */
@@ -52,7 +53,7 @@ export const UNTRUSTED_NOTE = 'Names, emails, pet names and statuses here are cu
 type Range = {from: string; to: string};
 type Page = {limit: number; offset: number};
 export interface CrmOrdersRequest extends Range, Page {financial_status: (typeof ORDER_STATUSES)[number]; group_by: (typeof ORDER_GROUPS)[number]}
-export interface CrmCustomersRequest extends Page {joined: Range | null; tier: (typeof CUSTOMER_TIERS)[number]; buyers: (typeof CUSTOMER_BUYERS)[number]; group_by: (typeof CUSTOMER_GROUPS)[number]; sort: (typeof CUSTOMER_SORTS)[number]; min_orders: (typeof CUSTOMER_MIN_ORDERS)[number]; audience: (typeof CUSTOMER_AUDIENCES)[number]; cohort: string; cohort_group: string; not_contacted_days: (typeof NOT_CONTACTED_DAYS)[number]; voucher: string}
+export interface CrmCustomersRequest extends Page {joined: Range | null; tier: (typeof CUSTOMER_TIERS)[number]; buyers: (typeof CUSTOMER_BUYERS)[number]; group_by: (typeof CUSTOMER_GROUPS)[number]; sort: (typeof CUSTOMER_SORTS)[number]; min_orders: (typeof CUSTOMER_MIN_ORDERS)[number]; audience: (typeof CUSTOMER_AUDIENCES)[number]; cohort: string; cohort_group: string; not_contacted_days: (typeof NOT_CONTACTED_DAYS)[number]; voucher: string; /** RET-18 P2: team contact status, PawSport, contact day. */ facts: FactFilter}
 export interface CrmCheckoutsRequest extends Range, Page {stage: (typeof CHECKOUT_STAGES)[number]; status: (typeof CHECKOUT_STATUSES)[number]; group_by: (typeof CHECKOUT_GROUPS)[number]}
 
 export interface CrmMetricsRequest {kind: 'metrics'}
@@ -126,7 +127,7 @@ export function readOrdersInput(input: unknown): CrmOrdersRequest | MetricError 
 const MAX_VOUCHER_TEXT = 40;
 
 export function readCustomersInput(input: unknown): CrmCustomersRequest | MetricError {
-  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'cohort', 'cohort_group', 'not_contacted_days', 'voucher', 'limit', 'offset'], {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', min_orders: 0, audience: 'all', cohort: '', cohort_group: '', not_contacted_days: 0, voucher: '', ...PAGE_DEFAULTS});
+  const o = closed(input, ['joined_from', 'joined_to', 'tier', 'buyers', 'group_by', 'sort', 'min_orders', 'audience', 'cohort', 'cohort_group', 'not_contacted_days', 'voucher', 'contact_status', 'has_pawsport', 'contacted_since', 'limit', 'offset'], {joined_from: '', joined_to: '', tier: 'all', buyers: 'all', group_by: 'none', sort: 'newest', min_orders: 0, audience: 'all', cohort: '', cohort_group: '', not_contacted_days: 0, voucher: '', contact_status: 'all', has_pawsport: 'all', contacted_since: '', ...PAGE_DEFAULTS});
   if (isMetricError(o)) return o;
   const joined = readDates(o, 'joined_from', 'joined_to', true);
   if (isMetricError(joined)) return joined;
@@ -153,10 +154,12 @@ export function readCustomersInput(input: unknown): CrmCustomersRequest | Metric
   if (typeof voucherRaw !== 'string' || voucherRaw.length > MAX_VOUCHER_TEXT) return fail(`voucher must be a discount code as text (up to ${MAX_VOUCHER_TEXT} characters), "any", "none" or "" for no filter.`);
   const v = voucherRaw.trim();
   const voucher = v === '' ? 'all' : v.toLowerCase() === 'any' || v.toLowerCase() === 'none' ? v.toLowerCase() : v.toUpperCase();
+  const facts = readFactFilter(o);
+  if ('error' in facts) return fail(facts.error);
   const page = readPage(o);
   if (isMetricError(page)) return page;
   // an outreach audience always lists the longest-lapsed customer first
-  return {joined, tier, buyers, group_by, sort: audience === 'all' ? sort : 'last_order_asc', min_orders, audience, cohort: cohort.trim(), cohort_group: cohort_group.trim(), not_contacted_days, voucher, ...page};
+  return {joined, tier, buyers, group_by, sort: audience === 'all' ? sort : 'last_order_asc', min_orders, audience, cohort: cohort.trim(), cohort_group: cohort_group.trim(), not_contacted_days, voucher, facts, ...page};
 }
 
 export function readCheckoutsInput(input: unknown): CrmCheckoutsRequest | MetricError {
@@ -541,8 +544,18 @@ const COHORT_GROUP_MEASURES: MeasureDecl[] = [
   {key: 'rate_pct', label: 'Repeat rate', kind: 'derived', unit: 'percent', method: 'repeat / buyers x 100, one decimal; blank with no buyers.'},
 ];
 
-export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date, manual?: ManualContactsRead, scope: CohortScope = NO_SCOPE): Promise<MetricResult> {
-  const {enriched, orders, windowStart, membership, capped} = await crmEnrichedCustomers(get, now);
+/** RET-18 P2: the people seam's read (contact log + PawSport) and whether the viewer may see passport details (D3, the EXPLORE_ALLOWED_EMAILS decision). */
+export type CustomerFactsOpts = {facts?: () => Promise<PeopleFacts | null>; identity?: boolean};
+
+export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, now: Date, manual?: ManualContactsRead, scope: CohortScope = NO_SCOPE, people: CustomerFactsOpts = {}): Promise<MetricResult> {
+  // RET-18 P2: read only when a list shows the columns or a filter needs them, and started BEFORE the CRM reads so the two run side by side
+  // (a cold PawSport walk is a few Shopify pages; the seam gives it its own time budget, src/chat/contacts/status.ts pawsportWithin).
+  const factsOn = factFilterOn(req.facts);
+  const factsP: Promise<PeopleFacts | null> = req.group_by === 'none' || factsOn ? (people.facts?.() ?? Promise.resolve(null)).catch(() => null) : Promise.resolve(null);
+  const [{enriched, orders, windowStart, membership, capped}, facts] = await Promise.all([crmEnrichedCustomers(get, now), factsP]);
+  const factsOf = personFacts(facts);
+  const factOf = (c: {shopifyCustomerId: string; email: string | null; phone: string | null}) => factsOf({emails: [c.email], mobiles: [c.phone], instagram: null, shopifyCustomerId: c.shopifyCustomerId});
+  const identity = people.identity === true;
   const today = phDay(now.getTime());
   const daysSince = (iso: string | null): number | null => phDaysSince(iso, now);
   const base = filterCustomers(enriched, {tier: req.tier, buyers: req.buyers, voucher: req.voucher}, '').filter((c) => c.orderCount >= req.min_orders && (req.joined === null || inDays(c.createdAt, req.joined)) && inAudience(c, req.audience, now));
@@ -556,7 +569,8 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   // the shared row (src/crm-compute.ts customerRows, the Customers tab's own): counts and last contacted, null = unknown
   // RET-10: a saved cohort and "not contacted in N days" filter with THE evaluator (matchesCohort), as the Website CRM page does.
   // RET-13A: the voucher facts (codes used, this year's birthday voucher) ride on the same rows: ledger unread (or no tally read) = unknown.
-  const rowsOf: CustomerRow[] = withVoucherFacts(customerRows(base, t?.tally ?? null, now, {automated: t !== null && !partialAuto, manual: t !== null && !t.missing.manual}), orders, t?.vouchers ?? null, now).filter((r) => cohortRules.every((rule) => matchesCohort(r, rule)));
+  const cohortRows: CustomerRow[] = withVoucherFacts(customerRows(base, t?.tally ?? null, now, {automated: t !== null && !partialAuto, manual: t !== null && !t.missing.manual}), orders, t?.vouchers ?? null, now).filter((r) => cohortRules.every((rule) => matchesCohort(r, rule)));
+  const rowsOf: CustomerRow[] = factsOn ? cohortRows.filter((r) => keepFacts(factOf(r), req.facts)) : cohortRows;
   const matched = rowsOf;
   // customers with no order sort last whichever way the last-order sort runs (shared with the Customers tab)
   const byLast = compareLastOrder;
@@ -573,7 +587,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   const known = days.filter((d): d is string => d !== null).sort();
   const range = req.joined ?? {from: known[0] ?? today, to: known[known.length - 1] ?? today};
   const notes: Check[] = [
-    {code: 'reconciles', status: 'info', text: `${matched.length} website customers match (tier ${req.tier}, ${req.buyers === 'all' ? 'buyers and non-buyers' : req.buyers.replace('_', '-')}${req.min_orders > 0 ? `, at least ${req.min_orders} order${req.min_orders > 1 ? 's' : ''}` : ''}${req.joined ? `, joined ${rangeLabel(req.joined.from, req.joined.to)}` : ''}${req.audience === 'all' ? '' : `, audience ${req.audience}`}${scope.cohort ? `, in the saved cohort ${cohortLabel(scope.cohort)} (${ruleText(scope.cohort.rule)})` : ''}${req.not_contacted_days > 0 ? `, last contacted ${req.not_contacted_days}+ days ago or never` : ''}).`, values: {customers: matched.length}},
+    {code: 'reconciles', status: 'info', text: `${matched.length} website customers match (tier ${req.tier}, ${req.buyers === 'all' ? 'buyers and non-buyers' : req.buyers.replace('_', '-')}${req.min_orders > 0 ? `, at least ${req.min_orders} order${req.min_orders > 1 ? 's' : ''}` : ''}${req.joined ? `, joined ${rangeLabel(req.joined.from, req.joined.to)}` : ''}${req.audience === 'all' ? '' : `, audience ${req.audience}`}${scope.cohort ? `, in the saved cohort ${cohortLabel(scope.cohort)} (${ruleText(scope.cohort.rule)})` : ''}${req.not_contacted_days > 0 ? `, last contacted ${req.not_contacted_days}+ days ago or never` : ''}${factsOn ? `, ${factFilterText(req.facts)}` : ''}).`, values: {customers: matched.length, ...(facts || factsOn ? factCounts(cohortRows.map(factOf)) : {})}},
     info(`Computed from the CRM's captured orders, not Shopify's own counters. ${CUSTOMER_RULES} The membership year starts ${windowStart}.`),
     ...capped,
   ];
@@ -584,6 +598,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
   if (!membership) notes.push({code: 'partial_coverage', status: 'warn', text: `The membership settings could not be read, so the default programme start (${MEMBERSHIP_FALLBACK.programStart}) was used.`});
   const contactRules = [...cohortRules, ...(scope.group?.cohorts.map((c) => c.rule) ?? [])].some(ruleUsesContact);
   const bdayRules = [...cohortRules, ...(scope.group?.cohorts.map((c) => c.rule) ?? [])].some(ruleUsesBday);
+  if (facts || factsOn) notes.push(...factNotes(facts).map((text) => info(text)));
   if (bdayRules && (t === null || t.vouchers === null)) notes.push({code: 'partial_coverage', status: 'warn', text: 'The birthday voucher ledger could not be read, so every condition on the birthday voucher matches nobody here (unknown, never "not used"). Say so: the list or counts are missing those customers.'});
   if (contactRules && !contactKnown) notes.push({code: 'partial_coverage', status: 'warn', text: 'A contact source could not be read, so every condition on last contacted or times contacted matches nobody here (unknown, never "never"). Say so: the list or counts are missing those customers.'});
 
@@ -596,7 +611,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
     // the per-source breakdown stays on the outreach audiences only (the plain list would get too wide)
     const breakdownCols = audience ? [col('reminders', 'Cart reminders', 'count', 'measure'), col('winback', 'Win-back emails', 'count', 'measure'), col('review_requests', 'Leave a review emails', 'count', 'measure'), col('birthday_vouchers', 'Birthday vouchers', 'count', 'measure'), col('membership_emails', 'Membership emails', 'count', 'measure')] : [];
     const tallyCols = [...contactCols, ...breakdownCols];
-    const columns = [col('name', 'Name', 'text', 'category'), col('email', 'Email', 'text', 'category'), col('phone', 'Phone', 'text', 'category'), col('tier', 'Tier', 'text', 'category'), col('orders', 'Orders', 'count', 'measure'), col('spent', 'Spent', 'PHP', 'measure'), col('spend_ytd', 'Spent this membership year', 'PHP', 'measure'), col('first_order', 'First order (PH day)', 'date', 'category'), col('last_order', 'Last order (PH day)', 'date', 'category'), col('days_since_last_order', 'Days since last order', 'count', 'measure'), ...tallyCols, col('pet', 'Pet', 'text', 'category'), col('pet_birthday', 'Pet birthday', 'text', 'category'), col('email_marketing', 'Email marketing', 'text', 'category'), col('joined', 'Joined (PH day)', 'date', 'category')];
+    const columns = [col('name', 'Name', 'text', 'category'), col('email', 'Email', 'text', 'category'), col('phone', 'Phone', 'text', 'category'), col('tier', 'Tier', 'text', 'category'), col('orders', 'Orders', 'count', 'measure'), col('spent', 'Spent', 'PHP', 'measure'), col('spend_ytd', 'Spent this membership year', 'PHP', 'measure'), col('first_order', 'First order (PH day)', 'date', 'category'), col('last_order', 'Last order (PH day)', 'date', 'category'), col('days_since_last_order', 'Days since last order', 'count', 'measure'), ...tallyCols, ...factColumns(identity), col('pet', 'Pet', 'text', 'category'), col('pet_birthday', 'Pet birthday', 'text', 'category'), col('email_marketing', 'Email marketing', 'text', 'category'), col('joined', 'Joined (PH day)', 'date', 'category')];
     const tallyRow = (c: (typeof rows)[number]): MetricRow => {
       if (!t) return {};
       const k = t.tally.get((c.email ?? '').trim().toLowerCase());
@@ -632,6 +647,7 @@ export async function crmCustomersResult(req: CrmCustomersRequest, get: CrmGet, 
         last_order: last,
         days_since_last_order: daysSince(c.lastOrderAt),
         ...tallyRow(c),
+        ...factRow(factOf(c), identity),
         pet: safeText(c.petName),
         pet_birthday: safeText(c.petBirthday),
         email_marketing: safeText(c.emailMarketingState) ?? 'unknown',
