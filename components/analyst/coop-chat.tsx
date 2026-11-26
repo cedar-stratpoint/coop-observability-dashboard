@@ -43,6 +43,9 @@ const SUGGESTIONS = [
   'What should I prioritize?',
   'Compare Shopee and Lazada ad spend.',
   'Which products are driving revenue?',
+  // RET-18 P2: the team's contact status and PawSport
+  'Not contacted yet',
+  'PawSport holders not contacted yet',
 ];
 // Home screen: no period loaded yet, so orient the user instead.
 const HOME_SUGGESTIONS = [
