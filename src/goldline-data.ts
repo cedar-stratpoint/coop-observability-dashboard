@@ -12,7 +12,7 @@ import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, isRealForm, 
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {formConsultants} from './goldline-ba-reconcile';
 import {knownStores} from './goldline-store-registry';
-import {uploadSource, distinctPages, pagesByStatus, pageNeed} from './goldline-upload-groups';
+import {uploadSource, distinctPages, pagesByStatus, pageNeed, storesFromForm} from './goldline-upload-groups';
 import {scanPosition, splitName} from './upload-batch';
 import {getGlCatalog, getGlStores, glTags} from './goldline-ref-data';
 
@@ -995,19 +995,24 @@ export function listUploads(companyId: string): Promise<UploadRow[]> {
         supa
           .from('uploads')
           .select(
-            'id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,form_version,page_kind,orientation,cls_store:classification->>store_code,cls_name:classification->>store_name,cls_start:classification->>period_start',
+            'id,company_id,kind,filename,status,page_count,reject_reason,uploaded_by,created_at,storage_path,batch_id,batch_name,page_no,form_version,page_kind,orientation,cls_store:classification->>store_code,cls_name:classification->>store_name,cls_start:classification->>period_start',
           )
           .eq('company_id', companyId)
           .order('created_at', {ascending: false})
           .order('id', {ascending: true})
           .range(from, to),
-      )) as unknown as Array<UploadRow & {cls_store?: string | null; cls_name?: string | null; cls_start?: string | null}>;
-      return rows.map(({cls_store, cls_name, cls_start, ...u}): UploadRow =>
+      )) as unknown as Array<UploadRow & {page_no?: number | null; cls_store?: string | null; cls_name?: string | null; cls_start?: string | null}>;
+      // Pages filed under the store their own form read, as the scan board files them (Nov 26).
+      const fromForm = storesFromForm(
+        rows.map((r) => ({id: r.id, filename: r.filename, batch_id: r.batch_id ?? null, status: r.status, page_no: r.page_no ?? null, page_kind: r.page_kind ?? null, form_version: r.form_version ?? null, readStore: r.cls_store, readName: r.cls_name, readStart: r.cls_start})),
+        known,
+      );
+      return rows.map(({cls_store, cls_name, cls_start, page_no: _pageNo, ...u}): UploadRow =>
         u.batch_id
           ? {
               ...u,
               drop_id: drops.get(u.batch_id) ?? u.batch_id,
-              needs: pageNeed({status: u.status, batchHasStore: hasStore.has(u.batch_id), readStore: cls_store, readName: cls_name, readStart: cls_start}, known),
+              needs: pageNeed({status: u.status, batchHasStore: hasStore.has(u.batch_id), readStore: cls_store, readName: cls_name, readStart: cls_start ?? fromForm.get(u.id)?.periodStart ?? null, storeFromForm: fromForm.get(u.id)?.store ?? false}, known),
             }
           : u,
       );

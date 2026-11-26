@@ -87,3 +87,18 @@ describe('storeCheckNote from_form', () => {
     expect(n?.text).not.toMatch(/[–—]/);
   });
 });
+
+describe('inheritFormStores: one period per form', () => {
+  it('pages with no period take the one most of the form read; a tie fills nothing', () => {
+    const a = page(f(13), 1, {code: '1334', status: 'exact'});
+    const b = {...page(f(14), 2, missing), period_start: null, period_end: null};
+    const out = inheritFormStores([a, b], at);
+    expect(out[1]).toMatchObject({period_start: '2026-10-16', period_end: '2026-10-31', period_from_form: true});
+    const c = {...page(f(15), 3, missing), period_start: '2026-11-01', period_end: '2026-11-15'};
+    const d = {...page(f(16), 4, missing), period_start: null, period_end: null};
+    const out2 = inheritFormStores([a, c, d], at); // 1 vs 1: a tie
+    expect(out2[2].period_start).toBeNull();
+    const e = page(f(17), 5, missing); // a second 2026-10-16 read breaks the tie
+    expect(inheritFormStores([a, c, d, e], at)[2].period_start).toBe('2026-10-16');
+  });
+});
