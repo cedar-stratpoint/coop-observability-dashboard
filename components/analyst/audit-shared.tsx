@@ -12,6 +12,7 @@ import {cn} from '@/lib/utils';
 import {AUDIT_META, MATRIX_STATES, NEEDS_ACTION, RECO_LETTERS, RECO_META, WHY_LABEL, WHY_ORDER, type AuditState, type AuditSummary, type Leg, type RecoLetter, type WhyUnknown} from '@/src/goldline-audit';
 import type {AuditCoverage, PoLeg} from '@/src/goldline-audit-data';
 import {InfoTip} from '@/components/analyst/info-tip';
+import {Tooltip} from '@base-ui/react/tooltip';
 
 export const TONE_VAR: Record<(typeof AUDIT_META)[AuditState]['tone'], string> = {
   good: 'var(--status-good)',
@@ -516,43 +517,75 @@ export function Pager({page, pages, total, size, onPage, label}: {page: number; 
 
 const EASE = 'ease-[cubic-bezier(0.23,1,0.32,1)]';
 
-/** Syl's Reco A to D as small letter pills (control row and the pinned bar). The label and
- *  owner are in the tooltip and the table header; the grid below names every group. */
+/** 1 to 3 words per Reco group for the pills; the full name, owner and step are in the hover card. */
+const RECO_SHORT: Record<RecoLetter, string> = {A: 'Retire', B: 'Accounting', C: 'Watsons audit', D: 'Add to form'};
+
+/** Syl's Reco A to D as pills (control row and the pinned bar): a coloured dot, a short name and
+ *  the count. Hovering or focusing one opens a card with what it means: the Reco letter and who
+ *  acts, the full name, and the step. One card opens after a short wait; moving along the row
+ *  swaps cards at once (shared delay, no re-animation). */
 export function RecoPills({summary, active, onPick, size = 'md'}: {summary: AuditSummary; active: RecoLetter | null; onPick: (l: RecoLetter) => void; size?: 'sm' | 'md'}) {
   return (
-    <span role="group" aria-label="Reco A to D" className="flex gap-1.5">
-      {RECO_LETTERS.map((l) => {
-        const m = RECO_META[l];
-        const tone = toneOf(m.states[0]);
-        const on = active === l;
-        const n = summary.letters[l];
-        return (
-          <button
-            key={l}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onPick(l)}
-            title={`Reco ${l} · ${m.label} · ${m.owner}`}
-            aria-label={`Reco ${l}, ${m.label}: ${n.toLocaleString('en-US')}`}
-            className={cn(
-              'inline-flex items-center gap-1.5 border tabular-nums outline-none',
-              size === 'md' ? 'h-10 rounded-xl px-3 text-sm' : 'h-8 rounded-lg px-2 text-xs',
-              'transition-[scale,border-color,background-color] duration-150 active:scale-[0.97] motion-reduce:active:scale-100',
-              EASE,
-              'focus-visible:ring-3 focus-visible:ring-ring/40',
-              on ? 'border-transparent' : 'border-border bg-card [@media(hover:hover)]:hover:border-foreground/25',
-              n === 0 && !on && 'opacity-50',
-            )}
-            style={on ? {background: tint(tone, 16), color: ink(tone), boxShadow: `0 0 0 3px ${tint(tone, 12)}`} : undefined}
-          >
-            <span className="font-mono font-semibold" style={on ? undefined : {color: ink(tone)}}>
-              {l}
-            </span>
-            <span>{n.toLocaleString('en-US')}</span>
-          </button>
-        );
-      })}
-    </span>
+    <Tooltip.Provider delay={250} closeDelay={60}>
+      <span role="group" aria-label="Reco A to D" className="flex flex-wrap gap-1.5">
+        {RECO_LETTERS.map((l) => {
+          const m = RECO_META[l];
+          const tone = toneOf(m.states[0]);
+          const on = active === l;
+          const n = summary.letters[l];
+          return (
+            <Tooltip.Root key={l}>
+              <Tooltip.Trigger
+                render={<button type="button" />}
+                aria-pressed={on}
+                onClick={() => onPick(l)}
+                aria-label={`Reco ${l}, ${m.label}, ${m.owner}: ${n.toLocaleString('en-US')}`}
+                className={cn(
+                  'inline-flex items-center gap-2 border whitespace-nowrap tabular-nums outline-none',
+                  size === 'md' ? 'h-10 rounded-xl pr-3.5 pl-3 text-sm' : 'h-8 rounded-lg px-2.5 text-xs',
+                  'transition-[scale,border-color,background-color,color] duration-150 active:scale-[0.97] motion-reduce:active:scale-100',
+                  EASE,
+                  'focus-visible:ring-3 focus-visible:ring-ring/40',
+                  on ? 'border-transparent' : 'border-border bg-card text-foreground/85 [@media(hover:hover)]:hover:border-foreground/25 [@media(hover:hover)]:hover:bg-muted/50 [@media(hover:hover)]:hover:text-foreground',
+                  n === 0 && !on && 'opacity-50',
+                )}
+                style={on ? {background: tint(tone, 16), color: ink(tone), boxShadow: `0 0 0 3px ${tint(tone, 12)}`} : undefined}
+              >
+                <span aria-hidden className="size-2 shrink-0 rounded-full" style={{background: tone}} />
+                <span className="font-medium">{RECO_SHORT[l]}</span>
+                <span className={cn('font-semibold', !on && 'text-foreground')}>{n.toLocaleString('en-US')}</span>
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="z-50">
+                  <Tooltip.Popup
+                    className={cn(
+                      'w-72 origin-[var(--transform-origin)] rounded-xl border bg-popover px-3.5 py-3 text-popover-foreground',
+                      'shadow-[0_16px_40px_-16px_color-mix(in_oklab,var(--foreground)_35%,transparent)]',
+                      'transition-[opacity,scale] duration-150',
+                      EASE,
+                      'data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[ending-style]:duration-100 data-[instant]:transition-none',
+                      'motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100',
+                    )}
+                  >
+                    <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="grid size-5 place-items-center rounded-md font-mono text-[11px] font-semibold" style={{color: ink(tone), background: tint(tone, 16)}}>
+                        {l}
+                      </span>
+                      Reco {l} · {m.owner === 'Admin' ? 'You' : m.owner}
+                    </p>
+                    <p className="mt-2 text-sm font-medium">{m.label}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{m.action}</p>
+                    <p className="mt-2.5 border-t pt-2 text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground tabular-nums">{n.toLocaleString('en-US')}</span> {n === 1 ? 'line' : 'lines'} this month · click to list {n === 1 ? 'it' : 'them'}
+                    </p>
+                  </Tooltip.Popup>
+                </Tooltip.Positioner>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+          );
+        })}
+      </span>
+    </Tooltip.Provider>
   );
 }
 
@@ -574,7 +607,7 @@ export function NeedsStepStat({n, of, unit, target}: {n: number; of?: number; un
     >
       <span className="flex flex-col items-end">
         <span className="font-heading text-4xl leading-none font-semibold text-primary tabular-nums">{n.toLocaleString('en-US')}</span>
-        <span className="mt-1.5 text-xs text-muted-foreground">
+        <span className="mt-1.5 text-xs whitespace-nowrap text-muted-foreground">
           {of != null ? `of ${of.toLocaleString('en-US')} ${unit} need a step` : `${unit} need a step`}
         </span>
       </span>

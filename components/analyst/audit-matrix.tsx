@@ -151,11 +151,10 @@ export function AuditMatrix({data}: {data: AuditResult}) {
               <MonthPicker months={data.months} value={sel.month} onChange={(month) => setParam('month', month)} />
               {data.coverage.loaded && (
                 <span className="flex items-center gap-2 max-sm:w-full">
-                  <span className="hidden text-xs text-muted-foreground lg:inline">Reco</span>
                   <RecoPills summary={data.summary} active={letter} onPick={(l) => go({reco: letter === l ? null : l, why: null, q: ''})} />
                 </span>
               )}
-              <NeedsStepStat n={data.summary.needsAction} of={data.summary.total} unit={all ? 'store and product pairs' : 'products'} target="recon-table" />
+              <NeedsStepStat n={data.summary.needsAction} of={data.summary.total} unit={all ? 'pairs' : 'products'} target="recon-table" />
             </div>
             <ReconContext po={data.po} month={sel.month} coverage={data.coverage} all={all} summary={data.summary} reasonsOpen={!searching && !letter && state === 'unknown'}>
               <UnknownReasons summary={data.summary} active={!searching && !letter && state === 'unknown'} activeWhy={query.why} onPick={(why) => go({state: 'unknown', reco: null, why, q: ''})} />
