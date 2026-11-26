@@ -5,9 +5,9 @@ import {useRouter} from 'next/navigation';
 import {createBatchAction, serverBatchProgressAction, splitFormsAction, updateBatchInfoAction} from '@/app/uploads/actions';
 import type {SplitForm} from '@/src/goldline-data';
 import {kindOfFile, type Phase, type UploadKindGuess} from '@/src/upload-progress';
-import {MAX_BATCH_FILES, MAX_FILE_BYTES, splitName} from '@/src/upload-batch';
+import {MAX_BATCH_FILES, MAX_FILE_BYTES, scanPosition, splitName} from '@/src/upload-batch';
 import {sendReread, sendUpload, signAndIngestScan, splitPdfPages, type UploadResult, type WatsonsResult} from '@/src/upload-transport';
-import {serverPageState, type ServerPageProgress} from '@/src/server-upload-progress';
+import {serverPageState, tallyServerPages, type ScanTally, type ServerPageProgress} from '@/src/server-upload-progress';
 import {planServerScans} from '@/components/analyst/server-scan-plan';
 
 // The Goldline upload queue. Lives in the app shell (which stays mounted across
@@ -77,6 +77,11 @@ export type ServerBatchState = {
   part?: {index: number; total: number}; // when several PDFs were dropped: this is scan `index` of `total`
 };
 
+/** An earlier scan of a multi-scan upload (Nov 26: the panel used to forget it once the next
+ *  scan started, so a 2-scan drop showed only "Scan…115129.pdf, 30 pages"). It keeps reading on
+ *  the server; the panel keeps a compact row for it, polled until it settles. */
+export type PriorScan = ScanTally & {name: string; batchId: string; source: string | null; settled: boolean};
+
 // How often the browser polls the server batch's page progress while it's reading.
 const SERVER_POLL_MS = 3000;
 // A stand-in File for a server-driven page row: in server mode the client never reads the
@@ -101,6 +106,8 @@ type QueueApi = {
   serverBatch: ServerBatchState | null;
   /** The PDFs in the current server-driven run, in upload order (one entry for a single scan). */
   serverRun: {name: string; size: number}[] | null;
+  /** Earlier scans of the current multi-scan run, still followed after the next scan started. */
+  priorScans: PriorScan[];
   active: number; // queued + running + waiting
   addFiles: (files: File[]) => Promise<void>;
   retry: (id: string) => void;
@@ -146,6 +153,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   // ref lets those effects bail synchronously.
   const [serverBatch, setServerBatch] = useState<ServerBatchState | null>(null);
   const [serverRun, setServerRun] = useState<{name: string; size: number}[] | null>(null);
+  const [priorScans, setPriorScans] = useState<PriorScan[]>([]);
   const serverBatchRef = useRef<ServerBatchState | null>(null);
   serverBatchRef.current = serverBatch;
   // Stamp when each server page first went 'running', so its progress band eases instead of
@@ -391,12 +399,12 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
   }, [items, serverBatch, serverUploadsLeft]);
 
   // Server-driven path: start one whole-scan upload, then let the poll effect watch it.
-  // Returns false when it failed, so a run of several scans stops there.
-  const startServerScan = useCallback(async (file: File, opts?: {name?: string; part?: {index: number; total: number}}): Promise<boolean> => {
+  // Returns the batch id, or null when it failed, so a run of several scans stops there.
+  const startServerScan = useCallback(async (file: File, opts?: {name?: string; part?: {index: number; total: number}}): Promise<string | null> => {
     const company = queueCompany.current;
     if (!company) {
       setNotice('No company in view.');
-      return false;
+      return null;
     }
     const part = opts?.part;
     setForms(null);
@@ -414,12 +422,12 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       setBatch((b) => ({...b, id: batchId}));
       batchRef.current = {...batchRef.current, id: batchId};
       setServerBatch({id: batchId, totalPages: pages, totalBytes: file.size, phase: 'reading', uploadFrac: 1, part});
-      return true;
+      return batchId;
     } catch (e) {
       setServerBatch(null);
       const why = e instanceof Error ? e.message : 'Upload failed. Please try again.';
       setNotice(part && part.total > 1 ? `Scan ${part.index} of ${part.total} (${file.name}): ${why}` : why);
-      return false;
+      return null;
     }
   }, []);
 
@@ -456,6 +464,33 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       } satisfies QueueItem;
     });
   }, []);
+
+  // Poll the earlier scans of a multi-scan run until each settles (the current scan polls below).
+  const openPrior = priorScans.filter((p) => !p.settled).map((p) => p.batchId).join(',');
+  useEffect(() => {
+    if (!openPrior) return;
+    const ids = openPrior.split(',');
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      for (const batchId of ids) {
+        const r = await serverBatchProgressAction({company: queueCompany.current, batchId});
+        if (cancelled) return;
+        if (!r.ok) continue;
+        const t = tallyServerPages(r.progress.pages);
+        const first = r.progress.pages[0]?.filename;
+        setPriorScans((list) =>
+          list.map((p) => (p.batchId === batchId ? {...p, ...t, source: first ? scanPosition(first)?.source ?? first : p.source, settled: r.progress.pages.length > 0 && r.progress.settled} : p)),
+        );
+      }
+      timer = setTimeout(poll, SERVER_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [openPrior]);
 
   // Poll the server batch's page progress while it reads; stop once every page has settled.
   useEffect(() => {
@@ -498,14 +533,20 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
           return;
         }
         setServerRun(files.map((f) => ({name: f.name, size: f.size})));
+        setPriorScans([]);
         if (files.length === 1) {
           await startServerScan(files[0]);
           return;
         }
         for (const [i, f] of files.entries()) {
           const scan = plan.scans[i];
-          const ok = await startServerScan(f, {name: scan.name, part: {index: scan.index, total: scan.total}});
-          if (!ok) return;
+          // The scan before this one keeps reading on the server; keep a row for it before the
+          // panel switches to this scan.
+          const batchId = await startServerScan(f, {name: scan.name, part: {index: scan.index, total: scan.total}});
+          if (!batchId) return;
+          if (i < files.length - 1) {
+            setPriorScans((list) => [...list, {name: f.name, batchId, source: null, settled: false, total: 0, read: 0, setAside: 0, failed: 0, inFlight: 0}]);
+          }
         }
         return;
       }
@@ -586,6 +627,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       serverUpload,
       serverBatch,
       serverRun,
+      priorScans,
       active,
       addFiles,
       retry: (id) => {
@@ -627,6 +669,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
         setForms(null);
         setServerBatch(null);
         setServerRun(null);
+        setPriorScans([]);
         setUploadName('');
         serverStartedAt.current.clear();
         splitFor.current = null;
@@ -637,7 +680,7 @@ export function UploadQueueProvider({company, serverUpload = false, children}: {
       dismissNotice: () => setNotice(null),
     }),
     // company: queueCompany.current follows it whenever the queue is empty.
-    [batch, items, preparing, notice, forms, splitting, serverBatch, serverRun, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
+    [batch, items, preparing, notice, forms, splitting, serverBatch, serverRun, priorScans, serverUpload, active, addFiles, patch, company, uploadName, setUploadName],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
