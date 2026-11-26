@@ -8,6 +8,10 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Upload panel keeps every scan of a multi-scan upload (Nov 26)
+
+Dropping two scans showed only the second ("Scan2026-11-20_115129.pdf, 30 pages") once it started: each scan's server batch replaced the panel's list, while the first kept reading unseen. The panel now keeps a compact row per earlier scan ("Scan 1 of 2 · 30 of 35 read · 5 set aside", Open), polled until it settles; the heading says "2 scans" and the status line names the scan the full row is for.
+
 ## Unreleased — Store name matching tolerates handwriting (65-page staging run, Nov 26)
 
 The 65-page run after #831 showed the name check needs exact whole words: "Rob Malolos" got ROB PLACE SANTIAGO (wrong; 1334 ROBINSONS PLACE MALO), and code 1296 (a real store) beside "Ma. Christina Rocitas" (296 MARIA CRISTINA ROSIT) went unflagged.
