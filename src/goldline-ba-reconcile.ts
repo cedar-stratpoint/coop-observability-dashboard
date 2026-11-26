@@ -4,7 +4,8 @@
 // into one, preferring a name already in the registry as the source of truth so the
 // canonical spelling is the one the brand uses. Pure + unit-tested.
 
-import {editDistance} from './goldline-segment';
+import {editDistance, formRuns, type ClassifiedPage} from './goldline-segment';
+import {wordMatches} from './store-suggest';
 
 const HONORIFICS = new Set(['ma', 'mr', 'mrs', 'ms', 'dr']);
 
@@ -131,4 +132,68 @@ export function withCanonicalBa<T extends {forms: ReadonlyArray<{consultant: str
       return t ? {...f, consultant: map.get(t) ?? t} : f;
     }),
   };
+}
+
+/**
+ * One BA per physical form (QA Nov 26): handwriting reads one person's name differently on each page
+ * ("Elaiza Mae V. Calen / Calem / Calern / Calleja", "Cherry Mae P. Baluco / Balisco / Bacoo"). Within
+ * each form (formRuns), the pages' names are clustered as on the board (reconcileBaNames, first-name
+ * fold on); the cluster most pages read wins. Its spelling: the registry's (`known`) when it has one,
+ * else the normalized name most pages wrote (middle initials and case ignored), a tie going to the
+ * reading closest to all the others (never simply the longest: "Nanette Vadpacagia" lost to
+ * "Saladaga"), written in its fullest form. Pages in that cluster, pages that read no BA, and pages
+ * whose "BA" is really the form's store (a word of the store's registry name, e.g. "Walter Plaridel"
+ * for WALTERMART PLARIDEL) take it, keeping what they read in `consultant_read`. A page naming
+ * someone else keeps its own name. Two pages must agree before anything changes. Pure.
+ */
+export function formConsultants<T extends ClassifiedPage>(
+  pages: T[],
+  positionOf: (p: T) => {source: string; index: number} | null,
+  known: string[] = [],
+  storeNameOf: (code: string) => string | null = () => null,
+): T[] {
+  const out = [...pages];
+  const words = (s: string) => baSlug(s).split(' ').filter((w) => w.length >= 5);
+  for (const run of formRuns(out, positionOf)) {
+    const codes = [...new Set(run.map((x) => x.p.store_code).filter((c): c is string => Boolean(c)))];
+    const storeWords = codes.flatMap((c) => words(storeNameOf(c) ?? ''));
+    const isStoreName = (name: string) => words(name).some((w) => storeWords.some((sw) => wordMatches(w, sw, true)));
+    const named = run.filter((x) => x.p.consultant && baSlug(x.p.consultant) && !isStoreName(x.p.consultant));
+    if (named.length < 2) continue;
+    const canon = reconcileBaNames(named.map((x) => x.p.consultant), known, {foldFirstName: true});
+    const votes = new Map<string, number>();
+    for (const x of named) {
+      const c = canon.get((x.p.consultant ?? '').trim());
+      if (c) votes.set(c, (votes.get(c) ?? 0) + 1);
+    }
+    const ranked = [...votes].sort((a, b) => b[1] - a[1]);
+    if (!ranked.length || ranked[0][1] < 2 || (ranked[1] && ranked[1][1] === ranked[0][1])) continue;
+    const winner = ranked[0][0];
+    const members = named.map((x) => (x.p.consultant ?? '').trim()).filter((n) => canon.get(n) === winner);
+    const spelled = known.some((k) => k.trim() === winner) ? winner : agreedSpelling(members);
+    for (const x of run) {
+      const read = x.p.consultant?.trim() || null;
+      const takes = !read || isStoreName(read) || canon.get(read) === winner;
+      if (!takes || read === spelled) continue;
+      out[x.i] = {...out[x.i], consultant: spelled, consultant_read: read};
+    }
+  }
+  return out;
+}
+
+/** The spelling most readings agree on: the normalized name (baSlug) written most often, a tie going
+ *  to the one closest to all the others; then its fullest written form. Pure. */
+export function agreedSpelling(readings: string[]): string {
+  const bySlug = new Map<string, string[]>();
+  for (const r of readings) {
+    const s = baSlug(r);
+    if (s) bySlug.set(s, [...(bySlug.get(s) ?? []), r]);
+  }
+  const slugs = [...bySlug.keys()];
+  const spread = (s: string) => slugs.reduce((n, t) => n + editDistance(s, t) * (bySlug.get(t)?.length ?? 1), 0);
+  const best = slugs.sort((a, b) => (bySlug.get(b)!.length - bySlug.get(a)!.length) || spread(a) - spread(b))[0];
+  return bySlug
+    .get(best)!
+    .slice()
+    .sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length || b.length - a.length)[0];
 }

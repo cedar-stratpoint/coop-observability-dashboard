@@ -159,6 +159,8 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       periodStart: pageStart ?? firstIsoDate(batch?.period_start),
       periodEnd: pageEnd ?? firstIsoDate(batch?.period_end),
       consultant: v(read.consultant) ?? v(head?.consultant),
+      // The form's agreed BA replaced this page's own read: what the page read, for the note.
+      ...(read.consultantRead !== undefined ? {consultantRead: read.consultantRead} : {}),
     };
     bas = baReg;
   }

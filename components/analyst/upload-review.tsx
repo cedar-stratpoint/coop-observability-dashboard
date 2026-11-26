@@ -65,6 +65,8 @@ export type PageSuggestionView = {
   storeName?: string | null;
   /** Nothing proved whether this page is V1 or V2 (the layout read was empty, the classifier unsure). */
   versionUnsure?: boolean;
+  /** Set when `consultant` is the form's agreed BA: what this page itself read (null = none). */
+  consultantRead?: string | null;
 };
 
 // What the last committed page of a scan used, so the next page (pages 2 to 5 rarely print a
@@ -733,6 +735,13 @@ export function UploadReview({
                         disabled={committed || !canEdit}
                         className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
                       />
+                      {suggestion?.consultantRead !== undefined && ba === suggestion?.consultant && !committed && (
+                        <span className="text-xs text-muted-foreground">
+                          {suggestion.consultantRead
+                            ? `This page reads “${suggestion.consultantRead}”; the rest of the form agrees on this name.`
+                            : 'No BA name on this page; the rest of the form agrees on this name.'}
+                        </span>
+                      )}
                       <datalist id="ba-names">
                         {(bas?.names ?? []).map((n) => (
                           <option key={n} value={n} />
