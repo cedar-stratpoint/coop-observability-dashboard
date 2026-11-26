@@ -151,6 +151,11 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     suggestion = {
       storeCode: pageStore ?? batchStore,
       storeFrom: pageStore ? ('page' as const) : batchStore ? ('batch' as const) : null,
+      // Doubt about the store read on this page (not a known store, corrected, or the written name
+      // disagrees), so the review says so next to Store instead of a plain "Coop read Store N".
+      storeCheck: read.storeCheck,
+      storeName: read.storeName,
+      versionUnsure: read.versionUnsure,
       periodStart: pageStart ?? firstIsoDate(batch?.period_start),
       periodEnd: pageEnd ?? firstIsoDate(batch?.period_end),
       consultant: v(read.consultant) ?? v(head?.consultant),

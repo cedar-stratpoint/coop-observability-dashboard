@@ -1,7 +1,7 @@
 import 'server-only';
 import {nichidoConfigured, nichidoDb} from './nichido-client';
 import type {FlagInput, MarkKind, MarkSource, MarkStatus, ReviewMark} from './goldline-review-marks';
-import {readerMarksFor, type ReaderMark} from './goldline-reader-marks';
+import {pageCheckMarkFor, readerMarksFor, type ReaderMark} from './goldline-reader-marks';
 import {readMarksEnabled} from './goldline-anchored-flag';
 import {bandNote, cleanBands, type PaperBand} from './band-prices';
 
@@ -153,7 +153,7 @@ export async function replaceReaderMarks(companyId: string, uploadId: string, ma
   if (!marks.length) return 0;
   const ins = await nichidoDb()
     .from('review_marks')
-    .insert(marks.map((m) => ({company_id: companyId, upload_id: uploadId, item_code: m.itemCode, row_index: m.rowIndex, kind: m.kind, source: 'reader', created_by: 'reader'})));
+    .insert(marks.map((m) => ({company_id: companyId, upload_id: uploadId, item_code: m.itemCode, row_index: m.rowIndex, kind: m.kind, source: 'reader', reason: m.reason ?? null, created_by: 'reader'})));
   if (ins.error) throw new Error(`review_marks reader write failed: ${ins.error.message}`);
   return marks.length;
 }
@@ -212,7 +212,17 @@ export async function syncReaderMarks(companyId: string, uploadId: string, page:
   await syncBandMarks(companyId, uploadId, page);
   if (!readMarksEnabled() || !page || !Array.isArray(page.rows)) return;
   try {
-    await replaceReaderMarks(companyId, uploadId, readerMarksFor(page));
+    // Doubts about the store Coop read or the form version (QA Nov 26) ride along as one
+    // page-level "Take a look" mark. Read from the saved classification so every read path
+    // (inline, batch, reused) gets it.
+    const cls = await nichidoDb()
+      .from('uploads')
+      .select('store_snap:classification->store_snap,version_unsure:classification->version_unsure,version:classification->version')
+      .eq('company_id', companyId)
+      .eq('id', uploadId)
+      .maybeSingle();
+    const pageMark = cls.error ? null : pageCheckMarkFor(cls.data as Parameters<typeof pageCheckMarkFor>[0]);
+    await replaceReaderMarks(companyId, uploadId, [...readerMarksFor(page), ...(pageMark ? [pageMark] : [])]);
   } catch (e) {
     console.error('reader review flags skipped', uploadId, e instanceof Error ? e.message : e);
   }

@@ -1,11 +1,11 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('server-only', () => ({}));
-import {applyReaderFlags, cleanHeaders, cleanReaderFlags, readerMarksFor} from '../src/goldline-reader-marks';
+import {applyReaderFlags, cleanHeaders, cleanReaderFlags, columnsChanged, pageCheckMarkFor, readerMarksFor, storeMarkFor} from '../src/goldline-reader-marks';
 import {buildFormTemplate} from '../src/goldline-form-template';
 import {anchoredSchemaFor, ANCHORED_EXTRACTION_SCHEMA_P1, mapAnchoredP1ToExtractedPage, withMarksSchema, type AnchoredOutputP1} from '../src/goldline-anchored-extract';
 import {legacyRowToCore} from '../src/goldline-legacy-extract';
-import {buildAnchoredParams, buildInventoryReadParams} from '../src/goldline-extract-run';
+import {buildAnchoredParams, buildInventoryReadParams, mapInventoryRead} from '../src/goldline-extract-run';
 
 // Plan: knowledge/tasks/2026-11-25-review-marks-and-reco-reports.md (NICH-36)
 
@@ -155,5 +155,98 @@ describe('schema budget (API caps: 24 optional, 16 union-typed params)', () => {
     const c = count(buildInventoryReadParams('', 1, undefined, 'legacy').output_config.format.schema as Node);
     expect(c.optional).toBeLessThanOrEqual(24);
     expect(c.union).toBeLessThanOrEqual(16);
+  });
+});
+
+// QA Nov 26: a BA writing Stockroom / Drawer / Selling over the printed Legacy headers was never
+// flagged, because only the anchored V1/V2 read asked for headers_written_over.
+describe('relabelled columns (QA Nov 26)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const text = (p: {messages: Array<{content: Array<{type: string; text?: string}>}>}) => p.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+
+  it('Legacy and free V1/V2 reads ask for the headers written over when marks are on', () => {
+    vi.stubEnv('GOLDLINE_READ_MARKS', '1');
+    for (const v of ['legacy', 'v1', 'v2'] as const) {
+      const p = buildInventoryReadParams('', 1, undefined, v);
+      expect(Object.keys((p.output_config.format.schema as {properties: object}).properties)).toContain('headers_written_over');
+      expect((p.output_config.format.schema as unknown as {required: string[]}).required).toContain('headers_written_over');
+      expect(text(p)).toContain('headers_written_over');
+    }
+  });
+  it('off: no reader asks for them', () => {
+    vi.stubEnv('GOLDLINE_READ_MARKS', '');
+    for (const v of ['legacy', 'v1'] as const) {
+      const p = buildInventoryReadParams('', 1, undefined, v);
+      expect(Object.keys((p.output_config.format.schema as {properties: object}).properties)).not.toContain('headers_written_over');
+      expect(text(p)).not.toContain('headers_written_over');
+    }
+  });
+  it('Columns changed comes from the written-over headers or, as a backstop, a Legacy page filled as locations', () => {
+    expect(columnsChanged({headers_written_over: ['Beginning Inventory']})).toBe(true);
+    expect(columnsChanged({legacy_layout: 'locations'})).toBe(true);
+    expect(columnsChanged({legacy_layout: 'printed', headers_written_over: []})).toBe(false);
+    expect(columnsChanged({})).toBe(false);
+    expect(readerMarksFor({rows: [{item_code: 'A'}], legacy_layout: 'locations'})).toEqual([{itemCode: null, rowIndex: null, kind: 'column_changed'}]);
+    expect(readerMarksFor({rows: [{item_code: 'A'}], legacy_layout: 'printed'})).toEqual([]);
+  });
+});
+
+describe('store and version doubts as one page mark (QA Nov 26)', () => {
+  it('names a store Coop corrected, could not match, or whose written name disagrees', () => {
+    expect(storeMarkFor({code: '2414', status: 'corrected', from: '2944', by: 'name'})?.reason).toBe('Store read as 2944; Coop used 2414 from the store name');
+    expect(storeMarkFor({code: '473', status: 'corrected', from: '472'})?.reason).toBe('Store read as 472; Coop used the nearest store, 473');
+    expect(storeMarkFor({code: '2410', status: 'ambiguous', candidates: ['2413', '2414']})?.reason).toBe('Store 2410 isn’t a known store; did you mean 2413?');
+    expect(storeMarkFor({code: '2944', status: 'name_mismatch', candidates: ['2414']})?.reason).toBe('Store 2944 read, but the store name points to 2414');
+  });
+  it('a clean or confirmed store carries no mark', () => {
+    expect(storeMarkFor({code: '2414', status: 'exact'})).toBeNull();
+    expect(storeMarkFor({code: '2414', status: 'confirmed'})).toBeNull();
+    expect(storeMarkFor(null)).toBeNull();
+  });
+  it('joins a store doubt and an unsure version into one Other mark, no dashes', () => {
+    const m = pageCheckMarkFor({store_snap: {code: '2414', status: 'corrected', from: '2944', by: 'name'}, version_unsure: true, version: 'v1'});
+    expect(m).toMatchObject({itemCode: null, rowIndex: null, kind: 'other'});
+    expect(m?.reason).toBe('Store read as 2944; Coop used 2414 from the store name. Form version unsure: read as V1, but the printed layout didn’t confirm it');
+    expect(m?.reason).not.toMatch(/[–—]/);
+    expect(pageCheckMarkFor({version_unsure: true, version: 'unknown'})?.reason).toBe('Form version unsure: the printed layout didn’t say V1 or V2');
+    expect(pageCheckMarkFor({store_snap: {code: '473', status: 'exact'}})).toBeNull();
+  });
+});
+
+describe('schema budget with headers (QA Nov 26)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('free V1 read + headers stays within both caps', () => {
+    vi.stubEnv('GOLDLINE_READ_MARKS', '1');
+    type Node = {type?: unknown; properties?: Record<string, Node>; required?: readonly string[]; items?: Node};
+    const count = (n: Node, acc = {optional: 0, union: 0}) => {
+      if (Array.isArray(n.type)) acc.union++;
+      if (n.properties) {
+        const req = new Set(n.required ?? []);
+        for (const [k, v] of Object.entries(n.properties)) {
+          if (!req.has(k)) acc.optional++;
+          count(v, acc);
+        }
+      }
+      if (n.items) count(n.items, acc);
+      return acc;
+    };
+    const c = count(buildInventoryReadParams('', 1, undefined, 'v1').output_config.format.schema as Node);
+    expect(c.optional).toBeLessThanOrEqual(24);
+    expect(c.union).toBeLessThanOrEqual(16);
+  });
+});
+
+describe('Legacy read result carries the relabel signals (QA Nov 26)', () => {
+  it('keeps the headers written over and the page layout, so Columns changed can fire', () => {
+    const row = (code: string, a: number, b: number, c: number) => ({item_code: code, beginning: a, delivery: b, begin_plus_delivery: c, deducted_pcs: null, ending_on_hand: a + b + c, confidence: 0.9});
+    const out = mapInventoryRead(
+      {store_code: '473', store_name: null, period_start: null, period_end: null, consultant: null, rows: [row('A', 1, 2, 3), row('B', 0, 4, 2), row('C', 2, 2, 2)], family_totals: [], headers_written_over: ['Beginning Inventory', 'Delivery']},
+      1,
+      undefined,
+      'legacy',
+    );
+    expect(out.legacy_layout).toBe('locations');
+    expect(out.headers_written_over).toEqual(['Beginning Inventory', 'Delivery']);
+    expect(readerMarksFor(out).some((m) => m.kind === 'column_changed')).toBe(true);
   });
 });

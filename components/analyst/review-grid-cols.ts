@@ -40,3 +40,18 @@ export function colsForPage(
   if (version !== 'legacy' || rows.some((r) => r.delivery != null)) return cols;
   return cols.filter((c) => c.key !== 'delivery');
 }
+
+/** What the PAPER prints above each review column on a Legacy page (QA Nov 26: Coop labels the
+ *  columns Stockroom / Drawer / Selling area, which is how BAs fill them, but the printed form says
+ *  Beginning Inventory / Delivery / Beginning + Delivery, and QA couldn't tell they were the same
+ *  columns). Shown under the label so review and paper line up. Null where the label already
+ *  matches the paper, and on V1/V2 (their labels are the printed ones). */
+const LEGACY_PRINTED: Partial<Record<ColKey, string>> = {
+  stockroom: 'Beginning Inventory',
+  drawer: 'Delivery',
+  selling_area: 'Beginning + Delivery',
+  ending_on_hand: 'Ending Inventory',
+};
+export function printedHeader(version: string | null | undefined, key: ColKey): string | null {
+  return version === 'legacy' ? LEGACY_PRINTED[key] ?? null : null;
+}

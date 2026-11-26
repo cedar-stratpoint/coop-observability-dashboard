@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — QA Nov 26: store code by name, version check, relabelled columns flagged
+
+Plan `knowledge/tasks/2026-11-26-qa-store-version-relabel-fixes.md`. Staging only; prod on ask.
+- **Store code checked against the store name.** 2414 (SM Center Pulilan) was read as 2944, 2410, 2494 and 2140, each time beside a correctly read name, and the code-only snap left it "ambiguous" with nothing shown. `snapStoreWithName`: a code that isn't a store snaps to the store the written name points at when it is at most 2 edits away (auto-corrected, flagged, undoable); a real code is never overridden, and a nearby store the name disagrees with is `name_mismatch` (flagged). Used by the read, the board's regrouping and the page review (re-checked live, so pages read before this get it with no backfill). **Decided (user):** auto-correct and flag, not suggest only.
+- **Store doubt is visible.** The page review shows an amber note beside Store ("Coop read 2944 … so Coop used that", Undo) instead of "Coop read Store 2944", and the doubt is a page "Take a look" mark in the Flags hub.
+- **Form version check fixed (p30 V1/V2 flip).** The Delivery-column locator had `max_tokens: 500` and the model's thinking used all of it on faint pages (QA p30, 4 of 4: no answer), so the page fell back to the classifier's 0.6 guess. Cap now 4000 (billed on use); the locator also reads the printed column numbers (V1 numbers six data columns, V2 five with Delivery apart), which stay legible when the header words don't, and wins over a misread Delivery header. Validated on 8 staging pages (both p30 copies now V2, 6 known V1/V2 unchanged). One retry when empty, the locator's answer is in the read log, and a page nothing proves is flagged "Form version unsure" (note + mark).
+- **Relabelled columns flagged on Legacy (FYI).** "Columns changed" was only asked of the anchored V1/V2 read. The Legacy and free V1/V2 reads now ask for `headers_written_over`, and a Legacy page whose sums show Stockroom / Drawer / Selling use is flagged even if the handwriting isn't caught. Review shows the printed header under each Legacy column ("Printed: Beginning Inventory"). **Decided (user):** relabelled headers only, FYI tone.
+
 ## Unreleased — PawSport filter on Event leads (RET-18 P1b)
 
 Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
