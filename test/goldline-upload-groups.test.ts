@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {DROP_TYPE_LABEL, distinctPages, dropMatchesType, dropTypeOf, groupUploads, pageNeed, pagesByStatus, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
+import {DROP_TYPE_LABEL, distinctPages, dropMatchesType, dropTypeOf, groupUploads, pageNeed, pagesByStatus, storesFromForm, uploadGroupKey, uploadSource, type GroupableUpload} from '../src/goldline-upload-groups';
 
 const u = (filename: string, created_at: string, status = 'needs_review'): GroupableUpload => ({filename, created_at, status});
 
@@ -189,5 +189,39 @@ describe('drop type (Nov 26)', () => {
     expect(dropMatchesType(mixed, 'pos_csv')).toBe(true);
     expect(dropMatchesType(mixed, 'pos_xlsx')).toBe(false);
     expect(dropMatchesType(['pos_xlsx'], 'mixed')).toBe(false);
+  });
+});
+
+// Nov 26, prod: the Uploads tile said "13 pages need a store" while the scan board had filed 8 of
+// them under the store their own form read. The tile now counts the same way.
+describe('storesFromForm + pageNeed', () => {
+  const STORES = [{code: '1334', name: 'ROBINSONS PLACE MALO'}, {code: '88', name: 'SM CITY SAN FERNANDO'}];
+  const row = (batch: string, idx: number, page_no: number, readStore: string | null, status = 'needs_review') => ({
+    id: `${batch}-${idx}`, filename: `Scan2026-11-20_115129 (page ${idx} of 30).pdf`, batch_id: batch, status,
+    page_no, page_kind: 'inventory', form_version: 'v1', readStore, readName: null,
+  });
+  it('pages of a form with one sure code take it; the tile no longer says they need a store', () => {
+    const rows = [row('b1', 13, 1, '1334'), row('b1', 14, 2, null), row('b1', 15, 3, null), row('b1', 25, 1, null), row('b1', 26, 2, null)];
+    const filled = storesFromForm(rows, STORES);
+    expect([...filled].filter(([, v]) => v.store).map(([k]) => k).sort()).toEqual(['b1-14', 'b1-15']);
+    const need = (r: (typeof rows)[number]) => pageNeed({status: r.status, batchHasStore: false, readStore: r.readStore, readStart: '2026-10-16', storeFromForm: filled.get(r.id)?.store}, STORES);
+    expect(rows.map(need)).toEqual([null, null, null, 'store', 'store']);
+  });
+  it('a re-upload of the same file is its own scan; committed or set-aside pages are left alone', () => {
+    const rows = [row('b1', 13, 1, '1334'), row('b2', 14, 2, null), row('b1', 15, 2, null, 'committed')];
+    expect(storesFromForm(rows, STORES).size).toBe(0);
+  });
+});
+
+describe('storesFromForm: the period comes from the form too', () => {
+  const STORES = [{code: '1334', name: 'ROBINSONS PLACE MALO'}];
+  it('a page that read no period takes the one its form read, so it does not "need a date"', () => {
+    const rows = [
+      {id: 'a', filename: 'S (page 13 of 30).pdf', batch_id: 'b', status: 'needs_review', page_no: 1, page_kind: 'inventory', form_version: 'v1', readStore: '1334', readName: null, readStart: '2026-10-16'},
+      {id: 'c', filename: 'S (page 14 of 30).pdf', batch_id: 'b', status: 'needs_review', page_no: 2, page_kind: 'inventory', form_version: 'v1', readStore: null, readName: null, readStart: null},
+    ];
+    const m = storesFromForm(rows, STORES);
+    expect(m.get('c')).toEqual({store: true, periodStart: '2026-10-16'});
+    expect(pageNeed({status: 'needs_review', batchHasStore: false, readStore: null, readStart: m.get('c')?.periodStart ?? null, storeFromForm: m.get('c')?.store}, STORES)).toBeNull();
   });
 });
