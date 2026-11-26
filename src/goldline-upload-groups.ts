@@ -24,6 +24,8 @@ export function pageNeed(
 }
 
 export type GroupableUpload = {filename: string; created_at: string; status: string; batch_name?: string | null; batch_id?: string | null;
+  /** The upload kind (inventory_pdf, pos_xlsx, pos_csv), for the drop's file type. */
+  kind?: string | null;
   /** The upload this page's batch was split from (see src/upload-drops.ts); its own batch when never split. */
   drop_id?: string | null;
   /** What this page still to review is missing before it can be committed (see pageNeed). */
@@ -64,7 +66,38 @@ export type UploadGroup = {
    *  later firstAt): points at the first / canonical drop so the tile can badge "Duplicate"
    *  and name the original. Null for the first (canonical) drop and for lone files. */
   duplicateOf: {key: string; name: string | null; day: string} | null;
+  /** The distinct upload kinds in the drop, sorted (one for nearly every drop; two or more is
+   *  a mixed drop). Empty when the rows carry no kind. */
+  kinds: string[];
 };
+
+// ---- What a drop is (Nov 26, owner: "show if the file is a csv, a pdf or mix; better wordings
+// could be Inventory form, Watsons sales"). One type per drop, for the tile chip and the Type
+// filter: its single kind, or 'mixed' when a drop holds more than one kind of file.
+
+export type DropType = 'inventory_pdf' | 'pos_xlsx' | 'pos_csv' | 'mixed';
+export const DROP_TYPE_LABEL: Record<DropType, string> = {
+  inventory_pdf: 'Inventory form',
+  pos_xlsx: 'Watsons sales',
+  pos_csv: 'Sales export',
+  mixed: 'Mixed',
+};
+const KNOWN_KINDS = new Set<string>(['inventory_pdf', 'pos_xlsx', 'pos_csv']);
+
+/** The drop's type from its kinds: the one kind, 'mixed' for more than one, null for none. */
+export function dropTypeOf(kinds: readonly string[]): DropType | null {
+  const known = kinds.filter((k) => KNOWN_KINDS.has(k));
+  if (known.length === 0) return null;
+  return known.length === 1 ? (known[0] as DropType) : 'mixed';
+}
+
+/** True when a drop passes the Type filter: 'all'; 'mixed' for a drop of several kinds; a kind
+ *  for any drop holding that kind (so a mixed drop still shows under each of its kinds, whole). */
+export function dropMatchesType(kinds: readonly string[], filter: string): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'mixed') return dropTypeOf(kinds) === 'mixed';
+  return kinds.includes(filter);
+}
 
 /** The source name a filename groups under: the scan name for a split page, else the
  *  whole filename. */
@@ -135,7 +168,7 @@ export function pagesByStatus(items: Array<Pick<GroupableUpload, 'filename' | 's
  * `pages` and a page that failed then read on a retry counts once, under its good status.
  */
 export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGroup[] {
-  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus' | 'needsStore' | 'needsDate'> & {_files: number; _pageStatus: Map<string, string>; _need: Map<string, PageNeed>};
+  type Acc = Omit<UploadGroup, 'files' | 'pages' | 'byStatus' | 'needsStore' | 'needsDate' | 'kinds'> & {_files: number; _pageStatus: Map<string, string>; _need: Map<string, PageNeed>; _kinds: Set<string>};
   const map = new Map<string, Acc>();
   for (const u of uploads) {
     const key = uploadGroupKey(u);
@@ -155,10 +188,12 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
         _files: 0,
         _pageStatus: new Map<string, string>(),
         _need: new Map<string, PageNeed>(),
+        _kinds: new Set<string>(),
       };
       map.set(key, g);
     }
     g._files++;
+    if (u.kind) g._kinds.add(u.kind);
     if (!g.name && u.batch_name?.trim()) g.name = u.batch_name.trim();
     const id = pageIdentity(u.filename);
     const prev = g._pageStatus.get(id);
@@ -168,14 +203,14 @@ export function groupUploads<T extends GroupableUpload>(uploads: T[]): UploadGro
     if (at && at > g.lastAt) g.lastAt = at;
     if (scanPosition(u.filename)) g.isSplit = true;
   }
-  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, _need, ...g}) => {
+  const groups: UploadGroup[] = [...map.values()].map(({_files, _pageStatus, _need, _kinds, ...g}) => {
     const byStatus: Record<string, number> = {};
     for (const s of _pageStatus.values()) byStatus[s] = (byStatus[s] ?? 0) + 1;
     // Only pages that are still to review at their best status (a re-upload committed elsewhere doesn't count).
     const left = [..._need].filter(([id]) => _pageStatus.get(id) === 'needs_review');
     const needsStore = left.filter(([, n]) => n === 'store').length;
     const needsDate = left.filter(([, n]) => n === 'date').length;
-    return {...g, files: _files, pages: _pageStatus.size, byStatus, needsStore, needsDate};
+    return {...g, files: _files, pages: _pageStatus.size, byStatus, needsStore, needsDate, kinds: [..._kinds].sort()};
   });
   // Mark re-uploads: among groups that share a source (the same scan uploaded more than once),
   // the earliest drop by firstAt is canonical; the rest point at it as duplicates, so a
