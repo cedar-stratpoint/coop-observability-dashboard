@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Store name matching tolerates handwriting (65-page staging run, Nov 26)
+
+The 65-page run after #831 showed the name check needs exact whole words: "Rob Malolos" got ROB PLACE SANTIAGO (wrong; 1334 ROBINSONS PLACE MALO), and code 1296 (a real store) beside "Ma. Christina Rocitas" (296 MARIA CRISTINA ROSIT) went unflagged.
+- `suggestStore` now matches a registry name cut at 20 characters by the start of the written word ("MALO" starts "Malolos"), expands abbreviations the same way on both sides ("Rob", "Ma.", "Sta."), and lets a 5+ letter word pass within one typo (two on 8+).
+- **Decided: rarity is counted on the written word** (how many stores it matches), not the registry string; a cut fragment like "SANT" is unique as text but "Santa" matches many. Branch numbers ("PABLO2") match exactly only, cut fragments need 4+ letters, only a name's true last word counts as cut, and Santa/Santo are filler.
+- Checked on every store name read on Staging (463 names, 326 stores): 35 new suggestions (Malolos, Maria Cristina, Veranza ... right), 21 dropped (mostly old guesses that were wrong or ties, e.g. "SM Sta Maria" → Maria Cristina), 27 automatic corrections of which 26 are right and 1 can't be confirmed (2146 "W. Gaisano Mall Dipolog" → 2596; the old matcher did the same). The 1296/296 case is now flagged.
+
 ## Unreleased — QA Nov 26: store code by name, version check, relabelled columns flagged
 
 Plan `knowledge/tasks/2026-11-26-qa-store-version-relabel-fixes.md`. Staging only; prod on ask.
