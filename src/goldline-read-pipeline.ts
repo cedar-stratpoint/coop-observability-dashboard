@@ -243,7 +243,9 @@ export async function runInventoryRead(args: {
       // an empty answer is debuggable, and flag the page when nothing proved the version.
       let loc = await locateFormVersion(extractB64);
       let tries = 1;
-      if (!loc.version) {
+      // No retry on a page the classifier calls Legacy: its seven printed columns never give a V1/V2
+      // answer, so a retry there always fires and only doubles the call (seen on the first re-read).
+      if (!loc.version && cls.version !== 'legacy') {
         const again = await locateFormVersion(extractB64);
         tries = 2;
         if (again.version || !loc.seen) loc = again;
