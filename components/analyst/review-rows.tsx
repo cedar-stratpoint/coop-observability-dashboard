@@ -9,7 +9,7 @@ import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {SegmentedControl} from '@/components/analyst/segmented-control';
 import {cn} from '@/lib/utils';
-import {COLS, colsForPage, colsForVersion, type ColKey} from './review-grid-cols';
+import {COLS, colsForPage, colsForVersion, printedHeader, type ColKey} from './review-grid-cols';
 import {noteLayout, readerNote} from './reader-note';
 import {FlagButton, FlagChips, useReviewFlags} from './review-flags';
 import {pageMarks, rowMarks} from '@/src/goldline-review-marks';
@@ -269,6 +269,11 @@ export function ReviewRows({
       {cols.map((c) => (
         <th key={c.key} className="py-2 pr-2 text-right leading-tight font-medium" title={c.title}>
           {c.label}
+          {printedHeader(version, c.key) && (
+            <span className="mt-0.5 block text-[10px] font-normal tracking-normal normal-case text-muted-foreground/80">
+              Printed: {printedHeader(version, c.key)}
+            </span>
+          )}
         </th>
       ))}
       <th className="py-2 pr-2 text-right font-medium">Conf.</th>

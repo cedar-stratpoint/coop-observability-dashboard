@@ -6,7 +6,7 @@
 // unit-tests. Used by the Uploads "Groups" view.
 
 import {scanPosition} from './upload-batch';
-import {snapStoreCode} from './goldline-segment';
+import {snapStoreWithName, storeRefs, type StoreRef} from './goldline-segment';
 
 /** What a page still to review is missing before Commit all can file it (Nov 25):
  *  'store' when no registry store can be read off it, 'date' when the store is known but no
@@ -14,12 +14,13 @@ import {snapStoreCode} from './goldline-segment';
  *  all can file it (a misread year is corrected the way the board corrects it). */
 export type PageNeed = 'store' | 'date';
 export function pageNeed(
-  p: {status: string; batchHasStore: boolean; readStore: string | null | undefined; readStart: string | null | undefined},
-  knownStores: Iterable<string>,
+  p: {status: string; batchHasStore: boolean; readStore: string | null | undefined; readStart: string | null | undefined; readName?: string | null},
+  knownStores: Iterable<string | StoreRef>,
 ): PageNeed | null {
   if (p.status !== 'needs_review' || p.batchHasStore) return null;
-  const snap = snapStoreCode(p.readStore ?? null, knownStores);
-  if (snap.status !== 'exact' && snap.status !== 'corrected') return 'store';
+  const snap = snapStoreWithName(p.readStore ?? null, p.readName, storeRefs(knownStores));
+  // name_mismatch keeps a real registry code, so the page can still be filed (it's flagged elsewhere).
+  if (snap.status !== 'exact' && snap.status !== 'corrected' && snap.status !== 'name_mismatch') return 'store';
   return p.readStart ? null : 'date';
 }
 

@@ -52,22 +52,95 @@ export const MARKS_PROMPT_ANCHORED = [
   '  "headers_written_over"; otherwise return [].',
 ];
 
+/** The page-level "relabelled columns" question (QA Nov 26: Legacy never asked it, so a BA writing
+ *  Stockroom / Drawer / Selling over the printed headers was never flagged). Shared by the Legacy
+ *  and free V1/V2 reads; the anchored read states the same in MARKS_PROMPT_ANCHORED. */
+export const HEADERS_PROMPT_LINES = [
+  'COLUMN HEADERS: if the consultant wrote their own column names on or over printed DATA-column headers (e.g.',
+  '"Stockroom", "Drawer", "Selling" written over "Beginning Inventory", "Delivery", "Beginning + Delivery"), list those',
+  'PRINTED headers in "headers_written_over"; otherwise return []. Never let the handwritten names move a number.',
+];
+
 /** Prompt lines for the Legacy read (blank cells are null there). */
 export const MARKS_PROMPT_LEGACY = [
   'NOTES AND DAMAGE (flag only, never transcribe them): if the consultant wrote a note, arrow, circle or correction on or',
   'beside a row (anything besides its counts), add "note" to that row\'s "flags". If a count cell holds a word such as',
   '"Damage" instead of a number, add "damage" to "flags" and set that cell to null. Leave "flags" out for a clean row.',
+  ...HEADERS_PROMPT_LINES,
 ];
+
+/** Add the page-level `headers_written_over` (required, so it costs no optional-param budget). */
+export function withHeadersSchema<S extends {properties: object; required: readonly string[]}>(schema: S): S {
+  return {
+    ...schema,
+    properties: {...schema.properties, headers_written_over: {type: 'array', items: {type: 'string'}}},
+    required: [...schema.required, 'headers_written_over'],
+  } as S;
+}
 
 /** The optional per-row `flags` property (one optional param; schema budgets are tight). */
 export const FLAGS_PROPERTY = {type: 'array', items: {type: 'string', enum: [...READER_FLAGS, ...OS_FLAGS]}} as const;
 
-export type ReaderMark = {itemCode: string | null; rowIndex: number | null; kind: MarkKind};
+export type ReaderMark = {itemCode: string | null; rowIndex: number | null; kind: MarkKind; reason?: string | null};
+
+/** The store part of a page's classification (goldline-segment StoreSnap), as saved. */
+type SavedSnap = {code?: unknown; status?: unknown; from?: unknown; by?: unknown; candidates?: unknown} | null | undefined;
+
+/**
+ * A page-level "Take a look" mark when Coop isn't sure of the store it read (QA Nov 26: 2414 read
+ * as 2944 with nothing flagged), so it shows in the Flags hub as well as on the page. Corrected by
+ * the name or by a near code, not a known store, or a real code the written name disagrees with.
+ * A known store read cleanly, or one a reviewer confirmed, carries none.
+ */
+export function storeMarkFor(snap: SavedSnap): ReaderMark | null {
+  if (!snap || typeof snap !== 'object') return null;
+  const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const code = s(snap.code);
+  const from = s(snap.from);
+  const first = Array.isArray(snap.candidates) ? s(snap.candidates[0]) : null;
+  let reason: string | null = null;
+  switch (snap.status) {
+    case 'corrected':
+      reason = from && code ? (snap.by === 'name' ? `Store read as ${from}; Coop used ${code} from the store name` : `Store read as ${from}; Coop used the nearest store, ${code}`) : null;
+      break;
+    case 'ambiguous':
+    case 'unknown':
+      reason = code ? `Store ${code} isn’t a known store${first ? `; did you mean ${first}?` : ''}` : null;
+      break;
+    case 'name_mismatch':
+      reason = code ? `Store ${code} read, but the store name points to ${first ?? 'another store'}` : null;
+      break;
+  }
+  return reason ? {itemCode: null, rowIndex: null, kind: 'other', reason} : null;
+}
+
+/** The page-level "Take a look" mark from the page's classification: the store doubt and/or a form
+ *  version nothing proved (QA Nov 26, p30). One mark per page (the table keeps one reader mark per
+ *  page and kind), its reason naming each doubt. Null when there is none. */
+export function pageCheckMarkFor(cls: {store_snap?: SavedSnap; version_unsure?: unknown; version?: unknown} | null | undefined): ReaderMark | null {
+  const reasons: string[] = [];
+  const store = storeMarkFor(cls?.store_snap);
+  if (store?.reason) reasons.push(store.reason);
+  if (cls?.version_unsure === true) {
+    const v = typeof cls.version === 'string' && cls.version !== 'unknown' ? cls.version.toUpperCase() : null;
+    reasons.push(v ? `Form version unsure: read as ${v}, but the printed layout didn’t confirm it` : 'Form version unsure: the printed layout didn’t say V1 or V2');
+  }
+  return reasons.length ? {itemCode: null, rowIndex: null, kind: 'other', reason: reasons.join('. ')} : null;
+}
 
 type PageLike = {
   rows: Array<{item_code: string; off_manifest?: boolean | null; reader_flags?: ReaderFlag[] | null}>;
   headers_written_over?: string[] | null;
+  /** How a Legacy page's columns were used, decided by its own arithmetic (legacyPageLayout). */
+  legacy_layout?: 'locations' | 'printed' | null;
 };
+
+/** True when the BA repurposed the printed columns: the reader saw names written over the printed
+ *  headers, or (backstop, no model needed) a Legacy page's sums show col1 to col3 were used as
+ *  Stockroom / Drawer / Selling, which is a relabel even when the handwriting wasn't caught. */
+export function columnsChanged(page: Pick<PageLike, 'headers_written_over' | 'legacy_layout'>): boolean {
+  return cleanHeaders(page.headers_written_over).length > 0 || page.legacy_layout === 'locations';
+}
 
 /**
  * The review flags a read page carries: note and Damage per row, "Product written in" for each
@@ -89,6 +162,6 @@ export function readerMarksFor(page: PageLike): ReaderMark[] {
     if (!code) return;
     for (const f of cleanReaderFlags(r.reader_flags)) add({itemCode: code, rowIndex: i, kind: f});
   });
-  if (cleanHeaders(page.headers_written_over).length) add({itemCode: null, rowIndex: null, kind: 'column_changed'});
+  if (columnsChanged(page)) add({itemCode: null, rowIndex: null, kind: 'column_changed'});
   return out;
 }

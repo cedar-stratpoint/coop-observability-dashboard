@@ -81,6 +81,15 @@ export type AnchoredOutput = {
  */
 export const ANCHOR_MIN_CONFIDENCE = 0.75;
 
+/** True when nothing proved a V1/V2 page's version: no anchor version (the layout read was empty
+ *  and the classifier was under ANCHOR_MIN_CONFIDENCE), on a page classified V1, V2 or unknown. The
+ *  free read then maps cells by printed meaning, but the version tag (and so its columns in review)
+ *  is a guess, so the page is flagged "Form version unsure" (QA Nov 26, p30). Legacy never anchors
+ *  this way, so it is never unsure here. */
+export function versionUnsure(version: FormVersion, anchored: 'v1' | 'v2' | null): boolean {
+  return !anchored && (version === 'v1' || version === 'v2' || version === 'unknown');
+}
+
 /** The version to anchor to, or null to fall back to the free read: only a confidently-classified
  *  V1 or V2 (Legacy already reads template-anchored via its own path; unknown never anchors). */
 export function anchorVersion(version: FormVersion, confidence: number): 'v1' | 'v2' | null {
@@ -133,7 +142,13 @@ export function buildDeliveryLocatorPrompt(): string {
     'RIGHT of the PRODUCT column; exclude ITEM# and PRODUCT) exactly in the order they are physically',
     'printed. Do NOT reorder them into any standard or expected order. Then give delivery_column: the',
     '1-based position (counting from the first data column) where the column literally labelled',
-    '"Delivery" physically appears, or null if there is none. Return JSON only.',
+    '"Delivery" physically appears, or null if there is none.',
+    'Separately, look at the small printed column NUMBERS above the header boxes (1, 2, 3...). They',
+    'are bold and often still legible when the header words are faint. Give highest_column_number:',
+    'the largest number printed there, or null if none is legible. Give unnumbered_data_column: true',
+    'if a data column (right of the PRODUCT and price columns) has NO number above it and stands',
+    'apart from the numbered block, false if every data column is numbered, or null if you cannot',
+    'tell. Report only what is printed; never guess a header you cannot read. Return JSON only.',
   ].join('\n');
 }
 
@@ -144,11 +159,47 @@ export const DELIVERY_LOCATOR_SCHEMA = {
   properties: {
     columns_left_to_right: {type: 'array', items: {type: 'string'}},
     delivery_column: {type: ['integer', 'null']},
+    highest_column_number: {type: ['integer', 'null']},
+    unnumbered_data_column: {type: ['boolean', 'null']},
   },
-  required: ['delivery_column'],
+  required: ['delivery_column', 'highest_column_number', 'unnumbered_data_column'],
 } as const;
 
-export type DeliveryLocatorOutput = {columns_left_to_right?: (string | null)[] | null; delivery_column?: number | null};
+export type DeliveryLocatorOutput = {
+  columns_left_to_right?: (string | null)[] | null;
+  delivery_column?: number | null;
+  highest_column_number?: number | null;
+  unnumbered_data_column?: boolean | null;
+};
+
+/** The version implied by the printed column NUMBERS (QA Nov 26, p30): V1 numbers all six data
+ *  columns 1 to 6 (Delivery is 4); V2 numbers only 1 to 5 and prints Delivery apart, unnumbered,
+ *  in front. The digits survive a faint photocopy that the header words don't (on p30 the locator
+ *  invented "Beginning Inventory, Delivery, Sales" headers but the 1 to 5 were plain). Null when the
+ *  numbers don't say, or the two number cues disagree. */
+export function versionFromNumbering(out: DeliveryLocatorOutput | null | undefined): 'v1' | 'v2' | null {
+  const n = out?.highest_column_number;
+  const byCount = n === 6 ? 'v1' : n === 5 ? 'v2' : null;
+  const apart = out?.unnumbered_data_column;
+  const byApart = apart === true ? 'v2' : apart === false && byCount === 'v1' ? 'v1' : null;
+  if (byCount && byApart && byCount !== byApart) return null;
+  return byCount ?? (apart === true ? 'v2' : null);
+}
+
+/** What the locator proved about the version, and from which cue. The printed numbering wins over
+ *  the Delivery header position when both answer and disagree (the numbers are the legible cue on a
+ *  faint copy); `conflict` records the disagreement so the page is flagged for a look. */
+export type LocatedVersion = {version: 'v1' | 'v2' | null; by: 'numbering' | 'delivery' | null; deliveryColumn: number | null; conflict: boolean};
+
+export function versionFromLocator(out: DeliveryLocatorOutput | null | undefined): LocatedVersion {
+  const deliveryColumn = deliveryColumnFromLocator(out);
+  const byPos = versionFromDeliveryColumn(deliveryColumn);
+  const byNum = versionFromNumbering(out);
+  const conflict = Boolean(byPos && byNum && byPos !== byNum);
+  if (byNum) return {version: byNum, by: 'numbering', deliveryColumn, conflict};
+  if (byPos) return {version: byPos, by: 'delivery', deliveryColumn, conflict};
+  return {version: null, by: null, deliveryColumn, conflict};
+}
 
 /** The Delivery column position from a locator read: prefer the transcribed header order (so the
  *  position is derived deterministically in code), else the model's own delivery_column. */

@@ -28,6 +28,7 @@ export const FLAG_LABEL: Record<string, string> = {
   'unknown-store': 'Store not matched',
   'store-corrected': 'Store auto-corrected',
   'store-unmatched': 'Store needs a pick',
+  'store-name-mismatch': 'Store name differs',
   'period-missing': 'No period read',
   'period-unparsed': 'Period unreadable',
   'period-invalid-day': 'Invalid date',
