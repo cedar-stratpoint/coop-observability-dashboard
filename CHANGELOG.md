@@ -10,6 +10,12 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-26 — Release v1.29.1: Uploads tiles say what the file is, Type filter in the same words
+
+PROD release (cherry-picked onto main after v1.29.0). Owner asked to promote it right after staging.
+
+- **Uploads** (#829): each tile leads its tags with the drop's type, using the drop zone's color-coded format badge plus the name in words (Inventory form, Watsons sales, Sales export, or **Mixed** for a drop holding more than one kind). The Type filter uses the same words and adds **Mixed**; in Grouped view the type is matched per drop. No SQL, no env change.
+
 ## 2026-11-26 — Release v1.29.0: Flags hub, band prices and O/S on review, Overview to Stores by month (Nichido)
 
 PROD release of Nichido work from staging (cherry-picked onto main after v1.28.1, plan `knowledge/tasks/2026-11-26-nichido-prod-release-v1.29.0.md`). Owner decisions Nov 26: all five groups in one release, the Flags hub on at release, and every page in review re-read afterwards.
