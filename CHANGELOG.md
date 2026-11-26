@@ -14,6 +14,13 @@ Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but
 - **Filter PawSport: All / Has · n / None · n / Can't tell · n** beside Status on `/customers/leads`. It combines with every other filter, resets the page, and the CSV and Copy buttons follow it; Status and PawSport each count over the other's choice.
 - **Decided: Can't tell, never None, when we can't know.** Shopify unread or cut off, or a lead with no usable email or mobile (Instagram-only, most booth leads) reads Can't tell. None = has an email or mobile, Shopify read in full, no holder matches. When Shopify is unread the filter is disabled ("Unavailable") and counts as All, like the Website CRM.
 - **Reuse:** the Website CRM's helpers in `src/pawsport.ts` gain an optional `matchable` argument on `pawsportState`, `pawsportMatchable` and `countPawsportStates` (the CRM view now uses it too); the page passes the read status as the Website CRM page does.
+## 2026-11-26 — Uploads: each tile says what the file is (Inventory form, Watsons sales, Sales export, Mixed), and the Type filter uses the same words
+
+- **Owner ask:** "show here if the file is a csv, a pdf, or mix; better wordings could be Inventory Form, Watsons Sales", then "add those kind of filters too".
+- **Tile:** every Uploads tile now leads its tag row with the drop's type: the same color-coded format badge the drop zone uses (PDF violet, XLS red, CSV green) plus the name in words. A drop holding more than one kind of file reads **Mixed**, with a badge per format. Unfilled, so it never competes with the status tags.
+- **Filter:** the Type filter options are now Inventory form, Watsons sales, Sales export and **Mixed** (new). In Grouped view the type is matched per drop, so a mixed drop shows whole under Mixed and under each kind it holds. In All files, Mixed lists the files of mixed drops. The flat list's type column uses the same words.
+- **Code:** `UploadGroup.kinds`, `dropTypeOf`, `dropMatchesType`, `DROP_TYPE_LABEL` in `src/goldline-upload-groups.ts` (pure, tested); `DropTypeChip` in `components/analyst/uploads-view.tsx`.
+
 ## 2026-11-26 — Flags hub: Back from a flagged page returns to Flags, named; flags colored by what to do
 
 Owner QA on staging (#826): opening a flag's page showed "Back to uploads" and went to Uploads. It should go back to the Flags view it came from, with a dynamic label, and the same for the other ways out. And color, so it is easier to see what a flag is about and what needs doing.
