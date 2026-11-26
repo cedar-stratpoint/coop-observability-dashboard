@@ -37,6 +37,9 @@ export type ClassifiedPage = PageClassification & {
    *  blank-store form groups by its physical run instead of collapsing every unreadable
    *  page into one bucket. Ignored once a store is known. */
   contiguityKey?: string;
+  /** Set by formConsultants when this page's BA was replaced by its form's agreed name: what the
+   *  page itself read (null when it read none). */
+  consultant_read?: string | null;
   /** Set by inheritFormStores when this page's physical form shows two different store codes
    *  (QA Nov 26), so nothing was filled and the form is flagged for a look. */
   form_store_conflict?: boolean;
@@ -397,14 +400,21 @@ const SURE_STORE = new Set<StoreSnap['status']>(['exact', 'corrected', 'confirme
  * code is never overwritten. `positionOf` gives a page's scan and its position in it; pages without
  * one are left as they are. Returns the pages in their input order. Pure.
  */
-export function inheritFormStores<T extends ClassifiedPage>(pages: T[], positionOf: (p: T) => {source: string; index: number} | null): T[] {
-  const out = [...pages];
-  const placed = out
+/** One page of a physical form: the page, its index in the caller's array, and its scan position. */
+export type FormRunPage<T> = {p: T; i: number; pos: {source: string; index: number}};
+
+/**
+ * Split a scan's pages into physical forms (QA Nov 26): in scan position order, a run of one scan's
+ * inventory pages whose printed page number keeps rising (1 to 5) on the same version. Pages without
+ * a scan position, and non-inventory pages, belong to no run. Pure.
+ */
+export function formRuns<T extends ClassifiedPage>(pages: T[], positionOf: (p: T) => {source: string; index: number} | null): FormRunPage<T>[][] {
+  const placed = pages
     .map((p, i) => ({p, i, pos: positionOf(p)}))
-    .filter((x): x is {p: T; i: number; pos: {source: string; index: number}} => x.pos != null && isInventoryPage(x.p))
+    .filter((x): x is FormRunPage<T> => x.pos != null && isInventoryPage(x.p))
     .sort((a, b) => a.pos.source.localeCompare(b.pos.source) || a.pos.index - b.pos.index);
-  const runs: (typeof placed)[] = [];
-  let cur: typeof placed = [];
+  const runs: FormRunPage<T>[][] = [];
+  let cur: FormRunPage<T>[] = [];
   for (const x of placed) {
     const prev = cur[cur.length - 1];
     if (!prev || prev.pos.source !== x.pos.source || x.p.page <= prev.p.page || x.p.version !== prev.p.version) {
@@ -414,7 +424,12 @@ export function inheritFormStores<T extends ClassifiedPage>(pages: T[], position
     cur.push(x);
   }
   if (cur.length) runs.push(cur);
-  for (const run of runs) {
+  return runs;
+}
+
+export function inheritFormStores<T extends ClassifiedPage>(pages: T[], positionOf: (p: T) => {source: string; index: number} | null): T[] {
+  const out = [...pages];
+  for (const run of formRuns(out, positionOf)) {
     const sure = run.filter((x) => x.p.store_code && x.p.store_snap && SURE_STORE.has(x.p.store_snap.status));
     const codes = new Set(sure.map((x) => x.p.store_code));
     if (codes.size > 1) {
