@@ -55,6 +55,8 @@ export async function POST(req: Request) {
 
   const claude = anthropicClientOptions(process.env);
   if (!claude) return new Response('Coop chat is not configured (missing API key).', {status: 503});
+  // What reaches the SDK: a key fingerprint (never the key) and the workspace header, so a wrong Vercel var shows in the logs.
+  console.log(JSON.stringify({event: 'chat_anthropic_config', key: `${claude.apiKey.slice(0, 10)}…${claude.apiKey.slice(-6)}`, keyLength: claude.apiKey.length, workspaceId: claude.defaultHeaders?.['anthropic-workspace-id'] ?? null}));
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
   if (rateLimited(ip, Date.now())) return new Response('Too many requests — give Coop a moment.', {status: 429});

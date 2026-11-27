@@ -89,6 +89,12 @@ Plan `knowledge/tasks/2026-11-26-qa-store-version-relabel-fixes.md`. Staging onl
 - **Form version check fixed (p30 V1/V2 flip).** The Delivery-column locator had `max_tokens: 500` and the model's thinking used all of it on faint pages (QA p30, 4 of 4: no answer), so the page fell back to the classifier's 0.6 guess. Cap now 4000 (billed on use); the locator also reads the printed column numbers (V1 numbers six data columns, V2 five with Delivery apart), which stay legible when the header words don't, and wins over a misread Delivery header. Validated on 8 staging pages (both p30 copies now V2, 6 known V1/V2 unchanged). One retry when empty, the locator's answer is in the read log, and a page nothing proves is flagged "Form version unsure" (note + mark).
 - **No locator retry on Legacy pages** (follow-up): the first staging re-read showed every Legacy page retrying, since Legacy never gives a V1/V2 answer.
 - **Relabelled columns flagged on Legacy (FYI).** "Columns changed" was only asked of the anchored V1/V2 read. The Legacy and free V1/V2 reads now ask for `headers_written_over`, and a Legacy page whose sums show Stockroom / Drawer / Selling use is flagged even if the handwriting isn't caught. Review shows the printed header under each Legacy column ("Printed: Beginning Inventory"). **Decided (user):** relabelled headers only, FYI tone.
+## 2026-11-27 — Ask Coop logs which Anthropic key and workspace it sends
+
+PROD chat failed after moving to an org-scoped key, and nobody could see what reached the SDK: Vercel had
+`COOP_ANTHROPIC_WORKSPACE_ID`, a name no code reads (the route reads `ANTHROPIC_API_KEY` + `ANTHROPIC_WORKSPACE_ID`).
+The chat route now logs one `chat_anthropic_config` line per request: a key fingerprint (first 10 + last 6 chars,
+never the key), its length, and the `anthropic-workspace-id` it sends (or null). The workspace id is not a secret.
 
 ## Unreleased — PawSport filter on Event leads (RET-18 P1b)
 
