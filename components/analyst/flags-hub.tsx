@@ -43,6 +43,7 @@ import {FilterSelect, type FilterOption} from '@/components/ui/filter-select';
 import {Button} from '@/components/ui/button';
 import {Pagination} from '@/components/analyst/pagination';
 import {keptId, useDrillIn, useReturnTrip} from '@/components/analyst/back-nav';
+import {useLeaving} from '@/components/analyst/leaving';
 import {FLAG_SOURCES, SOURCE_LABEL, filterLines, type FlagFilter, type FlagLine} from '@/src/goldline-flag-lines';
 import type {FlagLinesData} from '@/src/goldline-flag-lines-data';
 import {CLEARED_TILE, HUB_TIERS, clearableIds, hubTiles, isTileKey, kindMeta, lineMeta, pageOf, tileLines, type FlagMeta, type FlagTone, type HubTier, type HubTile} from '@/src/goldline-flag-hub';
@@ -179,8 +180,7 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
   const tileKey = isTileKey(openParam) ? openParam : null;
   const page = Math.max(1, Number(params.get('p')) || 1);
   // Lines on their way out (fading) and gone (removed until the server agrees).
-  const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  const [gone, setGone] = useState<Set<string>>(new Set());
+  const {leaving, gone, remove, restore, reset: forgetRemovals} = useLeaving();
   const [toast, setToast] = useState<Toast | null>(null);
   const [error, setError] = useState<string | null>(null);
   const top = useRef<HTMLDivElement>(null);
@@ -195,10 +195,7 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
   }, [f]);
 
   // A server refresh brings lines back in their real state; forget the local removals.
-  useEffect(() => {
-    setGone(new Set());
-    setLeaving(new Set());
-  }, [data]);
+  useEffect(() => forgetRemovals(), [data, forgetRemovals]);
 
   const setPage = useCallback(
     (p: number) => {
@@ -221,14 +218,6 @@ export function FlagsHub({data, initial, company, canEdit}: {data: FlagLinesData
   const fail = (text: string) => {
     setError(text);
     setToast(null);
-  };
-  const remove = (keys: string[]) => {
-    setLeaving((s) => new Set([...s, ...keys]));
-    window.setTimeout(() => setGone((s) => new Set([...s, ...keys])), 200);
-  };
-  const restore = (keys: string[]) => {
-    setGone((s) => new Set([...s].filter((k) => !keys.includes(k))));
-    setLeaving((s) => new Set([...s].filter((k) => !keys.includes(k))));
   };
 
   const act: Act = {
