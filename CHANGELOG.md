@@ -8,6 +8,12 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Page review: a calmer Store / period / BA block; "Looks right" keeps your place (Nov 27)
+
+Owner QA on the page review:
+- **Store, period and BA** sat in one bottom-aligned row: the BA hint pushed its label above the others, the fields kept their content widths, and a narrow card wrapped them unevenly. Now a grid sized by the card (container query), not the window: one column when narrow, **Store | BA over Period start | Period end** from about 32rem, every label top-aligned, fields full-width at 40px, the hint under its own field. The grey "Coop read Store …" line sits under the heading; the amber store warning stays under the fields and stacks text over its button when narrow. The store picker gets a `fill` mode for grid cells (other uses unchanged).
+- **"Looks right" sent you back to the top** when a band price flag was open above: the next flag was the first open one on the page, and a price flag is only answered by picking a price. Now it is the next open flag below the row you answered (`nextOpenFlag`), wrapping to the top only when none is left below.
+
 ## Unreleased — Reopen a committed page for review (Nov 27)
 
 A committed page was read-only; the only way back was to delete it (losing the read, the price picks and the store/BA fixes, and paying for a new read), and Coop's checks from that commit stayed on the BA as "resolved". Now the committed banner has **Reopen for review**.

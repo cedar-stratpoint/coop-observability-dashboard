@@ -30,7 +30,7 @@ import type {ReviewMark} from '@/src/goldline-review-marks';
 import type {AddableItem} from '@/src/review-add-row';
 import {markReturn, NamedReturnLink, previousEntryUrl, ReturnLink, returnTarget, useTrackReturnRow} from '@/components/analyst/back-nav';
 import {LOW_BELOW, rowConfidence, toneText} from '@/src/review-confidence';
-import {pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
+import {nextOpenFlag, pageTotal, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from '@/src/review-workbench';
 
 // Review workbench for one scanned inventory page. Shows the staged Claude Vision
 // read, pre-filled and editable; low-confidence rows are flagged so the reviewer
@@ -102,6 +102,10 @@ function toIntOrNull(s: string): number | null {
   const n = Number(t);
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
+
+/** The header's text and date fields: full cell width, the grid's field height. */
+const FIELD =
+  'h-10 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60 disabled:hover:border-border';
 
 export function UploadReview({
   company,
@@ -729,89 +733,94 @@ export function UploadReview({
               />
               <div ref={confEnd} aria-hidden className="h-0" />
 
-              <fieldset className="flex flex-col gap-3">
-                <legend className="mb-3 text-xs font-medium text-muted-foreground">
+              {/* Store, period and BA (polish Nov 27): a top-aligned grid sized by the card, not the
+                  window, so a wrapping hint under one field never pushes the others' labels out of line.
+                  One column when narrow; Store | BA over Period start | Period end from ~32rem. */}
+              <fieldset className="@container min-w-0">
+                <legend className="text-sm font-medium text-foreground">
                   {nav ? 'Store, period and BA for this page' : 'Which store and period is this count for?'}
                 </legend>
-                <div className="flex flex-wrap items-end gap-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium">Store</span>
-                    <StoreCodeField value={storeCode} onChange={setStoreCode} stores={stores} disabled={committed || !canEdit} />
-                  </div>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs font-medium">Period start</span>
-                    <input
-                      type="date"
-                      value={periodStart ?? ''}
-                      onChange={(e) => setPeriodStart(e.target.value)}
-                      disabled={committed || !canEdit}
-                      className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs font-medium">Period end</span>
-                    <input
-                      type="date"
-                      value={periodEnd ?? ''}
-                      min={periodStart || undefined}
-                      onChange={(e) => setPeriodEnd(e.target.value)}
-                      disabled={committed || !canEdit}
-                      className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
-                    />
-                  </label>
-                  {nav && (
-                    <label className="flex min-w-48 flex-1 flex-col gap-1">
-                      <span className="text-xs font-medium">BA on the form</span>
+                {nav && !committed && !storeNote ? (
+                  <p className="mt-1.5 max-w-[68ch] text-[13px] leading-relaxed text-muted-foreground">{suggestionNote}</p>
+                ) : !nav && (extraction.page ?? 1) > 1 && !committed ? (
+                  <p className="mt-1.5 max-w-[68ch] text-[13px] leading-relaxed text-muted-foreground">
+                      Pages 2 to 5 don&apos;t print the store or period. Use the same ones as this store&apos;s page 1 so all pages land in
+                      one Inventory count.
+                  </p>
+                ) : null}
+                <div className="mt-5 flex flex-col gap-5">
+                  <div className="grid grid-cols-1 gap-x-5 gap-y-5 @lg:grid-cols-2">
+                    <div className={cn('flex min-w-0 flex-col gap-2', !nav && '@lg:col-span-2')}>
+                      <span className="text-[13px] font-medium">Store</span>
+                      <StoreCodeField value={storeCode} onChange={setStoreCode} stores={stores} disabled={committed || !canEdit} fill />
+                    </div>
+                    {nav && (
+                      <label className="flex min-w-0 flex-col gap-2">
+                        <span className="text-[13px] font-medium">BA on the form</span>
+                        <input
+                          value={ba}
+                          onChange={(e) => setBa(e.target.value)}
+                          list="ba-names"
+                          maxLength={80}
+                          placeholder={storeBa ?? 'Full name'}
+                          autoComplete="off"
+                          disabled={committed || !canEdit}
+                          className={FIELD}
+                        />
+                        {suggestion?.consultantRead !== undefined && ba === suggestion?.consultant && !committed && (
+                          <span className="text-xs leading-relaxed text-muted-foreground">
+                            {suggestion.consultantRead
+                              ? `This page reads “${suggestion.consultantRead}”; the rest of the form agrees on this name.`
+                              : 'No BA name on this page; the rest of the form agrees on this name.'}
+                          </span>
+                        )}
+                        <datalist id="ba-names">
+                          {(bas?.names ?? []).map((n) => (
+                            <option key={n} value={n} />
+                          ))}
+                        </datalist>
+                      </label>
+                    )}
+                    <label className="flex min-w-0 flex-col gap-2">
+                      <span className="text-[13px] font-medium">Period start</span>
                       <input
-                        value={ba}
-                        onChange={(e) => setBa(e.target.value)}
-                        list="ba-names"
-                        maxLength={80}
-                        placeholder={storeBa ?? 'Full name'}
-                        autoComplete="off"
+                        type="date"
+                        value={periodStart ?? ''}
+                        onChange={(e) => setPeriodStart(e.target.value)}
                         disabled={committed || !canEdit}
-                        className="h-9 rounded-md border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
+                        className={cn(FIELD, 'tabular-nums')}
                       />
-                      {suggestion?.consultantRead !== undefined && ba === suggestion?.consultant && !committed && (
-                        <span className="text-xs text-muted-foreground">
-                          {suggestion.consultantRead
-                            ? `This page reads “${suggestion.consultantRead}”; the rest of the form agrees on this name.`
-                            : 'No BA name on this page; the rest of the form agrees on this name.'}
-                        </span>
-                      )}
-                      <datalist id="ba-names">
-                        {(bas?.names ?? []).map((n) => (
-                          <option key={n} value={n} />
-                        ))}
-                      </datalist>
                     </label>
+                    <label className="flex min-w-0 flex-col gap-2">
+                      <span className="text-[13px] font-medium">Period end</span>
+                      <input
+                        type="date"
+                        value={periodEnd ?? ''}
+                        min={periodStart || undefined}
+                        onChange={(e) => setPeriodEnd(e.target.value)}
+                        disabled={committed || !canEdit}
+                        className={cn(FIELD, 'tabular-nums')}
+                      />
+                    </label>
+                  </div>
+                  {nav && !committed && storeNote && (
+                    <div
+                      role="status"
+                      className="flex flex-col items-start gap-3 rounded-lg bg-[var(--amber-bg)] px-4 py-3 text-[13px] leading-relaxed text-[var(--bhr-warn)] @lg:flex-row @lg:items-center @lg:justify-between @lg:gap-x-5"
+                    >
+                      <span className="min-w-0 @lg:flex-1">{storeNote.text}</span>
+                      {storeNote.action && canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => setStoreCode(storeNote.action!.code)}
+                          className="shrink-0 rounded-md border border-[color-mix(in_oklab,var(--bhr-warn)_35%,transparent)] bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-transform duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
+                        >
+                          {storeNote.action.label}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
-                {nav && !committed && storeNote ? (
-                  <div
-                    role="status"
-                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg bg-[var(--amber-bg)] px-3.5 py-2.5 text-[13px] text-[var(--bhr-warn)]"
-                  >
-                    <span>{storeNote.text}</span>
-                    {storeNote.action && canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => setStoreCode(storeNote.action!.code)}
-                        className="shrink-0 rounded-md border border-[color-mix(in_oklab,var(--bhr-warn)_35%,transparent)] bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-transform duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
-                      >
-                        {storeNote.action.label}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  nav && !committed && <p className="text-xs text-muted-foreground">{suggestionNote}</p>
-                )}
-                {!nav && (extraction.page ?? 1) > 1 && !committed && (
-                  <p className="text-xs text-muted-foreground">
-                    Pages 2 to 5 don&apos;t print the store or period. Use the same ones as this store&apos;s page 1 so all pages land in
-                    one Inventory count.
-                  </p>
-                )}
               </fieldset>
 
               {/* Totals check: the page's value vs the total written at the bottom of the form. */}
@@ -887,7 +896,8 @@ export function UploadReview({
             onCell={updateCell}
             onResolve={(i) => {
               resolve(i);
-              goToFlag(unresolvedFlags(flagged, new Set(resolved).add(i))[0] ?? null);
+              // Keep the reviewer's place: the next open flag below, not the first on the page.
+              goToFlag(nextOpenFlag(flagged, resolved, i));
             }}
             onStep={(dir) => {
               setView('needs');
