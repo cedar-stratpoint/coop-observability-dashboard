@@ -4,7 +4,7 @@ import {printedPageItems, withPrintedHeadings} from '@/src/goldline-printed-page
 import {notFound, redirect} from 'next/navigation';
 import {getDataContext} from '@/src/active-context';
 import {canEditData} from '@/src/company';
-import {catalogForCodes, formPageStrip, getBatch, getExtraction, getPageSuggestion, getUpload, listStores, listUploads} from '@/src/goldline-data';
+import {scanPeriodYear, catalogForCodes, formPageStrip, getBatch, getExtraction, getPageSuggestion, getUpload, listStores, listUploads} from '@/src/goldline-data';
 import {getCurrentBas} from '@/src/goldline-ba-data';
 import {uploadSource} from '@/src/goldline-upload-groups';
 import {fileListParams, fileNeighbours, fileReviewQuery, parseFileFilter} from '@/src/scan-file-nav';
@@ -17,7 +17,7 @@ import {UploadReview} from '@/components/analyst/upload-review';
 import {marksForUploads} from '@/src/goldline-review-marks-data';
 import {addableProducts} from '@/src/goldline-add-row-data';
 import {DuplicateBanner} from '@/components/analyst/duplicate-banner';
-import {firstIsoDate, isoPeriod} from '@/src/period-date';
+import {snapPeriodYear, firstIsoDate, isoPeriod} from '@/src/period-date';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,11 +98,12 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const storeParam = one('store');
     const scope = baParam ? ({kind: 'ba', name: baParam} as const) : storeParam ? ({kind: 'store', code: storeParam} as const) : null;
     const query = fileReviewQuery(filter, version, scope);
-    const [all, read, batch, baReg] = await Promise.all([
+    const [all, read, batch, baReg, scanYear] = await Promise.all([
       listUploads(ctx.companyId),
       getPageSuggestion(ctx.companyId, upload.id),
       upload.batch_id ? getBatch(ctx.companyId, upload.batch_id) : Promise.resolve(null),
       extraction ? getCurrentBas(ctx.companyId) : Promise.resolve(undefined),
+      extraction ? scanPeriodYear(ctx.companyId, upload).catch(() => null) : Promise.resolve(null),
     ]);
     const allFiles = all.filter((u) => uploadSource(u.filename) === source && (!version || (u.form_version ?? 'unknown') === version));
     // Narrow the ‹ › stepper to just this store's / BA's pages, grouped the same way the board is.
@@ -142,7 +143,10 @@ export default async function Page(props: {params: Promise<{id: string}>; search
     const pageStore = v(read.storeCode) ?? v(head?.store_code);
     // The page sort's date (YYYY-MM-DD, year-checked) first; else the reader's written date
     // converted ("10/16/2026"), since a non-ISO value blanks the date box.
-    const {start: pageStart, end: pageEnd} = isoPeriod([read.periodStart, head?.period_start], [read.periodEnd, head?.period_end]);
+    // A misread year (a handwritten 2026 read as 2024) moves to the year most of this scan reads,
+    // as the board already does; the review says so beside Period (QA Nov 27).
+    const pagePeriod = snapPeriodYear(isoPeriod([read.periodStart, head?.period_start], [read.periodEnd, head?.period_end]), scanYear);
+    const {start: pageStart, end: pageEnd} = pagePeriod;
     // The batch's store is only a fair guess for a page of the same count: in a shuffled
     // pile the batch carries one form's store, and a page dated another period is another
     // form. Better an honest blank (filled from the last committed page) than a wrong store.
@@ -158,6 +162,7 @@ export default async function Page(props: {params: Promise<{id: string}>; search
       versionUnsure: read.versionUnsure,
       periodStart: pageStart ?? firstIsoDate(batch?.period_start),
       periodEnd: pageEnd ?? firstIsoDate(batch?.period_end),
+      periodYearRead: pageStart || pageEnd ? pagePeriod.yearRead : null,
       consultant: v(read.consultant) ?? v(head?.consultant),
       // The form's agreed BA replaced this page's own read: what the page read, for the note.
       ...(read.consultantRead !== undefined ? {consultantRead: read.consultantRead} : {}),
@@ -169,7 +174,8 @@ export default async function Page(props: {params: Promise<{id: string}>; search
   let periodDefault: {start: string | null; end: string | null} | null = null;
   if (!suggestion && extraction) {
     const read = await getPageSuggestion(ctx.companyId, upload.id);
-    periodDefault = isoPeriod([read.periodStart, extraction.data?.period_start], [read.periodEnd, extraction.data?.period_end]);
+    const scanYear = await scanPeriodYear(ctx.companyId, upload).catch(() => null);
+    periodDefault = snapPeriodYear(isoPeriod([read.periodStart, extraction.data?.period_start], [read.periodEnd, extraction.data?.period_end]), scanYear);
   }
   // History check (flags only): rows the same store's last committed count can't explain.
   let rowNotes: Record<number, string> = {};

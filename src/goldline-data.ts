@@ -8,7 +8,7 @@ import {fetchAllRows} from './pos-fetch-paginate';
 import type {PosSaleRow} from './goldline-csv';
 import type {ExtractedPage} from './goldline-extract-run';
 import type {FormVersion} from './goldline-extract';
-import {applyStoreRegistry, assignBlankFormRuns, inheritFormStores, isRealForm, reconcileYears, segmentBundle, snapStoreWithName, type ClassifiedPage, type StoreRef} from './goldline-segment';
+import {applyStoreRegistry, assignBlankFormRuns, dominantYear, inheritFormStores, isRealForm, reconcileYears, segmentBundle, snapStoreWithName, type ClassifiedPage, type StoreRef} from './goldline-segment';
 import {consultantOf, toClassifiedPage, UPLOAD_CLS_COLS, type UploadClsRow} from './goldline-triage-data';
 import {formConsultants} from './goldline-ba-reconcile';
 import {knownStores} from './goldline-store-registry';
@@ -895,6 +895,20 @@ export type PageSuggestion = {
    *  read (null = none). */
   consultantRead?: string | null;
 };
+
+/** The year most pages of this page's drop read (its batch, else its scan file), or null when
+ *  there is no clear one. The page review moves a misread year to it (snapPeriodYear), the way
+ *  the scan board already groups pages (reconcileYears). QA Nov 27. */
+export async function scanPeriodYear(companyId: string, upload: {batch_id?: string | null; filename: string}): Promise<number | null> {
+  if (!goldlineConfigured()) return null;
+  const supa = db();
+  const rows = (await fetchAllRows('uploads', (from, to) => {
+    let q = supa.from('uploads').select('id,classification').eq('company_id', companyId).eq('kind', 'inventory_pdf'); // pagination-ok: paged by fetchAllRows (.range below)
+    q = upload.batch_id ? q.eq('batch_id', upload.batch_id) : q.like('filename', `${uploadSource(upload.filename).replace(/[%_]/g, '\\$&')}%`);
+    return q.order('id').range(from, to);
+  })) as Array<{classification: {period_start?: string | null; period_end?: string | null} | null}>;
+  return dominantYear(rows.map((r) => ({period_start: r.classification?.period_start ?? null, period_end: r.classification?.period_end ?? null})));
+}
 
 export async function getPageSuggestion(companyId: string, uploadId: string): Promise<PageSuggestion> {
   const none: PageSuggestion = {storeCode: null, storeName: null, periodStart: null, periodEnd: null, consultant: null, storeCheck: null, versionUnsure: false};
