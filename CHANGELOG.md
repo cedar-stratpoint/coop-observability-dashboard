@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Page review: the year follows the scan; Period is one field with Coop's own calendar (Nov 27)
+
+Owner QA: most reviewed pages read the period year wrong ("July 16 to 31, 2026" read as 07/16/2024). Prod: 39 of 112 dated pages (Oct 30 21/67, Nov 20 Part 1 12/25, Part 2 6/20) read 2016, 2020, 2021, 2022, 2024 or 2025; month and day were right. The header is already read from 300 dpi crops (#835), so resolution was not the gap: the scan board snapped those years to the scan's main year (`reconcileYears`) but the page review prefilled the raw read.
+- **Decided: use the scan's year and say so.** `scanPeriodYear` (the year most pages of the page's drop read) + `snapPeriodYear` move a misread year in the review prefill, with "Year read as 2024; using 2026 like the rest of this scan." under Period. Applies at once to every uncommitted page; no re-read. A reopened page keeps its committed period.
+- **Decided: one Period field with the app's range calendar** instead of two browser date boxes (Chrome's popup can't be styled). The field reads "Sep 16 to 30, 2026" (`periodLabel`), opens the same calendar the Transactions filter uses, and offers the month's two cut-offs ("Sep 1 to 15", "Sep 16 to 30", `halfMonths`) one tap away; a finished pick sets both dates and closes. `Calendar` reports the month on screen (`onMonthChange`, optional).
+- Layout: Store | Period | BA in one row from ~42rem of card, two columns from ~32rem, one below.
+- Already committed with a wrong year on prod: 5 forms (366 counts, mostly store 2166; one under store code "W. Gaisano"). **Decided: the owner reopens them in Coop** (Reopen for review) and corrects them.
+
 ## Unreleased — Page review: a calmer Store / period / BA block; "Looks right" keeps your place (Nov 27)
 
 Owner QA on the page review:
