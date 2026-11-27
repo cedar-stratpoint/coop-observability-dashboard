@@ -22,7 +22,13 @@ VERSIONS = [("legacy", "Legacy"), ("v1", "V1"), ("v2", "V2")]
 
 
 def parse(path):
-    """Return the ordered items for one page: [{code, product, group, price}]."""
+    """Return the ordered items for one page: [{code, product, group, price[, optional]}].
+
+    A row whose "PRINTED ON" cell (column J, outside the paper's columns) reads "some copies"
+    is printed on some copies of the page only (QA Nov 27: some V1 page 5 prints carry an
+    INDIVIDUAL FLARE band, most do not). It is emitted with "optional": true so the reader
+    reports it only when it is printed.
+    """
     ws = openpyxl.load_workbook(path, data_only=True).active
     items = []
     group = None
@@ -31,14 +37,18 @@ def parse(path):
         a = row[0].value  # ITEM #
         b = row[1].value  # PRODUCT
         c = row[2].value  # PRICE
+        j = row[9].value if len(row) > 9 else None  # PRINTED ON
         if a:  # item row
             price = c if isinstance(c, (int, float)) else group_price
-            items.append({
+            item = {
                 "code": str(a).strip(),
                 "product": (str(b).strip() if b else (group or "")),
                 "group": group,
                 "price": price if isinstance(price, (int, float)) else None,
-            })
+            }
+            if isinstance(j, str) and j.strip().lower() == "some copies":
+                item["optional"] = True
+            items.append(item)
         elif b:  # band / footer
             if str(b).strip().upper().startswith("PAGE #"):
                 continue  # footer TOTAL row
@@ -73,6 +83,8 @@ def main():
         "  product: string;",
         "  group: string | null;",
         "  price: number | null;",
+        "  /** Printed on some copies of this page only: the reader reports it only when printed. */",
+        "  optional?: boolean;",
         "};",
         "",
         "type GeneratedVersion = Exclude<FormVersion, 'unknown'>;",

@@ -42,6 +42,8 @@ export type TemplateGroupRow = {
   kind: 'group';
   line: string;
   unitPrice: number | null;
+  /** Every row under this band is optional: the band is printed on some copies only. */
+  optional?: boolean;
 };
 
 /** One printed item row: the reader fills this row's handwritten cells, never its code/name. */
@@ -53,6 +55,9 @@ export type TemplateItemRow = {
   /** The family this row sits under (its band's line); null when the code is uncatalogued. */
   group: string | null;
   unitPrice: number | null;
+  /** Printed on some copies of this page only (QA Nov 27: INDIVIDUAL FLARE on some V1 page 5
+   *  prints). The reader reports it only when printed; a copy without it gets no row. */
+  optional?: boolean;
 };
 
 export type TemplateRow = TemplateGroupRow | TemplateItemRow;
@@ -132,9 +137,24 @@ export function buildFormTemplate(
       if (group != null) rows.push({kind: 'group', line: group, unitPrice});
       currentGroup = group;
     }
-    rows.push({kind: 'item', itemCode: it.code, product: it.product, group, unitPrice});
+    rows.push({kind: 'item', itemCode: it.code, product: it.product, group, unitPrice, ...(it.optional ? {optional: true} : {})});
   }
+  markOptionalBands(rows);
   return {page, version, columns: columnsForVersion(version), rows, itemCount: items.length};
+}
+
+/** A band whose rows are all optional is itself printed on some copies only. Mutates `rows`. */
+function markOptionalBands(rows: TemplateRow[]): void {
+  for (let i = 0; i < rows.length; i++) {
+    const band = rows[i];
+    if (band.kind !== 'group') continue;
+    let any = false, all = true;
+    for (let j = i + 1; j < rows.length && rows[j].kind === 'item'; j++) {
+      any = true;
+      if (!(rows[j] as TemplateItemRow).optional) all = false;
+    }
+    if (any && all) band.optional = true;
+  }
 }
 
 /** True when a page carries an item template (an inventory page 1 to 5 with a manifest); false

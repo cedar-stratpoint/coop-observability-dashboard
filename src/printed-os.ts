@@ -29,7 +29,8 @@ const PRINTED: Record<'legacy' | 'v1' | 'v2', Record<number, string[]>> = {
     4: ['MUR', 'FLBES', 'PKB', ...ACCESSORY_CODES],
     5: ['EFTT1112', 'EFTT1064', 'EFTT1904', 'EFTT1676', 'ELIF3125B'],
   },
-  v1: {4: ['PKB', ...ACCESSORY_CODES]},
+  // V1 page 5: the INDIVIDUAL FLARE row printed on some copies only (QA Nov 27, stores 5300, 296).
+  v1: {4: ['PKB', ...ACCESSORY_CODES], 5: ['ELIF3125B']},
   v2: {4: ['PKB', ...ACCESSORY_CODES]},
 };
 
