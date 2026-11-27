@@ -169,6 +169,18 @@ export function bandNote(b: PaperBand): string {
   return `${head}${total}`.slice(0, 200);
 }
 
+/** The "use the paper's price" button. The pick prices every row of the band, though the flag
+ *  sits on its first row, so the label says so (QA Nov 27: read as "just this cell"). */
+export function pickPaperPriceLabel(b: Pick<PaperBand, 'offer_price' | 'codes'>): string {
+  if (b.offer_price == null) return '';
+  const n = new Set(b.codes ?? []).size;
+  const head = `Use ${peso(b.offer_price)}`;
+  return n > 2 ? `${head} for all ${n}` : n === 2 ? `${head} for both` : head;
+}
+
+/** The line beside the band's price buttons. */
+export const BAND_PICK_SCOPE = 'Applies to the whole band, this form only.';
+
 /** The prices a reviewer may pick for a band: its printed price or the one the paper offers. */
 export function allowedPrices(b: PaperBand): number[] {
   return [b.printed_price, b.offer_price].filter((p): p is number => p != null && p > 0);

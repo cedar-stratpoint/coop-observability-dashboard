@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Band price buttons say they price the whole band (Nov 27)
+
+QA on the prod Oct 30 scan: "Use ₱180 / Keep ₱225 · For this form only" sits on the band's first row (USMLLC01), so it read as a choice for that one cell. The pick prices every row of the band (`pickedPrices` covers `band.codes`).
+- **Decided (owner): say "whole band".** The button reads "Use ₱180 for all 10" ("for both" for two rows, plain for one) and the line beside it "Applies to the whole band, this form only." (`pickPaperPriceLabel`, `BAND_PICK_SCOPE`).
+- Also decided the same day: a band kept at the printed price **never puts a point on the BA** (it stays a review mark). The BA's sums were right at their own price (36 × ₱180 = ₱6,480; 57 × ₱199 = ₱11,343); revisit only if Nichido says such prices are not allowed.
+- Plan: `knowledge/tasks/2026-11-27-reopen-flare-band-wording.md` (W2).
+
 ## Unreleased — Individual Flare is a printed row on V1 page 5 (Nov 27)
 
 On the prod Oct 30 scan, page 21 (store 5300) showed "Individual Flare 3125 Black" as "Handwritten row not on the template · Product written in", blocking commit. It is printed: some V1 page 5 prints carry an `INDIVIDUAL FLARE` band (₱238, `ELIF3125B · 3125 (black)`, O/S printed) between Elise Lashes and Feather Lite. The V1 reference copy, and so the template, did not.
