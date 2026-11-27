@@ -3,7 +3,7 @@
 import {useState} from 'react';
 import {Button} from '@/components/ui/button';
 import {toneText} from '@/src/review-confidence';
-import {bandNote, peso, type PaperBand} from '@/src/band-prices';
+import {BAND_PICK_SCOPE, bandNote, peso, pickPaperPriceLabel, type PaperBand} from '@/src/band-prices';
 
 /**
  * A flagged band's price pick (QA San Pablo, Nov 25), shown on the band's first row: what the
@@ -63,12 +63,12 @@ export function BandPrice({band, pieces, editable, onPick}: {
       {editable && onPick ? (
         <span className="flex flex-wrap items-center gap-1.5">
           <Button variant="outline" size="xs" disabled={busy != null} onClick={() => pick(offer)} className="active:scale-[0.97]">
-            {busy === offer ? 'Saving…' : `Use ${peso(offer)}`}
+            {busy === offer ? 'Saving…' : pickPaperPriceLabel(band)}
           </Button>
           <Button variant="ghost" size="xs" disabled={busy != null} onClick={() => pick(printed)} className="active:scale-[0.97]">
             {busy === printed ? 'Saving…' : `Keep ${peso(printed)}`}
           </Button>
-          <span className="text-[11px] text-muted-foreground">For this form only.</span>
+          <span className="text-[11px] text-muted-foreground">{BAND_PICK_SCOPE}</span>
         </span>
       ) : null}
       {error && (
