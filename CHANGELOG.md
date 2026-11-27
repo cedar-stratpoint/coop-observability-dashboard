@@ -8,6 +8,15 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Individual Flare is a printed row on V1 page 5 (Nov 27)
+
+On the prod Oct 30 scan, page 21 (store 5300) showed "Individual Flare 3125 Black" as "Handwritten row not on the template · Product written in", blocking commit. It is printed: some V1 page 5 prints carry an `INDIVIDUAL FLARE` band (₱238, `ELIF3125B · 3125 (black)`, O/S printed) between Elise Lashes and Feather Lite. The V1 reference copy, and so the template, did not.
+- **Decided (owner): add it to the template**, rather than a general backstop for rows printed on another version's page. Seen on stores 5300 and 296 (Oct 30 p21, p32, p40; Nov 20 Part 1 p28); not on other V1 copies (2166 and others) or any V2 copy, so it is an **optional** row: a "PRINTED ON: some copies" marker in `INV_FORM_V1_PAGE5.xlsx`, `"optional": true` in the generated template.
+- The anchored read (both prompts) marks it "(SOME COPIES ONLY)": report it only when printed. `fitOptionalRows` (in `mapAnchoredOutput`) drops an optional row the read did not report, so copies without it get no blank "kept blank for review" row, and moves an extra naming it (by code or printed name) onto the printed row, so copies with it get no "Product written in".
+- `printed-os`: `ELIF3125B` is printed O/S on V1 page 5 too, so its O/S stays a quiet note.
+- Real write-ins stay flagged: Oct 30 p50, p56, p62 ("Raspberry Float" handwritten under Pink Champagne).
+- Plan: `knowledge/tasks/2026-11-27-reopen-flare-band-wording.md` (W1 of 3; band wording and Reopen for review follow).
+
 ## Unreleased — Uploads tiles count "need a store" the way the board files pages; one period per form (Nov 26)
 
 After v1.30.0 on prod the Uploads tile for "[PART 2] … Nov 20 scan" said 13 pages need a store while the scan board had filed 8 of them under the store their own form read: the tile (and Commit all's "what's missing") checked each page alone.

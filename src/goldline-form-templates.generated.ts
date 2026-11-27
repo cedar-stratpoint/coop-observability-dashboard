@@ -15,6 +15,8 @@ export type GeneratedTemplateItem = {
   product: string;
   group: string | null;
   price: number | null;
+  /** Printed on some copies of this page only: the reader reports it only when printed. */
+  optional?: boolean;
 };
 
 type GeneratedVersion = Exclude<FormVersion, 'unknown'>;
@@ -591,6 +593,7 @@ export const GENERATED_FORM_TEMPLATES: Record<GeneratedVersion, Record<number, G
       {"code": "ELCX1313", "product": "CX1313", "group": "ELISE LASHES", "price": 238},
       {"code": "ELI8089", "product": "I8089", "group": "ELISE LASHES", "price": 238},
       {"code": "ELF8058", "product": "F8058", "group": "ELISE LASHES", "price": 238},
+      {"code": "ELIF3125B", "product": "3125 (black)", "group": "INDIVIDUAL FLARE", "price": 238, "optional": true},
       {"code": "EFLLF11", "product": "F11", "group": "ELISE FEATHER LITE LASHES", "price": 198},
       {"code": "EFLLF12", "product": "F12", "group": "ELISE FEATHER LITE LASHES", "price": 198},
       {"code": "EFLLF13", "product": "F13", "group": "ELISE FEATHER LITE LASHES", "price": 198},
