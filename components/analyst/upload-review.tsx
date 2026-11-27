@@ -15,6 +15,7 @@ import {bandFlagRows, cleanBands, withPickedPrices} from '@/src/band-prices';
 import {reopenedNote, reviewedRows} from '@/src/goldline-reopen';
 import {scanPageLabel} from '@/src/upload-batch';
 import {ReopenPageDialog} from '@/components/analyst/reopen-page-dialog';
+import {PeriodField} from '@/components/analyst/period-field';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
@@ -70,6 +71,8 @@ export type PageSuggestionView = {
   versionUnsure?: boolean;
   /** Set when `consultant` is the form's agreed BA: what this page itself read (null = none). */
   consultantRead?: string | null;
+  /** The year the page read when Coop moved its period to the scan's year (QA Nov 27), else null. */
+  periodYearRead?: number | null;
 };
 
 // What the last committed page of a scan used, so the next page (pages 2 to 5 rarely print a
@@ -154,7 +157,7 @@ export function UploadReview({
   /** Coop's prefill for store / period / BA in the one-page view. */
   suggestion?: PageSuggestionView | null;
   /** The period to prefill (YYYY-MM-DD) when there is no suggestion (page opened on its own). */
-  periodDefault?: {start: string | null; end: string | null} | null;
+  periodDefault?: {start: string | null; end: string | null; yearRead?: number | null} | null;
   /** Row index → a history-check note (the store's last count can't explain the row); flagged. */
   rowNotes?: Record<number, string>;
   /** The BA list (each store's current BA and every name), for the BA field. */
@@ -204,6 +207,8 @@ export function UploadReview({
   // The BA written on the form. Blank saves under the store's BA from earlier forms.
   const [ba, setBa] = useState(reopened?.consultant ?? suggestion?.consultant ?? head?.consultant ?? '');
   const [reopenOpen, setReopenOpen] = useState(false);
+  // The year the page read when Coop moved its period to the scan's year (QA Nov 27).
+  const yearRead = reopened ? null : (suggestion?.periodYearRead ?? periodDefault?.yearRead ?? null);
   const storeBa = bas?.byStore[storeCode] ?? null;
   // Which header fields were carried over from the page committed just before this one.
   const [carried, setCarried] = useState(false);
@@ -735,7 +740,8 @@ export function UploadReview({
 
               {/* Store, period and BA (polish Nov 27): a top-aligned grid sized by the card, not the
                   window, so a wrapping hint under one field never pushes the others' labels out of line.
-                  One column when narrow; Store | BA over Period start | Period end from ~32rem. */}
+                  One column when narrow; two from ~32rem; Store | Period | BA from ~42rem. Period is one
+                  field with the app's range calendar (the browser's date popup can't be styled). */}
               <fieldset className="@container min-w-0">
                 <legend className="text-sm font-medium text-foreground">
                   {nav ? 'Store, period and BA for this page' : 'Which store and period is this count for?'}
@@ -749,10 +755,30 @@ export function UploadReview({
                   </p>
                 ) : null}
                 <div className="mt-5 flex flex-col gap-5">
-                  <div className="grid grid-cols-1 gap-x-5 gap-y-5 @lg:grid-cols-2">
-                    <div className={cn('flex min-w-0 flex-col gap-2', !nav && '@lg:col-span-2')}>
+                  <div className={cn('grid grid-cols-1 gap-x-5 gap-y-5 @lg:grid-cols-2', nav && '@2xl:grid-cols-[minmax(0,1fr)_minmax(0,1.12fr)_minmax(0,1fr)]')}>
+                    <div className="flex min-w-0 flex-col gap-2">
                       <span className="text-[13px] font-medium">Store</span>
                       <StoreCodeField value={storeCode} onChange={setStoreCode} stores={stores} disabled={committed || !canEdit} fill />
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-2">
+                      <span id="review-period" className="text-[13px] font-medium">
+                        Period
+                      </span>
+                      <PeriodField
+                        labelId="review-period"
+                        start={periodStart || null}
+                        end={periodEnd || null}
+                        onChange={(s, e) => {
+                          setPeriodStart(s);
+                          setPeriodEnd(e);
+                        }}
+                        disabled={committed || !canEdit}
+                      />
+                      {yearRead != null && !committed && periodStart && periodStart.slice(0, 4) !== String(yearRead) && (
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          Year read as {yearRead}; using {periodStart.slice(0, 4)} like the rest of this scan.
+                        </span>
+                      )}
                     </div>
                     {nav && (
                       <label className="flex min-w-0 flex-col gap-2">
@@ -781,27 +807,7 @@ export function UploadReview({
                         </datalist>
                       </label>
                     )}
-                    <label className="flex min-w-0 flex-col gap-2">
-                      <span className="text-[13px] font-medium">Period start</span>
-                      <input
-                        type="date"
-                        value={periodStart ?? ''}
-                        onChange={(e) => setPeriodStart(e.target.value)}
-                        disabled={committed || !canEdit}
-                        className={cn(FIELD, 'tabular-nums')}
-                      />
-                    </label>
-                    <label className="flex min-w-0 flex-col gap-2">
-                      <span className="text-[13px] font-medium">Period end</span>
-                      <input
-                        type="date"
-                        value={periodEnd ?? ''}
-                        min={periodStart || undefined}
-                        onChange={(e) => setPeriodEnd(e.target.value)}
-                        disabled={committed || !canEdit}
-                        className={cn(FIELD, 'tabular-nums')}
-                      />
-                    </label>
+
                   </div>
                   {nav && !committed && storeNote && (
                     <div
