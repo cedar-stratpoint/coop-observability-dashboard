@@ -18,20 +18,23 @@ export function StoreCodeField({
   stores,
   disabled,
   className,
+  fill = false,
 }: {
   value: string;
   onChange: (code: string) => void;
   stores: StoreOption[];
   disabled?: boolean;
   className?: string;
+  /** Fill the width it is given (a form grid cell), at the grid's taller field height. */
+  fill?: boolean;
 }) {
   const listed = stores.some((s) => s.code === value);
   const [other, setOther] = useState(Boolean(value) && !listed);
   const showOther = other || (Boolean(value) && !listed);
 
   return (
-    <div className={cn('flex flex-wrap items-center gap-2', className)}>
-      <div className={cn('w-56', disabled && 'pointer-events-none opacity-60')}>
+    <div className={cn('flex items-center gap-2', fill ? 'w-full' : 'flex-wrap', className)}>
+      <div className={cn(fill ? 'min-w-0 flex-1' : 'w-56', disabled && 'pointer-events-none opacity-60')}>
         <SearchableSelect
           ariaLabel="Store"
           value={showOther ? OTHER : value}
@@ -49,7 +52,7 @@ export function StoreCodeField({
             ...stores.map((s) => ({value: s.code, label: `${s.code} · ${s.name}`})),
             {value: OTHER, label: 'Other store code…', hint: 'not in the list yet'},
           ]}
-          className="h-9"
+          className={fill ? 'h-10' : 'h-9'}
         />
       </div>
       {showOther && (
@@ -60,7 +63,10 @@ export function StoreCodeField({
           autoFocus={other && !value}
           aria-label="Store code"
           placeholder="Store code"
-          className="h-9 w-28 rounded-md border border-border bg-background px-2.5 text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
+          className={cn(
+            'border border-border bg-background text-sm outline-none transition-colors hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60',
+            fill ? 'h-10 w-32 rounded-lg px-3' : 'h-9 w-28 rounded-md px-2.5',
+          )}
         />
       )}
     </div>
