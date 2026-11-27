@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback, useLayoutEffect, useRef, useState, type RefObject} from 'react';
+import {flushSync} from 'react-dom';
 
 // Taking a row out of a list without the rest "teleporting" (Nov 27, from the Flags hub):
 // the row fades, the rows below slide up into its place, and the caller offers Undo.
@@ -11,6 +12,12 @@ import {useCallback, useLayoutEffect, useRef, useState, type RefObject} from 're
 //  • useSlideUp: for layouts that can't fold a row's height (table rows), measure the rows
 //    just before the change and glide each one from where it was to where it lands. Only
 //    runs when armed, so typing in a search box or editing a cell never animates.
+//
+//  • viewTransition / useHeldData: for grids, where a card can change column or section. The
+//    browser snapshots the page, the update applies, and each named card (`vtName`) glides
+//    from its old box to its new one; a card that is gone fades out. useHeldData keeps
+//    showing the current data until a refresh lands, then swaps it inside a transition, so a
+//    server-driven move animates too. Browsers without View Transitions just update.
 //
 // Reduced motion: nothing moves or fades; the row goes at once (Undo still offered).
 
@@ -81,4 +88,44 @@ export function useSlideUp(ref: RefObject<HTMLElement | null>, ms = 220) {
     }
   });
   return arm;
+}
+
+type VTDocument = Document & {startViewTransition?: (update: () => void) => unknown};
+
+/** Run a state update inside a View Transition (instant where unsupported or reduced motion). */
+export function viewTransition(update: () => void) {
+  const d = typeof document === 'undefined' ? null : (document as VTDocument);
+  if (!d?.startViewTransition || reducedMotion()) return update();
+  d.startViewTransition(() => flushSync(update));
+}
+
+/** A `view-transition-name` for a card: a CSS-safe name from any key (codes, file names). */
+export function vtName(prefix: string, key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
+  return `${prefix}-${(h >>> 0).toString(36)}`;
+}
+
+/** Show `data` as it was until fresh data arrives; when armed, swap it in a View Transition.
+ *  Unarmed refreshes (polling, other edits) swap at once, before paint. */
+export function useHeldData<T>(data: T): {shown: T; arm: () => void} {
+  const [shown, setShown] = useState(data);
+  // armed: the next fresh data should animate. holding: a swap is under way, so keep showing
+  // the old data until the transition's update runs (its snapshot must see the old layout).
+  const armed = useRef(false);
+  const holding = useRef(false);
+  useLayoutEffect(() => {
+    if (data === shown || holding.current) return;
+    if (!armed.current) return setShown(data);
+    armed.current = false;
+    holding.current = true;
+    viewTransition(() => {
+      holding.current = false;
+      setShown(data);
+    });
+  }, [data, shown]);
+  const arm = useCallback(() => {
+    armed.current = true;
+  }, []);
+  return {shown: data === shown || armed.current || holding.current ? shown : data, arm};
 }

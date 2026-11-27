@@ -16,6 +16,7 @@ import type {TriageForm, TriageResult} from '@/src/goldline-triage-data';
 import {fmtTriagePeriod, FLAG_LABEL, flagTone, VERSION_LABEL} from '@/src/goldline-triage-format';
 import {assignFormStoreAction} from '@/app/uploads/actions';
 import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
+import {useHeldData, vtName} from '@/components/analyst/leaving';
 
 /** Told when a form's store is confirmed, so the board can say so (the card itself moves away). */
 const StoreAssigned = createContext<((a: {code: string; name: string; form: TriageForm}) => void) | null>(null);
@@ -231,7 +232,7 @@ function looksDifferent(readName: string | null, storeName: string): boolean {
  *  for the group's code; the user keeps it or picks another and ticks which forms to point
  *  at it — so a wrongly-grouped form (a different store read under the same code) can be
  *  left out instead of mis-stamped. Reuses the per-form assign action, applied in bulk. */
-function GroupStoreDialog({company, group, stores, onClose}: {company: string; group: {code: string; name: string | null; forms: TriageForm[]}; stores: StoreOption[]; onClose: () => void}) {
+function GroupStoreDialog({company, group, stores, onClose, onDone}: {company: string; group: {code: string; name: string | null; forms: TriageForm[]}; stores: StoreOption[]; onClose: () => void; onDone?: () => void}) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const suggested = useMemo(() => stores.find((s) => s.code === group.code) ?? null, [stores, group.code]);
@@ -259,6 +260,7 @@ function GroupStoreDialog({company, group, stores, onClose}: {company: string; g
     setPending(false);
     const bad = results.find((r) => !r.ok);
     if (bad && !bad.ok) return setErr(bad.error);
+    onDone?.();
     onClose();
     router.refresh();
   }
@@ -379,7 +381,7 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
   // whole form is filed with one tap instead of opening the batch to type a store.
   if (needsStore && canEdit && stores.length > 0) {
     return (
-      <div className="flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+      <div className="flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5" style={{viewTransitionName: vtName('form', form.key)}}>
         <CardBody form={form} s={s} />
         <div className="mt-auto flex flex-col">
           <StorePicker company={company} form={form} stores={stores} />
@@ -393,6 +395,7 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
       data-row
       data-kept-id={form.uploadIds.join(' ') || undefined}
       data-kept-tile
+      style={{viewTransitionName: vtName('form', form.key)}}
       onClick={() => leaveList('scan', form.uploadIds[0] ?? null, href)}
       className="group flex h-full flex-col gap-3.5 rounded-2xl border border-border bg-card p-4 shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out hover:border-foreground/20 hover:shadow-md active:scale-[0.99] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 motion-reduce:transition-none sm:p-5"
     >
@@ -406,7 +409,7 @@ function FormCard({form, stores, canEdit, company, baScope}: {form: TriageForm; 
 }
 
 export function TriageBoard({
-  data,
+  data: fresh,
   company,
   scan,
   stores = [],
@@ -425,6 +428,9 @@ export function TriageBoard({
   baScope?: string | null;
 }) {
   useReturnTrip('scan');
+  // Filing a store moves its card to another section: keep the board as it is until the
+  // refresh lands, then swap in a View Transition so the card visibly travels (Nov 27).
+  const {shown: data, arm: armMove} = useHeldData(fresh);
   const {needsStore, groups, singles, counts, storeCount, n} = useMemo(() => {
     const withStatus = data.forms.map((f) => ({f, s: statusOf(f)}));
     const counts = {ready: 0, needsStore: 0, incomplete: 0, committed: 0};
@@ -515,6 +521,7 @@ export function TriageBoard({
   sectionsNow.current = sections;
   const onAssigned = useCallback(
     ({code, name, form}: {code: string; name: string; form: TriageForm}) => {
+      armMove();
       const label = form.storeName ?? (form.storeCode ? `Store ${form.storeCode}` : 'this form');
       push({
         kind: 'ok',
@@ -522,7 +529,7 @@ export function TriageBoard({
         action: {label: 'Show', onClick: () => setStoreFilter(sectionsNow.current.some((x) => x.key === code) ? code : 'singles')},
       });
     },
-    [push, setStoreFilter],
+    [push, setStoreFilter, armMove],
   );
 
   const t = data.totals;
@@ -655,7 +662,7 @@ export function TriageBoard({
         </div>
       )}
 
-      {editGroup && <GroupStoreDialog company={company} group={editGroup} stores={stores} onClose={() => setEditGroup(null)} />}
+      {editGroup && <GroupStoreDialog company={company} group={editGroup} stores={stores} onClose={() => setEditGroup(null)} onDone={armMove} />}
       <ToastStack toasts={toasts} dismiss={dismiss} />
     </div>
     </OpenPicker.Provider>
@@ -675,7 +682,7 @@ function FormGrid({children}: {children: React.ReactNode}) {
  *  how many forms sit under it — so repeated periods of one store read as one store. */
 function GroupHeading({title, code, count, countLabel = 'form', tone, onEditStore, linked}: {title: string; code?: string; count: number; countLabel?: string; tone?: Tone; onEditStore?: () => void; linked?: boolean}) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3" style={{viewTransitionName: vtName('group', code ?? title)}}>
       <h3 className="flex min-w-0 items-center gap-2">
         {tone === 'crit' && <span aria-hidden className="size-2 shrink-0 rounded-full" style={{background: TONE_VAR.crit}} />}
         <span className={cn('truncate text-sm font-semibold tracking-tight', tone === 'crit' && 'text-[color:var(--status-crit)]')}>{title}</span>

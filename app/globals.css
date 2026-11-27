@@ -461,3 +461,12 @@ td.bhr-tgt { background: var(--accent); box-shadow: inset 0 0 0 3px var(--primar
 td.bhr-tgt::after { content: attr(data-tip); position: absolute; right: 4px; top: -9px; z-index: 25; white-space: nowrap; pointer-events: none; font-size: 10px; font-weight: 600; background: var(--primary); color: var(--primary-foreground); border-radius: 5px; padding: 1px 6px; }
 @keyframes bhr-tgt-pulse { 50% { box-shadow: inset 0 0 0 3px var(--primary), 0 0 0 4px var(--accent); } }
 @media (prefers-reduced-motion: reduce) { td.bhr-tgt { animation: none; } }
+
+/* View Transitions (Nov 27, row-removal plan P2): grid cards glide to their new spot with the
+   app's strong ease-out; a card that is gone fades. Only pages that call viewTransition()
+   (Uploads tiles, the scan triage board) start one. */
+::view-transition-group(*) { animation-duration: 260ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+::view-transition-old(*), ::view-transition-new(*) { animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}

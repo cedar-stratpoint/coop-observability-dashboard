@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Uploads and the scan board: cards glide to their new spot (View Transitions) (Nov 27)
+
+P2 of the row-removal plan (decided: View Transitions for multi-column grids, no new dependency).
+- **Uploads:** after a scan or file is deleted (the confirm dialog stays; no Undo, decided), its tile or row fades and the tiles or rows after it glide into place right away. The refresh then confirms it from the server. It used to vanish on refresh and the 3-column grid jumped.
+- **Scan board:** filing a store (inline picker or "Edit store" for a group) moves the form card out of "Needs a store". The board now keeps its layout until the refresh lands, then swaps inside a View Transition, so the card travels to its store's section and the others close the gap. Other refreshes swap at once as before.
+- `leaving.ts` gains `viewTransition` (instant where unsupported or with reduced motion), `vtName` (a CSS-safe `view-transition-name` from any key) and `useHeldData` (hold data until an armed refresh, then swap it in a transition). Timing in `globals.css`: groups 260ms, fades 180ms, strong ease-out; none with reduced motion.
+- Checked with a local test page and a fake refresh: the move starts as the data lands (~640ms after the click with a 600ms fake refresh) and ends ~300ms later; a deleted card fades; no transition runs with reduced motion. Not exercised on real staging data (filing re-splits batches and deletes are permanent).
+
 ## Unreleased — SKU links and the upload list: decided rows fade out, the rest slide up, Undo in a toast (Nov 27)
 
 P1 of the row-removal plan.
