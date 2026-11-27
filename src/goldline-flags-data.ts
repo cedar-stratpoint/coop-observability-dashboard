@@ -75,7 +75,8 @@ export async function getFlagsData(companyId: string, scope: string[] | null): P
     getGlCatalog(companyId),
     getGlStores(companyId),
     fetchAllRows('flags', (from, to) => {
-      let q = supa.from('flags').select('*').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      // A check withdrawn by a reopen (Nov 27) is not listed and doesn't count; the hub keeps it under Cleared.
+      let q = supa.from('flags').select('*').eq('company_id', companyId).neq('status', 'withdrawn'); // pagination-ok: paged by fetchAllRows (.range below)
       if (scope) q = q.in('store_code', scope);
       return q.order('created_at', {ascending: false}).order('id').range(from, to);
     }) as unknown as Promise<Array<Record<string, unknown>>>,
@@ -214,6 +215,7 @@ export async function getFormPages(companyId: string, scope: string[] | null, in
         .select('id,kind,item_code,period_start,period_end,status')
         .eq('company_id', companyId)
         .eq('store_code', input.store)
+        .neq('status', 'withdrawn')
         .gte('period_end', start)
         .lte('period_end', end)
         .order('id')

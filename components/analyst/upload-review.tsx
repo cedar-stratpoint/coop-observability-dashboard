@@ -4,7 +4,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import Link from 'next/link';
 import {useRouter, useSearchParams} from 'next/navigation';
-import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, X} from 'lucide-react';
+import {ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Crosshair, ExternalLink, FileText, Loader2, RefreshCw, Undo2, X} from 'lucide-react';
 import type {ExtractionRecord, FormPageStrip, StoreCheck, StoreOption, UploadRow} from '@/src/goldline-data';
 import {storeCheckNote} from '@/src/store-check-note';
 import {titleName} from '@/src/goldline-ui';
@@ -12,6 +12,9 @@ import {StoreCodeField} from '@/components/analyst/store-code-field';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {commitReview, setBandPriceAction, setBandPricesAction} from '@/app/uploads/actions';
 import {bandFlagRows, cleanBands, withPickedPrices} from '@/src/band-prices';
+import {reopenedNote, reviewedRows} from '@/src/goldline-reopen';
+import {scanPageLabel} from '@/src/upload-batch';
+import {ReopenPageDialog} from '@/components/analyst/reopen-page-dialog';
 import {Card, CardContent, CardHeader, CardTitle} from '@/components/ui/card';
 import {Button} from '@/components/ui/button';
 import {cn} from '@/lib/utils';
@@ -188,12 +191,15 @@ export function UploadReview({
 
   const head = extraction?.data;
   const [rows, setRows] = useState<EditRow[]>(() => (head?.rows ?? []).map((r) => ({...r})));
-  const [storeCode, setStoreCode] = useState(suggestion?.storeCode ?? head?.store_code ?? '');
+  // A reopened page (Nov 27) starts from what it was committed as: store, period and BA.
+  const reopened = !committed ? head?.reopened ?? null : null;
+  const [storeCode, setStoreCode] = useState(reopened?.store_code ?? suggestion?.storeCode ?? head?.store_code ?? '');
   // Never the reader's raw text ("10/16/2026"): a date box blanks any value not YYYY-MM-DD.
-  const [periodStart, setPeriodStart] = useState(suggestion?.periodStart ?? periodDefault?.start ?? '');
-  const [periodEnd, setPeriodEnd] = useState(suggestion?.periodEnd ?? periodDefault?.end ?? '');
+  const [periodStart, setPeriodStart] = useState(reopened?.period_start ?? suggestion?.periodStart ?? periodDefault?.start ?? '');
+  const [periodEnd, setPeriodEnd] = useState(reopened?.period_end ?? suggestion?.periodEnd ?? periodDefault?.end ?? '');
   // The BA written on the form. Blank saves under the store's BA from earlier forms.
-  const [ba, setBa] = useState(suggestion?.consultant ?? head?.consultant ?? '');
+  const [ba, setBa] = useState(reopened?.consultant ?? suggestion?.consultant ?? head?.consultant ?? '');
+  const [reopenOpen, setReopenOpen] = useState(false);
   const storeBa = bas?.byStore[storeCode] ?? null;
   // Which header fields were carried over from the page committed just before this one.
   const [carried, setCarried] = useState(false);
@@ -267,7 +273,8 @@ export function UploadReview({
     for (const p of picks) answerBand(res.bands.find((x) => x.group === p.group)?.first_index);
     return null;
   }
-  const [resolved, setResolved] = useState<Set<number>>(() => new Set());
+  // Rows a reviewer already committed before a reopen start answered.
+  const [resolved, setResolved] = useState<Set<number>>(() => reviewedRows(head?.rows));
   const [active, setActive] = useState<number | null>(null);
   // Jumping to a flag (the navigator) points the scan at that row too.
   useEffect(() => {
@@ -562,12 +569,42 @@ export function UploadReview({
           <span className="inline-flex items-center gap-2">
             <CheckCircle2 className="size-4" /> This upload is committed.
           </span>
-          {inventoryHref && (
-            <Link href={inventoryHref} className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
-              View in Inventory <ArrowRight className="size-3.5" />
-            </Link>
-          )}
+          <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
+            {inventoryHref && (
+              <Link href={inventoryHref} className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline">
+                View in Inventory <ArrowRight className="size-3.5" />
+              </Link>
+            )}
+            {canEdit && upload.kind === 'inventory_pdf' && extraction && (
+              <button
+                type="button"
+                onClick={() => setReopenOpen(true)}
+                className="inline-flex items-center gap-1 rounded-sm font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/40"
+              >
+                <Undo2 className="size-3.5" aria-hidden /> Reopen for review
+              </button>
+            )}
+          </span>
         </div>
+      )}
+      {committed && canEdit && upload.kind === 'inventory_pdf' && extraction && (
+        <ReopenPageDialog
+          company={company}
+          uploadId={upload.id}
+          pageLabel={scanPageLabel(upload.filename).index > 0 ? `page ${scanPageLabel(upload.filename).index}` : 'this page'}
+          open={reopenOpen}
+          onClose={() => setReopenOpen(false)}
+          onReopened={() => {
+            setReopenOpen(false);
+            router.refresh();
+          }}
+        />
+      )}
+      {reopened && (
+        <p className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          <Undo2 className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{reopenedNote(reopened)}</span>
+        </p>
       )}
 
       <div className={cn('flex flex-col gap-5', twoCol && 'lg:flex-row lg:items-start')}>
