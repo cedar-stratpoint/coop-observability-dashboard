@@ -36,7 +36,7 @@ function monthGrid(year: number, month: number, weekStartsOn: WeekStart): {leadi
  * outside the optional `min`/`max` (YYYY-MM-DD, inclusive). Fully themed from
  * the design tokens and keyboard-operable.
  */
-export function Calendar({value, onChange, min, max, allowFuture = false, weekStartsOn = 0}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string; allowFuture?: boolean; weekStartsOn?: WeekStart}) {
+export function Calendar({value, onChange, min, max, allowFuture = false, weekStartsOn = 0, onMonthChange}: {value: DateRange; onChange: (next: DateRange) => void; min?: string; max?: string; allowFuture?: boolean; weekStartsOn?: WeekStart; /** The month on screen (0-based month), when it changes. */ onMonthChange?: (year: number, month: number) => void}) {
   const today = todayYmd();
   const anchor = value.end ?? value.start ?? min ?? today;
   const [ay, am] = anchor.split('-').map(Number);
@@ -50,10 +50,10 @@ export function Calendar({value, onChange, min, max, allowFuture = false, weekSt
   ];
 
   function step(delta: number) {
-    setView((v) => {
-      const next = new Date(Date.UTC(v.y, v.m + delta, 1));
-      return {y: next.getUTCFullYear(), m: next.getUTCMonth()};
-    });
+    const next = new Date(Date.UTC(view.y, view.m + delta, 1));
+    const v = {y: next.getUTCFullYear(), m: next.getUTCMonth()};
+    setView(v);
+    onMonthChange?.(v.y, v.m);
   }
 
   function pick(day: string) {

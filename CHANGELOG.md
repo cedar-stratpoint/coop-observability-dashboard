@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-27 — Release v1.31.2: page review year follows the scan; Period is one field with Coop's calendar (Nichido)
+
+PROD release (cherry-picked onto main after v1.31.1). Owner QA Nov 27: most reviewed pages showed the wrong period year (39 of 112 dated prod pages read 2016 to 2025 for a handwritten 2026; month and day right).
+
+- **Year** (#850): the review fills a misread year with the year most of the page's scan reads (as the scan board already did), and says so: "Year read as 2024; using 2026 like the rest of this scan." Every uncommitted page, no re-read. A reopened page keeps its committed period.
+- **Period field** (#850): one field ("Sep 16 to 30, 2026") opening Coop's own range calendar with the month's two cut-offs one tap away, replacing the browser's date boxes. Store | Period | BA in one row on a wide card.
+- Already committed with a wrong year (owner reopens in Coop): Oct 30 p52, p56, p57, p58, p62, p63, p64.
+
 ## 2026-11-27 — Release v1.31.1: page review Store / period / BA block made calmer; "Looks right" keeps your place (Nichido)
 
 PROD release (cherry-picked onto main after v1.31.0). Owner QA on the page review, Nov 27.
