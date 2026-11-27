@@ -27,6 +27,17 @@ Transcribed from the reference scans in `public/form-versions/{legacy,v1,v2}-{1.
 - **Merged per-family total cells**: the "Total Amount of Ending Inventory" column (and, on Legacy, "Total Amount Deducted Inventory") merges into one cell across each family's rows. Accessories and Make-up Collection stay per-item (each has its own price).
 - **Footer**: `PAGE # N` + `TOTAL` under the piece-count and peso-total columns.
 
+## Rows printed on some copies only
+
+Some prints of a page carry a row the reference copy does not. Mark such a row, and its
+band, with `some copies` in a **PRINTED ON** column (column J, outside the paper's columns).
+The generator emits it with `"optional": true`; the reader then reports it only when it is
+printed, so a copy without it gets no row and a copy with it gets no "written in" flag.
+
+- V1 page 5: `INDIVIDUAL FLARE` band (₱238) with `ELIF3125B · 3125 (black)`, O/S printed,
+  between `ELF8058` and `ELISE FEATHER LITE LASHES`. Seen on stores 5300 and 296 (Oct 30
+  scan p21, p32, p40; Nov 20 Part 1 p28); not on other V1 copies or any V2 copy.
+
 ## Why per-(version, page)
 
 The versions share one catalog but **paginate differently** (e.g. Trulashes De Luxe is on

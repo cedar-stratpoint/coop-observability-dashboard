@@ -223,6 +223,71 @@ export function shouldRetrySetAside(kind: string, confidence: number): boolean {
 
 const COUNT_KEYS = ['stockroom', 'drawer', 'selling_area', 'delivery', 'ending_on_hand'] as const;
 
+/* Optional printed rows (QA Nov 27). Some V1 page 5 prints carry an INDIVIDUAL FLARE band
+ * (ELIF3125B) between Elise Lashes and Feather Lite; most do not. The template lists it as optional:
+ * the reader reports it only when it is printed, a copy without it gets no row (no blank "kept
+ * blank" row to review), and a copy with it gets a printed row instead of a "written in" extra. */
+
+const SOME_COPIES = ' (SOME COPIES ONLY)';
+
+/** The prompt rule for a template with optional rows; empty when it has none. */
+function optionalRule(template: FormTemplate): string[] {
+  if (!templateItems(template).some((it) => it.optional)) return [];
+  return [
+    `- A row or family marked${SOME_COPIES} is printed on some copies of this page and not others. Return it`,
+    '  only when it is printed on THIS page (then like any row, even with no counts); if it is not printed, leave',
+    '  it out. Never put a printed row of this list in "extras".',
+  ];
+}
+
+const optKey = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+
+/**
+ * Fit the template to the copy that was read: an optional row the read reported (as a row, or as an
+ * extra naming its code or printed name) stays, and such an extra becomes that row; an optional row
+ * the read did not report is taken off the template, with its band when the band is left empty.
+ * Index-keyed outputs are re-indexed to the reduced template. A template with no optional rows, or a
+ * read that reported all of them, comes back unchanged. Pure.
+ */
+export function fitOptionalRows<O extends AnchoredOutput | AnchoredOutputP1>(template: FormTemplate, out: O): {template: FormTemplate; out: O} {
+  const items = templateItems(template);
+  if (!items.some((it) => it.optional)) return {template, out};
+  const p1 = typeof ((out.rows ?? [])[0] as {row?: unknown} | undefined)?.row === 'string';
+  const keys = p1RowKeys(template).map(optKey);
+  const rows = [...((out.rows ?? []) as Array<AnchoredRow | AnchoredRowP1>)];
+  let extras = [...(out.extras ?? [])];
+  const present = items.map((it, j) => {
+    if (!it.optional) return true;
+    const reported = rows.some((r) => (p1 ? optKey((r as AnchoredRowP1).row) === keys[j] || optKey((r as AnchoredRowP1).row) === optKey(it.itemCode) : (r as AnchoredRow).i === j));
+    if (reported) return true;
+    const name = optKey(it.product);
+    const e = extras.find((x) => optKey(x.code) === optKey(it.itemCode) || (name.length >= 4 && optKey(x.name).includes(name)));
+    if (!e) return false;
+    extras = extras.filter((x) => x !== e);
+    const cells: CountCols = {};
+    for (const k of COUNT_KEYS) if (typeof e[k] === 'number') cells[k] = e[k];
+    rows.push(p1 ? ({...cells, row: keys[j], confidence: e.confidence} as AnchoredRowP1) : ({...cells, i: j, confidence: e.confidence ?? 0.5} as AnchoredRow));
+    return true;
+  });
+  if (present.every(Boolean) && extras.length === (out.extras ?? []).length) return {template, out};
+
+  // Reduce the template: drop absent optional rows, then any band left with no rows under it.
+  const kept: FormTemplate['rows'] = [];
+  const newIndex: number[] = [];
+  let j = 0;
+  for (const r of template.rows) {
+    if (r.kind === 'item') {
+      newIndex[j] = present[j] ? kept.filter((k) => k.kind === 'item').length : -1;
+      if (present[j]) kept.push(r);
+      j++;
+    } else kept.push(r);
+  }
+  const reducedRows = kept.filter((r, i) => r.kind === 'item' || kept[i + 1]?.kind === 'item');
+  const reduced: FormTemplate = {...template, rows: reducedRows, itemCount: reducedRows.filter((r) => r.kind === 'item').length};
+  const outRows = p1 ? rows : (rows as AnchoredRow[]).flatMap((r) => (typeof r.i === 'number' && newIndex[r.i] >= 0 ? [{...r, i: newIndex[r.i]}] : []));
+  return {template: reduced, out: {...out, rows: outRows, extras} as O};
+}
+
 /**
  * The user-turn prompt for a template-anchored read: the ordered item rows (index · code · name,
  * with family bands for context) and the version's column positions, with the fill-only rules.
@@ -236,9 +301,9 @@ export function buildAnchoredPrompt(template: FormTemplate): string {
   for (const r of template.rows) {
     if (r.kind === 'group') {
       const price = r.unitPrice == null ? '' : ` (printed ₱${r.unitPrice})`;
-      lines.push(`  [FAMILY] ${r.line}${price}`);
+      lines.push(`  [FAMILY] ${r.line}${price}${r.optional ? SOME_COPIES : ''}`);
     } else {
-      lines.push(`  ${idx} · ${r.itemCode} · ${r.product}`);
+      lines.push(`  ${idx} · ${r.itemCode} · ${r.product}${r.optional ? SOME_COPIES : ''}`);
       idx++;
     }
   }
@@ -252,6 +317,7 @@ export function buildAnchoredPrompt(template: FormTemplate): string {
     `- Return exactly one entry for each of the ${idx} item rows below (i = 0 to ${idx - 1}), in this order.`,
     '  Never add, drop, reorder, or rename a row. A row with no counts (blank, or only an "O/S"',
     '  mark) is still returned, with null in every cell.',
+    ...optionalRule(template),
     '- OMIT a blank cell entirely (do not return that field for the row); only a written "0" is 0.',
     '  Read the WRITTEN ending_on_hand value; do not',
     '  compute or overwrite it with a sum.',
@@ -549,9 +615,9 @@ export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: bo
   for (const r of template.rows) {
     if (r.kind === 'group') {
       const price = r.unitPrice == null ? '' : ` (printed ₱${r.unitPrice})`;
-      lines.push(`  [FAMILY] ${r.line}${price}`);
+      lines.push(`  [FAMILY] ${r.line}${price}${r.optional ? SOME_COPIES : ''}`);
     } else {
-      lines.push(`  row "${keys[idx]}" · ${r.product}`);
+      lines.push(`  row "${keys[idx]}" · ${r.product}${r.optional ? SOME_COPIES : ''}`);
       idx++;
     }
   }
@@ -583,6 +649,7 @@ export function buildAnchoredPromptP1(template: FormTemplate, opts: {unsure?: bo
     'Rules:',
     `- Return one entry for every row below (${idx} rows), with "row" set to the row key exactly as listed.`,
     '  A row with no counts (blank, or only an "O/S" mark) is still returned, with no count fields.',
+    ...optionalRule(template),
     '- OMIT a blank cell entirely; only a written "0" is 0. Read the WRITTEN ending_on_hand; never compute it.',
     '- Map each cell by the PRINTED column header described above, not by any handwritten sub-label.',
     '- Also transcribe the printed DATA-column header labels into "column_headers", left to right, exactly as',
@@ -803,7 +870,8 @@ export function mapAnchoredP1ToExtractedPage(template: FormTemplate, out: Anchor
 
 /** Map either output shape: P1 rows carry `row`, the original carries `i`. Lets a batch submitted
  *  under one flag setting be ingested after the flag flips. */
-export function mapAnchoredOutput(template: FormTemplate, out: AnchoredOutput | AnchoredOutputP1): AnchoredMapResult {
+export function mapAnchoredOutput(fullTemplate: FormTemplate, fullOut: AnchoredOutput | AnchoredOutputP1): AnchoredMapResult {
+  const {template, out} = fitOptionalRows(fullTemplate, fullOut);
   const first = (out.rows ?? [])[0] as {row?: unknown} | undefined;
   return first && typeof first.row === 'string'
     ? mapAnchoredP1ToExtractedPage(template, out as AnchoredOutputP1)

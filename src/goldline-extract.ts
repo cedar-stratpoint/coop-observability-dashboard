@@ -37,7 +37,7 @@ export type FormVersion = (typeof FORM_VERSIONS)[number];
 export const PAGE_KINDS = ['inventory', 'sales', 'blank', 'unknown'] as const;
 export type PageKind = (typeof PAGE_KINDS)[number];
 
-export type ManifestItem = {code: string; product: string};
+export type ManifestItem = {code: string; product: string; /** Printed on some copies of the page only. */ optional?: boolean};
 
 // Per-page item manifest, in printed order, generated from the blank templates
 // (Nichido/page 1_..PAGE 6). Page 1 is enumerated from the verified scan; pages
