@@ -8,6 +8,17 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Reopen a committed page for review (Nov 27)
+
+A committed page was read-only; the only way back was to delete it (losing the read, the price picks and the store/BA fixes, and paying for a new read), and Coop's checks from that commit stayed on the BA as "resolved". Now the committed banner has **Reopen for review**.
+- **Who (decided):** anyone who can commit, within their stores, **behind a confirmation dialog** that says what changes, read from the server: how many counts leave Inventory, for which store and period, how many of Coop's checks close, and any counts that now come from another page (those stay).
+- **What comes back (decided):** commit writes the reviewed counts to `inventory` only, so the reopen first restores the read from them (`restoreCommitted`): each row gets its committed cells (Legacy's own counts too), a product the reviewer added comes back as an added row, and the header takes the committed store, period and BA. Price picks and marks ride along. Committed rows are marked `reviewed` and start answered. No new read. The page shows "Reopened for review by … on …".
+- **One transaction** (`reopen_upload`, `p8_reopen.sql`): the page must still be committed (row lock); its counts leave Inventory; the read takes the restored page; both go back to review.
+- **Checks (decided):** a check from the reopened page that stops firing closes as **`withdrawn`** (new status), which the BA scorecard and the BA drill-down skip; the Flags hub lists it under Cleared with why. Other checks that stop firing still resolve and still count. Re-committing re-runs the checks, so a real problem opens again (a withdrawn check reopens like a resolved one).
+- Re-commit from the page's own review. A page from a form already committed with "Commit all" stays out of Commit all (that form's batch is closed).
+- SQL: `p8_reopen.sql` applied on **Nichido Staging** Nov 27 (dry run in a rolled-back transaction: 43 counts out, page and read back in review, a second reopen refused). Prod with the release.
+- Plan: `knowledge/tasks/2026-11-27-reopen-flare-band-wording.md` (W3).
+
 ## Unreleased — Band price buttons say they price the whole band (Nov 27)
 
 QA on the prod Oct 30 scan: "Use ₱180 / Keep ₱225 · For this form only" sits on the band's first row (USMLLC01), so it read as a choice for that one cell. The pick prices every row of the band (`pickedPrices` covers `band.codes`).

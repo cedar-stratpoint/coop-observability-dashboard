@@ -121,3 +121,9 @@ export function exportRow(l: FlagLine): (string | number)[] {
     l.createdAt.slice(0, 10),
   ];
 }
+
+/** The note on a check withdrawn by a reopen (Nov 27), shown under Cleared; any remark follows. */
+export function withdrawnNote(remark: string | null | undefined): string {
+  const base = 'Withdrawn: its page was reopened for review, so it no longer counts against the BA.';
+  return remark?.trim() ? `${base} ${remark.trim()}` : base;
+}

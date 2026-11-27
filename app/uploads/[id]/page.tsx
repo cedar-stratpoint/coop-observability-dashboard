@@ -201,7 +201,8 @@ export default async function Page(props: {params: Promise<{id: string}>; search
         </div>
       )}
       <UploadReview
-      key={upload.id}
+      // Remount on commit or reopen, so the rows and header start from the page's new state.
+      key={`${upload.id}:${upload.status}`}
       company={ctx.companyId}
       canEdit={canEditData(ctx.role)}
       upload={upload}
