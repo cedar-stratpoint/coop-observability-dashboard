@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — Page review: removing an added row fades, slides and offers Undo (Nov 27)
+
+From a UI tip the owner shared (The Glide Studio reel: "Fade the row, slide the rest up, offer undo."). Removing a product the reviewer had added made the row vanish and the rows below jump up, with no way back.
+- **Now:** the row fades (150ms), the rows below glide up into its place (220ms, strong ease-out), focus moves to the next row, and a toast says "Removed 24HRTEEP" with **Undo** for 6 seconds. Undo puts the row back where it was, with its "Product written in" flag. Reduced motion: the row goes at once; Undo is still offered.
+- **Shared code:** `components/analyst/leaving.ts`, taken from the Flags hub, which already did this: `useLeaving` (fading / hidden keys, now used by the Flags hub with no visual change), `leaveRow` (folds a block list item's height), and `useSlideUp` (a table row's height can't fold, so it measures the rows just before the change and glides each one from where it was; only when armed, so search and cell edits never animate).
+- **Decided (row-removal plan, Nov 27):** Uploads deletes keep their confirm dialog and get no Undo (they are permanent, and the dialog lists any committed data they remove); multi-column grids (Uploads tiles, Triage cards) will use View Transitions; the Undo window is the standard 6s toast. Next: SKU link approve/reject, the upload queue, batch review commit, then the grids.
+
 ## Unreleased — Page review: the year follows the scan; Period is one field with Coop's own calendar (Nov 27)
 
 Owner QA: most reviewed pages read the period year wrong ("July 16 to 31, 2026" read as 07/16/2024). Prod: 39 of 112 dated pages (Oct 30 21/67, Nov 20 Part 1 12/25, Part 2 6/20) read 2016, 2020, 2021, 2022, 2024 or 2025; month and day were right. The header is already read from 300 dpi crops (#835), so resolution was not the gap: the scan board snapped those years to the scan's main year (`reconcileYears`) but the page review prefilled the raw read.

@@ -878,7 +878,7 @@ export function UploadReview({
             uploadId={upload.id}
             addable={upload.kind === 'inventory_pdf' ? addable : undefined}
             page={extraction?.page ?? null}
-            onAddRow={(row) => setRows((rs) => [...rs, row])}
+            onAddRow={(row, at) => setRows((rs) => (at == null ? [...rs, row] : [...rs.slice(0, at), row, ...rs.slice(at)]))}
             onRemoveRow={(i) => setRows((rs) => (rs[i]?.added ? rs.filter((_, k) => k !== i) : rs))}
             rows={rows}
             onPoint={scanUrl ? setPointRow : undefined}

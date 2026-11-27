@@ -1,6 +1,6 @@
 'use client';
 
-import {useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {Check, ChevronLeft, ChevronRight, Plus, Search, Trash2} from 'lucide-react';
 import type {ExtractedRow} from '@/src/goldline-extract-run';
 import {bandOf, LOW_BELOW, rowConfidence, toneText, type Band} from '@/src/review-confidence';
@@ -17,6 +17,8 @@ import {AddRowDialog} from './add-row-dialog';
 import {addedRow, type AddableItem} from '@/src/review-add-row';
 import {bandOpen, peso, type PaperBand} from '@/src/band-prices';
 import {BandPrice, BandPricesBar} from './band-price';
+import {reducedMotion, useSlideUp} from './leaving';
+import {ToastStack, useToasts} from './toast-stack';
 
 // The rows of a scan review (plan §07d). Two views:
 //  • Needs review — only the flagged rows, each with "Looks right" (or edit it) to
@@ -65,6 +67,18 @@ export function reviewRowEl(index: number): HTMLElement | null {
 }
 export type ReviewView = 'needs' | 'all';
 
+/** A row's identity that survives index shifts (code + which copy of it), so a removed row's
+ *  neighbours can be followed on screen and an undone row put back in its place. */
+function flipKeys(rows: ReadonlyArray<{item_code: string}>): string[] {
+  const seen = new Map<string, number>();
+  return rows.map((r) => {
+    const n = seen.get(r.item_code) ?? 0;
+    seen.set(r.item_code, n + 1);
+    return `${r.item_code}#${n}`;
+  });
+}
+const ROW_FADE_MS = 150;
+
 const BAND_TONE: Record<Band, string> = {high: 'var(--status-good)', medium: 'var(--status-warn)', low: 'var(--status-crit)'};
 
 type Props = {
@@ -101,7 +115,8 @@ type Props = {
    *  "printed on another page" warning), and the parent's add/remove. Absent = no Add product. */
   addable?: AddableItem[];
   page?: number | null;
-  onAddRow?: (row: ExtractedRow) => void;
+  /** Add a row at the end, or put one back at `at` (Undo of a removal). */
+  onAddRow?: (row: ExtractedRow, at?: number) => void;
   onRemoveRow?: (index: number) => void;
   /** The page's heading bands as read: paper total, written price, and the reviewer's price
    *  pick (QA Nov 25). A flagged band shows its pick on its first row. */
@@ -197,11 +212,60 @@ export function ReviewRows({
     }
     return null;
   };
+  // Removing an added row (the Glide Studio reel, Nov 27): the row fades, the rows below
+  // slide up into its place, focus moves to the next row, and a toast offers Undo, which
+  // puts the row (and its "added" flag) back where it was.
+  const {toasts, push, dismiss} = useToasts();
+  const listRef = useRef<HTMLDivElement>(null);
+  const armSlide = useSlideUp(listRef);
+  const [fading, setFading] = useState<Set<string>>(new Set());
+  const live = useRef({rows, editable});
+  useEffect(() => {
+    live.current = {rows, editable};
+  });
+  const keys = useMemo(() => flipKeys(rows), [rows]);
+  const focusRow = (i: number) =>
+    requestAnimationFrame(() => {
+      const el = reviewRowEl(i) ?? reviewRowEl(i - 1);
+      (el?.querySelector<HTMLElement>('input, button') ?? el)?.focus({preventScroll: true});
+    });
   const removeAdded = (r: {item_code: string; i: number}) => {
-    onRemoveRow?.(r.i);
-    const m = onPage.find((x) => x.status === 'open' && x.itemCode === r.item_code && x.kind === 'added_row' && x.source === 'reviewer');
-    if (m && flagCtx) void flagCtx.clear(m.id);
+    const key = keys[r.i];
+    if (!key || fading.has(key)) return;
+    const row = rows[r.i];
+    const hadMark = onPage.some((x) => x.status === 'open' && x.itemCode === r.item_code && x.kind === 'added_row' && x.source === 'reviewer');
+    setFading((s) => new Set(s).add(key));
+    window.setTimeout(() => {
+      setFading((s) => {
+        const n = new Set(s);
+        n.delete(key);
+        return n;
+      });
+      const at = flipKeys(live.current.rows).indexOf(key);
+      if (at < 0) return;
+      armSlide();
+      onRemoveRow?.(at);
+      focusRow(at);
+      const m = onPage.find((x) => x.status === 'open' && x.itemCode === r.item_code && x.kind === 'added_row' && x.source === 'reviewer');
+      if (m && flagCtx) void flagCtx.clear(m.id);
+      push({
+        kind: 'ok',
+        text: `Removed ${r.item_code}`,
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            if (!live.current.editable) return;
+            const back = Math.min(at, live.current.rows.length);
+            armSlide();
+            onAddRow?.(row, back);
+            focusRow(back);
+            if (hadMark && flagCtx?.canFlag && uploadId) void flagCtx.save({uploadId, itemCode: r.item_code, rowIndex: back, kind: 'added_row'});
+          },
+        },
+      });
+    }, reducedMotion() ? 0 : ROW_FADE_MS);
   };
+  const fadeClass = (r: {i: number}) => fading.has(keys[r.i] ?? '') && 'pointer-events-none opacity-0 transition-opacity duration-150 ease-out motion-reduce:transition-none';
   const removeButton = (r: (typeof indexed)[number]) =>
     r.added && editable && onRemoveRow ? (
       <button
@@ -324,6 +388,7 @@ export function ReviewRows({
         key={`${r.item_code}-${r.i}`}
         id={`review-row-${r.i}`}
         data-review-row={r.i}
+        data-flip-key={keys[r.i]}
         onPointerEnter={onPoint ? () => onPoint(r.i) : undefined}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
         data-pointed={pointed === r.i || active === r.i || undefined}
@@ -332,6 +397,7 @@ export function ReviewRows({
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
+          fadeClass(r),
         )}
       >
         {/* pl-3 keeps the item clear of the 3px bar on the pointed row. */}
@@ -422,6 +488,7 @@ export function ReviewRows({
       <li
         key={`${r.item_code}-${r.i}`}
         data-review-row={r.i}
+        data-flip-key={keys[r.i]}
         onFocus={onPoint ? () => onPoint(r.i) : undefined}
         data-pointed={pointed === r.i || active === r.i || undefined}
         className={cn(
@@ -429,6 +496,7 @@ export function ReviewRows({
           isFlag && !done && 'bg-[color-mix(in_oklab,var(--status-crit)_6%,transparent)]',
           pointed === r.i && 'bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_var(--primary)]',
           active === r.i && 'outline-2 -outline-offset-2 outline-[var(--status-crit)]',
+          fadeClass(r),
         )}
       >
         <div className="flex items-start justify-between gap-2">
@@ -564,12 +632,12 @@ export function ReviewRows({
                 : 'Nothing needs review. Switch to “All” to see the whole page.'}
           </p>
         ) : (
-          <>
+          <div ref={listRef}>
           <ul role="list" className="-mx-4 flex flex-col divide-y divide-border border-y border-border md:hidden" aria-label="Rows">
             {groups
               ? groups.map((g) => (
                   <li key={`${g.family}-${g.items[0].i}`}>
-                    <div className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">{heading(g)}</div>
+                    <div data-flip-key={`family:${g.family}`} className="bg-muted/50 px-4 py-1.5 text-xs font-semibold">{heading(g)}</div>
                     <ul role="list" className="flex flex-col divide-y divide-border">{g.items.map(card)}</ul>
                   </li>
                 ))
@@ -581,7 +649,7 @@ export function ReviewRows({
               {groups ? (
                 groups.map((g) => (
                   <tbody key={`${g.family}-${g.items[0].i}`}>
-                    <tr className="bg-muted/50">
+                    <tr data-flip-key={`family:${g.family}`} className="bg-muted/50">
                       <th colSpan={cols.length + (editable ? 3 : 2)} scope="rowgroup" className="px-2 py-1.5 text-left text-xs font-semibold">
                         {heading(g)}
                       </th>
@@ -594,9 +662,10 @@ export function ReviewRows({
               )}
             </table>
           </div>
-          </>
+          </div>
         )}
       </CardContent>
+      <ToastStack toasts={toasts} dismiss={dismiss} />
       {adding && addable && (
         <AddRowDialog items={addable} pageCodes={pageCodes} pageLines={pageLines} page={page ?? null} onAdd={addProduct} onClose={() => setAdding(false)} />
       )}
