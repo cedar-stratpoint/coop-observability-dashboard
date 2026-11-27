@@ -708,7 +708,7 @@ export function BatchReview({
                   uploadId={cur.upload.id}
                   addable={addable}
                   page={cur.page}
-                  onAddRow={(row) => setCur((s) => ({rows: [...s.rows, row]}))}
+                  onAddRow={(row, at) => setCur((s) => ({rows: at == null ? [...s.rows, row] : [...s.rows.slice(0, at), row, ...s.rows.slice(at)]}))}
                   onRemoveRow={(i) => setCur((s) => ({rows: s.rows[i]?.added ? s.rows.filter((_, k) => k !== i) : s.rows}))}
                   onPoint={cur.scanUrl ? setPointRow : undefined}
                   pointed={pointRow}
