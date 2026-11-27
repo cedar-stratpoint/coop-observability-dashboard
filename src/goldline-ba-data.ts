@@ -235,7 +235,8 @@ export async function getBaScorecard(companyId: string, scope: string[] | null):
   const [stores, flags, forms] = await Promise.all([
     getGlStores(companyId),
     fetchAllRows('flags', (from, to) => {
-      let q = supa.from('flags').select('store_code,period_end,consultant,cause').eq('company_id', companyId); // pagination-ok: paged by fetchAllRows (.range below)
+      // A check withdrawn by a reopen doesn't count (Nov 27); every other one does, resolved too.
+      let q = supa.from('flags').select('store_code,period_end,consultant,cause').eq('company_id', companyId).neq('status', 'withdrawn'); // pagination-ok: paged by fetchAllRows (.range below)
       if (scope) q = q.in('store_code', scope);
       return q.order('id').range(from, to);
     }) as unknown as Promise<Array<{store_code: string; period_end: string; consultant: string | null; cause: FlagCause}>>,

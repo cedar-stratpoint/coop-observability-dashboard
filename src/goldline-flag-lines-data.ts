@@ -3,7 +3,7 @@ import {nichidoConfigured, nichidoDb} from './nichido-client';
 import {fetchAllRows} from './pos-fetch-paginate';
 import {getGlCatalog, getGlStores} from './goldline-ref-data';
 import {itemDisplayName} from './goldline-item-name';
-import {checkWhy, filePage, markWhy, type FlagLine} from './goldline-flag-lines';
+import {checkWhy, filePage, markWhy, withdrawnNote, type FlagLine} from './goldline-flag-lines';
 import type {MarkKind} from './goldline-review-marks';
 import {cleanBands, type PaperBand} from './band-prices';
 
@@ -128,7 +128,7 @@ export async function flagLines(companyId: string, scope: string[] | null): Prom
       key: `f:${c.id}`,
       source: 'check',
       why: checkWhy(c.kind),
-      note: c.remark,
+      note: c.status === 'withdrawn' ? withdrawnNote(c.remark) : c.remark,
       open: c.status === 'open',
       storeCode: c.store_code,
       storeName: storeName.get(c.store_code) ?? null,

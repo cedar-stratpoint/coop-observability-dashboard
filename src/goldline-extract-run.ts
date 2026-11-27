@@ -100,6 +100,9 @@ export type ExtractedRow = {
   // NICH-36 · the row is printed on the page but its code/name isn't in the reference
   // manifest. Kept and flagged for review (never dropped). Null/absent on known rows.
   off_manifest?: boolean | null;
+  // Reopen for review (Nov 27) · a reviewer already committed this row before the page was
+  // reopened: its cells are the committed ones and its flag starts answered. Absent otherwise.
+  reviewed?: boolean;
 };
 
 export type CellMark = {
@@ -129,6 +132,23 @@ export type ExtractedPage = {
   /** Each heading band's paper total and written price, and whether the paper points at another
    *  price than the printed one (QA Nov 25). Absent on pages read before then. */
   bands?: PaperBand[] | null;
+  /** Reopen for review (Nov 27): the page was committed, then reopened. What it was committed as
+   *  (the review prefills from it) and who reopened it. Absent on pages never reopened. */
+  reopened?: ReopenRecord | null;
+};
+
+/** A reopened page's last commit and the reopen itself (src/goldline-reopen.ts). */
+export type ReopenRecord = {
+  at: string;
+  by: string | null;
+  store_code: string;
+  period_start: string;
+  period_end: string;
+  consultant: string | null;
+  /** Rows given back their committed cells. */
+  restored: number;
+  /** Codes whose count in Inventory now comes from another page; they stay there. */
+  kept_elsewhere: string[];
 };
 
 /** True when extraction is configured (a primary OR fallback key is set). */
