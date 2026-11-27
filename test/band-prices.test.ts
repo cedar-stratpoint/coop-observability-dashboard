@@ -9,6 +9,8 @@ import {
   flaggedRowIndexes,
   stampPickedPrices,
   withPickedPrices,
+  pickPaperPriceLabel,
+  BAND_PICK_SCOPE,
   type PaperBand,
 } from '../src/band-prices';
 
@@ -107,5 +109,22 @@ describe('flags and picks', () => {
     expect(cleanBands([{group: 1}, 'x'])).toEqual([]);
     const [b] = cleanBands([{...bands[0], use_price: 180, kind: 'bogus'}]);
     expect(b).toMatchObject({group: G, use_price: 180, kind: null, offer_price: 180});
+  });
+});
+
+// QA Nov 27: "Use ₱180" sat on the band's first row and read as "just this cell". It prices the
+// whole band, so the button says how many rows it covers.
+describe('pickPaperPriceLabel', () => {
+  const band = (n: number) => ({offer_price: 180, codes: Array.from({length: n}, (_, i) => `USMLLC${i + 1}`)});
+  it('names the whole band', () => {
+    expect(pickPaperPriceLabel(band(10))).toBe('Use ₱180 for all 10');
+    expect(pickPaperPriceLabel(band(2))).toBe('Use ₱180 for both');
+    expect(pickPaperPriceLabel(band(1))).toBe('Use ₱180');
+    expect(pickPaperPriceLabel({offer_price: 199, codes: ['24/7SEPM', '24/7SEPU', '24/7SEPM']})).toBe('Use ₱199 for both');
+    expect(pickPaperPriceLabel({offer_price: null, codes: []})).toBe('');
+  });
+  it('the scope line has no dashes', () => {
+    expect(BAND_PICK_SCOPE).toBe('Applies to the whole band, this form only.');
+    expect(BAND_PICK_SCOPE).not.toMatch(/[–—]/);
   });
 });
