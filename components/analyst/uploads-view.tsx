@@ -19,6 +19,7 @@ import {Pagination} from '@/components/analyst/pagination';
 import {keptId, leaveList, useListParams, useReturnTrip} from '@/components/analyst/back-nav';
 import {cn} from '@/lib/utils';
 import {ToastStack} from '@/components/analyst/toast-stack';
+import {viewTransition, vtName} from '@/components/analyst/leaving';
 import {GL_PAGE} from '@/src/goldline-ui';
 import {DROP_TYPE_LABEL, dropMatchesType, dropTypeOf, groupUploads, uploadGroupKey, type DropType, type UploadGroup} from '@/src/goldline-upload-groups';
 
@@ -135,7 +136,7 @@ function GroupTile({
   const done = committed > 0 && review === 0 && processing === 0;
   const share = committed + review > 0 ? committed / (committed + review) : 0;
   return (
-    <div data-kept-id={keptId(g.key)} data-kept-tile className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/40">
+    <div data-kept-id={keptId(g.key)} data-kept-tile style={{viewTransitionName: vtName('tile', g.key)}} className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:border-foreground/25 hover:shadow-md has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/40">
       <div className="flex items-start gap-2.5">
         {committed > 0 ? (
           <CommitRing share={done ? 1 : share} done={done} label={done ? 'Every page committed' : `${Math.round(share * 100)}% of pages committed`} />
@@ -319,6 +320,11 @@ export function UploadsView({
   // Toasts: short confirmations (deleted, sales saved). Auto-dismiss after 4.5 s;
   // announced politely to screen readers.
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // A deleted scan or file leaves at once (Nov 27): it fades and the tiles / rows after it
+  // glide into place in a View Transition; the refresh then confirms it from the server.
+  const [gone, setGone] = useState<Set<string>>(new Set());
+  useEffect(() => setGone(new Set()), [uploads]);
+  const drop = (key: string) => viewTransition(() => setGone((s) => new Set(s).add(key)));
   function toast(kind: Toast['kind'], text: string) {
     if (!text) return;
     const id = Date.now() + Math.random();
@@ -373,8 +379,8 @@ export function UploadsView({
   const items = tileMode ? groups : filtered;
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageRows = tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const pageTiles = tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : [];
+  const pageRows = (tileMode ? [] : filtered.slice((safePage - 1) * pageSize, safePage * pageSize)).filter((u) => !gone.has(u.id));
+  const pageTiles = (tileMode ? groups.slice((safePage - 1) * pageSize, safePage * pageSize) : []).filter((g) => !gone.has(g.key));
   // Search lives in the header (Nov 25), so it no longer counts as an open filter.
   const hasActiveFilters = Boolean(from || to || statusFilter !== 'all' || kindFilter !== 'all');
   const searching = Boolean(query.trim());
@@ -625,6 +631,7 @@ export function UploadsView({
                     company={company}
                     canEdit={canEdit}
                     onDeleted={({pages}) => {
+                      drop(g.key);
                       toast('ok', `Scan deleted · ${pages} ${pages === 1 ? 'page' : 'pages'} removed`);
                       router.refresh();
                     }}
@@ -641,7 +648,7 @@ export function UploadsView({
             {/* Phones: one card per file — name, type · when, status, delete. */}
             <ul role="list" className="-mx-4 flex flex-col divide-y divide-border border-t border-border md:hidden">
               {pageRows.map((u) => (
-                <li key={u.id} data-kept-id={u.id} className="relative flex items-center gap-3 px-4 py-3">
+                <li key={u.id} data-kept-id={u.id} style={{viewTransitionName: vtName('file-m', u.id)}} className="relative flex items-center gap-3 px-4 py-3">
                   <FileTypeBadge filename={u.filename} />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <Link
@@ -691,6 +698,7 @@ export function UploadsView({
                     <tr
                       key={u.id}
                       data-kept-id={u.id}
+                      style={{viewTransitionName: vtName('file', u.id)}}
                       data-row
                       tabIndex={0}
                       role="button"
@@ -778,6 +786,7 @@ export function UploadsView({
         upload={deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onDeleted={(text) => {
+          if (deleteTarget) drop(deleteTarget.id);
           setDeleteTarget(null);
           toast('ok', text);
           router.refresh();

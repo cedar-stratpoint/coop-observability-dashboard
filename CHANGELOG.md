@@ -10,6 +10,16 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-27 — Release v1.32.0: rows fade and slide instead of jumping, with Undo (Coop, Nichido)
+
+PROD release (cherry-picked onto main after v1.31.2). From a UI tip the owner shared (The Glide Studio reel: "Fade the row, slide the rest up, offer undo."). Decided: no Undo on Uploads deletes (keep the confirm dialog), View Transitions for grids, 6s Undo toast.
+
+- **Scan review** (#852): removing an added product row fades it, the rows below glide up, focus moves to the next row, and a toast "Removed 24HRTEEP" offers **Undo** (puts it back in place with its "Product written in" flag). Shared `components/analyst/leaving.ts`, taken from the Flags hub (no visual change there).
+- **SKU links** (#853): approve, reject, link, unlink, decommission, bring back and history Undo fold the row away before the refresh, and a toast offers **Undo** for the logged decision. Remarks and notes are unchanged.
+- **Upload list** (#853): "Remove from the list" folds the row and moves focus to the next one.
+- **Uploads and the scan board** (#854): a deleted scan or file fades and the tiles or rows after it glide into place; filing a store moves its card to its store's section in a View Transition instead of jumping. Instant with reduced motion or in browsers without View Transitions.
+- No SQL, no env vars, no flags.
+
 ## 2026-11-27 — Release v1.31.2: page review year follows the scan; Period is one field with Coop's calendar (Nichido)
 
 PROD release (cherry-picked onto main after v1.31.1). Owner QA Nov 27: most reviewed pages showed the wrong period year (39 of 112 dated prod pages read 2016 to 2025 for a handwritten 2026; month and day right).
