@@ -103,6 +103,14 @@ export function unresolvedFlags(flagged: number[], resolved: ReadonlySet<number>
   return flagged.filter((i) => !resolved.has(i));
 }
 
+/** Where to go after answering flag `answered`: the next open flag below it, wrapping to the first
+ *  open one only when none is left below. (QA Nov 27: going to the FIRST open flag sent the reviewer
+ *  back to the top whenever a band price flag, which "Looks right" doesn't answer, sat above.) */
+export function nextOpenFlag(flagged: number[], resolved: ReadonlySet<number>, answered: number): number | null {
+  const open = flagged.filter((i) => i !== answered && !resolved.has(i)).sort((a, b) => a - b);
+  return open.find((i) => i > answered) ?? open[0] ?? null;
+}
+
 /** The flag to go to next/previous from `current` (wraps around). */
 export function stepFlag(flags: number[], current: number | null, dir: 1 | -1): number | null {
   if (!flags.length) return null;
