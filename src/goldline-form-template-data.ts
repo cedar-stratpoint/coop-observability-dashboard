@@ -36,7 +36,7 @@ export async function getFormTemplate(
   if (templateReadEnabled(companyId)) {
     const gen = generatedTemplateItems(version, page);
     if (gen) {
-      const items = gen.map((g) => ({code: g.code, product: g.product}));
+      const items = gen.map((g) => ({code: g.code, product: g.product, ...(g.optional ? {optional: true} : {})}));
       const catalog: Record<string, {productLine: string | null; unitPrice: number | null}> =
         Object.fromEntries(gen.map((g) => [g.code, {productLine: g.group, unitPrice: g.price}]));
       return buildFormTemplate(page, version, items, catalog);

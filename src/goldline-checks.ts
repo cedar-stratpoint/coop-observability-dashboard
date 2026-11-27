@@ -34,6 +34,16 @@ export const CAUSE_OF: Record<Exclude<FlagKind, 'sales_gap'>, FlagCause> = {
   row_math: 'incorrect_total',
   zero_or_below: 'padding',
 };
+/** Reopen for review (Nov 27): of the checks that just stopped firing, the ids that came from the
+ *  reopened page. They close as 'withdrawn' and stop counting against the BA; the rest resolve. */
+export function withdrawnBy(stopped: ReadonlyArray<{id: string; source_upload_id: string | null}>, uploadId: string): string[] {
+  return stopped.filter((f) => f.source_upload_id === uploadId).map((f) => f.id);
+}
+
+/** Whether a stored check counts on the BA scorecard: every one does (open or resolved, Oct 26)
+ *  except one withdrawn by a reopen. */
+export const countsAgainstBa = (status: string | null | undefined) => status !== 'withdrawn';
+
 /** A sales gap is named by its direction: POS sold more than the counts show is padding. */
 export const gapCause = (gap: number): FlagCause => (gap < 0 ? 'padding' : 'incorrect_total');
 

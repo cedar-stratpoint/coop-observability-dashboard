@@ -10,6 +10,14 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-27 — Release v1.31.0: Reopen a committed page for review; Individual Flare is a printed row; band price buttons say "whole band" (Nichido)
+
+PROD release (cherry-picked onto main after v1.30.1). QA on the prod Oct 30 scan, owner decisions Nov 27 (plan: `knowledge/tasks/2026-11-27-reopen-flare-band-wording.md`), verified on Staging first.
+
+- **Reopen for review** (#844): a committed page's banner has "Reopen for review" for anyone who can commit (within their stores), behind a confirmation that shows the counts leaving Inventory, the store and period, and the checks that close. The page comes back with the counts, store, period, BA and price picks it was committed with (restored from Inventory, no new read); one transaction (`reopen_upload`). Its checks that stop firing close as **withdrawn** and no longer count against the BA; re-committing runs the checks again. **Needs `supabase/nichido/p8_reopen.sql` on Nichido prod.**
+- **Individual Flare** (#842): some V1 page 5 prints (stores 5300, 296) carry an INDIVIDUAL FLARE band (`ELIF3125B`, ₱238, O/S printed) that the template lacked, so it showed as "Product written in" and blocked commit. Now an optional template row: a printed row on copies that have it, nothing on copies that don't; its O/S stays a quiet note. Real write-ins (Raspberry Float) stay flagged.
+- **Band price buttons** (#843): "Use ₱180 for all 10" and "Applies to the whole band, this form only." (the pick always priced the whole band). Decided too: a band kept at the printed price never puts a point on the BA.
+
 ## 2026-11-26 — Release v1.30.1: Uploads tiles count "need a store" the way the board files pages; one period per form (Nichido)
 
 PROD release (cherry-picked onto main after v1.30.0). Owner asked after reviewing the fresh v1.30.0 uploads on prod: the tiles said 17 / 13 / 16 pages need a store while the scan board had filed 10 / 8 / 4 of them under their form's store. No SQL, no env change.

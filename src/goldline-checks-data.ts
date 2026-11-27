@@ -7,6 +7,7 @@ import {
   monthBounds,
   monthlyChecks,
   rowFindings,
+  withdrawnBy,
   type Adjustment,
   type CellMark,
   type CheckSettings,
@@ -31,9 +32,11 @@ import {receiptsByMonth} from './goldline-po';
 
 const db = nichidoDb;
 
-export type FlagStatus = 'open' | 'resolved';
+// 'withdrawn' (Nov 27): closed because its page was reopened for review. Unlike 'resolved' it does
+// NOT count against the BA; re-committing re-runs the checks, so a real problem opens again.
+export type FlagStatus = 'open' | 'resolved' | 'withdrawn';
 export type MonthCoverage = {month: string; match: number; flag: number; baseline: number; waiting_sales: number; unlinked: number; not_counted: number};
-export type ChecksRun = {opened: number; updated: number; resolved: number; months: MonthCheck[]};
+export type ChecksRun = {opened: number; updated: number; resolved: number; withdrawn?: number; months: MonthCheck[]};
 
 type StoredFlag = {id: string; kind: string; cause: string; store_code: string; item_code: string; period_start: string; period_end: string; status: FlagStatus; consultant: string | null; source_upload_id: string | null; details: unknown};
 
@@ -148,7 +151,7 @@ function posIndex(products: Array<{item_code: string; sku_code: string | null}>,
 }
 
 /** Run the checks for some stores (all counted stores when omitted) and sync `flags`. */
-export async function runChecks(companyId: string, stores?: string[]): Promise<ChecksRun> {
+export async function runChecks(companyId: string, stores?: string[], opts: {withdrawFor?: string; by?: string | null} = {}): Promise<ChecksRun> {
   if (!nichidoConfigured()) return {opened: 0, updated: 0, resolved: 0, months: []};
   const supa = db();
   const inp = await loadInputs(companyId, stores);
@@ -182,7 +185,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
     const prev = byKey.get(k);
     const fields = {cause: f.cause, consultant: f.consultant, source_upload_id: f.source_upload_id, details: f.details, updated_at: now};
     if (!prev) inserts.push({company_id: companyId, kind: f.kind, store_code: f.store_code, item_code: f.item_code, period_start: f.period_start, period_end: f.period_end, ...fields});
-    else if (prev.status === 'resolved' || (prev.status === 'open' && !sameFlag(prev, f))) {
+    else if (prev.status === 'resolved' || prev.status === 'withdrawn' || (prev.status === 'open' && !sameFlag(prev, f))) {
       // Still there (or back again after it cleared): refresh the numbers, keep it open.
       const res = await supa
         .from('flags')
@@ -196,7 +199,18 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
     const res = await supa.from('flags').insert(inserts.slice(i, i + 500));
     if (res.error) throw new Error(`flag insert failed: ${res.error.message}`);
   }
-  const gone = existing.filter((f) => f.status === 'open' && !seen.has(fkey(f))).map((f) => f.id);
+  const stopped = existing.filter((f) => f.status === 'open' && !seen.has(fkey(f)));
+  // A reopened page's own checks are withdrawn (they don't count against the BA); any other check
+  // that stopped firing is resolved (it still counts: the form was wrong when written).
+  const withdrawn = opts.withdrawFor ? withdrawnBy(stopped, opts.withdrawFor) : [];
+  for (let i = 0; i < withdrawn.length; i += 200) {
+    const res = await supa
+      .from('flags')
+      .update({status: 'withdrawn', closed_at: now, closed_by: opts.by ?? 'coop', updated_at: now})
+      .in('id', withdrawn.slice(i, i + 200));
+    if (res.error) throw new Error(`flag withdraw failed: ${res.error.message}`);
+  }
+  const gone = stopped.map((f) => f.id).filter((id) => !withdrawn.includes(id));
   for (let i = 0; i < gone.length; i += 200) {
     const res = await supa
       .from('flags')
@@ -204,7 +218,7 @@ export async function runChecks(companyId: string, stores?: string[]): Promise<C
       .in('id', gone.slice(i, i + 200));
     if (res.error) throw new Error(`flag resolve failed: ${res.error.message}`);
   }
-  return {opened: inserts.length, updated, resolved: gone.length, months: monthly.months};
+  return {opened: inserts.length, updated, resolved: gone.length, withdrawn: withdrawn.length, months: monthly.months};
 }
 
 /** Read-only: the month-by-month form vs. sales picture (for coverage on the flags page). */

@@ -14,6 +14,7 @@ import {uploadSource} from '@/src/goldline-upload-groups';
 import {serverUploadEnabled} from '@/src/goldline-server-upload';
 import {logReadEvent} from '@/src/goldline-read-log';
 import {setBandMarkStatus} from '@/src/goldline-review-marks-data';
+import {reopenImpact, reopenUpload, ReopenStateError, type ReopenImpact} from '@/src/goldline-reopen-data';
 import {auth} from '@/auth';
 import {bulkVerdict, type BulkVerdict} from '@/src/upload-batch';
 import {LOW_BELOW, rowConfidence} from '@/src/review-confidence';
@@ -151,6 +152,56 @@ export async function deleteUploadAction(input: {company: string | null; uploadI
     // deleteUpload drops the sales rows first, so a later step failing can still change them.
     expireSalesTotals(ctx.companyId);
     return {ok: false, error: 'Could not delete the upload. Please try again.'};
+  }
+}
+
+// ── Reopen for review (Nov 27) ─────────────────────────────────────────────────────────
+// Plan: knowledge/tasks/2026-11-27-reopen-flare-band-wording.md (W3). Same roles and store scope
+// as commit and delete; the review screen asks for confirmation first.
+
+/** What reopening a committed page would change, for the confirmation. Read-only. */
+export async function reopenImpactAction(input: {company: string | null; uploadId: string}): Promise<{ok: true; impact: ReopenImpact} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot reopen pages.'};
+  try {
+    const out = await outOfScopeFor(ctx, input.uploadId);
+    if (out) return {ok: false, error: out};
+    const impact = await reopenImpact(ctx.companyId, input.uploadId);
+    if (!impact) return {ok: false, error: 'This page isn’t committed, so there is nothing to reopen.'};
+    return {ok: true, impact};
+  } catch (e) {
+    console.error('reopenImpactAction', e);
+    return {ok: false, error: 'Couldn’t check what this page feeds. Please try again.'};
+  }
+}
+
+/** Put a committed page back in review: its counts leave Inventory, its read gets the committed
+ *  counts back, and the checks it raised are withdrawn (they stop counting against the BA). */
+export async function reopenUploadAction(input: {company: string | null; uploadId: string}): Promise<{ok: true; removed: number} | {ok: false; error: string}> {
+  const ctx = await getDataContext(input.company);
+  if (!ctx || !ctx.companyId) return {ok: false, error: 'Not authorized.'};
+  if (!canEditData(ctx.role)) return {ok: false, error: 'Your role cannot reopen pages.'};
+  try {
+    const out = await outOfScopeFor(ctx, input.uploadId);
+    if (out) return {ok: false, error: out};
+    const by = (await auth())?.user?.email ?? null;
+    const {store, removed} = await reopenUpload(ctx.companyId, input.uploadId, by);
+    // The page's own checks close as withdrawn; a failing check run never fails the reopen.
+    if (store) await runChecks(ctx.companyId, [store], {withdrawFor: input.uploadId, by}).catch((e) => console.error('runChecks after reopen', e));
+    revalidateTag(glTags.uploads(ctx.companyId), {expire: 0});
+    revalidatePath('/uploads');
+    revalidatePath(`/uploads/${input.uploadId}`);
+    revalidatePath('/stock');
+    revalidatePath('/flags');
+    revalidatePath('/bas');
+    return {ok: true, removed};
+  } catch (e) {
+    if (e instanceof ReopenStateError) {
+      return {ok: false, error: e.reason === 'not_committed' ? 'This page is already back in review.' : 'This page can’t be reopened (no reading found).'};
+    }
+    console.error('reopenUploadAction', e);
+    return {ok: false, error: 'Could not reopen the page. Please try again.'};
   }
 }
 
