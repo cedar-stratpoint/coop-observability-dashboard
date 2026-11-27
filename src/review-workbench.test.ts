@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {groupByFamily, pageTotal, printedNameConflict, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from './review-workbench';
+import {nextOpenFlag, groupByFamily, pageTotal, printedNameConflict, reconcile, stepFlag, unresolvedFlags, type CatalogLite} from './review-workbench';
 
 const cat: Record<string, CatalogLite> = {
   FBPP01: {productLine: 'Flawless Beauty Pressed Powder', unitPrice: 150},
@@ -78,5 +78,24 @@ describe('printedNameConflict', () => {
     expect(printedNameConflict('', 'Lip Stain Caramel Swirl')).toBe(false);
     expect(printedNameConflict('Caramel Swirl', null)).toBe(false);
     expect(printedNameConflict(undefined, undefined)).toBe(false);
+  });
+});
+
+// QA Nov 27: a band price flag (answered only by picking a price) sat at row 0; every "Looks right"
+// further down jumped back to it, because the next flag was the FIRST open one on the page.
+describe('nextOpenFlag', () => {
+  it('goes to the next open flag below, past an open price flag above', () => {
+    // 0 = band price flag (open), 5 / 9 / 14 = handwritten-number flags
+    expect(nextOpenFlag([0, 5, 9, 14], new Set(), 5)).toBe(9);
+    expect(nextOpenFlag([0, 5, 9, 14], new Set([9]), 5)).toBe(14);
+  });
+  it('wraps to the first open flag only when nothing open is left below', () => {
+    expect(nextOpenFlag([0, 5, 9, 14], new Set([5, 9]), 14)).toBe(0);
+  });
+  it('null when it was the last open flag', () => {
+    expect(nextOpenFlag([3, 7], new Set([3]), 7)).toBeNull();
+  });
+  it('handles flags given out of order', () => {
+    expect(nextOpenFlag([14, 0, 9, 5], new Set(), 5)).toBe(9);
   });
 });
