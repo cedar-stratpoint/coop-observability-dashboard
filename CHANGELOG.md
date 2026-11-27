@@ -8,6 +8,14 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## Unreleased — SKU links and the upload list: decided rows fade out, the rest slide up, Undo in a toast (Nov 27)
+
+P1 of the row-removal plan.
+- **SKU links:** approve, reject, link, unlink, decommission, bring back, and Undo from a row's history each move the row to another list. It used to vanish when the page reloaded. Now the "Approved" chip shows, then the row fades and folds (200ms) and the rows below slide up. The page reloads once the row is gone, and a toast repeats the confirmation with **Undo** (6s, `undoDecisionAction` on the logged decision; no dialog, since the decision was just made). Saving a remark or a note doesn't move the row, so it keeps the line above the list. "No units sold" rows stay put (they don't change list).
+- **Upload list:** "Remove from the list" on a file row fades and folds the row, and focus moves to the next row's first control. No Undo (it only drops a finished, failed or cancelled entry from the list).
+- **Batch review commit:** dropped from the plan. Committed pages stay as tabs with a check mark, so nothing jumps.
+- Rows fold with `leaveRow` from `leaving.ts`; the padded content sits one level inside the folding wrapper so the height can reach zero, and `overflow-hidden` applies only while leaving, so pickers inside a row aren't clipped.
+
 ## Unreleased — Page review: removing an added row fades, slides and offers Undo (Nov 27)
 
 From a UI tip the owner shared (The Glide Studio reel: "Fade the row, slide the rest up, offer undo."). Removing a product the reviewer had added made the row vanish and the rows below jump up, with no way back.
