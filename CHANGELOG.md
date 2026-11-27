@@ -8,6 +8,13 @@ sign-off); Conventional Commits; commits carry `Co-Authored-By: Claude` +
 a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 `*-staging` deploy; PROD is the co-worker's project).
 
+## 2026-11-27 — Ask Coop logs which Anthropic key and workspace it sends
+
+PROD chat failed after moving to an org-scoped key, and nobody could see what reached the SDK: Vercel had
+`COOP_ANTHROPIC_WORKSPACE_ID`, a name no code reads (the route reads `ANTHROPIC_API_KEY` + `ANTHROPIC_WORKSPACE_ID`).
+The chat route now logs one `chat_anthropic_config` line per request: a key fingerprint (first 10 + last 6 chars,
+never the key), its length, and the `anthropic-workspace-id` it sends (or null). The workspace id is not a secret.
+
 ## Unreleased — PawSport filter on Event leads (RET-18 P1b)
 
 Owner 2026-11-26 ("i think dapat meron"): Event leads showed a PawSport chip but could not list who has one. Plan `knowledge/tasks/2026-11-25-pawsport-data-in-coop.md`, slice P1b.
