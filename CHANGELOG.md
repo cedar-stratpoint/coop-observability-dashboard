@@ -10,6 +10,13 @@ a `Claude-Session` trailer. Reads the shared Coop Supabase (Staging on the
 
 Dates are local working dates (GMT+8). Newest first.
 
+## 2026-11-27 — Release v1.31.1: page review Store / period / BA block made calmer; "Looks right" keeps your place (Nichido)
+
+PROD release (cherry-picked onto main after v1.31.0). Owner QA on the page review, Nov 27.
+
+- **Store, period and BA** (#848): a grid sized by the card, not the window. One column when narrow; Store | BA over Period start | Period end from about 32rem, labels top-aligned, full-width fields, the BA hint under its own field, the "Coop read Store …" line under the heading, the amber store warning stacking when narrow.
+- **"Looks right"** (#848): goes to the next open flag below the row you answered, not back to the first open flag on the page (an open band price flag above used to pull you to the top).
+
 ## 2026-11-27 — Release v1.31.0: Reopen a committed page for review; Individual Flare is a printed row; band price buttons say "whole band" (Nichido)
 
 PROD release (cherry-picked onto main after v1.30.1). QA on the prod Oct 30 scan, owner decisions Nov 27 (plan: `knowledge/tasks/2026-11-27-reopen-flare-band-wording.md`), verified on Staging first.
