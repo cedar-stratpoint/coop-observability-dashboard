@@ -7,6 +7,8 @@ import type {DecommissionedItem, ItemNote, SkuLinkData, SkuLinkItem, SkuLinkRow}
 import {approveSuggestionAction, linkSkuAction, rejectSuggestionAction, saveItemNoteAction, saveRemarkAction, setDecommissionedAction, undoDecisionAction, unlinkSkuAction} from '@/app/stock/skus/actions';
 import type {DecisionInfo} from '@/src/goldline-sku-undo';
 import {decisionLabel, UndoDialog} from '@/components/analyst/goldline-undo-dialog';
+import {LEAVE_MS, leaveRow, reducedMotion, useLeaving} from '@/components/analyst/leaving';
+import {ToastStack, useToasts} from '@/components/analyst/toast-stack';
 import {RecentActivity} from '@/components/analyst/goldline-sku-activity';
 import {MonthsPointer, WatsonsMonthDialog, WatsonsMonthsPanel, type SkuInfo} from '@/components/analyst/goldline-watsons-months';
 import {allMonths, presence, type Presence} from '@/src/goldline-sku-months';
@@ -58,7 +60,10 @@ const tint = (t: Tone, pct: number) => `color-mix(in oklab, ${toneVar(t)} ${pct}
 // One icon per view for the help strip above the table.
 const TAB_ICON: Record<SkuStatus, typeof Check> = {check: SearchCheck, choose: CircleHelp, rejected: X, linked: CircleCheck, noSales: CircleDashed, formOnly: FileQuestion, decommissioned: Archive};
 
-type Act = (key: string, fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, onOk?: () => void, onErr?: () => void) => void;
+type ActResult = {ok: true; undoId?: number | null} | {ok: false; error: string};
+/** `leaves`: the decision moves the row to another list, so it fades and folds away (the rows
+ *  below slide up) and a toast confirms it, with Undo when the server logged the decision. */
+type Act = (key: string, fn: () => Promise<ActResult>, okText: string, onOk?: () => void, onErr?: () => void, opts?: {leaves?: boolean}) => void;
 
 export function GoldlineSkuLinks({company, data, canEdit}: {company: string; data: SkuLinkData; canEdit: boolean}) {
   const router = useRouter();
@@ -157,16 +162,40 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
   const from = (safePage - 1) * size;
   const slice = <T,>(xs: T[]) => xs.slice(from, from + size);
 
-  const act: Act = (key, fn, okText, onOk, onErr) => {
+  // A decided row leaves its list (Glide Studio reel, Nov 27): it fades, the rows below slide
+  // up, and the toast offers Undo for 6s. The page refreshes once the row is gone.
+  const {leaving, gone, remove, restore, reset: forgetRemovals} = useLeaving();
+  useEffect(() => forgetRemovals(), [data, forgetRemovals]);
+  const {toasts, push, dismiss} = useToasts();
+  const act: Act = (key, fn, okText, onOk, onErr, opts) => {
     setBusy(key);
     setNotice(null);
     start(async () => {
       const res = await fn();
       setBusy(null);
       if (res.ok) {
-        setNotice({kind: 'ok', text: okText});
         onOk?.();
-        router.refresh();
+        if (!opts?.leaves) {
+          setNotice({kind: 'ok', text: okText});
+          router.refresh();
+          return;
+        }
+        remove([key]);
+        const undoId = res.undoId;
+        push({
+          kind: 'ok',
+          text: okText,
+          action: undoId
+            ? {
+                label: 'Undo',
+                onClick: () => {
+                  restore([key]);
+                  act(key, () => undoDecisionAction({company, id: undoId}), 'Undone.');
+                },
+              }
+            : undefined,
+        });
+        window.setTimeout(() => router.refresh(), reducedMotion() ? 0 : LEAVE_MS);
       } else {
         setNotice({kind: 'err', text: res.error});
         onErr?.();
@@ -322,6 +351,7 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
         )}
       </div>
 
+      <ToastStack toasts={toasts} dismiss={dismiss} />
       {notice && (
         <p role="status" className={cn('-my-2 text-sm', notice.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive')}>
           {notice.text}
@@ -339,9 +369,10 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             {canEdit && <span>Your decision</span>}
           </div>
           <ul className="divide-y">
-            {slice(shownItems).map((i) => (
+            {slice(shownItems).map((i) => gone.has(i.itemCode) ? null : (
               <ItemRow
                 key={i.itemCode}
+                out={leaving.has(i.itemCode)}
                 i={i}
                 note={data.notes[i.itemCode] ?? null}
                 decision={data.decisions[`item:${i.itemCode}`]}
@@ -365,8 +396,8 @@ export function GoldlineSkuLinks({company, data, canEdit}: {company: string; dat
             <SortHead label={canEdit ? 'Your decision' : 'Decision'} k="decision" sort={sort} onSort={sortBy} />
           </div>
           <ul className="divide-y">
-            {slice(shownSkus).map((r) => (
-              <SkuRow key={r.skuCode} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} months={presence(data.skuMonths[r.skuCode])} monthsTotal={monthList.length} onShowMonths={showMonths} />
+            {slice(shownSkus).map((r) => gone.has(r.skuCode) ? null : (
+              <SkuRow key={r.skuCode} out={leaving.has(r.skuCode)} r={r} company={company} canEdit={canEdit} items={data.unlinkedItems} disabled={false} busy={busy === r.skuCode} act={act} onShowForm={showForm} quiet={filter === 'noSales'} decision={data.decisions[`sku:${r.skuCode}`]} months={presence(data.skuMonths[r.skuCode])} monthsTotal={monthList.length} onShowMonths={showMonths} />
             ))}
           </ul>
         </div>
@@ -604,6 +635,7 @@ function ItemRow({
   busy,
   act,
   onShowForm,
+  out = false,
 }: {
   i: SkuLinkItem | DecommissionedItem;
   note: ItemNote | null;
@@ -615,6 +647,8 @@ function ItemRow({
   busy: boolean;
   act: Act;
   onShowForm: (itemCode: string, spot: FormSpot | null) => void;
+  /** Decided and on its way out of this list. */
+  out?: boolean;
 }) {
   // One panel at a time: a note (for checking, or anything) or decommissioning; they're separate.
   const [panel, setPanel] = useState<'note' | 'decom' | null>(null);
@@ -644,6 +678,7 @@ function ItemRow({
       `Undone: ${decisionLabel(decision)}.`,
       () => setUndoing((u) => (u ? 'saved' : u)),
       () => setUndoing(null),
+      {leaves: true},
     );
   };
   const [saving, setSaving] = useState<'saving' | 'saved' | null>(null);
@@ -684,7 +719,8 @@ function ItemRow({
   const input =
     'min-h-14 w-full max-w-xl resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40';
   return (
-    <li className="transition-colors duration-150 hover:bg-muted/30">
+    <li className={leaveRow(out)}>
+      <div className={cn('min-h-0 min-w-0 transition-colors duration-150 hover:bg-muted/30', out && 'overflow-hidden')}>
       <div className={cn('grid gap-1.5 px-6 py-4 md:items-center md:gap-8', canEdit ? ITEM_COLS_EDIT : ITEM_COLS)}>
         <div className="flex min-w-0 flex-col gap-1">
           <p className="truncate text-sm" title={itemText(i)}>
@@ -753,7 +789,7 @@ function ItemRow({
                 size="sm"
                 variant="outline"
                 disabled={disabled}
-                onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`)}
+                onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: false}), `${i.itemCode} is back under Sold at Watsons?.`, undefined, undefined, {leaves: true})}
               >
                 <ArchiveRestore className="size-3.5" /> {busy && panel === null ? 'Saving…' : 'Bring back'}
               </Button>
@@ -823,7 +859,7 @@ function ItemRow({
             <Button
               size="sm"
               disabled={disabled}
-              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: true, remark}), `${i.itemCode} is marked as decommissioned.`, done)}
+              onClick={() => act(i.itemCode, () => setDecommissionedAction({company, item: i.itemCode, on: true, remark}), `${i.itemCode} is marked as decommissioned.`, done, undefined, {leaves: true})}
             >
               <Archive className="size-3.5" /> {busy ? 'Saving…' : 'Mark as decommissioned'}
             </Button>
@@ -833,6 +869,7 @@ function ItemRow({
           </div>
         </div>
       )}
+      </div>
     </li>
   );
 }
@@ -901,6 +938,7 @@ function SkuRow({
   months,
   monthsTotal = 0,
   onShowMonths,
+  out = false,
 }: {
   r: SkuLinkRow;
   company: string;
@@ -918,6 +956,8 @@ function SkuRow({
   months?: Presence | null;
   monthsTotal?: number;
   onShowMonths?: (sku: string) => void;
+  /** Decided and on its way out of this list. */
+  out?: boolean;
 }) {
   const status = skuStatus(r);
   const [undoOpen, setUndoOpen] = useState(false);
@@ -936,7 +976,7 @@ function SkuRow({
     setSeenKey(rowKey);
     if (outcome?.state === 'saved') setOutcome(null);
   }
-  const decide = (fn: () => Promise<{ok: true} | {ok: false; error: string}>, okText: string, chip: {doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem}) => {
+  const decide = (fn: () => Promise<ActResult>, okText: string, chip: {doing: string; done: string; tone: Tone; remark?: string; item?: SkuLinkItem}, leaves = !quiet) => {
     setOutcome({...chip, state: 'saving'});
     done();
     act(
@@ -945,6 +985,7 @@ function SkuRow({
       okText,
       () => setOutcome((o) => (o ? {...o, state: 'saved'} : o)),
       () => setOutcome(null),
+      {leaves},
     );
   };
   // While a link or approval is saving, show the item it is being linked to.
@@ -964,7 +1005,8 @@ function SkuRow({
   const samePrice = ours != null && theirs != null && Math.round(ours) === Math.round(theirs);
 
   return (
-    <li>
+    <li className={leaveRow(out)}>
+      <div className={cn('min-h-0 min-w-0', out && 'overflow-hidden')}>
       <div
         className={cn('grid gap-x-8 gap-y-3 px-6 py-4 transition-colors duration-150 hover:bg-muted/30 lg:items-center', COLS, open && 'bg-muted/30')}
         style={outcome ? {background: `color-mix(in oklab, ${toneVar(outcome.tone)} 6%, transparent)`} : undefined}
@@ -1153,7 +1195,7 @@ function SkuRow({
                   size="sm"
                   variant="outline"
                   disabled={disabled || !remark.trim()}
-                  onClick={() => decide(() => saveRemarkAction({company, sku, remark}), 'Remark saved.', {doing: 'Saving remark…', done: 'Remark saved', tone: 'info', remark})}
+                  onClick={() => decide(() => saveRemarkAction({company, sku, remark}), 'Remark saved.', {doing: 'Saving remark…', done: 'Remark saved', tone: 'info', remark}, false)}
                 >
                   Save remark only
                 </Button>
@@ -1171,10 +1213,11 @@ function SkuRow({
         <UndoDialog
           decision={decision}
           subject={`Watsons SKU ${sku} · ${watsonsName(r.name)}`}
-          onConfirm={() => decide(() => undoDecisionAction({company, id: decision.id}), `Undone: ${decisionLabel(decision)}.`, {doing: 'Undoing…', done: 'Undone', tone: 'info'})}
+          onConfirm={() => decide(() => undoDecisionAction({company, id: decision.id}), `Undone: ${decisionLabel(decision)}.`, {doing: 'Undoing…', done: 'Undone', tone: 'info'}, !quiet && decision.action !== 'remark')}
           onClosed={() => setUndoOpen(false)}
         />
       )}
+      </div>
     </li>
   );
 }

@@ -9,6 +9,7 @@ import {eta, groupLabel, groupQueueItems, itemCategory, itemLabel, itemPercent, 
 import {batchCoverage, FORM_PAGES, groupForms, isSingleFormUpload, MAX_BATCH_FILES, scanPageLabel, scanPosition} from '@/src/upload-batch';
 import {reconcileBaNames} from '@/src/goldline-ba-reconcile';
 import {FileTypeBadge} from '@/components/analyst/file-type-badge';
+import {LEAVE_MS, leaveRow, reducedMotion} from '@/components/analyst/leaving';
 import {planServerScans} from '@/components/analyst/server-scan-plan';
 import {VersionPill} from '@/components/analyst/version-pill';
 import {VERSION_COLOR, VERSION_LABEL} from '@/src/goldline-triage-format';
@@ -823,8 +824,24 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
   // commit"), so there is one place to review. The whole row is the target (stretched
   // link), so there's no small "Open" to aim for.
   const href = done && i.uploadId && i.kind === 'pdf' ? (batchId ? `/uploads/batch/${batchId}?page=${i.uploadId}` : `/uploads/${i.uploadId}`) : null;
+  // Remove from the list (Nov 27): the row fades and folds, the rows below slide up, and
+  // focus moves to the next row's first control instead of falling to the page.
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [out, setOut] = useState(false);
+  const leave = () => {
+    if (out) return;
+    const li = rowRef.current;
+    const next = (li?.nextElementSibling ?? li?.previousElementSibling) as HTMLElement | null;
+    setOut(true);
+    window.setTimeout(() => {
+      next?.querySelector<HTMLElement>('a, button')?.focus({preventScroll: true});
+      onRemove();
+    }, reducedMotion() ? 0 : LEAVE_MS);
+  };
   return (
-    <li
+    <li ref={rowRef} className={leaveRow(out)}>
+    <div className={cn('min-h-0 min-w-0', out && 'overflow-hidden')}>
+    <div
       className={cn(
         'relative flex items-center gap-3.5 px-4 py-3.5 transition-colors duration-300 ease-out',
         i.state === 'cancelled' && 'opacity-50',
@@ -913,11 +930,13 @@ function FileRow({i, batchId, now, onRetry, onCancel, onRemove, retrying = false
           </Button>
         )}
         {!serverMode && (failed || i.state === 'cancelled') && (
-          <Button variant="ghost" size="icon-sm" aria-label={`Remove ${i.name} from the list`} onClick={onRemove}>
+          <Button variant="ghost" size="icon-sm" aria-label={`Remove ${i.name} from the list`} onClick={leave}>
             <Trash2 className="size-3.5" />
           </Button>
         )}
       </div>
+    </div>
+    </div>
     </li>
   );
 }
